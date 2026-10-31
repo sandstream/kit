@@ -19,6 +19,7 @@
   },
   "files": [
     "dist",
+    ".github/kit-protected-paths.json",
     "README.md",
     "skills",
     "docs/MONKEY_TEST.md",

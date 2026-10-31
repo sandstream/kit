@@ -179,8 +179,13 @@ export async function cmdAgentAudit(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   const { runAgentAudit } = await import("../agent-audit.js");
   const { runAgentTrifecta } = await import("../agent-trifecta.js");
+  const { runAgentPreload } = await import("../agent-preload.js");
   const { homedir } = await import("node:os");
-  const results = [...runAgentAudit(process.cwd()), ...runAgentTrifecta(process.cwd(), homedir())];
+  const results = [
+    ...runAgentAudit(process.cwd()),
+    ...runAgentTrifecta(process.cwd(), homedir()),
+    ...runAgentPreload(process.cwd(), homedir(), process.env),
+  ];
   const fails = results.filter((r) => r.status === "fail").length;
 
   if (jsonMode) {
@@ -189,7 +194,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   }
 
   console.log(
-    `${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + git hooks + lethal trifecta${c.reset}`,
+    `${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + hooks + risky grants and writes${c.reset}`,
   );
   for (const r of results) {
     const mark =

@@ -3,7 +3,7 @@ import type { ServiceStatus } from "./check-services.js";
 import type { SecretStatus } from "./check-secrets.js";
 
 export interface EscalationItem {
-  category: "tool" | "service" | "secret";
+  category: "tool" | "service" | "secret" | "pr";
   name: string;
   issue: string;
   action: string;
@@ -96,7 +96,14 @@ export function formatEscalationMessage(items: EscalationItem[], projectDir: str
   }
 
   for (const [category, categoryItems] of byCategory) {
-    const label = category === "tool" ? "Tools" : category === "service" ? "Services" : "Secrets";
+    const label =
+      category === "tool"
+        ? "Tools"
+        : category === "service"
+          ? "Services"
+          : category === "pr"
+            ? "Pull requests"
+            : "Secrets";
     lines.push(`${label}:`);
     for (const item of categoryItems) {
       lines.push(`  - ${item.name}: ${item.issue}`);

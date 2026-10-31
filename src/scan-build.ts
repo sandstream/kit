@@ -1,11 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve, join, relative, sep } from "node:path";
-import {
-  findSecrets,
-  SECRET_PATTERNS,
-  shannonEntropy,
-  type SecretFinding,
-} from "./utils/redactSecrets.js";
+import type { SecretFinding } from "./utils/redactSecrets.js";
+import { ArtifactIncompleteError, findArtifactSecrets, MAX_BYTES } from "./scan-build-sourcemap.js";
 
 /**
  * Walks built-artifact directories looking for leaked credentials. The
@@ -22,6 +18,21 @@ import {
 export interface BuildHit {
   file: string;
   findings: SecretFinding[];
+}
+
+export interface BuildScanIssue {
+  file: string;
+  detail: string;
+}
+
+export class BuildScanIncompleteError extends Error {
+  constructor(
+    readonly issues: BuildScanIssue[],
+    readonly hits: BuildHit[],
+  ) {
+    super(issues[0]?.detail ?? "build scan incomplete");
+    this.name = "BuildScanIncompleteError";
+  }
 }
 
 const DEFAULT_BUILD_DIRS = [
@@ -55,39 +66,6 @@ const SCANNABLE_EXTS = new Set([
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".pnpm-store", "cache"]);
-
-const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
-
-// Terraform / tfstate finding labels do not apply to build artifacts and
-// false-positive on framework manifests — e.g. Next.js `routes-manifest.json`
-// has many `"value":"…"` route entries that match the tfstate `"value"` rule.
-// A build-artifact leak is an inlined CREDENTIAL (sk_/JWT/AWS/…), not an HCL or
-// state construct, so these labels are filtered out here.
-const BUILD_IRRELEVANT_LABELS = new Set(["tfstate-value", "terraform-sensitive"]);
-const BUILD_GENERIC_LABELS = new Set(["keyed-secret", "url-query-token"]);
-const OPAQUE_MIN_LENGTH = 20;
-const OPAQUE_MIN_ENTROPY = 4.2;
-
-function findBuildSecrets(content: string): SecretFinding[] {
-  const findings = findSecrets(content).filter(
-    (finding) =>
-      !BUILD_IRRELEVANT_LABELS.has(finding.label) && !BUILD_GENERIC_LABELS.has(finding.label),
-  );
-
-  // Minified UI code routinely contains `key:"description"` and example URLs.
-  // Generic names only justify a build failure when their values look opaque.
-  for (const { re, label } of SECRET_PATTERNS) {
-    if (!BUILD_GENERIC_LABELS.has(label)) continue;
-    for (const match of content.matchAll(new RegExp(re.source, re.flags))) {
-      const value =
-        label === "keyed-secret" ? (match[3] ?? match[2]) : match[0].slice(match[1].length);
-      if (value.length < OPAQUE_MIN_LENGTH || shannonEntropy(value) < OPAQUE_MIN_ENTROPY) continue;
-      findings.push({ label, preview: "[REDACTED]" });
-    }
-  }
-
-  return findings;
-}
 
 /** Next.js server modules are deployed to the runtime, not downloaded by visitors. */
 function isBrowserVisibleNextArtifact(file: string): boolean {
@@ -143,23 +121,48 @@ export async function scanBuildArtifacts(
   }
 
   const hits: BuildHit[] = [];
+  const incomplete: BuildScanIssue[] = [];
   for (const path of files) {
     const rel = relative(cwd, path).split(sep).join("/");
     if (!isBrowserVisibleNextArtifact(rel)) continue;
-    let content: string;
+    let size: number;
     try {
       const st = await stat(path);
-      if (st.size > MAX_BYTES) continue;
-      content = await readFile(path, "utf-8");
+      size = st.size;
     } catch {
+      if (rel.endsWith(".map"))
+        incomplete.push({ file: rel, detail: `${rel}: source map could not be inspected` });
       continue;
     }
-    const findings = findBuildSecrets(content);
+    if (size > MAX_BYTES) {
+      if (rel.endsWith(".map"))
+        incomplete.push({ file: rel, detail: `${rel}: source map exceeds 5 MiB` });
+      continue;
+    }
+    let content: string;
+    try {
+      content = await readFile(path, "utf-8");
+    } catch {
+      if (rel.endsWith(".map"))
+        incomplete.push({ file: rel, detail: `${rel}: source map could not be read` });
+      continue;
+    }
+    let findings: SecretFinding[];
+    try {
+      findings = findArtifactSecrets(content, rel);
+    } catch (error) {
+      if (error instanceof ArtifactIncompleteError && error.findings.length) {
+        hits.push({ file: rel, findings: error.findings });
+      }
+      incomplete.push({ file: rel, detail: `${rel}: ${(error as Error).message}` });
+      continue;
+    }
     if (findings.length > 0) {
       // Report repository-style paths so diagnostics and baselines are stable
       // across Windows and POSIX hosts.
       hits.push({ file: rel, findings });
     }
   }
+  if (incomplete.length) throw new BuildScanIncompleteError(incomplete, hits);
   return hits;
 }

@@ -25,6 +25,8 @@ import { runAdrGate } from "./adr.js";
 import { runSkillGate } from "../skill-run.js";
 import type { JsonCheck } from "../cli-checks-shared.js";
 import type { GateOpts } from "../check-security.js";
+import { verifyReviewReceiptFile, writeReviewReceipt } from "../review-receipt-io.js";
+import { redactSecrets } from "../utils/redactSecrets.js";
 
 export type ReviewStageName = "check" | "design" | "standards" | "adr" | "skill";
 
@@ -205,11 +207,24 @@ const ICON: Record<JsonCheck["status"], string> = {
 
 export async function cmdReview(): Promise<boolean> {
   const cwd = await reviewDirectory();
-  const jsonMode = hasFlag(process.argv, "--json");
-  const enforce = hasFlag(process.argv, "--enforce");
-  const enforceTests = hasFlag(process.argv, "--enforce-tests");
-  const lenient = hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT);
+  if (process.argv[3] === "verify-receipt") {
+    try {
+      const result = await verifyReviewReceiptFile(cwd, process.argv[4]);
+      console.log(`${result.ok ? "✓" : "✗"} ${result.reason}`);
+      return result.ok;
+    } catch (error) {
+      console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+  const receiptMode = hasFlag(process.argv, "--receipt");
+  const jsonMode = receiptMode || hasFlag(process.argv, "--json");
+  const enforce = receiptMode || hasFlag(process.argv, "--enforce");
+  const enforceTests = receiptMode || hasFlag(process.argv, "--enforce-tests");
+  const lenient =
+    !receiptMode && (hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT));
   const failOnWarning =
+    receiptMode ||
     hasFlag(process.argv, "--fail-on-warning") ||
     hasFlag(process.argv, "--strict") ||
     envTruthy(process.env.KIT_CI_STRICT);
@@ -232,11 +247,17 @@ export async function cmdReview(): Promise<boolean> {
     stages = parsed as ReviewStageName[];
   }
   const category = flagValue(process.argv, "--category");
+  if (receiptMode && (stagesFlag || category || hasFlag(process.argv, "--lenient"))) {
+    console.error(
+      "✗ --receipt requires a full review and cannot use --stages, --category, or --lenient",
+    );
+    return false;
+  }
   const config = await loadConfig(resolve(cwd, KIT_FILE));
 
   return await withGovernance(
     config,
-    { operation: "review", operationType: "read", metadata: {} },
+    { operation: "review", operationType: receiptMode ? "write" : "read", metadata: {} },
     async () => {
       if (!jsonMode) console.log(`${c.bold}kit review${c.reset} — full repo audit\n`);
       const report = await collectReview({
@@ -250,7 +271,37 @@ export async function cmdReview(): Promise<boolean> {
       });
 
       if (jsonMode) {
-        console.log(JSON.stringify(report, null, 2));
+        const output = JSON.stringify(report, null, 2) + "\n";
+        process.stdout.write(output);
+        if (receiptMode) {
+          try {
+            const { path, receipt } = await writeReviewReceipt(cwd, {
+              command: "kit review --receipt",
+              exitCode: report.ok ? 0 : 1,
+              stdout: output,
+              stderr: "",
+              failures: report.stages
+                .filter((stage) => !stage.ok)
+                .flatMap((stage) => {
+                  const findings = stage.findings
+                    .filter((finding) => finding.status === "fail" || finding.status === "warn")
+                    .map(
+                      (finding) =>
+                        `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
+                    );
+                  return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
+                }),
+            });
+            console.error(`Review receipt: ${path}`);
+            for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);
+            return receipt.evidence_issues.length === 0;
+          } catch (error) {
+            console.error(
+              `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            return false;
+          }
+        }
         return report.ok;
       }
 

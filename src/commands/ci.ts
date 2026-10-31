@@ -18,6 +18,7 @@ import { checkServices } from "../check-services.js";
 import { checkSecrets } from "../check-secrets.js";
 import { checkSkills } from "../check-skills.js";
 import { checkSecurity, gateStatus } from "../check-security.js";
+import { securityCheckToJson } from "../check-run.js";
 import { checkLockFiles } from "../check-lock.js";
 import { evaluatePolicy } from "../policy-check.js";
 import {
@@ -177,15 +178,14 @@ export async function cmdCi(): Promise<boolean> {
           category: "lock",
         })),
         ...securityResults.map((s) => ({
-          name: s.name,
+          ...securityCheckToJson(s),
           // Scanner-health strict by default: a check that could not run fails the
           // gate unless --lenient. A finding-warn (the check ran + flagged) is untouched.
           status: gateStatus(s, { lenient, failOnWarning }) as JsonCheck["status"],
           detail:
-            s.didNotRun && !lenient
+            s.didNotRun && !lenient && s.status === "warn"
               ? `${s.detail}  [did not run — strict default; --lenient to downgrade to warn]`
               : s.detail,
-          category: `security/${s.category}`,
         })),
         ...(policyReport.present
           ? [

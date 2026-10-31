@@ -5,8 +5,9 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { availableParallelism } from "node:os";
 import { classifyTap, describeFailureKinds, failureReasons } from "./test-failure-kinds.mjs";
-import { parseShard, selectShard } from "./test-shard.mjs";
+import { parseShard, selectShard, weightFrom } from "./test-shard.mjs";
 
 const env = {
   ...process.env,
@@ -90,7 +91,20 @@ if (stale.length > 0) {
 }
 
 // The stale-copy check above looks at every file, whatever the shard. Then the shard picks its own.
-const files = shard ? selectShard(allFiles, shard, (f) => statSync(f).size) : allFiles;
+// Measured Windows wall times balance the shards (#675); without the table, size is the fallback.
+let weights;
+try {
+  weights = JSON.parse(readFileSync(join(import.meta.dirname, "test-weights.json"), "utf8"));
+} catch {
+  weights = null;
+}
+const files = shard
+  ? selectShard(
+      allFiles,
+      shard,
+      weightFrom(weights, (f) => statSync(f).size),
+    )
+  : allFiles;
 if (shard) {
   console.error(
     `[kit] shard ${shard.index}/${shard.total}: ${files.length} of ${allFiles.length} test files`,
@@ -112,14 +126,36 @@ if (shard) {
 // a `npm test | grep '# fail'` that worked before would stop matching. So the stdout reporter is
 // node's own choice, reproduced, and the file reporter is purely additive.
 const TAP_LOG = ".kit-test-run.tap";
-const TEST_TIMEOUT_MS = 180000;
+/** A positive integer from the environment, or `fallback` when unset; a malformed value exits 2. */
+function positiveIntEnv(name, fallback, digits) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  if (!new RegExp(`^[1-9][0-9]{0,${digits - 1}}$`).test(raw)) {
+    console.error(`${name} must be a positive integer (got ${JSON.stringify(raw)})`);
+    process.exit(2);
+  }
+  return Number(raw);
+}
+// Per-file timeout. 180 s catches a hung file on a quiet machine; a CI job that runs more files at
+// once than its cores comfortably hold sets KIT_TEST_TIMEOUT_MS so slow is not reported as hung.
+const TEST_TIMEOUT_MS = positiveIntEnv("KIT_TEST_TIMEOUT_MS", 180000, 7);
+// Test files run in parallel. Measured on GitHub's 4-core runners, one file per core took the Linux
+// test step from 408 s to 288 s with every test passing. On the Windows runners the heavy
+// memory/PAL tests and cli.test hit the 180 s timeout with four files at once (three of three
+// runs), so Windows defaults to the 2 that 768edcb set for exactly that cliff; the Windows workflow
+// sets its own concurrency and timeout explicitly. KIT_TEST_CONCURRENCY overrides both defaults.
+const TEST_CONCURRENCY = positiveIntEnv(
+  "KIT_TEST_CONCURRENCY",
+  process.platform === "win32" ? 2 : availableParallelism(),
+  3,
+);
 const stdoutReporter = process.stdout.isTTY ? "spec" : "tap";
 const result = spawnSync(
   process.execPath,
   [
     "--test",
     `--test-timeout=${TEST_TIMEOUT_MS}`,
-    "--test-concurrency=2",
+    `--test-concurrency=${TEST_CONCURRENCY}`,
     `--test-reporter=${stdoutReporter}`,
     "--test-reporter-destination=stdout",
     "--test-reporter=tap",

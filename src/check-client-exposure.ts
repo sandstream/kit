@@ -441,7 +441,7 @@ async function candidatePackageDirs(root: string): Promise<string[]> {
 export function isTestArtifact(file: string): boolean {
   return (
     /(^|[\\/])(__tests__|__mocks__|fixtures)[\\/]/.test(file) ||
-    /\.(test|spec)\.[cm]?[jt]sx?$/.test(file)
+    /\.(test|spec)\.[cm]?[jt]sx?(?:\.map)?$/.test(file)
   );
 }
 
@@ -456,6 +456,39 @@ const BUILD_DIRS = [
   ".nuxt",
   ".output",
 ];
+
+async function presentBuildDirs(root: string, builds: ClientBuild[]): Promise<string[]> {
+  const present: string[] = [];
+  for (const build of builds) {
+    for (const dir of BUILD_DIRS) {
+      const rel = build.dir ? `${build.dir}/${dir}` : dir;
+      try {
+        await access(join(root, rel));
+        present.push(rel);
+      } catch {
+        /* not built here */
+      }
+    }
+  }
+  return present;
+}
+
+function incompleteBundleResult(
+  base: Omit<SecurityCheckResult, "status" | "detail">,
+  reason: string,
+  known: Array<{ file: string }>,
+): SecurityCheckResult {
+  return {
+    ...base,
+    status: "fail",
+    severity: known.length ? "critical" : "medium",
+    didNotRun: true,
+    scanIncomplete: true,
+    ...(known.length ? { hasFindings: true } : {}),
+    detail: `bundle scan could not finish: ${reason.slice(0, 80)}${known.length ? `; credentials also found in ${known.map((h) => h.file).join(", ")}` : ""}`,
+    ...(known.length ? { files: known.map((h) => h.file) } : {}),
+  };
+}
 
 /**
  * Scan the built output for credential shapes.
@@ -480,18 +513,7 @@ export async function checkBuiltBundleSecrets(root: string): Promise<SecurityChe
   }
   const framework = [...new Set(builds.map((b) => b.framework))].join("+");
 
-  const present: string[] = [];
-  for (const build of builds) {
-    for (const dir of BUILD_DIRS) {
-      const rel = build.dir ? `${build.dir}/${dir}` : dir;
-      try {
-        await access(join(root, rel));
-        present.push(rel);
-      } catch {
-        /* not built here */
-      }
-    }
-  }
+  const present = await presentBuildDirs(root, builds);
   if (present.length === 0) {
     return {
       ...base,
@@ -500,23 +522,30 @@ export async function checkBuiltBundleSecrets(root: string): Promise<SecurityChe
     };
   }
 
-  const { scanBuildArtifacts } = await import("./scan-build.js");
+  const { scanBuildArtifacts, BuildScanIncompleteError } = await import("./scan-build.js");
   let hits: Awaited<ReturnType<typeof scanBuildArtifacts>>;
+  let ignoredIncomplete: string[] = [];
   try {
     hits = await scanBuildArtifacts(root, present);
   } catch (e) {
     // A scan that crashed is not a clean scan: didNotRun makes the CI gate treat it as such.
-    return {
-      ...base,
-      status: "fail",
-      severity: "medium",
-      didNotRun: true,
-      detail: `bundle scan could not run: ${(e as Error).message.slice(0, 80)}`,
-    };
+    if (!(e instanceof BuildScanIncompleteError)) {
+      return incompleteBundleResult(base, (e as Error).message, []);
+    }
+    const issues = e.issues.filter((issue) => !isTestArtifact(issue.file));
+    if (issues.length) {
+      const known = e.hits.filter((hit) => !isTestArtifact(hit.file));
+      return incompleteBundleResult(base, issues[0].detail, known);
+    }
+    hits = e.hits;
+    ignoredIncomplete = e.issues.map((issue) => issue.file);
   }
 
   const shipped = hits.filter((h) => !isTestArtifact(h.file));
-  const excluded = hits.length - shipped.length;
+  const excluded = new Set([
+    ...hits.filter((hit) => isTestArtifact(hit.file)).map((hit) => hit.file),
+    ...ignoredIncomplete,
+  ]).size;
   const aside = excluded > 0 ? ` (${excluded} test fixture(s) not counted)` : "";
 
   if (shipped.length === 0) {

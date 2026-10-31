@@ -25,4 +25,18 @@ describe("self-audit-docs: env var names held in constants", () => {
       rmTemp(root);
     }
   });
+
+  it("counts a name read by an npm script in scripts/, but not by a script's own test", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-envvars-scripts-"));
+    try {
+      mkdirSync(join(root, "scripts"), { recursive: true });
+      writeFileSync(join(root, "scripts", "test.mjs"), "const c = process.env.KIT_FROM_SCRIPT;\n");
+      writeFileSync(join(root, "scripts", "x.test.mjs"), "process.env.KIT_SCRIPT_TEST_ONLY;\n");
+      const known = loadKnownEnvVars(root);
+      assert.ok(known.has("KIT_FROM_SCRIPT"));
+      assert.equal(known.has("KIT_SCRIPT_TEST_ONLY"), false);
+    } finally {
+      rmTemp(root);
+    }
+  });
 });

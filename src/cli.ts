@@ -53,17 +53,13 @@ import {
 } from "./commands/info.js";
 import { cmdCreatePlugin, cmdClone, cmdRun, cmdOpen } from "./commands/project.js";
 import { cmdHeal, cmdPkg } from "./commands/maintain.js";
-import {
-  cmdSkills,
-  cmdEscalate,
-  cmdAgentConfig,
-  cmdGovernance,
-  cmdTeam,
-} from "./commands/agent.js";
+import { cmdSkills, cmdAgentConfig, cmdGovernance, cmdTeam } from "./commands/agent.js";
+import { cmdEscalate } from "./commands/escalate.js";
 import { cmdStatusline } from "./commands/statusline.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
 import { cmdAdr } from "./commands/adr.js";
 import { cmdDecisions } from "./commands/decisions.js";
+import { cmdRig } from "./commands/rig.js";
 import {
   cmdGateBash,
   cmdGateEnv,
@@ -592,7 +588,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   "agent-audit": {
     handler: cmdAgentAudit,
     stability: "stable",
-    help: "Audit agent / MCP / hook configs for plaintext secrets + malware-shaped hooks",
+    help: "Audit agent, MCP, and hook configs for secrets, risky grants, and writes",
   },
   sentinel: {
     handler: cmdSentinel,
@@ -660,7 +656,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "stable",
     help: "Loop: auto-fix safe findings, re-scan until green; gate destructive, fail-closed on tamper (--dry-run, --agent)",
   },
-  escalate: { handler: cmdEscalate, stability: "stable", help: "List what needs human action" },
+  escalate: {
+    handler: cmdEscalate,
+    stability: "stable",
+    help: "List what needs human action; 'kit escalate pr' reads receipts, GitHub checks, and review reports",
+  },
   governance: {
     handler: cmdGovernance,
     stability: "stable",
@@ -829,7 +829,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   review: {
     handler: cmdReview,
     stability: "stable",
-    help: "Full repo audit — runs check + design + standards + adr + skill in one gate (for agents / PR checks; --json emits one structured report; --stages check,standards scopes the run, --category scopes the standards stage)",
+    help: "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks its signature and head. --json emits a report; --stages and --category scope runs.",
     // MCP-exposed: THE one-shot audit for shell-less agents (kit_review),
     // superseding kit_standards on that surface (deprecated, leaves in 6.0).
     mcp: true,
@@ -838,6 +838,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdDecisions,
     stability: "experimental",
     help: "Decision ledger (the review surface when nobody reads the diff): 'kit decisions add' records a choice made where the spec was silent, 'list' shows them, 'verify' is the gate's verdict. kit requires the artifact and checks its SHAPE — never its content.",
+  },
+  rig: {
+    handler: cmdRig,
+    stability: "experimental",
+    help: "The rig (ADR-0007): measure a reviewer prompt or policy against planted defects and clean controls. 'plan' freezes the input and says what to run outside kit, 'ingest' stores the reviewer's findings, 'adjudicate' decides caught/missed/false positives deterministically and signs a receipt, 'report' prints recall and spread per config with ADR-0007's three limits. kit never runs the reviewer.",
   },
   adr: {
     handler: cmdAdr,

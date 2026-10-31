@@ -22,7 +22,16 @@
  *
  * Pure analyzers (string in → findings out); `runAgentAudit` is the file-reading wrapper.
  */
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { resolve, join, relative, extname } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { findSecrets } from "./utils/redactSecrets.js";
@@ -50,7 +59,9 @@ export function auditMcpServers(json: string): string[] {
   for (const servers of containers) {
     for (const [name, def] of Object.entries(servers)) {
       const url = (def as { url?: string })?.url;
-      if (typeof url === "string" && /^http:\/\//i.test(url)) out.push(`${name} → ${url}`);
+      if (typeof url === "string" && url.toLowerCase().startsWith("http:" + "//")) {
+        out.push(`${name} → ${url}`);
+      }
     }
   }
   return out;
@@ -205,6 +216,60 @@ function result(
   return { category, name, status, detail, severity, suggestion };
 }
 
+/** True for a URL whose host is this machine: `localhost`, `*.localhost`, 127.0.0.0/8 or `::1`. */
+export function isLoopbackUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "::1" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+  );
+}
+
+/**
+ * Rows for MCP servers on `http://`. A remote one is a TLS problem. A loopback one is not:
+ * there the risk is what the server binds to and whether it asks for a token, which a client
+ * config cannot show, so kit names that question instead of telling the user to "use https".
+ */
+function cleartextMcpRows(rel: string, hits: string[]): SecurityCheckResult[] {
+  const urlOf = (hit: string): string => hit.slice(hit.indexOf("→ ") + 2);
+  const loopback = hits.filter((h) => isLoopbackUrl(urlOf(h)));
+  const remote = hits.filter((h) => !isLoopbackUrl(urlOf(h)));
+  const rows: SecurityCheckResult[] = [];
+  if (remote.length > 0) {
+    rows.push(
+      result(
+        `cleartext MCP in ${rel}`,
+        "warn",
+        `${remote.length} MCP server(s) on http://: ${remote.slice(0, 3).join("; ")}`,
+        "exposure",
+        "medium",
+        "use https:// MCP endpoints",
+      ),
+    );
+  }
+  if (loopback.length > 0) {
+    rows.push(
+      result(
+        `loopback MCP over http in ${rel}`,
+        "warn",
+        `${loopback.length} MCP server(s) on this machine over http://: ${loopback.slice(0, 3).join("; ")}`,
+        "exposure",
+        "low",
+        "kit cannot see what the server binds to: check it listens on 127.0.0.1, not 0.0.0.0, or requires a token",
+      ),
+    );
+  }
+  return rows;
+}
+
 const CONFIG_FILES = [
   ".claude.json",
   ".mcp.json",
@@ -340,11 +405,64 @@ function scanAgentDirs(cwd: string): { results: SecurityCheckResult[]; scanned: 
   return { results: out, scanned };
 }
 
+/**
+ * A hook file's text, or null when it is not a regular file. The check and the read both go
+ * through one open descriptor, so the file cannot be swapped in between. A symlinked hook is
+ * still followed (git runs it), and `O_NONBLOCK` keeps a named pipe from waiting for a writer.
+ */
+function readHookFile(path: string): string | null {
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+  try {
+    return fstatSync(fd).isFile() ? readFileSync(fd, "utf8") : null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Git hook files under `cwd` with a malware-shaped line. Read-only; fail-open per file. */
+function scanHookDirs(cwd: string): { results: SecurityCheckResult[]; scanned: number } {
+  const out: SecurityCheckResult[] = [];
+  let scanned = 0;
+  for (const dir of HOOK_DIRS) {
+    const dpath = resolve(cwd, dir);
+    if (!existsSync(dpath)) continue;
+    let entries: string[];
+    try {
+      entries = readdirSync(dpath);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.endsWith(".sample")) continue;
+      try {
+        const body = readHookFile(join(dpath, entry));
+        if (body === null) continue;
+        scanned++;
+        const reasons = auditHookBody(body);
+        if (reasons.length > 0) {
+          out.push(
+            result(
+              `suspicious hook ${dir}/${entry}`,
+              "fail",
+              `hook ${reasons.join("; ")}`,
+              "exposure",
+              "high",
+              "review the hook; a compromised hook runs on every git operation",
+            ),
+          );
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return { results: out, scanned };
+}
+
 /** Audit agent/MCP configs + git hooks under `cwd`. Read-only; fail-open per file. */
 export function runAgentAudit(cwd: string): SecurityCheckResult[] {
   const out: SecurityCheckResult[] = [];
   let scannedConfigs = 0;
-  let scannedHooks = 0;
 
   for (const rel of CONFIG_FILES) {
     const path = resolve(cwd, rel);
@@ -370,19 +488,7 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
         ),
       );
     }
-    const cleartext = auditMcpServers(content);
-    if (cleartext.length > 0) {
-      out.push(
-        result(
-          `cleartext MCP in ${rel}`,
-          "warn",
-          `${cleartext.length} MCP server(s) on http://: ${cleartext.slice(0, 3).join("; ")}`,
-          "exposure",
-          "medium",
-          "use https:// MCP endpoints",
-        ),
-      );
-    }
+    out.push(...cleartextMcpRows(rel, auditMcpServers(content)));
     for (const s of auditMcpStdio(content)) {
       out.push(
         result(
@@ -409,40 +515,8 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
     }
   }
 
-  for (const dir of HOOK_DIRS) {
-    const dpath = resolve(cwd, dir);
-    if (!existsSync(dpath)) continue;
-    let entries: string[];
-    try {
-      entries = readdirSync(dpath);
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry.endsWith(".sample")) continue;
-      const hpath = join(dpath, entry);
-      try {
-        if (!statSync(hpath).isFile()) continue;
-        const body = readFileSync(hpath, "utf8");
-        scannedHooks++;
-        const reasons = auditHookBody(body);
-        if (reasons.length > 0) {
-          out.push(
-            result(
-              `suspicious hook ${dir}/${entry}`,
-              "fail",
-              `hook ${reasons.join("; ")}`,
-              "exposure",
-              "high",
-              "review the hook; a compromised hook runs on every git operation",
-            ),
-          );
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
+  const hooks = scanHookDirs(cwd);
+  out.push(...hooks.results);
 
   const agent = scanAgentDirs(cwd);
   out.push(...agent.results);
@@ -452,7 +526,7 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
       result(
         "agent-audit",
         "pass",
-        `no issues in ${scannedConfigs} agent config(s) + ${scannedHooks} hook(s) + ${agent.scanned} command/agent/skill/plugin file(s)`,
+        `no issues in ${scannedConfigs} agent config(s) + ${hooks.scanned} hook(s) + ${agent.scanned} command/agent/skill/plugin file(s)`,
         "exposure",
       ),
     );

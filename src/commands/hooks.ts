@@ -7,6 +7,7 @@ import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
 import { c } from "../utils/colors.js";
 import { ensureKitWrapper } from "../kit-wrapper.js";
+import { runHooksContext } from "../hooks-context.js";
 
 const BUILTIN_HOOKS: Record<string, { hookName: string; commands: string[]; description: string }> =
   {
@@ -58,6 +59,10 @@ export async function cmdHooks(): Promise<boolean> {
   // on any repo, including ones that haven't run `kit init` yet.
   if (subcommand === "add") {
     return cmdHooksAdd();
+  }
+  // Session-start form (#671): silent when intact, one plain line otherwise, never fails.
+  if (subcommand === "context") {
+    return runHooksContext();
   }
 
   const config = await loadConfig(resolveConfigPath());

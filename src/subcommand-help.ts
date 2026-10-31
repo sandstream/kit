@@ -158,6 +158,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Interactive ChatGPT-web setup through OpenAI Secure MCP Tunnel; keeps kit private and uses its existing stdio server",
   "hooks install": "Install hooks declared in [hooks]",
   "hooks check": "Report whether the git hooks kit manages are installed and intact",
+  "hooks context":
+    "For an agent session-start hook: one plain line when a declared git hook does not run here, nothing otherwise; always exits 0",
   "security advisories":
     "Dependency advisories from the repo's own package manager, split into new debt, known debt, and baseline entries that no longer apply. --accept freezes the current set in .kit/advisories.json (and prunes it)",
   "security scan-artifact":
@@ -180,6 +182,16 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "plugin info": "Plugin metadata",
   "plugin scaffold": "Generate a new plugin skeleton",
   "governance status": "Budget + revocation + agent info",
+  "rig plan":
+    "Validate rig.toml, print its input id and what to run outside kit for every defect and control",
+  "rig ingest":
+    "Store a reviewer's findings (JSONL) under the input id; a malformed row is reported by line, --strict refuses the file",
+  "rig adjudicate":
+    "Decide caught, missed and false positives from file and line alone, write result.json and sign a receipt",
+  "rig report":
+    "Recall and spread per config for tune and holdout, control false-positive rate, comparisons, and ADR-0007's three limits",
+  "rig plant":
+    "Turn a past fix into a planted defect: reverse it onto the pinned commit in a throwaway index, write the patch, print the [[defect]] block; refused when the reverse does not apply cleanly",
   "decisions add":
     "Record one choice the run made where the spec was silent. kit never writes the content — that is model work — it provides the form and refuses a malformed entry",
   "decisions list":

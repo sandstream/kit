@@ -1,35 +1,37 @@
 /** Safely publish OneCLI placeholders without following or overwriting linked files. */
-import { constants, type Stats } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import { link, lstat, mkdtemp, open, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { secureFileStrict } from "../utils/secure-perms.js";
+import { sameIdentity } from "../utils/same-file.js";
 
-async function envFileState(path: string): Promise<Stats | null> {
+async function envFileState(path: string): Promise<BigIntStats | null> {
   try {
-    return await lstat(path);
+    return await lstat(path, { bigint: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
 }
 
-function sameEnvFile(before: Stats, after: Stats | null): boolean {
+function sameEnvFile(before: BigIntStats, after: BigIntStats | null): boolean {
   return (
     after !== null &&
     after.isFile() &&
-    after.nlink === 1 &&
-    before.dev === after.dev &&
-    before.ino === after.ino &&
+    after.nlink === 1n &&
+    sameIdentity(before, after) &&
     before.size === after.size &&
     before.mtimeMs === after.mtimeMs &&
     before.ctimeMs === after.ctimeMs
   );
 }
 
-async function readOneCliEnvFile(path: string): Promise<{ content: string; state: Stats | null }> {
+async function readOneCliEnvFile(
+  path: string,
+): Promise<{ content: string; state: BigIntStats | null }> {
   const before = await envFileState(path);
   if (!before) return { content: "", state: null };
-  if (!before.isFile() || before.nlink !== 1) {
+  if (!before.isFile() || before.nlink !== 1n) {
     throw new Error(".env.local must be a regular file, not a symlink or hard link");
   }
   const handle = await open(
@@ -37,10 +39,10 @@ async function readOneCliEnvFile(path: string): Promise<{ content: string; state
     constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | constants.O_NONBLOCK,
   );
   try {
-    if (!sameEnvFile(before, await handle.stat()))
+    if (!sameEnvFile(before, await handle.stat({ bigint: true })))
       throw new Error(".env.local changed before reading");
     const content = await handle.readFile("utf8");
-    if (!sameEnvFile(before, await handle.stat()))
+    if (!sameEnvFile(before, await handle.stat({ bigint: true })))
       throw new Error(".env.local changed while reading");
     return { content, state: before };
   } finally {
@@ -51,7 +53,7 @@ async function readOneCliEnvFile(path: string): Promise<{ content: string; state
 async function publishOneCliEnvFile(
   path: string,
   content: string,
-  previous: Stats | null,
+  previous: BigIntStats | null,
 ): Promise<void> {
   const staging = await mkdtemp(join(dirname(path), ".kit-onecli-env-"));
   try {

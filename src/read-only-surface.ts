@@ -97,6 +97,7 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   { command: "create-plugin", operation: "create-plugin" },
   { command: "decisions", subcommand: "add", operation: "decisions-add" },
   { command: "env", subcommand: "switch", operation: "env-switch" },
+  { command: "rig", subcommands: ["ingest", "adjudicate", "plant"], operation: "rig-write" },
   { command: "escalate", operation: "escalate" },
   { command: "fix", operation: "fix" },
   { command: "guard", subcommand: "install", operation: "guard-install" },
@@ -201,6 +202,7 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
     operation: "policy-pull-revocations",
   },
   { command: "policy", subcommand: "sign", operation: "policy-sign" },
+  { command: "review", anyFlags: ["--receipt"], operation: "review-receipt" },
   {
     command: "policy",
     subcommand: "trust",
