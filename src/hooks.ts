@@ -1,7 +1,7 @@
 import { open, writeFile, mkdir, readFile, rename, rm, unlink, lstat } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { resolve, isAbsolute, dirname, relative } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import type { HooksConfig } from "./config.js";
 import { kitWrapperPath } from "./kit-wrapper.js";
@@ -28,7 +28,22 @@ export function resolveHooksDir(gitDir = ".git", cwd = process.cwd()): string {
   } catch {
     /* not a git repo, hooksPath unset, or git absent — fall back below */
   }
-  return resolve(cwd, gitDir, "hooks");
+  const local = resolve(cwd, gitDir);
+  // In a linked worktree (`git worktree add`) `.git` is a FILE pointing at the shared repository,
+  // and git runs the hooks of the common directory. `<cwd>/.git/hooks` does not exist there, so
+  // every hook read as "not installed" and an install could not land. Ask git where it looks.
+  if (!isAbsolute(gitDir) && existsSync(local) && !statSync(local).isDirectory()) {
+    try {
+      const p = execFileSync("git", ["-C", repoRoot, "rev-parse", "--git-path", "hooks"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (p) return isAbsolute(p) ? p : resolve(repoRoot, p);
+    } catch {
+      /* git absent or not a repository: keep the conventional path */
+    }
+  }
+  return resolve(local, "hooks");
 }
 
 /**
