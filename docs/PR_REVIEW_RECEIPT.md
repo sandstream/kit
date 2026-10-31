@@ -3,11 +3,22 @@
 Use `kit review --receipt` from a clean branch with an open GitHub pull request.
 The command runs all five review stages with strict checks.
 It writes `.kit-review-receipt.json` in the repository root.
+The receipt and history files can be untracked without entries in `.gitignore`.
+Both paths must be untracked regular files. Kit rejects symbolic links and hard links.
+Kit requires a usable file identity to open the files.
+Kit rejects the operation if it cannot verify that identity.
+Keep the worktree and its parent directories under trusted control during the operation.
 The file records the PR head, the review command result, returned GitHub checks, review threads, and protected paths.
 It stores hashes of review output and comment text.
 It does not store the comment text.
 The command reports missing checks, failed checks, and open review threads as evidence issues.
 Failed local runs also enter `.kit-review-receipt-history.jsonl`.
+The file system must support hard links to create a new history file.
+Kit stops if the file system cannot create the link.
+Kit checks the worktree and PR identity before the review and before it signs the receipt.
+The checks cannot detect a file that changes and returns to its original state during the review.
+Git status also excludes ignored files from the worktree check.
+Run the review in a worktree that no other process changes.
 
 Run `kit review verify-receipt` to check the signature and current PR head.
 You can pass a receipt path after `verify-receipt`.
@@ -18,8 +29,18 @@ The receipt records GitHub review threads only.
 Other security findings need their own recorded source in a later review step.
 This command does not approve or merge a pull request.
 The protected path rules live in `.github/kit-protected-paths.json`.
-Kit ships these rules for projects that do not have their own rule file.
+Kit reads the rules from the current base commit and combines them with the proposed rules.
+It also applies the default branch rules when the PR targets another branch.
+If the base has no rule file, Kit uses the defaults built into the running Kit version.
+Use a trusted Kit version to evaluate pull requests.
+This keeps existing protections until the rule change is approved and merged.
+Kit also checks the original names of renamed files.
+Kit refuses the evidence if the base or head changes during collection, or if rules are unavailable.
+The rule file itself always requires human approval.
 Changes to those paths require a human approval before merge.
+Receipts use version 2 and record the base and default branch commits.
+Generate a new receipt after either branch changes.
+Version 1 receipts remain valid only as signed failure history.
 
 ## Pull request escalation
 

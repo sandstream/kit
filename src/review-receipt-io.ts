@@ -1,19 +1,17 @@
 /** Collect and store a signed receipt for the exact pull request head. */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import {
-  appendFileSync,
-  closeSync,
-  openSync,
-  readSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, lstatSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getAuditAnchorKey, tryReadAuditAnchorKey } from "./audit-anchor.js";
-import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
+import {
+  assertPrRefsUnchanged,
+  collectPrProtectedPaths,
+  readPrRefs,
+  type PrRefs,
+} from "./review-protected-paths-github.js";
 import { parseGitHubPrView, parseGitHubReviewThreads } from "./review-receipt-github.js";
+import { appendReceiptHistory, openReceiptForRead } from "./review-receipt-files.js";
 import { isReadOnlyMode, refuseWrite } from "./read-only-mode.js";
 import {
   buildReviewReceipt,
@@ -52,13 +50,91 @@ function prEvidence(root: string, run: ReadCommand) {
 }
 
 function clean(root: string, run: ReadCommand): void {
-  if (run("git", ["status", "--porcelain", "--untracked-files=all"], root).trim()) {
+  const outputFiles = [REVIEW_RECEIPT_FILE, REVIEW_RECEIPT_HISTORY_FILE];
+  const indexedPaths = outputFiles.map((file) => `:(icase,literal)${file}`);
+  if (run("git", ["ls-files", "-z", "--", ...indexedPaths], root) !== "") {
+    throw new Error("review receipt output paths must not contain tracked files");
+  }
+  const status = run("git", ["status", "--porcelain", "--untracked-files=all"], root);
+  const dirty = status
+    .split("\n")
+    .some((line) => line !== "" && !outputFiles.some((file) => line === `?? ${file}`));
+  if (dirty) {
     throw new Error("review receipt requires a clean worktree");
+  }
+  for (const file of outputFiles) {
+    let stat;
+    try {
+      stat = lstatSync(join(root, file));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (!stat.isFile() || stat.nlink !== 1) {
+      throw new Error("review receipt output must be a regular file without hard links");
+    }
   }
 }
 
+export interface ReviewSnapshot {
+  root: string;
+  repo: string;
+  pr: number;
+  head: string;
+  refs: PrRefs;
+}
+
+/** Capture the source and PR identity before any review stages run. */
+export function captureReviewSnapshot(
+  cwd: string,
+  run: ReadCommand = defaultReadCommand,
+): ReviewSnapshot {
+  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
+  clean(root, run);
+  const head = gitHead(root, run);
+  const repoValue = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
+    nameWithOwner?: unknown;
+  };
+  if (
+    typeof repoValue.nameWithOwner !== "string" ||
+    !/^[^/\s]+\/[^/\s]+$/.test(repoValue.nameWithOwner)
+  ) {
+    throw new Error("invalid GitHub repository identity");
+  }
+  const repo = repoValue.nameWithOwner;
+  const pr = prEvidence(root, run);
+  const refs = readPrRefs(root, repo, pr.number, run);
+  if (pr.head !== head || refs.head !== head)
+    throw new Error("pull request head changed before review");
+  const snapshot = { root, repo, pr: pr.number, head, refs };
+  assertReviewSnapshot(snapshot, run);
+  return snapshot;
+}
+
+export function assertReviewSnapshot(
+  snapshot: ReviewSnapshot,
+  run: ReadCommand = defaultReadCommand,
+): void {
+  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], snapshot.root).trim());
+  if (root !== snapshot.root) throw new Error("review root changed during review");
+  clean(root, run);
+  if (gitHead(root, run) !== snapshot.head) throw new Error("local commit changed during review");
+  const repoValue = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
+    nameWithOwner?: unknown;
+  };
+  const pr = prEvidence(root, run);
+  if (
+    repoValue.nameWithOwner !== snapshot.repo ||
+    pr.number !== snapshot.pr ||
+    pr.head !== snapshot.head
+  ) {
+    throw new Error("pull request changed during review");
+  }
+  assertPrRefsUnchanged(snapshot.refs, root, snapshot.repo, run);
+}
+
 function readReceipt(path: string): string | null {
-  const fd = openSync(path, "r");
+  const fd = openReceiptForRead(path);
   const chunks: Buffer[] = [];
   let total = 0;
   try {
@@ -85,7 +161,7 @@ export function countFailedReviewReceipts(
   const failures = new Set<string>();
   for (const receipt of receipts) {
     if (!/^[a-f0-9]{40}$/.test(receipt.head)) throw new Error("invalid receipt history head");
-    const verdict = verifyReviewReceipt(receipt, key, receipt.head);
+    const verdict = verifyReviewReceipt(receipt, key, receipt.head, { allowLegacy: true });
     if (!verdict.ok) throw new Error(`invalid receipt history signature: ${verdict.reason}`);
     if (receipt.head === head && receipt.gate.command === command && receipt.gate.exit_code !== 0) {
       failures.add(receipt.signature);
@@ -152,18 +228,28 @@ export function collectReviewReceipt(
       root,
     ),
   );
-  const protectedPaths = classifyProtectedPaths(pr.changedPaths, loadProtectedPathRules(root));
+  const { refs, protectedPaths } = collectPrProtectedPaths(
+    root,
+    { repo, number: pr.number, head: localHead },
+    pr.changedPaths,
+    run,
+  );
 
   // Refuse a receipt if the branch or PR moved while evidence was collected.
   clean(root, run);
   if (gitHead(root, run) !== localHead || prEvidence(root, run).head !== localHead) {
     throw new Error("pull request head changed during receipt collection");
   }
+  assertPrRefsUnchanged(refs, root, repo, run);
   return buildReviewReceipt({
     repo,
     pr: pr.number,
     localHead,
     remoteHead: pr.head,
+    baseBranch: refs.baseName,
+    baseHead: refs.base,
+    policyBranch: refs.defaultName,
+    policyHead: refs.defaultHead,
     createdAt,
     gate,
     checks: pr.checks,
@@ -177,13 +263,30 @@ export async function writeReviewReceipt(
   cwd: string,
   gate: ReviewReceiptInput["gate"],
   run: ReadCommand = defaultReadCommand,
+  snapshot?: ReviewSnapshot,
 ): Promise<{ path: string; receipt: ReviewReceipt }> {
   if (isReadOnlyMode()) {
     const refusal = await refuseWrite("review-receipt", {}, { cwd });
     throw new Error(refusal.reason);
   }
+  if (!snapshot) throw new Error("review receipt requires an identity captured before review");
+  if (resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim()) !== snapshot.root) {
+    throw new Error("review root changed during review");
+  }
+  assertReviewSnapshot(snapshot, run);
   const receipt = collectReviewReceipt(cwd, gate, run);
   const key = await getAuditAnchorKey();
+  assertReviewSnapshot(snapshot, run);
+  if (
+    receipt.repo !== snapshot.repo ||
+    receipt.pr !== snapshot.pr ||
+    receipt.head !== snapshot.head ||
+    receipt.base_branch !== snapshot.refs.baseName ||
+    receipt.base_head !== snapshot.refs.base ||
+    receipt.policy_branch !== snapshot.refs.defaultName ||
+    receipt.policy_head !== snapshot.refs.defaultHead
+  )
+    throw new Error("review receipt identity changed during review");
   const signed = signReviewReceipt(receipt, key);
   const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
   const path = join(root, REVIEW_RECEIPT_FILE);
@@ -199,10 +302,7 @@ export async function writeReviewReceipt(
     rmSync(temp, { force: true });
   }
   if (gate.exitCode !== 0) {
-    appendFileSync(join(root, REVIEW_RECEIPT_HISTORY_FILE), JSON.stringify(signed) + "\n", {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    appendReceiptHistory(join(root, REVIEW_RECEIPT_HISTORY_FILE), JSON.stringify(signed) + "\n");
   }
   return { path, receipt };
 }
@@ -235,5 +335,16 @@ export async function verifyReviewReceiptFile(
   ) {
     return { ok: false, reason: "review receipt does not match the current pull request" };
   }
+  const refs = readPrRefs(root, receipt.repo, receipt.pr, run);
+  if (
+    refs.head !== receipt.head ||
+    refs.baseName !== receipt.base_branch ||
+    refs.base !== receipt.base_head ||
+    refs.defaultName !== receipt.policy_branch ||
+    refs.defaultHead !== receipt.policy_head
+  ) {
+    return { ok: false, reason: "review receipt does not match the current PR base or head" };
+  }
+  assertPrRefsUnchanged(refs, root, receipt.repo, run);
   return { ...signature, receipt };
 }

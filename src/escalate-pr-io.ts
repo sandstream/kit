@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { parseCurrentHumanApproval } from "./escalate-pr-github.js";
 import type { PrEscalationEvidence } from "./escalate-pr.js";
 import { collectIndependentReviewComments } from "./review-comments-github.js";
-import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
+import { assertPrRefsUnchanged, collectPrProtectedPaths } from "./review-protected-paths-github.js";
 import {
   parseGitHubPrView,
   parseGitHubReviewThreads,
@@ -46,12 +46,17 @@ export function receiptMatchesCurrent(
   pr: GitHubPrEvidence,
   threads: ReviewReceiptInput["threads"],
   protectedPaths: ReviewReceiptInput["protectedPaths"],
+  refs: { baseName: string; base: string; defaultName: string; defaultHead: string },
 ): boolean {
   const live = buildReviewReceipt({
     repo: receipt.repo,
     pr: pr.number,
     localHead: pr.head,
     remoteHead: pr.head,
+    baseBranch: refs.baseName,
+    baseHead: refs.base,
+    policyBranch: refs.defaultName,
+    policyHead: refs.defaultHead,
     createdAt: receipt.created_at,
     gate: {
       command: receipt.gate.command,
@@ -65,6 +70,10 @@ export function receiptMatchesCurrent(
     protectedPaths,
   });
   return (
+    receipt.base_branch === refs.baseName &&
+    receipt.base_head === refs.base &&
+    receipt.policy_branch === refs.defaultName &&
+    receipt.policy_head === refs.defaultHead &&
     sameRecords(receipt.checks, live.checks) &&
     sameRecords(receipt.review_threads, live.review_threads) &&
     sameRecords(receipt.changed_paths, live.changed_paths) &&
@@ -132,13 +141,15 @@ function reviewEvidence(
   return { threads, rawThreads, humanApproved };
 }
 
-async function localReceipt(
-  root: string,
-  pr: GitHubPrEvidence,
-  rawThreads: ReviewReceiptInput["threads"],
-  protectedPaths: ReviewReceiptInput["protectedPaths"],
-  run: ReadCommand,
-) {
+interface CurrentReceiptEvidence {
+  pr: GitHubPrEvidence;
+  rawThreads: ReviewReceiptInput["threads"];
+  protectedPaths: ReviewReceiptInput["protectedPaths"];
+  refs: { baseName: string; base: string; defaultName: string; defaultHead: string };
+}
+
+async function localReceipt(root: string, current: CurrentReceiptEvidence, run: ReadCommand) {
+  const { pr, rawThreads, protectedPaths, refs } = current;
   let receiptProblem: string | null = null;
   let historyProblem: string | null = null;
   let gate: PrEscalationEvidence["gate"] = null;
@@ -148,7 +159,7 @@ async function localReceipt(
     if (!verified.ok || !verified.receipt) {
       receiptProblem = verified.reason;
     } else {
-      if (!receiptMatchesCurrent(verified.receipt, pr, rawThreads, protectedPaths)) {
+      if (!receiptMatchesCurrent(verified.receipt, pr, rawThreads, protectedPaths, refs)) {
         receiptProblem = "review receipt evidence changed on this PR head";
       }
       const saved = verified.receipt.gate;
@@ -180,7 +191,12 @@ export async function collectPrEvidence(
 ): Promise<PrEscalationEvidence> {
   const { root, repo, pr } = prIdentity(cwd, run);
   const { threads, rawThreads, humanApproved } = reviewEvidence(root, repo, pr, run);
-  const protectedPaths = classifyProtectedPaths(pr.changedPaths, loadProtectedPathRules(root));
+  const { refs, protectedPaths } = collectPrProtectedPaths(
+    root,
+    { repo, number: pr.number, head: pr.head },
+    pr.changedPaths,
+    run,
+  );
   let reviewComments: PrEscalationEvidence["reviewComments"];
   let reviewCommentProblem: string | null = null;
   try {
@@ -189,7 +205,7 @@ export async function collectPrEvidence(
     reviewCommentProblem = `review comments unavailable: ${errorMessage(error)}`;
   }
   const current = prView(root, run);
-  const receipt = await localReceipt(root, current, rawThreads, protectedPaths, run);
+  const receipt = await localReceipt(root, { pr: current, rawThreads, protectedPaths, refs }, run);
   if (
     run("git", ["rev-parse", "HEAD"], root).trim() !== pr.head ||
     current.head !== pr.head ||
@@ -197,6 +213,7 @@ export async function collectPrEvidence(
   ) {
     throw new Error("PR head changed while collecting escalation evidence");
   }
+  assertPrRefsUnchanged(refs, root, repo, run);
   return {
     repo,
     pr: pr.number,

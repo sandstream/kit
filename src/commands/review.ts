@@ -25,7 +25,12 @@ import { runAdrGate } from "./adr.js";
 import { runSkillGate } from "../skill-run.js";
 import type { JsonCheck } from "../cli-checks-shared.js";
 import type { GateOpts } from "../check-security.js";
-import { verifyReviewReceiptFile, writeReviewReceipt } from "../review-receipt-io.js";
+import {
+  captureReviewSnapshot,
+  verifyReviewReceiptFile,
+  writeReviewReceipt,
+  type ReviewSnapshot,
+} from "../review-receipt-io.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 
 export type ReviewStageName = "check" | "design" | "standards" | "adr" | "skill";
@@ -205,18 +210,44 @@ const ICON: Record<JsonCheck["status"], string> = {
   skip: `${c.dim}-${c.reset}`,
 };
 
+function selectReviewStages(value: string | undefined): ReviewStageName[] | undefined {
+  if (!value) return undefined;
+  const parsed = value
+    .split(",")
+    .map((stage) => stage.trim())
+    .filter(Boolean);
+  const bad = parsed.filter((stage) => !REVIEW_STAGES.includes(stage as ReviewStageName));
+  if (bad.length)
+    throw new Error(`unknown stage(s): ${bad.join(", ")}  (valid: ${REVIEW_STAGES.join(", ")})`);
+  return parsed as ReviewStageName[];
+}
+
+function receiptSnapshot(cwd: string, receiptMode: boolean): ReviewSnapshot | undefined {
+  return receiptMode ? captureReviewSnapshot(cwd) : undefined;
+}
+
+async function verifyReceiptCommand(cwd: string): Promise<boolean> {
+  try {
+    const result = await verifyReviewReceiptFile(cwd, process.argv[4]);
+    console.log(`${result.ok ? "✓" : "✗"} ${result.reason}`);
+    return result.ok;
+  } catch (error) {
+    console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+function incompatibleReceiptOptions(
+  receiptMode: boolean,
+  stages: string | undefined,
+  category: string | undefined,
+): boolean {
+  return receiptMode && (!!stages || !!category || hasFlag(process.argv, "--lenient"));
+}
+
 export async function cmdReview(): Promise<boolean> {
   const cwd = await reviewDirectory();
-  if (process.argv[3] === "verify-receipt") {
-    try {
-      const result = await verifyReviewReceiptFile(cwd, process.argv[4]);
-      console.log(`${result.ok ? "✓" : "✗"} ${result.reason}`);
-      return result.ok;
-    } catch (error) {
-      console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
-  }
+  if (process.argv[3] === "verify-receipt") return verifyReceiptCommand(cwd);
   const receiptMode = hasFlag(process.argv, "--receipt");
   const jsonMode = receiptMode || hasFlag(process.argv, "--json");
   const enforce = receiptMode || hasFlag(process.argv, "--enforce");
@@ -232,24 +263,25 @@ export async function cmdReview(): Promise<boolean> {
   // `stages` param). An unknown name is a refusal, not a silent full run.
   const stagesFlag = flagValue(process.argv, "--stages");
   let stages: ReviewStageName[] | undefined;
-  if (stagesFlag) {
-    const parsed = stagesFlag
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const bad = parsed.filter((s) => !REVIEW_STAGES.includes(s as ReviewStageName));
-    if (bad.length > 0) {
-      console.error(
-        `${c.red}✗ unknown stage(s): ${bad.join(", ")}${c.reset}  ${c.dim}(valid: ${REVIEW_STAGES.join(", ")})${c.reset}`,
-      );
-      return false;
-    }
-    stages = parsed as ReviewStageName[];
+  try {
+    stages = selectReviewStages(stagesFlag);
+  } catch (error) {
+    console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
   const category = flagValue(process.argv, "--category");
-  if (receiptMode && (stagesFlag || category || hasFlag(process.argv, "--lenient"))) {
+  if (incompatibleReceiptOptions(receiptMode, stagesFlag, category)) {
     console.error(
       "✗ --receipt requires a full review and cannot use --stages, --category, or --lenient",
+    );
+    return false;
+  }
+  let snapshot: ReviewSnapshot | undefined;
+  try {
+    snapshot = receiptSnapshot(cwd, receiptMode);
+  } catch (error) {
+    console.error(
+      `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
     );
     return false;
   }
@@ -275,23 +307,28 @@ export async function cmdReview(): Promise<boolean> {
         process.stdout.write(output);
         if (receiptMode) {
           try {
-            const { path, receipt } = await writeReviewReceipt(cwd, {
-              command: "kit review --receipt",
-              exitCode: report.ok ? 0 : 1,
-              stdout: output,
-              stderr: "",
-              failures: report.stages
-                .filter((stage) => !stage.ok)
-                .flatMap((stage) => {
-                  const findings = stage.findings
-                    .filter((finding) => finding.status === "fail" || finding.status === "warn")
-                    .map(
-                      (finding) =>
-                        `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
-                    );
-                  return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
-                }),
-            });
+            const { path, receipt } = await writeReviewReceipt(
+              cwd,
+              {
+                command: "kit review --receipt",
+                exitCode: report.ok ? 0 : 1,
+                stdout: output,
+                stderr: "",
+                failures: report.stages
+                  .filter((stage) => !stage.ok)
+                  .flatMap((stage) => {
+                    const findings = stage.findings
+                      .filter((finding) => finding.status === "fail" || finding.status === "warn")
+                      .map(
+                        (finding) =>
+                          `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
+                      );
+                    return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
+                  }),
+              },
+              undefined,
+              snapshot,
+            );
             console.error(`Review receipt: ${path}`);
             for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);
             return receipt.evidence_issues.length === 0;

@@ -5,42 +5,46 @@ import { buildReviewReceipt, signReviewReceipt, verifyReviewReceipt } from "./re
 const HEAD = "a".repeat(40);
 const KEY = Buffer.alloc(32, 7);
 
-describe("review receipt", () => {
-  const input = () => ({
-    repo: "sandstream/kit",
-    pr: 647,
-    localHead: HEAD,
-    remoteHead: HEAD,
-    createdAt: "2026-10-29T08:00:00.000Z",
-    gate: {
-      command: "kit review --json --enforce",
-      exitCode: 0,
-      stdout: '{"ok":true}',
-      stderr: "",
-      failures: [] as string[],
+const input = () => ({
+  repo: "sandstream/kit",
+  pr: 647,
+  localHead: HEAD,
+  remoteHead: HEAD,
+  baseBranch: "main",
+  baseHead: "b".repeat(40),
+  policyBranch: "main",
+  policyHead: "b".repeat(40),
+  createdAt: "2026-10-29T08:00:00.000Z",
+  gate: {
+    command: "kit review --json --enforce",
+    exitCode: 0,
+    stdout: '{"ok":true}',
+    stderr: "",
+    failures: [] as string[],
+  },
+  checks: [
+    {
+      name: "build-and-test",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      url: "https://example.test/check",
     },
-    checks: [
-      {
-        name: "build-and-test",
-        status: "COMPLETED",
-        conclusion: "SUCCESS",
-        url: "https://example.test/check",
-      },
-    ],
-    threads: [
-      {
-        id: "thread-1",
-        path: "src/x.ts",
-        line: 12,
-        resolved: false,
-        resolvedBy: null,
-        comments: [{ url: "https://example.test/comment", body: "Fix this unsafe case" }],
-      },
-    ],
-    changedPaths: ["src/x.ts"],
-    protectedPaths: [],
-  });
+  ],
+  threads: [
+    {
+      id: "thread-1",
+      path: "src/x.ts",
+      line: 12,
+      resolved: false,
+      resolvedBy: null,
+      comments: [{ url: "https://example.test/comment", body: "Fix this unsafe case" }],
+    },
+  ],
+  changedPaths: ["src/x.ts"],
+  protectedPaths: [],
+});
 
+describe("review receipt", () => {
   it("binds the gate, checks, and review threads to one head commit", () => {
     const receipt = buildReviewReceipt(input());
     assert.equal(receipt.head, HEAD);
