@@ -2,6 +2,15 @@
 
 ### Added
 
+- **`kit escalate feed github` tracks what GitHub reports as broken, so the failure mail is not the only
+  record.** It reads the latest push or schedule run of every active workflow on the default branch
+  and the open Dependabot alerts (read-only `gh api` calls), and keeps one action item per failure.
+  An item closes when the workflow is green again or the alert is gone. A failure older than 14 days
+  is reported as skipped, not tracked. A source it cannot read (rate limit, missing token scope)
+  leaves its open items alone and says why, so a failed call never clears a blocker. A missing login
+  prints `Run: gh auth login` and keeps an item until it works. Workflow names are cleaned before
+  they are stored. `--dry-run` writes nothing. Open pull requests and GitHub security notices (new
+  token, new app) are not covered yet.
 - **`kit rig` — the rig ADR-0007 accepted and kit had not built (experimental).** Measure a
   reviewer prompt or policy against planted defects and clean controls, kept in a private
   `rig.toml` corpus. `plan` freezes the input (a SHA-256 over the manifest, the prompt and every
@@ -74,7 +83,7 @@
   marketplace is now triaged like `skills add`: a GitHub repo becomes a `github:` triage ref, a local
   path is the user's own code, and any other source (another host, a URL to a `marketplace.json`)
   is blocked as unverifiable. Installing from a marketplace added earlier is not re-gated. `/plugin
-  install` typed inside Claude Code never reaches a Bash hook and is not covered.
+install` typed inside Claude Code never reaches a Bash hook and is not covered.
 - **Updated vulnerable transitive packages.** Hono 4.13.14, fast-uri 3.1.9, and ip-address 10.7.5 resolve the current npm advisories. `npm audit` reports zero vulnerabilities.
 
 - **`kit gha-audit` now checks CI gate coverage, deployment image tags, and default branch protection.** It reports whether CI declares `kit check`, `kit scan`, osv-scanner, and Trivy steps. It flags `latest` or branch-derived deployment tags in scripts, Compose files, and CI variables. The branch check reads GitHub or GitLab with a declared `GITHUB_TOKEN` or `GITLAB_TOKEN` from kit secrets. Missing tokens, API errors, and air-gap mode stay unverified.

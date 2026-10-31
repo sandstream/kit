@@ -8,6 +8,8 @@
  * entry here, which is how 46 of them had come to print only their parent's one-liner.
  */
 export const SUBCOMMAND_HELP: Record<string, string> = {
+  "escalate feed":
+    "Track what GitHub reports as broken (failed workflows on the default branch, open Dependabot alerts) as action items: kit escalate feed github [--repo owner/name] [--dry-run] [--json]",
   "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
   "check compare":
     "Diff two `kit check --json` runs — what changed, with lost coverage ranked above a regression",
