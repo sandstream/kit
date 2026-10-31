@@ -725,7 +725,7 @@ export function kitGateInvocation(): string {
 }
 
 /** Same stable-wrapper resolution for any kit subcommand baked into a hook. */
-function kitSubcommandInvocation(sub: string): string {
+export function kitSubcommandInvocation(sub: string): string {
   // The POSIX wrapper cannot run in a native Windows hook shell. Use the
   // executable entrypoint directly until the Windows shim can be refreshed.
   if (process.platform === "win32") {

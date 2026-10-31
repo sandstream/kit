@@ -9,6 +9,13 @@
 
 ### Added
 
+- **The git-hook floor's bootstrap is a hook, not a sentence (#671).** `kit hooks context`
+  prints one plain line when a hook declared in `.kit.toml` does not run in this checkout, nothing
+  when all do, and always exits 0. `kit agent-config` wires it as a Claude Code `SessionStart` hook,
+  and kit's own repository commits `.claude/settings.json` with it, so an agent in a fresh clone is
+  told at session start instead of relying on the managed block's "Start: `kit check`" line, which
+  an agent session skipped for its whole length.
+
 - **`kit rig` — the rig ADR-0007 accepted and kit had not built (experimental).** Measure a
   reviewer prompt or policy against planted defects and clean controls, kept in a private
   `rig.toml` corpus. `plan` freezes the input (a SHA-256 over the manifest, the prompt and every
@@ -25,6 +32,10 @@
   `extra` keeps the id it always had (pinned by a test).
 
 ### Security
+
+- **Git hooks in a linked worktree are found where git runs them.** In a `git worktree`, `.git` is a
+  file, and kit looked for hooks in `<worktree>/.git/hooks`: every declared hook read as "not
+  installed" and `kit hooks install` could not land there. kit now asks git for the hooks path.
 
 - **The GitLab CI health sensor no longer sends `GITLAB_TOKEN` to whatever host `origin` names.**
   It runs whenever `.gitlab-ci.yml` exists, so a GitLab project whose `origin` pointed at a mirror on

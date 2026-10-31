@@ -4,6 +4,7 @@
  * `team`. Independent leaves (no cross-cluster cmd* calls), each returning a
  * boolean verdict for the COMMANDS dispatch table.
  */
+import { installSessionStartCheck } from "../session-start-gate.js";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagInt } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
@@ -164,6 +165,12 @@ export async function cmdAgentConfig(): Promise<boolean> {
         console.log(`    ${c.dim}· ${agent} skipped: ${result.detail ?? result.action}${c.reset}`);
       }
     }
+    // The git-hook floor's bootstrap, as a hook instead of a line of prose (#671).
+    const start = await installSessionStartCheck();
+    const shown = start.action === "skipped" ? `skipped: ${start.detail}` : start.action;
+    console.log(
+      `    ${c.dim}· Claude Code SessionStart: missing git hooks reported at session start (${shown})${c.reset}`,
+    );
   }
   // Opt-in: the exec-broker gates (Pillar 3). NOT default — a wired egress-gate is fail-closed
   // (no verified [scope] ⇒ deny all network), so it's only wanted once the operator has declared
