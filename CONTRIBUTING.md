@@ -37,8 +37,8 @@ npm run build
 npm test
 ```
 
-`npm test` applies the fixture environment, concurrency limit, and complete TAP
-logging in `scripts/test.mjs`. A bare `node --test` invocation does not reproduce
+`npm test` applies the fixture environment, one test file per core (2 on Windows; override
+with `KIT_TEST_CONCURRENCY`), and complete TAP logging in `scripts/test.mjs`. A bare `node --test` invocation does not reproduce
 that environment. Do not rebuild shared `dist` while another test run uses it.
 
 Shared fixture helpers use `*.test-support.ts`. They compile in the development

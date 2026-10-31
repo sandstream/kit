@@ -5,6 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { availableParallelism } from "node:os";
 import { classifyTap, describeFailureKinds, failureReasons } from "./test-failure-kinds.mjs";
 import { parseShard, selectShard } from "./test-shard.mjs";
 
@@ -113,13 +114,29 @@ if (shard) {
 // node's own choice, reproduced, and the file reporter is purely additive.
 const TAP_LOG = ".kit-test-run.tap";
 const TEST_TIMEOUT_MS = 180000;
+// Test files run in parallel. Measured on GitHub's 4-core runners, one file per core took the Linux
+// test step from 408 s to 288 s with every test passing. On the Windows runners it did not hold:
+// the heavy memory/PAL tests and cli.test hit the 180 s timeout with four files at once (three of
+// three runs), so Windows keeps the 2 that 768edcb set for exactly that cliff. KIT_TEST_CONCURRENCY
+// overrides both, for a loaded machine or to reproduce a timing-dependent failure.
+const TEST_CONCURRENCY = (() => {
+  const raw = process.env.KIT_TEST_CONCURRENCY;
+  if (raw === undefined || raw === "") {
+    return process.platform === "win32" ? 2 : availableParallelism();
+  }
+  if (!/^[1-9][0-9]{0,2}$/.test(raw)) {
+    console.error(`KIT_TEST_CONCURRENCY must be a positive integer (got ${JSON.stringify(raw)})`);
+    process.exit(2);
+  }
+  return Number(raw);
+})();
 const stdoutReporter = process.stdout.isTTY ? "spec" : "tap";
 const result = spawnSync(
   process.execPath,
   [
     "--test",
     `--test-timeout=${TEST_TIMEOUT_MS}`,
-    "--test-concurrency=2",
+    `--test-concurrency=${TEST_CONCURRENCY}`,
     `--test-reporter=${stdoutReporter}`,
     "--test-reporter-destination=stdout",
     "--test-reporter=tap",
