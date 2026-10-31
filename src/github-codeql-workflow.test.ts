@@ -5,7 +5,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CODEQL_ACTION_SHA = "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee";
 
 describe("CodeQL workflow action", () => {
   it("uses one supported v4 action commit for every CodeQL step", () => {
@@ -18,9 +17,13 @@ describe("CodeQL workflow action", () => {
     });
 
     assert.ok(references.length > 0, "expected at least one CodeQL action step");
+    // One full-SHA commit for every step, labelled with a v4 release. The exact patch is left to
+    // Dependabot: pinning it here made every patch bump fail this test (#619).
+    const shas = new Set(references.map((r) => r.sha));
+    assert.equal(shas.size, 1, `CodeQL steps use different commits: ${[...shas].join(", ")}`);
     for (const reference of references) {
-      assert.equal(reference.sha, CODEQL_ACTION_SHA, `${reference.name} has a stale CodeQL pin`);
-      assert.equal(reference.version, "v4.39.0", `${reference.name} must identify supported major`);
+      assert.match(reference.sha, /^[0-9a-f]{40}$/, `${reference.name} must pin a full commit SHA`);
+      assert.match(reference.version, /^v4\.\d+\.\d+$/, `${reference.name} must identify v4`);
     }
   });
 });
