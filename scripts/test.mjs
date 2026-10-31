@@ -5,6 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { availableParallelism } from "node:os";
 import { classifyTap, describeFailureKinds, failureReasons } from "./test-failure-kinds.mjs";
 import { parseShard, selectShard } from "./test-shard.mjs";
 
@@ -113,13 +114,28 @@ if (shard) {
 // node's own choice, reproduced, and the file reporter is purely additive.
 const TAP_LOG = ".kit-test-run.tap";
 const TEST_TIMEOUT_MS = 180000;
+// Test files run in parallel, one per core. Measured on a 4-core Linux container, 2 → 4 took the
+// suite from 484 s to 260 s with the same 7440 passes; at 2 the CI runners left half their cores
+// idle. 2 was set after two MCP tests that run a full `kit check` against this repository (25–46 s
+// alone) crept toward the timeout beside another file; they carry their own 150 s request budget
+// under the 180 s test timeout. KIT_TEST_CONCURRENCY overrides the core count, for a loaded machine
+// or to reproduce a timing-dependent failure at the old setting.
+const TEST_CONCURRENCY = (() => {
+  const raw = process.env.KIT_TEST_CONCURRENCY;
+  if (raw === undefined || raw === "") return availableParallelism();
+  if (!/^[1-9][0-9]{0,2}$/.test(raw)) {
+    console.error(`KIT_TEST_CONCURRENCY must be a positive integer (got ${JSON.stringify(raw)})`);
+    process.exit(2);
+  }
+  return Number(raw);
+})();
 const stdoutReporter = process.stdout.isTTY ? "spec" : "tap";
 const result = spawnSync(
   process.execPath,
   [
     "--test",
     `--test-timeout=${TEST_TIMEOUT_MS}`,
-    "--test-concurrency=2",
+    `--test-concurrency=${TEST_CONCURRENCY}`,
     `--test-reporter=${stdoutReporter}`,
     "--test-reporter-destination=stdout",
     "--test-reporter=tap",

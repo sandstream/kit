@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+### Changed
+
+- **`npm test` runs one test file per core instead of two at a time.** On a 4-core machine the
+  suite went from 484 s to 260 s with the same passes. `KIT_TEST_CONCURRENCY` overrides it.
+
 ### Added
 
 - **`kit rig` — the rig ADR-0007 accepted and kit had not built (experimental).** Measure a

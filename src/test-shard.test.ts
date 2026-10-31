@@ -93,4 +93,15 @@ describe("scripts/test.mjs", () => {
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /KIT_TEST_SHARD/);
   });
+
+  it("refuses a malformed KIT_TEST_CONCURRENCY before it runs anything", () => {
+    const run = spawnSync(process.execPath, [join(ROOT, "scripts", "test.mjs")], {
+      cwd: ROOT,
+      env: { ...process.env, KIT_TEST_CONCURRENCY: "0" },
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    assert.equal(run.status, 2);
+    assert.match(run.stderr, /KIT_TEST_CONCURRENCY must be a positive integer/);
+  });
 });
