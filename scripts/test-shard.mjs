@@ -25,7 +25,7 @@ export function weightFrom(table, sizeOf) {
   let ms = 0;
   let bytes = 0;
   for (const [f, w] of Object.entries(known)) {
-    let size = 0;
+    let size;
     try {
       size = sizeOf(f);
     } catch {

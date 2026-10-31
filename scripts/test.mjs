@@ -92,7 +92,7 @@ if (stale.length > 0) {
 
 // The stale-copy check above looks at every file, whatever the shard. Then the shard picks its own.
 // Measured Windows wall times balance the shards (#675); without the table, size is the fallback.
-let weights = null;
+let weights;
 try {
   weights = JSON.parse(readFileSync(join(import.meta.dirname, "test-weights.json"), "utf8"));
 } catch {
