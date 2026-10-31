@@ -2,6 +2,13 @@
 
 ### Security
 
+- **`kit triage npm --sandbox` names binaries inside a tarball.** It used to flag scripts and
+  path traversal only, so a package shipping a prebuilt Linux kernel image passed without a word.
+  Each file's first bytes are now classified, and an ELF, Mach-O or PE executable, a Linux boot
+  image or a Java class is reported as a warning with its path, kind and size; a WebAssembly module
+  is reported as info. It is a fact, not a verdict: prebuilt addons are common and legitimate, so
+  the triage outcome does not change.
+
 - **`kit agent-audit` names code-loading environment variables.** A `--preload`, `--require`/`-r`,
   `--import` or `--loader` in `BUN_OPTIONS` or `NODE_OPTIONS`, and any `LD_PRELOAD` or
   `DYLD_INSERT_LIBRARIES`, puts a file inside every process of that runtime, the agent included, and
