@@ -3,14 +3,40 @@
 ### Added
 
 - **`kit escalate feed github` tracks what GitHub reports as broken, so the failure mail is not the only
-  record.** It reads the latest completed run of every active workflow on the default branch and the
-  open Dependabot alerts (read-only `gh api` calls), and keeps one action item per failure. An item
-  closes when the workflow is green again or the alert is gone. A source it cannot read (rate limit,
-  missing token scope) leaves its open items alone and says why, so a failed call never clears a
-  blocker. Workflow names are cleaned before they are stored. `--dry-run` writes nothing. Open pull
-  requests and GitHub security notices (new token, new app) are not covered yet.
+  record.** It reads the latest push or schedule run of every active workflow on the default branch
+  and the open Dependabot alerts (read-only `gh api` calls), and keeps one action item per failure.
+  An item closes when the workflow is green again or the alert is gone. A failure older than 14 days
+  is reported as skipped, not tracked. A source it cannot read (rate limit, missing token scope)
+  leaves its open items alone and says why, so a failed call never clears a blocker. A missing login
+  prints `Run: gh auth login` and keeps an item until it works. Workflow names are cleaned before
+  they are stored. `--dry-run` writes nothing. Open pull requests and GitHub security notices (new
+  token, new app) are not covered yet.
+- **`kit rig` — the rig ADR-0007 accepted and kit had not built (experimental).** Measure a
+  reviewer prompt or policy against planted defects and clean controls, kept in a private
+  `rig.toml` corpus. `plan` freezes the input (a SHA-256 over the manifest, the prompt and every
+  patch) and prints what to run outside kit; `ingest` stores a reviewer's JSONL findings under that
+  input; `adjudicate` decides caught, missed and false positives from file and line alone and
+  signs a receipt; `report` prints recall per config for the tune and holdout halves, the share of
+  clean controls flagged, comparisons by non-overlapping min/max ranges (refused below three runs),
+  and ADR-0007's three limits. `plant --from-fix <sha>` turns a historical fix into a planted
+  defect by reversing it onto the pinned commit, refusing one that does not apply cleanly. kit never
+  runs the reviewer and never reads the claim text.
 
 ### Security
+
+- **`kit triage npm --sandbox` looks one layer into opaque binaries.** A binary file that is not a
+  known executable or media type is no longer silent. gzip and zip streams found anywhere in it are
+  decompressed a little (16 KB in, 16 MB out at most, so a bomb cannot expand) and classified; a
+  package that hid a Linux kernel in a gzip stream inside a custom container is now reported as
+  such. Binary content behind a text extension (`.js`, `.json`, `.md`, …) is a warning, and any
+  other unknown binary is info below 256 KB and a warning above. xz and zstd streams are named, not
+  opened: Node's standard library cannot read them. The triage outcome does not change.
+- **`kit triage npm --sandbox` names binaries inside a tarball.** It used to flag scripts and
+  path traversal only, so a package shipping a prebuilt Linux kernel image passed without a word.
+  Each file's first bytes are now classified, and an ELF, Mach-O or PE executable, a Linux boot
+  image or a Java class is reported as a warning with its path, kind and size; a WebAssembly module
+  is reported as info. It is a fact, not a verdict: prebuilt addons are common and legitimate, so
+  the triage outcome does not change.
 
 - **`kit agent-audit` names code-loading environment variables.** A `--preload`, `--require`/`-r`,
   `--import` or `--loader` in `BUN_OPTIONS` or `NODE_OPTIONS`, and any `LD_PRELOAD` or

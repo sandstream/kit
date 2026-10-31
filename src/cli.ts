@@ -59,6 +59,7 @@ import { cmdStatusline } from "./commands/statusline.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
 import { cmdAdr } from "./commands/adr.js";
 import { cmdDecisions } from "./commands/decisions.js";
+import { cmdRig } from "./commands/rig.js";
 import {
   cmdGateBash,
   cmdGateEnv,
@@ -837,6 +838,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdDecisions,
     stability: "experimental",
     help: "Decision ledger (the review surface when nobody reads the diff): 'kit decisions add' records a choice made where the spec was silent, 'list' shows them, 'verify' is the gate's verdict. kit requires the artifact and checks its SHAPE — never its content.",
+  },
+  rig: {
+    handler: cmdRig,
+    stability: "experimental",
+    help: "The rig (ADR-0007): measure a reviewer prompt or policy against planted defects and clean controls. 'plan' freezes the input and says what to run outside kit, 'ingest' stores the reviewer's findings, 'adjudicate' decides caught/missed/false positives deterministically and signs a receipt, 'report' prints recall and spread per config with ADR-0007's three limits. kit never runs the reviewer.",
   },
   adr: {
     handler: cmdAdr,

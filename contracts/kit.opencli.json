@@ -2125,6 +2125,78 @@
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
+    "rig": {
+      "commands": {
+        "adjudicate": {
+          "kind": "command",
+          "summary": "Decide caught, missed and false positives from file and line alone, write result.json and sign a receipt",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "ingest": {
+          "kind": "command",
+          "summary": "Store a reviewer's findings (JSONL) under the input id; a malformed row is reported by line, --strict refuses the file",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "plan": {
+          "kind": "command",
+          "summary": "Validate rig.toml, print its input id and what to run outside kit for every defect and control",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "plant": {
+          "kind": "command",
+          "summary": "Turn a past fix into a planted defect: reverse it onto the pinned commit in a throwaway index, write the patch, print the [[defect]] block; refused when the reverse does not apply cleanly",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "report": {
+          "kind": "command",
+          "summary": "Recall and spread per config for tune and holdout, control false-positive rate, comparisons, and ADR-0007's three limits",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        }
+      },
+      "kind": "group",
+      "summary": "The rig (ADR-0007): measure a reviewer prompt or policy against planted defects and clean controls. 'plan' freezes the input and says what to run outside kit, 'ingest' stores the reviewer's findings, 'adjudicate' decides caught/missed/false positives deterministically and signs a receipt, 'report' prints recall and spread per config with ADR-0007's three limits. kit never runs the reviewer.",
+      "x-kit-accepted-flags": [
+        "--env",
+        "--from-fix",
+        "--help",
+        "--id",
+        "--json",
+        "--manifest",
+        "--non-interactive",
+        "--path",
+        "--pinned",
+        "--read-only",
+        "--readonly",
+        "--repo",
+        "--split",
+        "--strict",
+        "--version"
+      ],
+      "x-kit-args-modeled": true,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "run": {
       "kind": "command",
       "summary": "Execute a command with project env vars loaded",
