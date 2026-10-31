@@ -2,8 +2,10 @@
 
 ### Changed
 
-- **`npm test` runs one test file per core instead of two at a time.** On a 4-core machine the
-  suite went from 484 s to 260 s with the same passes. `KIT_TEST_CONCURRENCY` overrides it.
+- **`npm test` runs one test file per core on Linux and macOS instead of two at a time.** On
+  GitHub's 4-core Linux runner the test step went from 408 s to 288 s with every test passing.
+  Windows stays at 2: at one file per core its heavy memory tests hit the 180 s timeout.
+  `KIT_TEST_CONCURRENCY` overrides both.
 
 ### Added
 

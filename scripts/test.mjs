@@ -114,15 +114,16 @@ if (shard) {
 // node's own choice, reproduced, and the file reporter is purely additive.
 const TAP_LOG = ".kit-test-run.tap";
 const TEST_TIMEOUT_MS = 180000;
-// Test files run in parallel, one per core. Measured on a 4-core Linux container, 2 → 4 took the
-// suite from 484 s to 260 s with the same 7440 passes; at 2 the CI runners left half their cores
-// idle. 2 was set after two MCP tests that run a full `kit check` against this repository (25–46 s
-// alone) crept toward the timeout beside another file; they carry their own 150 s request budget
-// under the 180 s test timeout. KIT_TEST_CONCURRENCY overrides the core count, for a loaded machine
-// or to reproduce a timing-dependent failure at the old setting.
+// Test files run in parallel. Measured on GitHub's 4-core runners, one file per core took the Linux
+// test step from 408 s to 288 s with every test passing. On the Windows runners it did not hold:
+// the heavy memory/PAL tests and cli.test hit the 180 s timeout with four files at once (three of
+// three runs), so Windows keeps the 2 that 768edcb set for exactly that cliff. KIT_TEST_CONCURRENCY
+// overrides both, for a loaded machine or to reproduce a timing-dependent failure.
 const TEST_CONCURRENCY = (() => {
   const raw = process.env.KIT_TEST_CONCURRENCY;
-  if (raw === undefined || raw === "") return availableParallelism();
+  if (raw === undefined || raw === "") {
+    return process.platform === "win32" ? 2 : availableParallelism();
+  }
   if (!/^[1-9][0-9]{0,2}$/.test(raw)) {
     console.error(`KIT_TEST_CONCURRENCY must be a positive integer (got ${JSON.stringify(raw)})`);
     process.exit(2);
