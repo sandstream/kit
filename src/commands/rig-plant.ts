@@ -8,7 +8,7 @@
  * built may not have a single defect yet, so only that one field is read here; `kit rig plan`
  * validates the whole manifest later.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { c } from "../utils/colors.js";
@@ -71,7 +71,6 @@ export async function cmdRigPlant(): Promise<boolean> {
   if (typeof args === "string") return fail(args);
   const patchPath = `defects/${args.id}.diff`;
   const out = join(dirname(args.manifest), "defects", `${args.id}.diff`);
-  if (existsSync(out)) return fail(`${patchPath} already exists; choose another --id`);
   let planted;
   try {
     planted = plantFromFix(
@@ -85,7 +84,15 @@ export async function cmdRigPlant(): Promise<boolean> {
     return fail("git failed; is --repo a git repository that contains both commits?");
   }
   mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, planted.patch, { flag: "wx" });
+  try {
+    // "wx" creates the file or fails if it exists: one atomic step, no check-then-write race.
+    writeFileSync(out, planted.patch, { flag: "wx" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      return fail(`${patchPath} already exists; choose another --id`);
+    }
+    return fail(`${patchPath} could not be written`);
+  }
   const block = defectToml(planted, {
     id: args.id,
     split: args.split,
