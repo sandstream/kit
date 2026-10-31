@@ -164,6 +164,48 @@ describe("inputId", () => {
   });
 });
 
+describe("[input] extra", () => {
+  const WITH_EXTRA = MANIFEST.replace(
+    'prompt = "prompts/review.md"\n',
+    'prompt = "prompts/review.md"\nextra = ["excerpts/d1.txt", "./hints.json", "excerpts/d1.txt"]\n',
+  );
+  const EXTRA_FILES = { ...FILES, "excerpts/d1.txt": "  40  if (token) {\n", "hints.json": "{}\n" };
+
+  it("keeps the id every manifest without extra already had", () => {
+    // Pinned from the build before `extra` existed: adding the key must not move an old corpus.
+    assert.equal(
+      inputId(parseManifest(MANIFEST), FILES),
+      "1ce024b82beedc0d70e7a111cb33e6f0878ef17696fb2a57cd32029f97c830f0",
+    );
+    assert.equal("extra" in parseManifest(MANIFEST).input, false);
+  });
+
+  it("normalises, de-duplicates and sorts extra, and hashes every extra file", () => {
+    const m = parseManifest(WITH_EXTRA);
+    assert.deepEqual(m.input.extra, ["excerpts/d1.txt", "hints.json"]);
+    assert.ok(referencedFiles(m).includes("hints.json"));
+    const id = inputId(m, EXTRA_FILES);
+    assert.notEqual(id, inputId(parseManifest(MANIFEST), FILES));
+    assert.notEqual(inputId(m, { ...EXTRA_FILES, "hints.json": '{"d1":"40"}\n' }), id);
+    assert.throws(() => inputId(m, FILES), /"excerpts\/d1\.txt" was not supplied/);
+  });
+});
+
+describe("[input] extra refusals", () => {
+  it("refuses a non-array, an empty path, an absolute path or one that climbs out", () => {
+    const set = (v: string): string =>
+      MANIFEST.replace(
+        'prompt = "prompts/review.md"\n',
+        `prompt = "prompts/review.md"\nextra = ${v}\n`,
+      );
+    refuses(set('"hints.json"'), /"extra" must be an array/);
+    refuses(set('[""]'), /"extra" must be an array/);
+    refuses(set("[1]"), /"extra" must be an array/);
+    refuses(set('["/etc/passwd"]'), /extra: "\/etc\/passwd" must be relative/);
+    refuses(set('["../x.txt"]'), /extra: "\.\.\/x\.txt" must not contain \.\./);
+  });
+});
+
 describe("loadManifest", () => {
   it("reads the manifest and its referenced files from disk and computes the same id", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-rig-"));
