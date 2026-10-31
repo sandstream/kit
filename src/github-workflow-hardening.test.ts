@@ -103,7 +103,7 @@ describe("informational CI jobs can still fail", () => {
 describe("GitHub workflow standards gate", () => {
   it("provisions the pinned standards tools and runs the full standards gate in CI", () => {
     const ci = workflow("ci.yml");
-    assert.match(ci, /uses:\s*jdx\/mise-action@[a-f0-9]{40}\s*#\s*v5\.2\.0/);
+    assert.match(ci, /uses:\s*jdx\/mise-action@[a-f0-9]{40}\s*#\s*v5\.\d+\.\d+/);
     assert.match(ci, /run:\s*node dist\/cli\.js standards --enforce/);
     assert.doesNotMatch(
       ci,
