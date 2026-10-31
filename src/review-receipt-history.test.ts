@@ -54,6 +54,39 @@ describe("countFailedReviewReceipts", () => {
     );
   });
 
+  it("does not count interrupted reviews as confirmed gate failures", () => {
+    const {
+      signature: _signature,
+      sig_alg: _algorithm,
+      ...body
+    } = failed(HEAD, "2026-10-29T10:00:00.000Z");
+    const interrupted = signReviewReceipt({ ...body, run_status: "interrupted" }, KEY);
+    assert.equal(countFailedReviewReceipts([interrupted], KEY, HEAD, "kit review --receipt"), 0);
+  });
+
+  it("rejects two different signed results for the same run", () => {
+    const one = failed(HEAD, "2026-10-29T10:00:00.000Z");
+    const { signature: _signature, sig_alg: _algorithm, ...body } = one;
+    const other = signReviewReceipt(
+      { ...body, gate: { ...body.gate, output_sha256: "c".repeat(64) } },
+      KEY,
+    );
+    assert.throws(
+      () => countFailedReviewReceipts([one, other], KEY, HEAD, "kit review --receipt"),
+      /conflicting review run/,
+    );
+  });
+
+  it("keeps signed v2 receipts readable as current evidence", () => {
+    const current = failed(HEAD, "2026-10-29T10:00:00.000Z");
+    const { signature: _signature, run_id: _runId, run_status: _runStatus, ...rest } = current;
+    const body = { ...rest, schema: "kit-pr-review-receipt/v2" };
+    const signature = createHmac("sha256", KEY).update(JSON.stringify(body)).digest("base64");
+    const legacy = { ...body, signature } as unknown as SignedReviewReceipt;
+    assert.equal(verifyReviewReceipt(legacy, KEY, HEAD).ok, true);
+    assert.equal(countFailedReviewReceipts([legacy, legacy], KEY, HEAD, "kit review --receipt"), 1);
+  });
+
   it("keeps signed v1 history readable without accepting it as a current receipt", () => {
     const current = failed(HEAD, "2026-10-29T10:00:00.000Z");
     const {

@@ -2078,10 +2078,11 @@
     },
     "review": {
       "kind": "command",
-      "summary": "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks its signature and head. --json emits a report; --stages and --category scope runs.",
+      "summary": "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks it. recover-receipt --confirm-stopped restores an interrupted transaction. --json emits a report; --stages and --category scope runs.",
       "x-kit-accepted-flags": [
         "--attest",
         "--category",
+        "--confirm-stopped",
         "--enforce",
         "--enforce-tests",
         "--env",

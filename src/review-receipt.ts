@@ -1,5 +1,5 @@
 /** Signed evidence for one pull request head. This module has no GitHub or file side effects. */
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ProtectedClass } from "./review-protected-paths.js";
 
 export interface ReviewReceiptInput {
@@ -11,6 +11,8 @@ export interface ReviewReceiptInput {
   baseHead: string;
   policyBranch: string;
   policyHead: string;
+  runId?: string;
+  runStatus?: "completed" | "interrupted";
   createdAt: string;
   gate: { command: string; exitCode: number; stdout: string; stderr: string; failures?: string[] };
   checks: { name: string; status: string; conclusion: string; url: string }[];
@@ -27,7 +29,9 @@ export interface ReviewReceiptInput {
 }
 
 export interface ReviewReceipt {
-  schema: "kit-pr-review-receipt/v2";
+  schema: "kit-pr-review-receipt/v3";
+  run_id: string;
+  run_status: "completed" | "interrupted";
   repo: string;
   pr: number;
   head: string;
@@ -94,8 +98,12 @@ function receiptEvidenceIssues(input: ReviewReceiptInput): string[] {
 
 export function buildReviewReceipt(input: ReviewReceiptInput): ReviewReceipt {
   validateReceiptInput(input);
+  const runId = input.runId ?? randomBytes(16).toString("hex");
+  if (!/^[a-f0-9]{32}$/.test(runId)) throw new Error("invalid review run identity");
   return {
-    schema: "kit-pr-review-receipt/v2",
+    schema: "kit-pr-review-receipt/v3",
+    run_id: runId,
+    run_status: input.runStatus ?? "completed",
     repo: input.repo,
     pr: input.pr,
     head: input.localHead,
@@ -152,6 +160,24 @@ function validReceiptBase(receipt: SignedReviewReceipt): boolean {
   );
 }
 
+function validReceiptSchema(receipt: SignedReviewReceipt, allowLegacy: boolean): boolean {
+  const schema = receipt.schema as string;
+  return (
+    (schema === "kit-pr-review-receipt/v3" ||
+      schema === "kit-pr-review-receipt/v2" ||
+      (schema === "kit-pr-review-receipt/v1" && allowLegacy)) &&
+    receipt.sig_alg === "hmac-sha256"
+  );
+}
+
+function validReceiptRun(receipt: SignedReviewReceipt): boolean {
+  return (
+    typeof receipt.run_id === "string" &&
+    /^[a-f0-9]{32}$/.test(receipt.run_id) &&
+    (receipt.run_status === "completed" || receipt.run_status === "interrupted")
+  );
+}
+
 export function verifyReviewReceipt(
   receipt: SignedReviewReceipt,
   key: Buffer,
@@ -161,14 +187,15 @@ export function verifyReviewReceipt(
   if (typeof receipt !== "object" || receipt === null) {
     return { ok: false, reason: "invalid review receipt" };
   }
-  const legacy = (receipt.schema as string) === "kit-pr-review-receipt/v1";
-  if (
-    (receipt.schema !== "kit-pr-review-receipt/v2" && !(legacy && options.allowLegacy)) ||
-    receipt.sig_alg !== "hmac-sha256"
-  ) {
+  const schema = receipt.schema as string;
+  const legacy = schema === "kit-pr-review-receipt/v1";
+  if (!validReceiptSchema(receipt, !!options.allowLegacy)) {
     return { ok: false, reason: "unsupported receipt schema or signature algorithm" };
   }
   if (receipt.head !== expectedHead) return { ok: false, reason: "receipt head is stale" };
+  if (schema === "kit-pr-review-receipt/v3" && !validReceiptRun(receipt)) {
+    return { ok: false, reason: "receipt run identity is missing or invalid" };
+  }
   if (!legacy && !validReceiptBase(receipt)) {
     return { ok: false, reason: "receipt base is missing or invalid" };
   }

@@ -15,9 +15,11 @@ import { join } from "node:path";
 import {
   captureReviewSnapshot,
   assertReviewSnapshot,
+  prepareReviewReceipt,
   writeReviewReceipt,
   type ReadCommand,
 } from "./review-receipt-io.js";
+import { beginReviewTransaction } from "./review-receipt-transaction.js";
 
 const gate = { command: "kit review --receipt", exitCode: 0, stdout: "ok", stderr: "" };
 const BASE = "b".repeat(40);
@@ -78,8 +80,14 @@ describe("receipt identity is captured before review", () => {
   for (const change of ["commit", "base", "dirty"] as const) {
     it(`refuses a ${change} change while the review runs`, async () => {
       const { dir, root, state, run } = setup();
+      const previous = process.env.KIT_AUDIT_ANCHOR_DIR;
+      process.env.KIT_AUDIT_ANCHOR_DIR = join(dir, "anchor");
       try {
         const snapshot = captureReviewSnapshot(root, run);
+        const transaction = beginReviewTransaction(snapshot.root, run);
+        await prepareReviewReceipt(snapshot, transaction, run);
+        assert.equal(existsSync(join(transaction.dir, "pending.json")), true);
+        assert.equal(existsSync(join(transaction.dir, "started")), true);
         // These changes stand in for activity while the review stages are running.
         if (change === "commit") {
           writeFileSync(join(root, "file.txt"), "second\n");
@@ -92,9 +100,19 @@ describe("receipt identity is captured before review", () => {
         } else {
           writeFileSync(join(root, "file.txt"), "dirty\n");
         }
-        await assert.rejects(writeReviewReceipt(root, gate, run, snapshot), /changed|clean/i);
+        const expected = {
+          commit: /local commit changed during review/,
+          base: /PR base or head changed while collecting protection rules/,
+          dirty: /review receipt requires a clean worktree/,
+        }[change];
+        await assert.rejects(
+          writeReviewReceipt(root, gate, { run, snapshot, transaction }),
+          expected,
+        );
         assert.equal(existsSync(join(root, ".kit-review-receipt.json")), false);
       } finally {
+        if (previous === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
+        else process.env.KIT_AUDIT_ANCHOR_DIR = previous;
         rmSync(dir, { recursive: true, force: true });
       }
     });

@@ -27,10 +27,15 @@ import type { JsonCheck } from "../cli-checks-shared.js";
 import type { GateOpts } from "../check-security.js";
 import {
   captureReviewSnapshot,
+  defaultReadCommand,
+  prepareReviewReceipt,
+  recoverReviewReceipt,
   verifyReviewReceiptFile,
   writeReviewReceipt,
   type ReviewSnapshot,
 } from "../review-receipt-io.js";
+import { beginReviewTransaction, type ReviewTransaction } from "../review-receipt-transaction.js";
+import { isReadOnlyMode, refuseWrite } from "../read-only-mode.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 
 export type ReviewStageName = "check" | "design" | "standards" | "adr" | "skill";
@@ -222,10 +227,6 @@ function selectReviewStages(value: string | undefined): ReviewStageName[] | unde
   return parsed as ReviewStageName[];
 }
 
-function receiptSnapshot(cwd: string, receiptMode: boolean): ReviewSnapshot | undefined {
-  return receiptMode ? captureReviewSnapshot(cwd) : undefined;
-}
-
 async function verifyReceiptCommand(cwd: string): Promise<boolean> {
   try {
     const result = await verifyReviewReceiptFile(cwd, process.argv[4]);
@@ -235,6 +236,26 @@ async function verifyReceiptCommand(cwd: string): Promise<boolean> {
     console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
     return false;
   }
+}
+
+async function recoverReceiptCommand(cwd: string): Promise<boolean> {
+  const config = await loadConfig(resolve(cwd, KIT_FILE));
+  return withGovernance(
+    config,
+    { operation: "review", operationType: "write", metadata: {} },
+    async () => {
+      try {
+        const result = await recoverReviewReceipt(cwd, hasFlag(process.argv, "--confirm-stopped"));
+        console.log(result);
+        return true;
+      } catch (error) {
+        console.error(
+          `✗ Review recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return false;
+      }
+    },
+  );
 }
 
 function incompatibleReceiptOptions(
@@ -248,6 +269,11 @@ function incompatibleReceiptOptions(
 export async function cmdReview(): Promise<boolean> {
   const cwd = await reviewDirectory();
   if (process.argv[3] === "verify-receipt") return verifyReceiptCommand(cwd);
+  if (process.argv[3] === "recover-receipt") return recoverReceiptCommand(cwd);
+  if (hasFlag(process.argv, "--confirm-stopped")) {
+    console.error("--confirm-stopped requires review recover-receipt");
+    return false;
+  }
   const receiptMode = hasFlag(process.argv, "--receipt");
   const jsonMode = receiptMode || hasFlag(process.argv, "--json");
   const enforce = receiptMode || hasFlag(process.argv, "--enforce");
@@ -276,93 +302,152 @@ export async function cmdReview(): Promise<boolean> {
     );
     return false;
   }
-  let snapshot: ReviewSnapshot | undefined;
-  try {
-    snapshot = receiptSnapshot(cwd, receiptMode);
-  } catch (error) {
-    console.error(
-      `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return false;
-  }
   const config = await loadConfig(resolve(cwd, KIT_FILE));
 
-  return await withGovernance(
+  return withGovernance(
     config,
     { operation: "review", operationType: receiptMode ? "write" : "read", metadata: {} },
-    async () => {
-      if (!jsonMode) console.log(`${c.bold}kit review${c.reset} — full repo audit\n`);
-      const report = await collectReview({
+    () =>
+      runGovernedReview({
         cwd,
         config,
+        receiptMode,
+        jsonMode,
         enforce,
         enforceTests,
-        gate: { lenient, failOnWarning },
+        lenient,
+        failOnWarning,
         stages,
         category,
-      });
-
-      if (jsonMode) {
-        const output = JSON.stringify(report, null, 2) + "\n";
-        process.stdout.write(output);
-        if (receiptMode) {
-          try {
-            const { path, receipt } = await writeReviewReceipt(
-              cwd,
-              {
-                command: "kit review --receipt",
-                exitCode: report.ok ? 0 : 1,
-                stdout: output,
-                stderr: "",
-                failures: report.stages
-                  .filter((stage) => !stage.ok)
-                  .flatMap((stage) => {
-                    const findings = stage.findings
-                      .filter((finding) => finding.status === "fail" || finding.status === "warn")
-                      .map(
-                        (finding) =>
-                          `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
-                      );
-                    return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
-                  }),
-              },
-              undefined,
-              snapshot,
-            );
-            console.error(`Review receipt: ${path}`);
-            for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);
-            return receipt.evidence_issues.length === 0;
-          } catch (error) {
-            console.error(
-              `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
-            );
-            return false;
-          }
-        }
-        return report.ok;
-      }
-
-      for (const stage of report.stages) {
-        console.log(`${c.bold}=== ${stage.stage} ===${c.reset}`);
-        for (const f of stage.findings) {
-          console.log(`  ${ICON[f.status]} ${f.name}  ${c.dim}${f.detail}${c.reset}`);
-          if (f.files) for (const file of f.files) console.log(`      ${c.dim}- ${file}${c.reset}`);
-        }
-        const s = stage.summary;
-        const verdict = stage.ok ? `${c.green}✓ ok${c.reset}` : `${c.red}✗ failed${c.reset}`;
-        console.log(
-          `  ${verdict} ${c.dim}(${s.pass} pass · ${s.fail} fail · ${s.warn} warn · ${s.skip} skip)${c.reset}\n`,
-        );
-      }
-
-      console.log(
-        `${c.bold}${
-          report.ok
-            ? `${c.green}✓ review passed`
-            : `${c.red}✗ review failed — ${report.failed.join(", ")}`
-        }${c.reset}`,
-      );
-      return report.ok;
-    },
+      }),
   );
+}
+
+interface GovernedReviewOptions {
+  cwd: string;
+  config: kitConfig;
+  receiptMode: boolean;
+  jsonMode: boolean;
+  enforce: boolean;
+  enforceTests: boolean;
+  lenient: boolean;
+  failOnWarning: boolean;
+  stages: ReviewStageName[] | undefined;
+  category: string | undefined;
+}
+
+async function runGovernedReview(options: GovernedReviewOptions): Promise<boolean> {
+  const {
+    cwd,
+    config,
+    receiptMode,
+    jsonMode,
+    enforce,
+    enforceTests,
+    lenient,
+    failOnWarning,
+    stages,
+    category,
+  } = options;
+  let snapshot: ReviewSnapshot | undefined;
+  let transaction: ReviewTransaction | undefined;
+  if (receiptMode) {
+    if (isReadOnlyMode()) {
+      const refusal = await refuseWrite("review-receipt", {}, { cwd });
+      console.error(refusal.reason);
+      return false;
+    }
+    try {
+      snapshot = captureReviewSnapshot(cwd);
+      transaction = beginReviewTransaction(snapshot.root, defaultReadCommand);
+      await prepareReviewReceipt(snapshot, transaction);
+    } catch (error) {
+      console.error(
+        `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+  if (!jsonMode) console.log(`${c.bold}kit review${c.reset} — full repo audit\n`);
+  const report = await collectReview({
+    cwd,
+    config,
+    enforce,
+    enforceTests,
+    gate: { lenient, failOnWarning },
+    stages,
+    category,
+  });
+
+  if (jsonMode) return renderJsonReview(cwd, report, receiptMode, snapshot, transaction);
+
+  return renderTextReview(report);
+}
+
+async function renderJsonReview(
+  cwd: string,
+  report: ReviewReport,
+  receiptMode: boolean,
+  snapshot: ReviewSnapshot | undefined,
+  transaction: ReviewTransaction | undefined,
+): Promise<boolean> {
+  const output = JSON.stringify(report, null, 2) + "\n";
+  process.stdout.write(output);
+  if (receiptMode) {
+    try {
+      const { path, receipt } = await writeReviewReceipt(
+        cwd,
+        {
+          command: "kit review --receipt",
+          exitCode: report.ok ? 0 : 1,
+          stdout: output,
+          stderr: "",
+          failures: report.stages
+            .filter((stage) => !stage.ok)
+            .flatMap((stage) => {
+              const findings = stage.findings
+                .filter((finding) => finding.status === "fail" || finding.status === "warn")
+                .map(
+                  (finding) => `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
+                );
+              return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
+            }),
+        },
+        { snapshot, transaction },
+      );
+      console.error(`Review receipt: ${path}`);
+      for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);
+      return receipt.evidence_issues.length === 0;
+    } catch (error) {
+      console.error(
+        `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+  return report.ok;
+}
+
+function renderTextReview(report: ReviewReport): boolean {
+  for (const stage of report.stages) {
+    console.log(`${c.bold}=== ${stage.stage} ===${c.reset}`);
+    for (const f of stage.findings) {
+      console.log(`  ${ICON[f.status]} ${f.name}  ${c.dim}${f.detail}${c.reset}`);
+      if (f.files) for (const file of f.files) console.log(`      ${c.dim}- ${file}${c.reset}`);
+    }
+    const s = stage.summary;
+    const verdict = stage.ok ? `${c.green}✓ ok${c.reset}` : `${c.red}✗ failed${c.reset}`;
+    console.log(
+      `  ${verdict} ${c.dim}(${s.pass} pass · ${s.fail} fail · ${s.warn} warn · ${s.skip} skip)${c.reset}\n`,
+    );
+  }
+
+  console.log(
+    `${c.bold}${
+      report.ok
+        ? `${c.green}✓ review passed`
+        : `${c.red}✗ review failed — ${report.failed.join(", ")}`
+    }${c.reset}`,
+  );
+  return report.ok;
 }

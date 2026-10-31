@@ -513,6 +513,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   review: [
     "--attest",
     "--category",
+    "--confirm-stopped",
     "--enforce",
     "--enforce-tests",
     "--fail-on-warning",

@@ -1,16 +1,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   collectReviewReceipt,
   captureReviewSnapshot,
+  prepareReviewReceipt,
   readFailedReviewRuns,
   verifyReviewReceiptFile,
   writeReviewReceipt,
   type ReadCommand,
 } from "./review-receipt-io.js";
+import { beginReviewTransaction } from "./review-receipt-transaction.js";
+import { getAuditAnchorKey } from "./audit-anchor.js";
+import { signReviewReceipt } from "./review-receipt.js";
 
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
@@ -111,6 +115,8 @@ function fakeRuleSnapshot(options: FakeOptions): string {
 
 function fakeGitCommand(call: string, options: FakeOptions): string | null {
   if (call === "git rev-parse --show-toplevel") return (options.rootDir ?? root) + "\n";
+  if (call === "git rev-parse --absolute-git-dir")
+    return join(options.rootDir ?? root, ".git") + "\n";
   if (call === "git rev-parse HEAD") return HEAD + "\n";
   if (call.startsWith("git ls-files -z -- ")) return "";
   if (call === "git status --porcelain --untracked-files=all")
@@ -194,7 +200,10 @@ describe("writeReviewReceipt", () => {
     const previous = process.env.KIT_READ_ONLY;
     process.env.KIT_READ_ONLY = "1";
     try {
-      await assert.rejects(writeReviewReceipt(dir, gate, fakeCommands()), /read-only mode active/);
+      await assert.rejects(
+        writeReviewReceipt(dir, gate, { run: fakeCommands() }),
+        /read-only mode active/,
+      );
     } finally {
       if (previous === undefined) delete process.env.KIT_READ_ONLY;
       else process.env.KIT_READ_ONLY = previous;
@@ -208,17 +217,22 @@ describe("writeReviewReceipt", () => {
     process.env.KIT_AUDIT_ANCHOR_DIR = join(dir, "anchor");
     const run = fakeCommands({ rootDir: dir });
     try {
+      mkdirSync(join(dir, ".git"));
+      const snapshot1 = captureReviewSnapshot(dir, run);
+      const transaction1 = beginReviewTransaction(dir, run);
+      await prepareReviewReceipt(snapshot1, transaction1, run);
       await writeReviewReceipt(
         dir,
         { ...gate, command: "kit review --receipt", exitCode: 1, stdout: "first" },
-        run,
-        captureReviewSnapshot(dir, run),
+        { run, snapshot: snapshot1, transaction: transaction1 },
       );
+      const snapshot2 = captureReviewSnapshot(dir, run);
+      const transaction2 = beginReviewTransaction(dir, run);
+      await prepareReviewReceipt(snapshot2, transaction2, run);
       await writeReviewReceipt(
         dir,
         { ...gate, command: "kit review --receipt", exitCode: 1, stdout: "second" },
-        run,
-        captureReviewSnapshot(dir, run),
+        { run, snapshot: snapshot2, transaction: transaction2 },
       );
       assert.equal(await readFailedReviewRuns(dir, HEAD, "kit review --receipt"), 2);
       assert.equal((await verifyReviewReceiptFile(dir, undefined, run)).ok, true);
@@ -228,14 +242,20 @@ describe("writeReviewReceipt", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+describe("writeReviewReceipt base identity", () => {
   it("rejects a signed receipt when the base branch changes with the same head", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-review-receipt-base-"));
     const previous = process.env.KIT_AUDIT_ANCHOR_DIR;
     process.env.KIT_AUDIT_ANCHOR_DIR = join(dir, "anchor");
     try {
+      mkdirSync(join(dir, ".git"));
       const run = fakeCommands({ rootDir: dir });
-      await writeReviewReceipt(dir, gate, run, captureReviewSnapshot(dir, run));
+      const snapshot = captureReviewSnapshot(dir, run);
+      const transaction = beginReviewTransaction(dir, run);
+      await prepareReviewReceipt(snapshot, transaction, run);
+      await writeReviewReceipt(dir, gate, { run, snapshot, transaction });
       assert.equal(
         (await verifyReviewReceiptFile(dir, undefined, fakeCommands({ rootDir: dir }))).ok,
         true,
@@ -259,12 +279,34 @@ describe("writeReviewReceipt", () => {
 });
 
 describe("verifyReviewReceiptFile", () => {
+  it("never accepts an interrupted review as a current receipt", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-review-interrupted-"));
+    const previous = process.env.KIT_AUDIT_ANCHOR_DIR;
+    process.env.KIT_AUDIT_ANCHOR_DIR = join(dir, "anchor");
+    try {
+      mkdirSync(join(dir, ".git"));
+      const run = fakeCommands({ rootDir: dir });
+      const receipt = collectReviewReceipt(dir, gate, run);
+      receipt.run_status = "interrupted";
+      const signed = signReviewReceipt(receipt, await getAuditAnchorKey());
+      writeFileSync(join(dir, ".kit-review-receipt.json"), JSON.stringify(signed));
+      const result = await verifyReviewReceiptFile(dir, undefined, run);
+      assert.equal(result.ok, false);
+      assert.match(result.reason, /interrupted/);
+    } finally {
+      if (previous === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
+      else process.env.KIT_AUDIT_ANCHOR_DIR = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses an oversized receipt before it reads signing keys", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-review-receipt-large-"));
     const path = join(dir, "receipt.json");
     try {
+      mkdirSync(join(dir, ".git"));
       writeFileSync(path, Buffer.alloc(16 * 1024 * 1024 + 1));
-      const result = await verifyReviewReceiptFile(root, path, fakeCommands());
+      const result = await verifyReviewReceiptFile(dir, path, fakeCommands({ rootDir: dir }));
       assert.deepEqual(result, { ok: false, reason: "review receipt is too large" });
     } finally {
       rmSync(dir, { recursive: true, force: true });

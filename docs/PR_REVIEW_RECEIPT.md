@@ -38,9 +38,31 @@ Kit also checks the original names of renamed files.
 Kit refuses the evidence if the base or head changes during collection, or if rules are unavailable.
 The rule file itself always requires human approval.
 Changes to those paths require a human approval before merge.
-Receipts use version 2 and record the base and default branch commits.
+New receipts use version 3 and record a unique review run identity.
+They record the base and default branch commits.
 Generate a new receipt after either branch changes.
+Version 2 receipts remain valid as current receipts.
 Version 1 receipts remain valid only as signed failure history.
+
+Kit permits one receipt review at a time in each Git worktree.
+The lock stays in the worktree's Git metadata until the signed receipt and history are complete.
+An interrupted review blocks receipt verification and PR escalation until recovery.
+Inspect the review process and confirm that it has stopped.
+Run `kit review recover-receipt --confirm-stopped` to restore the signed pending result.
+Recovery records an interrupted review as incomplete, not as a confirmed gate failure.
+Run a new review after recovery reports an interruption or changed pull request.
+Kit does not automatically remove locks based on age or an absent process ID.
+If a recovery claim is also left behind, inspect its owner and confirm that process has stopped.
+Find the claim owner with `git rev-parse --git-path kit-review-receipt.lock/recovery/owner.json`.
+Read the named file and confirm that its host and process have stopped.
+Remove that owner file and its empty parent directory only after that inspection.
+Run the recovery command again.
+If staged evidence is incomplete or invalid, Kit leaves the review locked.
+Inspect the files in the lock directory before removing an invalid staged file.
+Run the recovery command again after that inspection.
+This recovery flow covers process interruption. It does not guarantee recovery after power loss.
+Signatures reveal changes to retained history entries.
+They do not prove that earlier entries or the whole history file still exist.
 
 ## Pull request escalation
 
@@ -48,6 +70,8 @@ Run `kit escalate pr` on a branch with an open GitHub pull request.
 It reads the signed receipt and current GitHub checks and review threads.
 It writes actions to `.kit-escalation.txt`.
 The actions name repeated local gate failures, failed or pending CI, open findings, and protected paths.
+Two failed gate runs on one head still require human review after a later passing run.
+Kit cannot yet record acceptance of that risk.
 The command reports every failed check. It does not decide whether Kit caused the failure.
 The command checks approvals from another GitHub user for the exact PR head.
 Use `kit escalate pr --merge-denied` after a permission layer refuses the merge.

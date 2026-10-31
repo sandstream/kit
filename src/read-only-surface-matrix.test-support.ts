@@ -135,6 +135,13 @@ export const MUTATING_COMMANDS: readonly CommandCase[] = [
   ),
   mutation("policy sign", "policy-sign", "policy", "sign"),
   mutation("review --receipt", "review-receipt", "review", "--receipt"),
+  mutation(
+    "review recover-receipt",
+    "review-recover-receipt",
+    "review",
+    "recover-receipt",
+    "--confirm-stopped",
+  ),
   mutation("policy trust add", "policy-trust-add", "policy", "trust", "signer.pem"),
   mutation("policy trust remove", "policy-trust-remove", "policy", "trust", "--remove=kid"),
   mutation("profile export --out", "profile-export", "profile", "export", "--out=bundle.json"),

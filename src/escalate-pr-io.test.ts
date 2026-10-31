@@ -144,6 +144,7 @@ function fakeRuleSnapshot(options: FakeOptions): string {
 
 function fakeGitCommand(call: string, root: string): string | null {
   if (call === "git rev-parse --show-toplevel") return root + "\n";
+  if (call === "git rev-parse --absolute-git-dir") return join(root, ".git") + "\n";
   if (call === "git rev-parse HEAD") return HEAD + "\n";
   if (call.startsWith("git ls-files -z -- ")) return "";
   if (call === "git status --porcelain --untracked-files=all") return "";

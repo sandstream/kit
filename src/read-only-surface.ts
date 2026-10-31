@@ -202,6 +202,7 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   },
   { command: "policy", subcommand: "sign", operation: "policy-sign" },
   { command: "review", anyFlags: ["--receipt"], operation: "review-receipt" },
+  { command: "review", subcommand: "recover-receipt", operation: "review-recover-receipt" },
   {
     command: "policy",
     subcommand: "trust",

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { parseCurrentHumanApproval } from "./escalate-pr-github.js";
 import type { PrEscalationEvidence } from "./escalate-pr.js";
 import { collectIndependentReviewComments } from "./review-comments-github.js";
+import { assertReviewReadStamp, reviewReadStamp } from "./review-receipt-transaction.js";
 import { assertPrRefsUnchanged, collectPrProtectedPaths } from "./review-protected-paths-github.js";
 import {
   parseGitHubPrView,
@@ -16,7 +17,7 @@ import {
 } from "./review-receipt.js";
 import {
   defaultReadCommand,
-  readFailedReviewRuns,
+  readFailedReviewSummary,
   REVIEW_RECEIPT_FILE,
   verifyReviewReceiptFile,
   type ReadCommand,
@@ -153,6 +154,7 @@ async function localReceipt(root: string, current: CurrentReceiptEvidence, run: 
   let receiptProblem: string | null = null;
   let historyProblem: string | null = null;
   let gate: PrEscalationEvidence["gate"] = null;
+  let lastFailedGate: PrEscalationEvidence["gate"] = null;
   let failedGateRuns = 0;
   try {
     const verified = await verifyReviewReceiptFile(root, REVIEW_RECEIPT_FILE, run);
@@ -170,7 +172,17 @@ async function localReceipt(root: string, current: CurrentReceiptEvidence, run: 
         failures: saved.failures ?? [],
       };
       try {
-        failedGateRuns = await readFailedReviewRuns(root, pr.head, saved.command);
+        const history = await readFailedReviewSummary(root, pr.head, saved.command);
+        failedGateRuns = history.count;
+        if (history.last) {
+          const last = history.last.gate;
+          lastFailedGate = {
+            command: last.command,
+            exitCode: last.exit_code,
+            outputSha256: last.output_sha256,
+            failures: last.failures ?? [],
+          };
+        }
       } catch (error) {
         historyProblem = `review history cannot be verified: ${errorMessage(error)}`;
       }
@@ -181,7 +193,7 @@ async function localReceipt(root: string, current: CurrentReceiptEvidence, run: 
         ? "review receipt missing for the current PR head"
         : `review receipt unavailable: ${errorMessage(error)}`;
   }
-  return { receiptProblem, historyProblem, gate, failedGateRuns };
+  return { receiptProblem, historyProblem, gate, lastFailedGate, failedGateRuns };
 }
 
 export async function collectPrEvidence(
@@ -190,6 +202,7 @@ export async function collectPrEvidence(
   run: ReadCommand = defaultReadCommand,
 ): Promise<PrEscalationEvidence> {
   const { root, repo, pr } = prIdentity(cwd, run);
+  const stamp = reviewReadStamp(root, run);
   const { threads, rawThreads, humanApproved } = reviewEvidence(root, repo, pr, run);
   const { refs, protectedPaths } = collectPrProtectedPaths(
     root,
@@ -214,6 +227,7 @@ export async function collectPrEvidence(
     throw new Error("PR head changed while collecting escalation evidence");
   }
   assertPrRefsUnchanged(refs, root, repo, run);
+  assertReviewReadStamp(root, run, stamp);
   return {
     repo,
     pr: pr.number,

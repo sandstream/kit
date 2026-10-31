@@ -81,6 +81,15 @@ describe("review receipt", () => {
     assert.equal(verifyReviewReceipt({ ...signed, signature: "bad" }, KEY, HEAD).ok, false);
   });
 
+  it("assigns a distinct signed identity to identical review runs", () => {
+    const first = signReviewReceipt(buildReviewReceipt(input()), KEY);
+    const second = signReviewReceipt(buildReviewReceipt(input()), KEY);
+    assert.notEqual(first.run_id, second.run_id);
+    assert.notEqual(first.signature, second.signature);
+    assert.equal(verifyReviewReceipt(first, KEY, HEAD).ok, true);
+    assert.equal(verifyReviewReceipt(second, KEY, HEAD).ok, true);
+  });
+
   it("records failing checks with the gate output", () => {
     const failed = input();
     failed.gate.exitCode = 1;
