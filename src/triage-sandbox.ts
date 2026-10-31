@@ -13,6 +13,7 @@
  *   - tarball entries that escape the package directory (path traversal)
  *   - tarball entries marked executable that shouldn't be
  *   - native executables, boot images and compiled modules, by their first bytes
+ *   - other binaries: an executable one gzip/zip layer in, binary "text" files, unknown blobs
  *
  * No code from the package is ever executed. All work is read-only on the
  * downloaded tarball.
@@ -24,6 +25,7 @@ import { readFile, mkdtemp, readdir, stat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { sniffBinary } from "./triage-sandbox-binary.js";
+import { inspectBlob } from "./triage-sandbox-blob.js";
 
 const exec = promisify(execFile);
 
@@ -288,13 +290,18 @@ async function walkAndCheck(dir: string, findings: SandboxFinding[], root = dir)
     }
     if (!entry.isFile()) continue;
     const st = await stat(full);
+    const rel = relative(root, full).split(sep).join("/");
     const binary = await sniffBinary(full);
     if (binary) {
       findings.push({
         severity: binary.severity,
         signal: "binary in package",
-        detail: `${relative(root, full).split(sep).join("/")}: ${binary.kind} (${st.size} bytes)`,
+        detail: `${rel}: ${binary.kind} (${st.size} bytes)`,
       });
+    } else {
+      const blob = await inspectBlob(full, rel, st.size);
+      if (blob)
+        findings.push({ severity: blob.severity, signal: "opaque binary", detail: blob.detail });
     }
     // Bash/python/Perl scripts dropped at the package root are unusual for
     // libraries — flag them.
