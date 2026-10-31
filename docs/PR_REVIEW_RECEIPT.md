@@ -3,8 +3,9 @@
 Use `kit review --receipt` from a clean branch with an open GitHub pull request.
 The command runs all five review stages with strict checks.
 It writes `.kit-review-receipt.json` in the repository root.
-The receipt and history files can be untracked without entries in `.gitignore`.
-Both paths must be untracked regular files. Kit rejects symbolic links and hard links.
+The receipt, history, and `.kit-audit.jsonl` files can be untracked without ignore rules.
+These paths must be untracked regular files. Kit rejects symbolic links and hard links.
+The worktree check does not verify the audit log or establish its authenticity.
 Kit requires a usable file identity to open the files.
 Kit rejects the operation if it cannot verify that identity.
 Keep the worktree and its parent directories under trusted control during the operation.
