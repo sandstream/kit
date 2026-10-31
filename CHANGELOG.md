@@ -13,6 +13,13 @@
 
 ### Security
 
+- **`kit triage npm --sandbox` looks one layer into opaque binaries.** A binary file that is not a
+  known executable or media type is no longer silent. gzip and zip streams found anywhere in it are
+  decompressed a little (16 KB in, 16 MB out at most, so a bomb cannot expand) and classified; a
+  package that hid a Linux kernel in a gzip stream inside a custom container is now reported as
+  such. Binary content behind a text extension (`.js`, `.json`, `.md`, …) is a warning, and any
+  other unknown binary is info below 256 KB and a warning above. xz and zstd streams are named, not
+  opened: Node's standard library cannot read them. The triage outcome does not change.
 - **`kit triage npm --sandbox` names binaries inside a tarball.** It used to flag scripts and
   path traversal only, so a package shipping a prebuilt Linux kernel image passed without a word.
   Each file's first bytes are now classified, and an ELF, Mach-O or PE executable, a Linux boot
