@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit escalate feed github` tracks what GitHub reports as broken, so the failure mail is not the only
+  record.** It reads the latest completed run of every active workflow on the default branch and the
+  open Dependabot alerts (read-only `gh api` calls), and keeps one action item per failure. An item
+  closes when the workflow is green again or the alert is gone. A source it cannot read (rate limit,
+  missing token scope) leaves its open items alone and says why, so a failed call never clears a
+  blocker. Workflow names are cleaned before they are stored. `--dry-run` writes nothing. Open pull
+  requests and GitHub security notices (new token, new app) are not covered yet.
+
 ### Security
 
 - **`kit agent-audit` names code-loading environment variables.** A `--preload`, `--require`/`-r`,
@@ -47,7 +57,7 @@
   marketplace is now triaged like `skills add`: a GitHub repo becomes a `github:` triage ref, a local
   path is the user's own code, and any other source (another host, a URL to a `marketplace.json`)
   is blocked as unverifiable. Installing from a marketplace added earlier is not re-gated. `/plugin
-  install` typed inside Claude Code never reaches a Bash hook and is not covered.
+install` typed inside Claude Code never reaches a Bash hook and is not covered.
 - **Updated vulnerable transitive packages.** Hono 4.13.14, fast-uri 3.1.9, and ip-address 10.7.5 resolve the current npm advisories. `npm audit` reports zero vulnerabilities.
 
 - **`kit gha-audit` now checks CI gate coverage, deployment image tags, and default branch protection.** It reports whether CI declares `kit check`, `kit scan`, osv-scanner, and Trivy steps. It flags `latest` or branch-derived deployment tags in scripts, Compose files, and CI variables. The branch check reads GitHub or GitLab with a declared `GITHUB_TOKEN` or `GITLAB_TOKEN` from kit secrets. Missing tokens, API errors, and air-gap mode stay unverified.

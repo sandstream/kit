@@ -866,9 +866,31 @@
       "x-kit-stability": "stable"
     },
     "escalate": {
-      "kind": "command",
+      "commands": {
+        "feed": {
+          "kind": "command",
+          "summary": "Track what GitHub reports as broken (failed workflows on the default branch, open Dependabot alerts) as action items: kit escalate feed github [--repo owner/name] [--dry-run] [--json]",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
       "summary": "List what needs human action; 'kit escalate pr' reads receipts, GitHub checks, and review reports",
-      "x-kit-accepted-flags": ["--env","--help","--merge-denied","--non-interactive","--read-only","--readonly","--version"],
+      "x-kit-accepted-flags": [
+        "--dry-run",
+        "--env",
+        "--help",
+        "--json",
+        "--merge-denied",
+        "--non-interactive",
+        "--read-only",
+        "--readonly",
+        "--repo",
+        "--version"
+      ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,

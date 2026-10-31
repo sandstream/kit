@@ -181,6 +181,7 @@
     "env list",
     "env switch",
     "escalate",
+    "escalate feed",
     "fix",
     "gate-bash",
     "gate-egress",
