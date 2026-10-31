@@ -29,9 +29,9 @@ describe("resolveHooksDir in a linked worktree", () => {
       git(main, "add", "a.txt");
       git(main, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-qm", "a");
       git(main, "worktree", "add", "-q", wt);
-      const expected = realpathSync(join(main, ".git", "hooks"));
-      assert.equal(realpathSync(resolveHooksDir(".git", wt)), expected);
-      assert.equal(realpathSync(resolveHooksDir(".git", main)), expected);
+      const expected = realpathSync.native(join(main, ".git", "hooks"));
+      assert.equal(realpathSync.native(resolveHooksDir(".git", wt)), expected);
+      assert.equal(realpathSync.native(resolveHooksDir(".git", main)), expected);
     } finally {
       rmTemp(root);
     }
