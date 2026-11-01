@@ -29,6 +29,11 @@ import { signReviewReceipt } from "./review-receipt.js";
 const root = process.argv[2]!;
 const mode = process.argv[3]!;
 const signals = process.argv[4]!;
+const startedAt = Date.now();
+function mark(stage: string): void {
+  if (process.env.KIT_REVIEW_TIMING_PROBE === "1")
+    process.stderr.write(`PROBE ${stage} ${Date.now() - startedAt}ms\n`);
+}
 function stopAtBarrier(): never {
   writeFileSync(join(signals, `${mode}.barrier`), "ready");
   const cell = new Int32Array(new SharedArrayBuffer(4));
@@ -124,6 +129,7 @@ function crashHooks() {
       mode === "crash-history-link"
         ? (source: Parameters<typeof linkSync>[0], destination: Parameters<typeof linkSync>[1]) => {
             linkSync(source, destination);
+            mark("history-link");
             stopAtBarrier();
           }
         : undefined,
@@ -190,6 +196,7 @@ async function handleSpecialMode(): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+  mark("start");
   if (await handleSpecialMode()) return;
   if (mode === "append-failure") {
     const history = join(root, ".kit-review-receipt-history.jsonl");
@@ -197,12 +204,14 @@ async function main(): Promise<void> {
     chmodSync(history, 0o400);
   }
   const snapshot = captureReviewSnapshot(root, run);
+  mark("snapshot");
   const transaction = beginReviewTransaction(
     snapshot.root,
     run,
     mode === "crash-ownerless" ? stopAtBarrier : undefined,
   );
   await prepareReviewReceipt(snapshot, transaction, run);
+  mark("prepared");
   if (mode === "crash-unknown") stopAtBarrier();
   if (mode === "legacy-interrupted") {
     const pending = readReviewPending(transaction)!;
@@ -242,6 +251,7 @@ async function main(): Promise<void> {
       hooks: {
         ...crashHooks(),
         afterPending: async () => {
+          mark("pending");
           if (mode !== "crash-after-pending") return;
           writeFileSync(join(signals, `${mode}.pending`), "ready");
           while (!existsSync(join(signals, "release")))

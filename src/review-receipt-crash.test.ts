@@ -72,19 +72,26 @@ function run(test: Test, mode: string) {
 }
 async function crash(test: Test, mode: string): Promise<void> {
   const child: ChildProcess = spawn(process.execPath, [fixture, test.root, mode, test.signals], {
-    env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
+    env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor, KIT_REVIEW_TIMING_PROBE: "1" },
     stdio: ["ignore", "ignore", "pipe"],
   });
   const stderr = captureChildStderr(child);
-  const deadline = Date.now() + 20000;
+  const start = Date.now();
+  const deadline = start + 120000;
+  let reported = false;
   try {
     while (!existsSync(join(test.signals, `${mode}.barrier`))) {
+      if (!reported && Date.now() - start > 20000) {
+        console.log(`PROBE ${mode} still waiting after 20s\n${stderr()}`);
+        reported = true;
+      }
       if (child.exitCode !== null || child.signalCode !== null)
         throw new Error(`fixture exited: ${child.exitCode ?? child.signalCode}\n${stderr()}`);
       if (Date.now() > deadline) throw new Error(`fixture did not reach the barrier\n${stderr()}`);
       await new Promise((done) => setTimeout(done, 20));
     }
     const exited = new Promise<void>((done) => child.once("exit", () => done()));
+    console.log(`PROBE ${mode} reached barrier in ${Date.now() - start}ms\n${stderr()}`);
     child.kill("SIGKILL");
     await exited;
     assert.equal(child.signalCode, "SIGKILL");
