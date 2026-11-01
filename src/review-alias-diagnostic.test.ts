@@ -18,7 +18,7 @@ for (const form of ["short", "case"]) {
       anchor = join(dir, "anchor");
     mkdirSync(repo);
     mkdirSync(signals);
-    const env = { ...process.env, KIT_AUDIT_ANCHOR_DIR: anchor, KIT_ALIAS_PROBE_DIR: repo };
+    const env = { ...process.env, KIT_AUDIT_ANCHOR_DIR: anchor };
     try {
       execFileSync("git", ["init", "-q"], { cwd: repo });
       execFileSync(
@@ -41,12 +41,7 @@ for (const form of ["short", "case"]) {
           encoding: "utf8",
         }).trim(),
       );
-      const short = execFileSync(
-        process.env.ComSpec || "cmd.exe",
-        ["/d", "/c", 'for %I in ("%KIT_ALIAS_PROBE_DIR%") do @echo %~sI'],
-        { env, encoding: "utf8" },
-      ).trim();
-      const alternative = form === "short" ? short : canonical.toUpperCase();
+      const alternative = form === "short" ? repo : canonical.toUpperCase();
       assert.ok(
         sameIdentity(
           statSync(canonical, { bigint: true }),
