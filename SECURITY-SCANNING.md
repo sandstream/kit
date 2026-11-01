@@ -116,6 +116,8 @@ ignored link or submodule is not scanned.
 Before each scan, the job checks ignore files without following symbolic links.
 It rejects linked or special `.semgrepignore` and `.gitignore` files, even in ignored directories.
 The job fails if it cannot inspect a directory.
+Git can also read local excludes from its metadata or `core.excludesFile`.
+The job does not validate those files. They can exclude untracked files.
 Registry or installation failures also fail the job. The security gate requires
 the SAST job to succeed.
 
