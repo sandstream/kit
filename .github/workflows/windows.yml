@@ -91,7 +91,13 @@ jobs:
           echo 'Results with PowerShell module path:'
           grep -E '^not ok|^ok |^# (tests|pass|fail|skipped)' "$RUNNER_TEMP/kit-acl-shell-override.log" || true
           if grep -q 'ETIMEDOUT' "$RUNNER_TEMP/kit-acl-shell-override.log"; then echo 'Detected ETIMEDOUT'; fi
-          test "$status" -eq 0 && test "$override_status" -eq 0
+          native_modules=$(node -e 'process.stdout.write(require("node:path").join(process.env.SystemRoot,"System32","WindowsPowerShell","v1.0","Modules"))')
+          PSModulePath="$native_modules" node --test --test-timeout=180000 --test-concurrency=1 dist/review-receipt-audit-cli.test.js > "$RUNNER_TEMP/kit-acl-shell-minimal.log" 2>&1
+          minimal_status=$?
+          echo 'Results with Windows system modules only:'
+          grep -E '^not ok|^ok |^# (tests|pass|fail|skipped)' "$RUNNER_TEMP/kit-acl-shell-minimal.log" || true
+          if grep -q 'ETIMEDOUT' "$RUNNER_TEMP/kit-acl-shell-minimal.log"; then echo 'Detected ETIMEDOUT'; fi
+          test "$status" -eq 0 && test "$override_status" -eq 0 && test "$minimal_status" -eq 0
       - name: Unit tests (shard ${{ matrix.shard }}/4)
         if: inputs.test_file == ''
         shell: bash
