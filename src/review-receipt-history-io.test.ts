@@ -1,17 +1,19 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getAuditAnchorKey } from "./audit-anchor.js";
+import { openReceiptForRead } from "./review-receipt-files.js";
 import {
   persistHistory,
   readFailedReviewRuns,
@@ -87,21 +89,32 @@ for (const overflow of [false, true]) {
       const initialBytes = limit - nextBytes + (overflow ? 1 : 0);
       const initial = paddedReceipt(key, initialBytes);
       const path = join(root, REVIEW_RECEIPT_HISTORY_FILE);
-      writeFileSync(path, JSON.stringify(initial) + "\n");
-      assert.equal(statSync(path).size, initialBytes);
-      if (overflow) {
-        const before = readFileSync(path);
-        assert.throws(() => persistHistory(root, next, key), /history.*(limit|large)/i);
-        assert.equal(
-          readFileSync(path).equals(before),
-          true,
-          "existing history must remain unchanged",
-        );
-        assert.equal(readHistory(root, key).length, 1);
-      } else {
-        persistHistory(root, next, key);
-        assert.equal(statSync(path).size, limit);
-        assert.equal(readHistory(root, key).length, 2);
+      const original = Buffer.from(JSON.stringify(initial) + "\n", "utf8");
+      writeFileSync(path, original);
+      const fd = openReceiptForRead(path);
+      try {
+        assert.equal(fstatSync(fd).size, initialBytes);
+        if (overflow) {
+          assert.throws(() => persistHistory(root, next, key), /history.*(limit|large)/i);
+          assert.equal(
+            readFileSync(fd).equals(original),
+            true,
+            "existing history must remain unchanged",
+          );
+          assert.deepEqual(
+            readHistory(root, key).map((entry) => entry.signature),
+            [initial.signature],
+          );
+        } else {
+          persistHistory(root, next, key);
+          assert.equal(fstatSync(fd).size, limit);
+          assert.deepEqual(
+            readHistory(root, key).map((entry) => entry.signature),
+            [initial.signature, next.signature],
+          );
+        }
+      } finally {
+        closeSync(fd);
       }
     });
   });
