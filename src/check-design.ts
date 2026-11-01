@@ -67,9 +67,10 @@ function walkSources(root: string, exts: string[]): string[] {
  */
 export function stripComments(source: string): string {
   const blank = (s: string) => s.replace(/[^\n]/g, " ");
+  // \x3c is "<"; it avoids a Semgrep parser error on HTML comment regexes.
   return source
     .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/<!--[\s\S]*?-->/g, blank)
+    .replace(/\x3c!--[\s\S]*?-->/g, blank)
     .replace(/(^|[^:])\/\/[^\n]*/g, (m, keep: string) => keep + " ".repeat(m.length - keep.length));
 }
 

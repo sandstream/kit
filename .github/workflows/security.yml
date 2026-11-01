@@ -126,16 +126,20 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - name: Semgrep (application code only)
-        # Excludes set in .semgrepignore — terraform/k8s handled by Stage 5
-        # Checkov/tfsec so they're skipped here to avoid duplicate findings.
-        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          config: >-
-            p/security-audit
-            p/owasp-top-ten
-            p/typescript
-            p/nodejs
+          python-version: "3.12"
+      - name: Install Semgrep
+        run: python3 -m pip install semgrep==1.176.0
+      - name: Test Semgrep gate
+        run: python3 scripts/test-semgrep-gate.py
+      - name: Semgrep (application code only)
+        # Keep .semgrepignore. Fail on findings, scanner errors and partial parses.
+        run: |
+          set -e
+          for config in p/security-audit p/owasp-top-ten p/typescript p/nodejs; do
+            python3 scripts/run-semgrep.py --config "$config" .
+          done
       - name: SonarCloud
         if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0

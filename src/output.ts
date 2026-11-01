@@ -1,3 +1,4 @@
+import type { AuditEvent } from "./audit.js";
 import type { ToolStatus } from "./check-tools.js";
 import type { ServiceStatus } from "./check-services.js";
 import type { SecretStatus } from "./check-secrets.js";
@@ -365,7 +366,7 @@ export function printLockTable(results: LockCheckResult[]): void {
   }
 }
 
-export function printAuditTable(events: import("./audit.js").AuditEvent[]): void {
+export function printAuditTable(events: AuditEvent[]): void {
   if (events.length === 0) {
     console.log(`${c.dim}No audit log entries found.${c.reset}`);
     return;
