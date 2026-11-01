@@ -21,9 +21,23 @@ SECRET_PATTERNS = (
 FILE_LIMIT = 1_000_000  # bytes; a larger file is reported unread, never skipped silently
 
 
+def _plugin_scan():
+    """plugin_scan.py from this file's own directory, loaded by path (see triage.py's _skill_scan)."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugin_scan.py")
+    spec = importlib.util.spec_from_file_location("kit_plugin_scan", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def triage_local_skill(rep):
     """Validate a local skill (a SKILL.md or its directory). False when the target is not local."""
     target = rep.target
+    # A Claude Code plugin is triaged as a plugin: its hooks and scripts carry the behaviour.
+    if os.path.isfile(os.path.join(target, ".claude-plugin", "plugin.json")):
+        _plugin_scan().triage_local_plugin(rep, _secrets_in)
+        return True
     path = next((p for p in (target, os.path.join(target, "SKILL.md")) if os.path.isfile(p)), None)
     if not path:
         return False

@@ -24,7 +24,11 @@ const BUNDLED_TRIAGE_SKILL = resolve(__dirname, "..", "skills", "triage");
 /** Every file the triage script executes. Each is installed and byte-verified against the
  *  bundled copy before use (ADR-0004): verifying triage.py alone would let a stale or planted
  *  sibling it loads run unchecked. */
-export const TRIAGE_SCRIPTS = ["scripts/triage.py", "scripts/skill_scan.py"] as const;
+export const TRIAGE_SCRIPTS = [
+  "scripts/triage.py",
+  "scripts/skill_scan.py",
+  "scripts/plugin_scan.py",
+] as const;
 /** Stamp of the kit version that produced the installed skill copy. Used to refresh a STALE
  *  copy after a kit upgrade — otherwise an improved `triage.py` (e.g. a fixed version resolver
  *  or a new secret pattern) would never reach existing installs, silently running old logic. */
