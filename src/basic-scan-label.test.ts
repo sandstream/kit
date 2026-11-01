@@ -18,4 +18,14 @@ describe("basicSecretScanFiles: command labels", () => {
     ]);
     assert.deepStrictEqual(files, ["src/config.json"]);
   });
+
+  it("does not hide a real secret that shares the line with a label", () => {
+    const files = basicSecretScanFiles([
+      hit(
+        "src/config.ts",
+        `  "mcp set-token": "Headless / paste-token install", "password": "literal-looking-value-0123456789abcdef"`,
+      ),
+    ]);
+    assert.deepStrictEqual(files, ["src/config.ts"]);
+  });
 });
