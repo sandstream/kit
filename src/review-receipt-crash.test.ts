@@ -20,7 +20,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { captureChildStderr, requireChildExit } from "./review-child-process.test-support.js";
 
@@ -47,13 +47,16 @@ function setup() {
     ],
     { cwd: root },
   );
+  const gitRoot = resolve(
+    execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8" }).trim(),
+  );
   return {
     dir,
-    root,
+    root: gitRoot,
     signals,
     anchor,
-    lock: join(root, ".git", "kit-review-receipt.lock"),
-    history: join(root, ".kit-review-receipt-history.jsonl"),
+    lock: join(gitRoot, ".git", "kit-review-receipt.lock"),
+    history: join(gitRoot, ".kit-review-receipt-history.jsonl"),
   };
 }
 type Test = ReturnType<typeof setup>;
