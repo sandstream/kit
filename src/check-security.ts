@@ -1,3 +1,4 @@
+import { skipsBasicScan } from "./basic-scan-skip.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, access, readdir } from "node:fs/promises";
@@ -1509,7 +1510,6 @@ export function classifyTrufflehogFindings(
  * Input: `git grep -n` output lines (`file:line:content`). Pure and deterministic.
  */
 export function basicSecretScanFiles(lines: string[]): string[] {
-  const TEST_PATH = /(\.test\.|\.spec\.|__tests__|\/__mocks__\/|\/fixtures?\/|\.fixture\.)/;
   const VALUE_RE =
     /(?:api[_-]?key|secret[_-]?key|password|token|credential)["']?\s*[:=]\s*["']([^"']{20,})/i;
   const TEMPLATE_VALUE =
@@ -1519,7 +1519,7 @@ export function basicSecretScanFiles(lines: string[]): string[] {
     const m = line.match(/^([^:]+):\d+:(.*)$/);
     if (!m) continue;
     const [, file, content] = m;
-    if (TEST_PATH.test(file)) continue;
+    if (skipsBasicScan(file, content)) continue;
     const value = content.match(VALUE_RE)?.[1] ?? "";
     if (/^[A-Z][A-Z0-9_]+$/.test(value)) continue; // env-var name, not a secret
     if (TEMPLATE_VALUE.test(value)) continue; // substitution syntax, not a literal
