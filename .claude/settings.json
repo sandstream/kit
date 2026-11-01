@@ -5,10 +5,45 @@
         "hooks": [
           {
             "type": "command",
-            "command": "kit hooks context"
+            "command": "\"$HOME/.kit/bin/kit\" hooks context"
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.kit/bin/kit\" gate-bash"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.kit/bin/kit\" gate-env"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(kit check:*)",
+      "Bash(kit status:*)",
+      "Bash(kit doctor:*)",
+      "Bash(kit ci:*)",
+      "Bash(kit analyze:*)",
+      "Bash(kit escalate:*)",
+      "Bash(kit context check:*)",
+      "Bash(kit triage:*)",
+      "Bash(kit memory search:*)",
+      "Bash(kit memory stats:*)",
+      "Bash(kit memory index:*)"
     ]
   }
 }
