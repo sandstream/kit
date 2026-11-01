@@ -132,8 +132,9 @@ scanner cannot use a saved Semgrep token. Scanner findings and errors can includ
 source snippets in job logs. Review log access before adding sensitive material
 to tracked files.
 
-Run `python3 scripts/test-semgrep-gate.py` with Semgrep 1.176.0 on `PATH` to
-exercise the scanner and gate against local fixtures.
+On Linux or macOS, run `python3 scripts/test-semgrep-gate.py` with Semgrep
+1.176.0 on `PATH` to exercise the scanner and gate against local fixtures.
+The fixtures skip on Windows because they use POSIX tools and file types.
 
 **Tool:** SonarQube + ESLint Security Plugin
 

@@ -31,6 +31,7 @@ def clean_report():
     }
 
 
+@unittest.skipIf(os.name == "nt", "Semgrep CI fixtures require a POSIX environment")
 class SemgrepGateTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="kit-semgrep-test-")
@@ -259,6 +260,7 @@ class SemgrepGateTest(unittest.TestCase):
         self.assert_status(self.run_gate(), True)
 
 
+@unittest.skipIf(os.name == "nt", "Semgrep CI fixtures require a POSIX environment")
 class TrackedSymlinkTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="kit-semgrep-git-test-")
