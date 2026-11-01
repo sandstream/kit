@@ -83,6 +83,10 @@ updates:
       day: "monday"
       time: "05:00"
       timezone: "Etc/UTC"
+    # Runtime major upgrades follow the Node policy and need a separate decision.
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore"
       include: "scope"
