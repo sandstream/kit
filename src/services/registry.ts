@@ -244,7 +244,9 @@ export function validateRef(kind: ServiceKind, ref: string): string | null {
   }
   if (kind === "port") {
     const n = Number(ref);
-    return /^\d{1,5}$/.test(ref) && n >= 1 && n <= 65535 ? null : "port ref must be 1-65535";
+    return /^\d{1,5}$/.test(ref) && Number.isFinite(n) && n >= 1 && n <= 65535
+      ? null
+      : "port ref must be 1-65535";
   }
   return DOCKER_REF_RE.test(ref)
     ? null

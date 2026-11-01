@@ -289,27 +289,32 @@ export async function stopEntry(entry: ServiceEntry, deps: ProbeDeps): Promise<S
   }
 }
 
+/** Send a signal; the error (if any) is returned, not thrown, so the caller decides what it means. */
+function sendSignal(pid: number, signal: NodeJS.Signals): NodeJS.ErrnoException | undefined {
+  try {
+    process.kill(pid, signal);
+    return undefined;
+  } catch (err) {
+    return err as NodeJS.ErrnoException;
+  }
+}
+
 async function stopPid(pid: number, deps: ProbeDeps): Promise<StopOutcome> {
   if (deps.platform === "win32") {
     // process.kill on Windows ends only the one process; a dev server's children would survive.
     const r = await deps.run("taskkill", ["/PID", String(pid), "/T", "/F"], { timeout: 30_000 });
     return r.ok ? { ok: true, detail: "taskkill /T /F" } : fail(r);
   }
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ESRCH") return { ok: true, detail: "not running" };
-    return { ok: false, detail: `SIGTERM failed: ${(err as Error).message}` };
-  }
+  const termError = sendSignal(pid, "SIGTERM");
+  // ESRCH: the process ended before the signal, which is the outcome stop wants.
+  if (termError?.code === "ESRCH") return { ok: true, detail: "not running" };
+  if (termError) return { ok: false, detail: `SIGTERM failed: ${termError.message}` };
   for (let i = 0; i < 50; i++) {
     if (!deps.pidAlive(pid)) return { ok: true, detail: "SIGTERM" };
     await new Promise((r) => setTimeout(r, 100));
   }
-  try {
-    process.kill(pid, "SIGKILL");
-  } catch {
-    /* ended between the check and the kill */
-  }
+  // An error here means it ended between the check and the kill; the caller probes again anyway.
+  sendSignal(pid, "SIGKILL");
   return { ok: true, detail: "SIGKILL after 5 s" };
 
   function fail(r: ExecResult): StopOutcome {

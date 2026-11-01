@@ -141,6 +141,7 @@ function table(rows: string[][]): string[] {
 
 function leaseCell(entry: ServiceEntry, now: number): string {
   const left = Date.parse(entry.leaseUntil) - now;
+  if (!Number.isFinite(left)) return "invalid lease";
   return left > 0 ? `${formatDuration(left)} left` : `ended ${formatDuration(left)} ago`;
 }
 
