@@ -9,7 +9,7 @@
  */
 export const SUBCOMMAND_HELP: Record<string, string> = {
   "escalate feed":
-    "Track what GitHub reports as broken (failed workflows on the default branch, open Dependabot alerts) as action items: kit escalate feed github [--repo owner/name] [--dry-run] [--json]",
+    "Track what outside services report as broken as action items: github (failed workflows on the default branch, open Dependabot alerts) and vercel (failed production deploys). kit escalate feed <github|vercel> [--repo owner/name | --team id-or-slug] [--dry-run] [--json]",
   "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
   "check compare":
     "Diff two `kit check --json` runs — what changed, with lost coverage ranked above a regression",

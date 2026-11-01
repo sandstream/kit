@@ -37,8 +37,8 @@ const RUNS_WINDOW = 10;
 
 /** gh is missing a login. The message carries the fix, so the caller can print it as is. */
 export class FeedAuthError extends Error {
-  constructor() {
-    super("GitHub is not logged in for kit. Run: gh auth login");
+  constructor(message = "GitHub is not logged in for kit. Run: gh auth login") {
+    super(message);
     this.name = "FeedAuthError";
   }
 }

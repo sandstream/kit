@@ -1,17 +1,16 @@
 /** Feed what outside services report as broken into the pending action ledger. */
 import { FeedAuthError, fetchGithubFeed, parseRepo, type GithubFeed } from "../feed-github.js";
 import { syncFeedAuth, syncGithubFeed, type FeedSyncResult } from "../feed-sync.js";
-import type { DatabaseSync } from "node:sqlite";
 import { openMemoryDb } from "../memory/db.js";
-import { defaultReadCommand, type ReadCommand } from "../review-receipt-io.js";
+import { defaultReadCommand } from "../review-receipt-io.js";
 import { flagValue, hasFlag } from "../utils/flags.js";
+import { runVercel } from "./feed-vercel.js";
+import { trackAuthFailure, type FeedDeps } from "./feed-shared.js";
 
-export interface FeedDeps {
-  run: ReadCommand;
-  open: () => DatabaseSync;
-}
+export type { FeedDeps };
 
-const USAGE = "Use: kit escalate feed github [--repo owner/name] [--dry-run] [--json]";
+const USAGE =
+  "Use: kit escalate feed github [--repo owner/name] [--dry-run] [--json]\n     kit escalate feed vercel [--team id-or-slug] [--dry-run] [--json]";
 
 function currentRepo(argv: readonly string[], deps: FeedDeps): string {
   const given = flagValue(argv, "--repo");
@@ -52,6 +51,7 @@ export function runFeed(
   out: (line: string) => void,
   err: (line: string) => void,
 ): boolean {
+  if (argv[1] === "vercel") return runVercel(argv, deps, out, err);
   if (argv[1] !== "github") {
     err(USAGE);
     return false;
@@ -69,22 +69,8 @@ export function runFeed(
     return feed.ci !== null || feed.dependabot !== null;
   } catch (error) {
     err(error instanceof Error ? error.message : String(error));
-    if (error instanceof FeedAuthError && !dry) trackAuthFailure(deps);
+    if (error instanceof FeedAuthError && !dry) trackAuthFailure(deps, "github");
     return false;
-  }
-}
-
-/** Fail-open: a ledger that cannot be written must not hide the message above. */
-function trackAuthFailure(deps: FeedDeps): void {
-  try {
-    const db = deps.open();
-    try {
-      syncFeedAuth(db, true);
-    } finally {
-      db.close();
-    }
-  } catch {
-    // The login message was already printed.
   }
 }
 
