@@ -35,13 +35,13 @@ export interface GeneratedConfig {
 
 /**
  * Security scanners kit installs by default, keyed by mise tool ref → version.
- * `semgrep` resolves through mise's registry to `pipx:semgrep`; socket has no
- * registry shortname, so it uses the npm backend ref directly. Both are looked
- * up at check time by `resolveToolBin` (mise-first), so they run even though
+ * Every ref carries a backend prefix: the install gate (`triageTargetFor`)
+ * refuses a bare name such as `semgrep` as untriageable. Socket uses the npm
+ * backend ref directly. All are looked up at check time by `resolveToolBin` (mise-first), so they run even though
  * mise shims aren't on kit's PATH.
  */
 export const DEFAULT_SECURITY_SCANNERS: Record<string, string> = {
-  semgrep: "latest",
+  "pipx:semgrep": "latest",
   "npm:@socketsecurity/cli": "latest",
   // trufflehog (single Go binary via aqua) → deep secret scan on by default;
   // `kit check` resolves the `trufflehog` bin mise-first and uses it instead of

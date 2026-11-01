@@ -49,6 +49,7 @@ export function miseErrorDetail(message: string, stderr = ""): string {
  */
 const SCANNER_REFS = new Set<string>([
   "semgrep",
+  "pipx:semgrep",
   "npm:@socketsecurity/cli",
   "aqua:trufflesecurity/trufflehog",
   "aqua:aquasecurity/trivy",

@@ -35,7 +35,7 @@ describe("generateToml", () => {
 
   it("includes the default security scanners (semgrep + socket + trufflehog) as mise tools", () => {
     const parsed = parseTOML(gen(stack())) as { tools: Record<string, string> };
-    assert.equal(parsed.tools.semgrep, "latest", "semgrep should be a default tool");
+    assert.equal(parsed.tools["pipx:semgrep"], "latest", "semgrep default, with backend");
     assert.equal(
       parsed.tools["npm:@socketsecurity/cli"],
       "latest",

@@ -298,7 +298,11 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
     ...r.tools.map((t) => ({
       name: t.name,
       status: (t.ok ? "pass" : "fail") as JsonCheck["status"],
-      detail: t.installed ? `installed ${t.installed}` : "not installed",
+      detail: t.installed
+        ? `installed ${t.installed}`
+        : t.blockedByTriage
+          ? `blocked by triage: ${t.blockedByTriage}`
+          : "not installed",
       category: "tools",
     })),
     ...r.services.map((s) => ({
