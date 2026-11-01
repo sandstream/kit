@@ -24,6 +24,12 @@
   prints `Run: gh auth login` and keeps an item until it works. Workflow names are cleaned before
   they are stored. `--dry-run` writes nothing. Open pull requests and GitHub security notices (new
   token, new app) are not covered yet.
+- **`kit escalate feed vercel` does the same for Vercel production deploys.** It reads the latest
+  settled production deploy of every project through `vercel api`, so it uses the login the Vercel
+  CLI already has and kit holds no token. A project whose latest deploy failed within 14 days gets
+  an action item that closes when a newer deploy is ready. `--team <id-or-slug>` reads a team
+  instead of the personal scope. A list that does not end, or a failed call, leaves open items
+  alone. Preview deploys are not covered.
 - **The git-hook floor's bootstrap is a hook, not a sentence (#671).** `kit hooks context`
   prints one plain line when a hook declared in `.kit.toml` does not run in this checkout, nothing
   when all do, and always exits 0. `kit agent-config` wires it as a Claude Code `SessionStart` hook,
