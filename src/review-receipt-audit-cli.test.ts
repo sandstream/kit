@@ -39,6 +39,7 @@ function makeFakeGh(bin: string): string {
       `const fake = path.basename(process.execPath).toLowerCase() === 'gh.exe' || path.basename(process.argv[1] || '') === 'gh';\n` +
       `if (fake) {\n` +
       ` const args = process.argv.slice(path.basename(process.execPath).toLowerCase() === 'gh.exe' ? 1 : 2);\n` +
+      ` if (path.basename(process.execPath).toLowerCase() === 'gh.exe' && args[0]) args[0] = path.basename(args[0]);\n` +
       ` const h = process.env.KIT_TEST_REMOTE_HEAD; let result;\n` +
       ` if (args[0] === 'repo') result = {nameWithOwner:'sandstream/kit'};\n` +
       ` else if (args[0] === 'pr') result = {number:12,headRefOid:h,changedFiles:0,files:[],statusCheckRollup:[]};\n` +
@@ -76,6 +77,24 @@ function environment(home: string, bin: string, anchor: string, head: string): N
     KIT_TEST_REMOTE_HEAD: head,
   };
 }
+
+it("handles a copied Node executable used as the GitHub CLI mock", () => {
+  const bin = mkdtempSync(join(tmpdir(), "kit-gh-mock-"));
+  try {
+    const mock = makeFakeGh(bin);
+    const executable = join(bin, "gh.exe");
+    if (process.platform !== "win32") copyFileSync(process.execPath, executable);
+    const result = run(executable, ["repo", "view", "--json", "nameWithOwner"], bin, {
+      ...process.env,
+      NODE_OPTIONS: `--require=${JSON.stringify(mock)}`,
+      KIT_TEST_REMOTE_HEAD: "a".repeat(40),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).nameWithOwner, "sandstream/kit");
+  } finally {
+    rmTemp(bin);
+  }
+});
 
 async function waitFor(path: string, child: ChildProcess): Promise<void> {
   const stderr = captureChildStderr(child);
