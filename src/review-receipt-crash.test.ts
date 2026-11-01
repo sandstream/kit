@@ -76,7 +76,9 @@ async function crash(test: Test, mode: string): Promise<void> {
     stdio: ["ignore", "ignore", "pipe"],
   });
   const stderr = captureChildStderr(child);
-  const deadline = Date.now() + 20000;
+  // This fixture performs several protected key operations before it reaches the link.
+  const timeout = mode === "crash-history-link" ? 60000 : 20000;
+  const deadline = Date.now() + timeout;
   try {
     while (!existsSync(join(test.signals, `${mode}.barrier`))) {
       if (child.exitCode !== null || child.signalCode !== null)
