@@ -1,6 +1,7 @@
 /** Explain recovery artifacts without moving or deleting user data. */
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { sameIdentity } from "./utils/same-file.js";
 
 const HISTORY_TEMP = /^\.kit-receipt-[a-f0-9]{32}\.tmp$/;
 const RECEIPT_TEMP = /^\.kit-review-receipt\.json\.(?:[a-f0-9]{12}|[a-f0-9]{32})\.tmp$/;
@@ -19,9 +20,7 @@ function describeHistoryLink(root: string, temp: string): string | null {
   if (
     !current.isFile() ||
     !staged.isFile() ||
-    current.ino === 0n ||
-    current.dev !== staged.dev ||
-    current.ino !== staged.ino ||
+    !sameIdentity(current, staged) ||
     current.nlink !== 2n ||
     staged.nlink !== 2n ||
     current.size !== 0n

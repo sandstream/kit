@@ -3,6 +3,7 @@ import { constants, type BigIntStats } from "node:fs";
 import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { privateFileIsControlled } from "./utils/secure-perms.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 function unsafeKey(path: string): Error {
   return new Error(
@@ -21,12 +22,7 @@ async function linkedKeyError(path: string, info: BigIntStats): Promise<Error> {
     )) {
       const temp = join(directory, name);
       const entry = await lstat(temp, { bigint: true });
-      if (
-        entry.isFile() &&
-        entry.nlink === 2n &&
-        entry.dev === info.dev &&
-        entry.ino === info.ino
-      ) {
+      if (entry.isFile() && entry.nlink === 2n && sameIdentity(entry, info)) {
         return new LinkedAnchorKeyError(
           `Audit anchor key ${path} and temporary file ${temp} are links to the same file. Preserve both and stop all key users. Matching identities do not prove ownership. A qualified person must inspect them and confirm the temporary name belongs to the interrupted creation before any manual removal.`,
         );
@@ -43,14 +39,7 @@ async function linkedKeyError(path: string, info: BigIntStats): Promise<Error> {
 async function checkedIdentity(handle: FileHandle, path: string): Promise<BigIntStats> {
   const info = await handle.stat({ bigint: true });
   const entry = await lstat(path, { bigint: true });
-  if (
-    !info.isFile() ||
-    !entry.isFile() ||
-    info.ino === 0n ||
-    info.dev !== entry.dev ||
-    info.ino !== entry.ino
-  )
-    throw unsafeKey(path);
+  if (!info.isFile() || !entry.isFile() || !sameIdentity(info, entry)) throw unsafeKey(path);
   if (info.nlink !== 1n) throw await linkedKeyError(path, info);
   return info;
 }

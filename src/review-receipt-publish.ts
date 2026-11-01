@@ -11,13 +11,15 @@ import {
   renameSync,
   unlinkSync,
   writeFileSync,
+  type BigIntStats,
 } from "node:fs";
 import { join } from "node:path";
 import { assertSameEntry, openReceiptForRead } from "./review-receipt-files.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
 import { assertReviewWritable, ReviewReadOnlyRefusal } from "./review-receipt-write-guard.js";
+import { sameIdentity } from "./utils/same-file.js";
 
-type FileIdentity = { dev: bigint; ino: bigint; digest: string } | null;
+type FileIdentity = { stats: BigIntStats; digest: string } | null;
 const MAX_DESTINATION_BYTES = 16 * 1024 * 1024;
 
 function destinationIdentity(path: string): FileIdentity {
@@ -52,7 +54,7 @@ function destinationIdentity(path: string): FileIdentity {
     const final = fstatSync(fd, { bigint: true });
     if (opened.size !== BigInt(total) || final.size !== opened.size || final.nlink !== 1n)
       throw new Error("review receipt destination changed while reading");
-    return { dev: opened.dev, ino: opened.ino, digest: hash.digest("hex") };
+    return { stats: opened, digest: hash.digest("hex") };
   } finally {
     closeSync(fd);
   }
@@ -64,9 +66,7 @@ function assertDestination(path: string, original: FileIdentity): void {
     (original === null) !== (current === null) ||
     (original !== null &&
       current !== null &&
-      (original.dev !== current.dev ||
-        original.ino !== current.ino ||
-        original.digest !== current.digest))
+      (!sameIdentity(original.stats, current.stats) || original.digest !== current.digest))
   ) {
     throw new Error("review receipt destination changed during publication");
   }

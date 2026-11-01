@@ -6,18 +6,12 @@ import { randomBytes } from "node:crypto";
 import { secureFile, secureFileStrict } from "./utils/secure-perms.js";
 import { reReadHexKey } from "./utils/key-file.js";
 import { readProtectedAnchorKey, waitForProtectedAnchorKey } from "./audit-anchor-protected.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 async function assertAnchorFileIdentity(handle: FileHandle, path: string): Promise<void> {
   const actual = await handle.stat({ bigint: true });
   const entry = await lstat(path, { bigint: true });
-  if (
-    !actual.isFile() ||
-    !entry.isFile() ||
-    actual.ino === 0n ||
-    actual.nlink !== 1n ||
-    actual.dev !== entry.dev ||
-    actual.ino !== entry.ino
-  ) {
+  if (!actual.isFile() || !entry.isFile() || actual.nlink !== 1n || !sameIdentity(actual, entry)) {
     throw new Error(`new audit anchor key file changed at ${path}`);
   }
 }
@@ -28,10 +22,8 @@ function assertLinkedAnchor(handle: FileHandle, path: string, links: bigint): vo
   if (
     !actual.isFile() ||
     !entry.isFile() ||
-    actual.ino === 0n ||
     actual.nlink !== links ||
-    actual.dev !== entry.dev ||
-    actual.ino !== entry.ino
+    !sameIdentity(actual, entry)
   ) {
     throw new Error(`audit anchor key file changed at ${path}`);
   }

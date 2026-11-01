@@ -13,6 +13,7 @@ import {
 import { dirname, join } from "node:path";
 import { isReadOnlyMode } from "./read-only-mode.js";
 import { assertReviewWritable, ReviewReadOnlyRefusal } from "./review-receipt-write-guard.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 const noFollow = constants.O_NOFOLLOW ?? 0;
 const nonBlock = constants.O_NONBLOCK ?? 0;
@@ -20,13 +21,7 @@ const nonBlock = constants.O_NONBLOCK ?? 0;
 export function assertSameEntry(fd: number, path: string): void {
   const opened = fstatSync(fd, { bigint: true });
   const entry = lstatSync(path, { bigint: true });
-  if (
-    !opened.isFile() ||
-    !entry.isFile() ||
-    opened.ino === 0n ||
-    entry.dev !== opened.dev ||
-    entry.ino !== opened.ino
-  ) {
+  if (!opened.isFile() || !entry.isFile() || !sameIdentity(opened, entry)) {
     throw new Error("review receipt file changed while opening");
   }
 }
