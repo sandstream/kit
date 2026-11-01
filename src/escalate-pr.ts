@@ -4,18 +4,21 @@ import type { ProtectedClass } from "./review-protected-paths.js";
 import type { ReviewCommentFinding, SelectedReviewComment } from "./review-comment.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 
+interface ReviewGateEvidence {
+  command: string;
+  exitCode: number;
+  outputSha256: string;
+  failures: string[];
+}
+
 export interface PrEscalationEvidence {
   repo: string;
   pr: number;
   head: string;
   receiptProblem: string | null;
   historyProblem?: string | null;
-  gate: {
-    command: string;
-    exitCode: number;
-    outputSha256: string;
-    failures: string[];
-  } | null;
+  gate: ReviewGateEvidence | null;
+  lastFailedGate?: ReviewGateEvidence | null;
   failedGateRuns: number;
   checks: { name: string; status: string; conclusion: string; url: string }[];
   threads: {
@@ -138,17 +141,16 @@ function receiptItems(evidence: PrEscalationEvidence, shortHead: string): Escala
       ),
     );
   }
-  if (
-    evidence.gate?.exitCode !== undefined &&
-    evidence.gate.exitCode !== 0 &&
-    evidence.failedGateRuns >= 2
-  ) {
-    const failing = evidence.gate.failures[0] ?? "see the review output for the failing check";
+  if (evidence.failedGateRuns >= 2) {
+    const failed = evidence.lastFailedGate ?? (evidence.gate?.exitCode ? evidence.gate : null);
+    const failing = failed?.failures[0] ?? "see the signed history for the failing check";
+    const output = failed ? ` Output SHA-256: ${failed.outputSha256}` : "";
+    const command = failed?.command ?? "kit review --receipt";
     items.push(
       item(
         "review gate",
-        `Failed ${evidence.failedGateRuns} times on ${shortHead}: ${failing}. Output SHA-256: ${evidence.gate.outputSha256}`,
-        `Rerun: ${evidence.gate.command}. Inspect the failing check before retrying the merge.`,
+        `Failed ${evidence.failedGateRuns} times on ${shortHead}: ${failing}.${output}`,
+        `Rerun: ${command}. Inspect the signed failures and request human review. Kit cannot yet record risk acceptance.`,
       ),
     );
   }
