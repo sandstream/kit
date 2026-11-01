@@ -5,6 +5,12 @@ import { hasFlag, flagValue } from "../utils/flags.js";
 import { isReadOnlyMode } from "../read-only-mode.js";
 import { memPalList } from "./memory-pal-list.js";
 import { planSessionStartLines } from "./memory-plan-hook.js";
+import {
+  hookSessionId,
+  servicesPromptNotice,
+  servicesSessionEnd,
+  servicesSessionStart,
+} from "../services/hook.js";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -1060,6 +1066,30 @@ async function memSearch(): Promise<boolean> {
   return true;
 }
 
+/** SessionEnd for both harnesses: mark owned services, then hand off to the detached worker. */
+const SESSION_END_EVENTS = new Map<string, "claude-code" | "codex">([
+  ["session-end", "claude-code"],
+  ["session-end-codex", "codex"],
+]);
+
+/** kit services lines for a prompt or a session start. Registry reads only, never docker. */
+async function servicesHookLines(at: "prompt" | "start"): Promise<string[]> {
+  const session = await hookSessionId();
+  if (at === "start") return servicesSessionStart(session, getCurrentProjectRoot());
+  const line = servicesPromptNotice(session);
+  return line ? [line] : [];
+}
+
+async function memHookSessionEnd(harness: "claude-code" | "codex"): Promise<void> {
+  // Mark the services this session still owns before the process goes (one file write).
+  servicesSessionEnd(await hookSessionId());
+  // Return instantly: a SessionEnd hook that blocks on the index (or the
+  // opt-in network push) gets cancelled by Claude Code on exit ("Hook
+  // cancelled"). The real work runs in a detached worker below.
+  if (harness === "codex") startDetachedSessionEnd("codex");
+  else startDetachedSessionEnd();
+}
+
 async function memHook(): Promise<boolean> {
   // Internal: invoked by Claude Code / Codex hooks. Fail-open — never block.
   const event = process.argv[4];
@@ -1067,17 +1097,13 @@ async function memHook(): Promise<boolean> {
     maybeStartMidSessionIndex(); // debounced, detached — keeps recall fresh mid-session
     const text = userPromptSubmitReminder();
     if (text) console.log(text);
+    // kit services: stop requests and ending leases for this session (registry read only).
+    for (const line of await servicesHookLines("prompt")) console.log(line);
     return true;
   }
-  if (event === "session-end") {
-    // Return instantly: a SessionEnd hook that blocks on the index (or the
-    // opt-in network push) gets cancelled by Claude Code on exit ("Hook
-    // cancelled"). The real work runs in a detached worker below.
-    startDetachedSessionEnd();
-    return true;
-  }
-  if (event === "session-end-codex") {
-    startDetachedSessionEnd("codex");
+  const endHarness = SESSION_END_EVENTS.get(String(event));
+  if (endHarness) {
+    await memHookSessionEnd(endHarness);
     return true;
   }
   if (event === "session-end-run") {
@@ -1117,6 +1143,10 @@ async function memHook(): Promise<boolean> {
     }
     const recovery = recoverSessionStart();
     if (recovery.context) contextLines.push(recovery.context);
+    // kit services: this session's requests and leases, and orphans in this project.
+    const serviceLines = await servicesHookLines("start");
+    contextLines.push(...serviceLines);
+    recovery.notices.push(...serviceLines);
     const context = contextLines.join("\n");
     if (context) {
       if (process.env.KIT_HOOK_JSON === "claude")

@@ -259,6 +259,11 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
     operation: "secrets-vault-migrate",
   },
   {
+    command: "services",
+    subcommands: ["add", "renew", "keep", "stop", "release", "prune", "ask"],
+    operation: "services-write",
+  },
+  {
     command: "security",
     subcommand: "advisories",
     anyFlags: ["--accept"],

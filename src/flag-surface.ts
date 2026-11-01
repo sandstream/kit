@@ -624,6 +624,17 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--write",
   ],
   sentinel: ["--force", "--json", "--label", "--limit", "--schedule", "--state"],
+  services: [
+    "--force",
+    "--json",
+    "--kind",
+    "--message",
+    "--owner",
+    "--project",
+    "--purpose",
+    "--ref",
+    "--ttl",
+  ],
   setup: [
     "--auto",
     "--category",

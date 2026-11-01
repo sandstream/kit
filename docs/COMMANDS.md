@@ -358,6 +358,21 @@ Declare `GITHUB_TOKEN` or `GITLAB_TOKEN` under `[secrets.keys]` in `.kit.toml`. 
 | `kit plugin info <id>`        | Plugin metadata.                                              |
 | `kit plugin scaffold <name>`  | Generate a new plugin skeleton.                               |
 
+## Local services
+
+Leases for the local services agents start: who started which container, Supabase stack, process or port, and until when. Full guide: [Local services](SERVICES.md).
+
+| Command                                                                                                                                                  | Purpose                                                                                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `kit services add <name> --kind <supabase\|compose\|container\|pid\|port> --ref <ref> [--purpose <text>] [--ttl 4h] [--project <dir>] [--owner <label>]` | Register a service you started. The owner is your agent session (`CODEX_THREAD_ID` or `CLAUDE_CODE_SESSION_ID`); `--owner` adds a label.  |
+| `kit services ls [--json]`                                                                                                                               | Registry merged with live probes (running, dead, expired, unknown), plus running docker workloads nobody registered, with age and memory. |
+| `kit services renew <name> [--ttl 4h]`                                                                                                                   | Extend your lease. Only the owner, unless `--force`.                                                                                      |
+| `kit services stop <name> [--force]`                                                                                                                     | Stop the service, verify it is gone, remove the entry. Refused for a non-owner while the lease runs.                                      |
+| `kit services prune`                                                                                                                                     | Remove entries whose service no longer runs.                                                                                              |
+| `kit services ask <name> [--message <text>]`                                                                                                             | Ask the owner to stop it. The owner sees the request on its next prompt.                                                                  |
+| `kit services keep <name> [--ttl 4h]`                                                                                                                    | Owner's answer: still needed. Renews the lease and clears the request.                                                                    |
+| `kit services release <name>`                                                                                                                            | Owner's answer: stop it now.                                                                                                              |
+
 ## Governance
 
 | Command                                                                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
