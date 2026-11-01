@@ -82,7 +82,22 @@ def unreported_git_entries(skipped, env):
             if os.path.abspath(current) not in ignored:
                 worktree_issues.append((os.fsdecode(path), reason))
             break
+
     return links, submodules, worktree_issues
+
+
+def assert_safe_ignore_files(root):
+    """Reject linked or special ignore files before Semgrep can read them."""
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.name in (".semgrepignore", ".gitignore"):
+                    if not stat.S_ISREG(entry.stat(follow_symlinks=False).st_mode):
+                        raise ValueError(f"unsafe ignore file: {entry.path!r}")
+                elif entry.name != ".git" and entry.is_dir(follow_symlinks=False):
+                    pending.append(entry.path)
 
 
 def main():
@@ -98,6 +113,7 @@ def main():
     for key in ("SEMGREP_APP_TOKEN", "SONAR_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN"):
         env.pop(key, None)
     try:
+        assert_safe_ignore_files(os.getcwd())
         _, _, preflight_issues = unreported_git_entries([], env)
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         print(f"Cannot verify tracked symbolic links and submodules: {error}", file=sys.stderr)

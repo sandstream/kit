@@ -330,6 +330,73 @@ class TrackedSymlinkTest(unittest.TestCase):
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_linked_semgrepignore_stops_scanner_before_read(self):
+        outside = self.root / "outside-ignore"
+        outside.write_text(".semgrepignore\nclean.js\n", encoding="utf-8")
+        (self.repo / ".semgrepignore").symlink_to(outside)
+        self.git("add", "--", ".semgrepignore")
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read a linked ignore file")
+
+    def test_untracked_linked_semgrepignore_stops_scanner_before_read(self):
+        outside = self.root / "outside-ignore"
+        outside.write_text("clean.js\n", encoding="utf-8")
+        (self.repo / ".semgrepignore").symlink_to(outside)
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read an untracked linked ignore file")
+
+    def test_linked_gitignore_stops_scanner_before_read(self):
+        outside = self.root / "outside-gitignore"
+        outside.write_text("clean.js\n", encoding="utf-8")
+        (self.repo / ".gitignore").symlink_to(outside)
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read a linked Git ignore file")
+
+    def test_nested_linked_ignore_stops_scanner_before_read(self):
+        directory = self.repo / "src"
+        directory.mkdir()
+        (directory / "safe.js").write_text("const y = 1;\n", encoding="utf-8")
+        self.git("add", "--", "src/safe.js")
+        outside = self.root / "outside-ignore"
+        outside.write_text("safe.js\n", encoding="utf-8")
+        (directory / ".semgrepignore").symlink_to(outside)
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read a nested linked ignore file")
+
+    def test_untracked_nested_linked_ignore_stops_scanner_before_read(self):
+        directory = self.repo / "untracked"
+        directory.mkdir()
+        (directory / "source.js").write_text("dangerous(1);\n", encoding="utf-8")
+        outside = self.root / "outside-ignore"
+        outside.write_text("source.js\n", encoding="utf-8")
+        (directory / ".semgrepignore").symlink_to(outside)
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read a linked ignore in an untracked directory")
+
+    def test_gitignored_nested_linked_ignore_stops_scanner_before_read(self):
+        (self.repo / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+        self.git("add", "--", ".gitignore")
+        directory = self.repo / "ignored"
+        directory.mkdir()
+        (directory / "source.js").write_text("dangerous(1);\n", encoding="utf-8")
+        outside = self.root / "outside-ignore"
+        outside.write_text("source.js\n", encoding="utf-8")
+        (directory / ".semgrepignore").symlink_to(outside)
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read a linked ignore in an ignored directory")
+
     def test_external_link_fails_without_reading_target(self):
         external = self.root / "external.js"
         external.write_text("dangerous(1);\n", encoding="utf-8")

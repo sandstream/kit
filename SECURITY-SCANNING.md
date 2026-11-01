@@ -113,6 +113,9 @@ or submodule passes only when Semgrep reports it as ignored. Git errors and
 unresolved index conflicts fail the job. A legitimate link or submodule that
 Semgrep does not report as ignored requires a verifiable explicit exception. An
 ignored link or submodule is not scanned.
+Before each scan, the job checks ignore files without following symbolic links.
+It rejects linked or special `.semgrepignore` and `.gitignore` files, even in ignored directories.
+The job fails if it cannot inspect a directory.
 Registry or installation failures also fail the job. The security gate requires
 the SAST job to succeed.
 
