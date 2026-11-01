@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { basicSecretScanFiles } from "./check-security.js";
+import { skipsBasicScan } from "./basic-scan-skip.js";
 
 describe("basicSecretScanFiles: command labels", () => {
   const hit = (file: string, content: string) => `${file}:157:${content}`;
@@ -27,5 +28,16 @@ describe("basicSecretScanFiles: command labels", () => {
       ),
     ]);
     assert.deepStrictEqual(files, ["src/config.ts"]);
+  });
+});
+
+describe("skipsBasicScan", () => {
+  it("skips test, fixture and mock paths", () => {
+    assert.equal(skipsBasicScan("src/auth.test.ts", "anything"), true);
+    assert.equal(skipsBasicScan("test/fixtures/a.json", "anything"), true);
+  });
+
+  it("does not skip an ordinary source path with an ordinary line", () => {
+    assert.equal(skipsBasicScan("src/config.ts", `const x = "value"`), false);
   });
 });
