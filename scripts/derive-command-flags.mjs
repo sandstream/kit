@@ -228,37 +228,21 @@ export function deriveFlagSurface(depth = 1) {
 }
 
 const GENERATED_HEADER = `/**
- * kit's declared FLAG SURFACE — the flags each command accepts, checked once at dispatch
- * instead of once per handler.
+ * This generated table lists the flags accepted by each command.
+ * The dispatcher checks the table once for every invocation.
+ * Generate it with: node scripts/derive-command-flags.mjs --emit
+ * flag-surface.test.ts checks the generated text and flags used in code.
  *
- * GENERATED. Regenerate with:  node scripts/derive-command-flags.mjs --emit
- * \`flag-surface.test.ts\` fails when this file drifts from the source scan, so the table can
- * never quietly fall behind a new flag.
+ * The generator scans each command and direct imports read by argv helpers.
+ * It also includes documented flags and compatibility flags.
+ * The scan deliberately stops after direct imports.
+ * The table can include flags passed to subprocesses.
+ * This over-acceptance keeps existing commands usable.
+ * It must not omit a flag that a command reads.
  *
- * WHY A TABLE AND NOT 45 PER-MODULE GUARDS: the same reasoning as \`read-only-surface.ts\`. Two
- * modules validated their flags after #487 and 43 did not, and the class is not theoretical —
- * \`kit check --category security\` ran the FULL check for six majors because nothing rejected the
- * flag, and \`kit upgrade --self.\` (trailing period) fell through to the lock-file path, rewrote
- * every \`installedAt\`, installed nothing, and printed the success line. Sweeping 43 handlers
- * would fix today and rot tomorrow: the defect is that nothing ENUMERATED which flags each
- * command accepts, so "did we cover everything?" had no answer. This table is that answer.
- *
- * HOW THE SETS ARE DERIVED (scripts/derive-command-flags.mjs): every \`--flag\` literal in the
- * command's own module, plus the flag literals its DIRECT imports hand to an argv reader
- * (\`hasFlag\` / \`flagValue\` / \`flagInt\` / \`includes\` / \`indexOf\` / \`===\` / \`startsWith\`), plus
- * every flag \`docs/COMMANDS.md\` documents for that verb. Depth-1 is deliberate: an allowlist
- * built from a handler file alone rejected \`kit check --attest\` and \`--no-auto-install\`, both
- * documented and both read one import away in \`cli-checks-shared.ts\`.
- *
- * The sets ERR TOWARD ACCEPTING. A flag kit only passes to a subprocess (\`--severity\` for trivy)
- * can appear here; over-accepting leaves a working invocation working, while under-accepting
- * breaks one. The guard's job is to catch what does NOTHING, not to police spelling.
- *
- * GLOBAL_FLAGS are not listed: the guard unions them in, so a global can never be missing
- * per-verb — the omission that made \`kit check --read-only\` exit 1 without running.
- *
- * ADDING A COMMAND: run the generator. A verb missing from this table is not "allowed to accept
- * anything", it is unvalidated — \`self-audit\` reports it as such.
+ * The dispatcher adds global flags to every command.
+ * A command absent from the table is unvalidated.
+ * The self-audit reports unvalidated commands.
  */
 
 `;
