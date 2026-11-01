@@ -2,8 +2,12 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -43,22 +47,28 @@ it("keeps a secured key after the creator is killed between link and cleanup", a
     );
     assert.ok(temp);
     const temporary = join(root, temp);
-    assert.equal(statSync(path).ino, statSync(temporary).ino);
-    assert.equal(statSync(path).nlink, 2);
-    assert.equal(privateFileIsControlled(path), true);
-    const exited = new Promise<void>((done) => child.once("exit", () => done()));
-    child.kill("SIGKILL");
-    await exited;
-    assert.equal(child.signalCode, "SIGKILL");
-    await assert.rejects(
-      getAuditAnchorKey(root, () => {}),
-      (error: Error) =>
-        error.message.includes(path) &&
-        error.message.includes(temporary) &&
-        error.message.includes("Preserve both"),
-    );
-    const legacyReader = await getAuditAnchorKey(root);
-    assert.equal(legacyReader.toString("hex"), readFileSync(path, "utf8").trim());
+    const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    let legacyReader: Buffer;
+    try {
+      assert.equal(fstatSync(fd).ino, statSync(temporary).ino);
+      assert.equal(fstatSync(fd).nlink, 2);
+      assert.equal(privateFileIsControlled(path), true);
+      const exited = new Promise<void>((done) => child.once("exit", () => done()));
+      child.kill("SIGKILL");
+      await exited;
+      assert.equal(child.signalCode, "SIGKILL");
+      await assert.rejects(
+        getAuditAnchorKey(root, () => {}),
+        (error: Error) =>
+          error.message.includes(path) &&
+          error.message.includes(temporary) &&
+          error.message.includes("Preserve both"),
+      );
+      legacyReader = await getAuditAnchorKey(root);
+      assert.equal(legacyReader.toString("hex"), readFileSync(fd, "utf8").trim());
+    } finally {
+      closeSync(fd);
+    }
     unlinkSync(temporary);
     assert.deepEqual(await getAuditAnchorKey(root, () => {}), legacyReader);
   } finally {

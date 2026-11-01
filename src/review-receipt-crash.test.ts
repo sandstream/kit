@@ -3,10 +3,14 @@ import { it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -107,18 +111,25 @@ it("preserves both links when a process dies after publishing history", async ()
     );
     assert.ok(temp);
     const tempPath = join(test.root, temp);
-    assert.equal(lstatSync(tempPath).ino, lstatSync(test.history).ino);
-    assert.equal(lstatSync(test.history).nlink, 2);
-    const blocked = mustBlock(test, "recover");
-    assert.ok(blocked.stderr.includes(tempPath));
-    assert.ok(blocked.stderr.includes(test.history));
-    assert.ok(existsSync(join(test.lock, "pending.json")));
-    assert.equal(lstatSync(test.history).nlink, 2);
-    mustBlock(test, "compete");
-    assertUntracked(test, temp);
-    unlinkSync(tempPath);
-    mustSucceed(test, "recover");
-    assert.equal(readFileSync(test.history, "utf8").trim().split("\n").length, 1);
+    const fd = openSync(test.history, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      assert.equal(lstatSync(tempPath).ino, fstatSync(fd).ino);
+      assert.equal(fstatSync(fd).nlink, 2);
+      const blocked = mustBlock(test, "recover");
+      assert.ok(blocked.stderr.includes(tempPath));
+      assert.ok(blocked.stderr.includes(test.history));
+      assert.ok(existsSync(join(test.lock, "pending.json")));
+      assert.equal(fstatSync(fd).nlink, 2);
+      mustBlock(test, "compete");
+      assertUntracked(test, temp);
+      unlinkSync(tempPath);
+      mustSucceed(test, "recover");
+      assert.equal(fstatSync(fd).nlink, 1);
+      assert.equal(readFileSync(fd, "utf8").trim().split("\n").length, 1);
+      assert.equal(lstatSync(test.history).ino, fstatSync(fd).ino);
+    } finally {
+      closeSync(fd);
+    }
   } finally {
     rmSync(test.dir, { recursive: true, force: true });
   }
