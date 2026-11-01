@@ -11,7 +11,7 @@
 # Dependabot version-updates only run from a committed .github/dependabot.yml on the default
 # branch; there is no repo setting that substitutes for it.
 #
-# SCOPE: github-actions, and npm devDependencies.
+# SCOPE: github-actions, npm devDependencies, and Docker base images.
 #
 # npm was left out until its interaction with `kit triage` was designed, because an unreviewed
 # flood of bumps would arrive around that gate rather than through it. The design:
@@ -56,6 +56,13 @@ updates:
       timezone: "Etc/UTC"
     allow:
       - dependency-type: "development"
+    # These majors follow the supported Node floor and the TypeScript ESLint range.
+    # Upgrade them deliberately when those policies change.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-dev:
         dependency-type: "development"
@@ -68,3 +75,18 @@ updates:
     labels:
       - "dependencies"
       - "npm"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    # Runtime major upgrades follow the Node policy and need a separate decision.
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"
