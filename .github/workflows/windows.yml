@@ -57,6 +57,10 @@ jobs:
         run: |
           node -e "const x=process.env.PSModulePath || ''; console.log(JSON.stringify({shell:'pwsh',present:!!x,length:x.length,semicolons:(x.match(/;/g)||[]).length,colons:(x.match(/:/g)||[]).length}));"
           [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\kit-pwsh-module-path.txt", $env:PSModulePath)
+      - name: Probe minimal PowerShell module paths
+        if: inputs.probe_shell == 'true' && matrix.shard == 1
+        shell: bash
+        run: node scripts/diagnostics/windows-module-probe.cjs
       - name: Focused Windows test
         if: inputs.test_file != '' && matrix.shard == 1
         shell: pwsh
