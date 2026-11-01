@@ -22,6 +22,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { captureChildStderr, requireChildExit } from "./review-child-process.test-support.js";
 
 const fixture = fileURLToPath(new URL("./review-receipt-process.test-support.js", import.meta.url));
 function setup() {
@@ -57,23 +58,27 @@ function setup() {
 }
 type Test = ReturnType<typeof setup>;
 function run(test: Test, mode: string) {
-  return spawnSync(process.execPath, [fixture, test.root, mode, test.signals], {
-    encoding: "utf8",
-    env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    timeout: 30000,
-  });
+  return requireChildExit(
+    spawnSync(process.execPath, [fixture, test.root, mode, test.signals], {
+      encoding: "utf8",
+      env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
+      timeout: 30000,
+    }),
+    `fixture ${mode}`,
+  );
 }
 async function crash(test: Test, mode: string): Promise<void> {
   const child: ChildProcess = spawn(process.execPath, [fixture, test.root, mode, test.signals], {
     env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
+  const stderr = captureChildStderr(child);
   const deadline = Date.now() + 20000;
   try {
     while (!existsSync(join(test.signals, `${mode}.barrier`))) {
       if (child.exitCode !== null || child.signalCode !== null)
-        throw new Error(`fixture exited: ${child.exitCode ?? child.signalCode}`);
-      if (Date.now() > deadline) throw new Error("fixture did not reach the barrier");
+        throw new Error(`fixture exited: ${child.exitCode ?? child.signalCode}\n${stderr()}`);
+      if (Date.now() > deadline) throw new Error(`fixture did not reach the barrier\n${stderr()}`);
       await new Promise((done) => setTimeout(done, 20));
     }
     const exited = new Promise<void>((done) => child.once("exit", () => done()));
@@ -116,8 +121,8 @@ it("preserves both links when a process dies after publishing history", async ()
       assert.equal(lstatSync(tempPath).ino, fstatSync(fd).ino);
       assert.equal(fstatSync(fd).nlink, 2);
       const blocked = mustBlock(test, "recover");
-      assert.ok(blocked.stderr.includes(tempPath));
-      assert.ok(blocked.stderr.includes(test.history));
+      assert.ok(blocked.stderr.includes(tempPath), blocked.stderr || "(no stderr)");
+      assert.ok(blocked.stderr.includes(test.history), blocked.stderr || "(no stderr)");
       assert.ok(existsSync(join(test.lock, "pending.json")));
       assert.equal(fstatSync(fd).nlink, 2);
       mustBlock(test, "compete");
@@ -145,8 +150,8 @@ it("preserves partial history and recovers both failures after inspected repair"
     assert.ok(damaged.length > original.length);
     const pending = join(test.lock, "pending.json");
     const blocked = mustBlock(test, "recover");
-    assert.ok(blocked.stderr.includes(test.history));
-    assert.ok(blocked.stderr.includes(pending));
+    assert.ok(blocked.stderr.includes(test.history), blocked.stderr || "(no stderr)");
+    assert.ok(blocked.stderr.includes(pending), blocked.stderr || "(no stderr)");
     assert.deepEqual(readFileSync(test.history), damaged);
     assert.ok(existsSync(pending));
     writeFileSync(join(test.dir, "damaged-history.backup"), damaged);
@@ -163,8 +168,11 @@ it("retains an ownerless lock for inspection", async () => {
   try {
     await crash(test, "crash-ownerless");
     const blocked = mustBlock(test, "recover");
-    assert.ok(blocked.stderr.includes(join(test.lock, "owner.json")));
-    assert.ok(blocked.stderr.includes(test.lock));
+    assert.ok(
+      blocked.stderr.includes(join(test.lock, "owner.json")),
+      blocked.stderr || "(no stderr)",
+    );
+    assert.ok(blocked.stderr.includes(test.lock), blocked.stderr || "(no stderr)");
     assert.ok(existsSync(test.lock));
     mustBlock(test, "compete");
     renameSync(test.lock, join(test.root, ".git", "archived-lock-for-test"));
@@ -185,7 +193,7 @@ it("preserves receipt temp files without an ignore rule", async () => {
     const tempPath = join(test.root, temp),
       content = readFileSync(tempPath);
     const blocked = mustBlock(test, "recover");
-    assert.ok(blocked.stderr.includes(tempPath));
+    assert.ok(blocked.stderr.includes(tempPath), blocked.stderr || "(no stderr)");
     assert.deepEqual(readFileSync(tempPath), content);
     assert.equal(
       JSON.parse(content.toString()).signature,
@@ -214,7 +222,7 @@ it("rejects complete history without a newline and does not approve it", () => {
     assert.equal(verification.ok, false);
     assert.match(verification.reason, /retry verification or start a new review/);
     const blocked = mustBlock(test, "pass");
-    assert.ok(blocked.stderr.includes(test.history));
+    assert.ok(blocked.stderr.includes(test.history), blocked.stderr || "(no stderr)");
     assert.deepEqual(readFileSync(test.history), damaged);
     assert.ok(existsSync(test.lock));
   } finally {
@@ -228,8 +236,11 @@ it("gives preservation guidance for complete invalid history records", () => {
     try {
       writeFileSync(test.history, invalid);
       const blocked = mustBlock(test, "pass");
-      assert.ok(blocked.stderr.includes(test.history));
-      assert.ok(blocked.stderr.includes(join(test.lock, "pending.json")));
+      assert.ok(blocked.stderr.includes(test.history), blocked.stderr || "(no stderr)");
+      assert.ok(
+        blocked.stderr.includes(join(test.lock, "pending.json")),
+        blocked.stderr || "(no stderr)",
+      );
       assert.match(blocked.stderr, /Preserve its original bytes/);
       assert.equal(readFileSync(test.history, "utf8"), invalid);
     } finally {

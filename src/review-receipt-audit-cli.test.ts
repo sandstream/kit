@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { it } from "node:test";
+import { captureChildStderr, requireChildExit } from "./review-child-process.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const dist = join(process.cwd(), "dist");
@@ -18,7 +19,10 @@ const cli = join(dist, "cli.js");
 const fixture = join(dist, "review-receipt-process.test-support.js");
 
 function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv) {
-  return spawnSync(command, args, { cwd, env, encoding: "utf8", timeout: 60_000 });
+  return requireChildExit(
+    spawnSync(command, args, { cwd, env, encoding: "utf8", timeout: 60_000 }),
+    command,
+  );
 }
 
 function runGit(args: string[], cwd: string): string {
@@ -73,11 +77,12 @@ function environment(home: string, bin: string, anchor: string, head: string): N
 }
 
 async function waitFor(path: string, child: ChildProcess): Promise<void> {
+  const stderr = captureChildStderr(child);
   const deadline = Date.now() + 90_000;
   while (!existsSync(path)) {
     if (child.exitCode !== null || child.signalCode !== null)
-      throw new Error("fixture exited early");
-    if (Date.now() > deadline) throw new Error("fixture did not become ready");
+      throw new Error(`fixture exited early: ${child.exitCode ?? child.signalCode}\n${stderr()}`);
+    if (Date.now() > deadline) throw new Error(`fixture did not become ready\n${stderr()}`);
     await new Promise((done) => setTimeout(done, 30));
   }
 }
@@ -85,7 +90,7 @@ async function waitFor(path: string, child: ChildProcess): Promise<void> {
 async function interruptedReview(root: string, signals: string, env: NodeJS.ProcessEnv) {
   const child = spawn(process.execPath, [fixture, root, "crash", signals], {
     env,
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
   try {
     await waitFor(join(signals, "crash.ready"), child);

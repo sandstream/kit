@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { captureChildStderr, requireChildExit } from "./review-child-process.test-support.js";
 import { readFailedReviewRuns } from "./review-receipt-io.js";
 
 const fixture = fileURLToPath(new URL("./review-receipt-process.test-support.js", import.meta.url));
@@ -55,23 +56,29 @@ function runChild(
   anchor: string,
   remoteHead?: string,
 ) {
-  return spawnSync(process.execPath, [fixture, root, mode, signals], {
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      KIT_AUDIT_ANCHOR_DIR: anchor,
-      ...(remoteHead ? { KIT_TEST_REMOTE_HEAD: remoteHead } : {}),
-    },
-    timeout: 30000,
-  });
+  return requireChildExit(
+    spawnSync(process.execPath, [fixture, root, mode, signals], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        KIT_AUDIT_ANCHOR_DIR: anchor,
+        ...(remoteHead ? { KIT_TEST_REMOTE_HEAD: remoteHead } : {}),
+      },
+      timeout: 30000,
+    }),
+    `fixture ${mode}`,
+  );
 }
 
 async function waitFor(path: string, child: ChildProcess): Promise<void> {
+  const stderr = captureChildStderr(child);
   const deadline = Date.now() + 20000;
   while (!existsSync(path)) {
     if (child.exitCode !== null || child.signalCode !== null)
-      throw new Error(`fixture exited before ready: ${child.exitCode ?? child.signalCode}`);
-    if (Date.now() > deadline) throw new Error("fixture did not become ready");
+      throw new Error(
+        `fixture exited before ready: ${child.exitCode ?? child.signalCode}\n${stderr()}`,
+      );
+    if (Date.now() > deadline) throw new Error(`fixture did not become ready\n${stderr()}`);
     await new Promise((done) => setTimeout(done, 20));
   }
 }
@@ -97,7 +104,7 @@ describe("review receipt process transactions", () => {
     const test = setup();
     const first = spawn(process.execPath, [fixture, test.root, "hold", test.signals], {
       env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
     });
     try {
       await waitFor(join(test.signals, "hold.ready"), first);
@@ -128,7 +135,7 @@ describe("review receipt interruption recovery", () => {
     const test = setup();
     const child = spawn(process.execPath, [fixture, test.root, "crash", test.signals], {
       env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
     });
     try {
       await waitFor(join(test.signals, "crash.ready"), child);
@@ -163,7 +170,7 @@ describe("review receipt interruption recovery", () => {
       const mode = `crash-after-${phase}`;
       const child = spawn(process.execPath, [fixture, test.root, mode, test.signals], {
         env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-        stdio: "ignore",
+        stdio: ["ignore", "ignore", "pipe"],
       });
       try {
         await waitFor(join(test.signals, `${mode}.${phase}`), child);
@@ -212,7 +219,7 @@ it("keeps a partial staged record locked until it is inspected", async () => {
   const test = setup();
   const child = spawn(process.execPath, [fixture, test.root, "crash", test.signals], {
     env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
   try {
     await waitFor(join(test.signals, "crash.ready"), child);
@@ -238,7 +245,7 @@ it("does not replace a clean tracked receipt during recovery", async () => {
   const test = setup();
   const child = spawn(process.execPath, [fixture, test.root, "crash", test.signals], {
     env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
   try {
     await waitFor(join(test.signals, "crash.ready"), child);
@@ -311,7 +318,7 @@ it("recovers a complete signed result left in a staging file", async () => {
   const test = setup();
   const child = spawn(process.execPath, [fixture, test.root, "staged-completed", test.signals], {
     env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
   try {
     await waitFor(join(test.signals, "staged-completed.ready"), child);
@@ -331,7 +338,7 @@ it("does not publish a recovered receipt after the local commit changes", async 
   const test = setup();
   const child = spawn(process.execPath, [fixture, test.root, "crash", test.signals], {
     env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
   try {
     await waitFor(join(test.signals, "crash.ready"), child);
@@ -366,7 +373,7 @@ it("keeps the transaction locked if the local commit changes after history appen
   const mode = "crash-after-history";
   const child = spawn(process.execPath, [fixture, test.root, mode, test.signals], {
     env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
   try {
     await waitFor(join(test.signals, `${mode}.history`), child);
@@ -399,7 +406,7 @@ it("requires inspection before clearing an interrupted recovery claim", async ()
   const test = setup();
   const owner = spawn(process.execPath, [fixture, test.root, "crash", test.signals], {
     env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
   let recovery: ChildProcess | undefined;
   try {
@@ -408,7 +415,7 @@ it("requires inspection before clearing an interrupted recovery claim", async ()
     await childExit(owner);
     recovery = spawn(process.execPath, [fixture, test.root, "claim-crash", test.signals], {
       env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
     });
     await waitFor(join(test.signals, "claim-crash.ready"), recovery);
     const active = runChild(test.root, "recover", test.signals, test.anchor);
@@ -439,7 +446,7 @@ it("does not mistake a dangling start marker for an unstarted review", async (t)
   const test = setup();
   const child = spawn(process.execPath, [fixture, test.root, "crash", test.signals], {
     env: { ...process.env, KIT_AUDIT_ANCHOR_DIR: test.anchor },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
   try {
     await waitFor(join(test.signals, "crash.ready"), child);
