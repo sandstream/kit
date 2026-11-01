@@ -11,6 +11,7 @@ import { withGovernance } from "../governance-middleware.js";
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import { cmdEscalatePr } from "./escalate-pr.js";
+import { cmdFeed } from "./feed.js";
 
 export async function cmdEscalate(): Promise<boolean> {
   if (process.argv[3] === "pr") {
@@ -20,6 +21,7 @@ export async function cmdEscalate(): Promise<boolean> {
     }
     return cmdEscalatePr();
   }
+  if (process.argv[3] === "feed") return cmdFeed();
   if (hasFlag(process.argv, "--merge-denied")) {
     console.error("--merge-denied requires kit escalate pr");
     return false;
