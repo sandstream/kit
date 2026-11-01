@@ -828,7 +828,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   review: {
     handler: cmdReview,
     stability: "stable",
-    help: "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks it. recover-receipt --confirm-stopped restores an interrupted transaction. --json emits a report; --stages and --category scope runs.",
+    help: "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks it. recover-receipt restores a stopped transaction. resolve-interruption records a review of an unknown result. --json emits a report; --stages and --category scope runs.",
     // MCP-exposed: THE one-shot audit for shell-less agents (kit_review),
     // superseding kit_standards on that surface (deprecated, leaves in 6.0).
     mcp: true,

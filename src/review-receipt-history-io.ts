@@ -1,9 +1,14 @@
 /** Read and preserve signed review history and receipt files. */
 import { closeSync, readSync } from "node:fs";
 import { join } from "node:path";
-import { tryReadAuditAnchorKey } from "./audit-anchor.js";
-import { appendReceiptHistory, openReceiptForRead } from "./review-receipt-files.js";
+import { tryReadProtectedAuditAnchorKey } from "./audit-anchor.js";
+import {
+  appendReceiptHistory,
+  decodeReceiptUtf8,
+  openReceiptForRead,
+} from "./review-receipt-files.js";
 import { verifyReviewReceipt, type SignedReviewReceipt } from "./review-receipt.js";
+import { assertReviewWritable } from "./review-receipt-write-guard.js";
 
 export const REVIEW_RECEIPT_HISTORY_FILE = ".kit-review-receipt-history.jsonl";
 const MAX_RECEIPT_BYTES = 16 * 1024 * 1024;
@@ -37,7 +42,7 @@ export function readReceipt(path: string): string | null {
     while (total <= MAX_RECEIPT_BYTES) {
       const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, MAX_RECEIPT_BYTES + 1 - total));
       const count = readSync(fd, chunk, 0, chunk.length, null);
-      if (count === 0) return Buffer.concat(chunks, total).toString("utf8");
+      if (count === 0) return decodeReceiptUtf8(Buffer.concat(chunks, total));
       total += count;
       if (total > MAX_RECEIPT_BYTES) return null;
       chunks.push(chunk.subarray(0, count));
@@ -86,20 +91,26 @@ export async function readFailedReviewSummary(
   root: string,
   head: string,
   command: string,
-): Promise<{ count: number; last: SignedReviewReceipt | null; signatures: string[] }> {
+): Promise<{
+  count: number;
+  last: SignedReviewReceipt | null;
+  signatures: string[];
+  unresolved: SignedReviewReceipt[];
+}> {
   const path = join(root, REVIEW_RECEIPT_HISTORY_FILE);
   let content: string | null;
   try {
     content = readReceipt(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
-      return { count: 0, last: null, signatures: [] };
+      return { count: 0, last: null, signatures: [], unresolved: [] };
+    if (error instanceof TypeError) throw new Error(historyGuidance(path), { cause: error });
     throw error;
   }
   if (content === null) throw new Error("review receipt history is too large");
   const receipts = parseHistory(content, path);
-  if (receipts.length === 0) return { count: 0, last: null, signatures: [] };
-  const key = await tryReadAuditAnchorKey();
+  if (receipts.length === 0) return { count: 0, last: null, signatures: [], unresolved: [] };
+  const key = await tryReadProtectedAuditAnchorKey();
   if (!key) throw new Error("review receipt history signing key is unavailable");
   let count: number;
   try {
@@ -120,7 +131,52 @@ export async function readFailedReviewSummary(
           item.gate.exit_code !== 0 &&
           item.run_status !== "interrupted",
       ) ?? null;
-  return { count, last, signatures: receipts.map((item) => item.signature) };
+  return {
+    count,
+    last,
+    signatures: receipts.map((item) => item.signature),
+    unresolved: unresolvedInterruptions(receipts),
+  };
+}
+
+function resolutionMatches(
+  resolution: SignedReviewReceipt,
+  original: SignedReviewReceipt,
+): boolean {
+  return (
+    resolution.run_status === "interrupted" &&
+    resolution.interruption_disposition === "risk-accepted" &&
+    typeof resolution.interruption_review === "string" &&
+    resolution.interruption_review.trim().length >= 10 &&
+    resolution.repo === original.repo &&
+    resolution.pr === original.pr &&
+    resolution.head === original.head &&
+    resolution.base_head === original.base_head &&
+    resolution.base_branch === original.base_branch &&
+    resolution.policy_head === original.policy_head &&
+    resolution.policy_branch === original.policy_branch
+  );
+}
+
+export function unresolvedInterruptions(receipts: SignedReviewReceipt[]): SignedReviewReceipt[] {
+  const unknown = receipts.filter(
+    (entry) => entry.run_status === "interrupted" && !entry.resolves_run_id,
+  );
+  const resolutions = receipts.filter((entry) => entry.resolves_run_id);
+  for (const resolution of resolutions) {
+    const original = unknown.find((item) => item.run_id === resolution.resolves_run_id);
+    if (!original || !resolutionMatches(resolution, original)) {
+      throw new Error("invalid review interruption assessment");
+    }
+  }
+  return unknown.filter(
+    (item) =>
+      !(
+        item.interruption_disposition === "risk-accepted" &&
+        typeof item.interruption_review === "string" &&
+        item.interruption_review.trim().length >= 10
+      ) && !resolutions.some((resolution) => resolution.resolves_run_id === item.run_id),
+  );
 }
 
 export async function readFailedReviewRuns(
@@ -131,13 +187,15 @@ export async function readFailedReviewRuns(
   return (await readFailedReviewSummary(root, head, command)).count;
 }
 
-function readHistory(root: string, key: Buffer, lockDir?: string): SignedReviewReceipt[] {
+export function readHistory(root: string, key: Buffer, lockDir?: string): SignedReviewReceipt[] {
   const path = join(root, REVIEW_RECEIPT_HISTORY_FILE);
   let content: string | null;
   try {
     content = readReceipt(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if (error instanceof TypeError)
+      throw new Error(historyGuidance(path, lockDir), { cause: error });
     throw error;
   }
   if (content === null) throw new Error("review receipt history is too large");
@@ -164,9 +222,11 @@ export function persistHistory(
     write?: (fd: number, text: string) => void;
   },
 ): void {
+  assertReviewWritable(root, "review-history");
   const history = readHistory(root, key, lockDir);
   try {
     countFailedReviewReceipts(history, key, signed.head, signed.gate.command);
+    unresolvedInterruptions(signed.resolves_run_id ? [...history, signed] : history);
   } catch (error) {
     throw new Error(
       `${historyGuidance(join(root, REVIEW_RECEIPT_HISTORY_FILE), lockDir)} ${error instanceof Error ? error.message : String(error)}`,

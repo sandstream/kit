@@ -143,6 +143,7 @@ function reviewEvidence(
 }
 
 interface CurrentReceiptEvidence {
+  repo: string;
   pr: GitHubPrEvidence;
   rawThreads: ReviewReceiptInput["threads"];
   protectedPaths: ReviewReceiptInput["protectedPaths"];
@@ -150,7 +151,7 @@ interface CurrentReceiptEvidence {
 }
 
 async function localReceipt(root: string, current: CurrentReceiptEvidence, run: ReadCommand) {
-  const { pr, rawThreads, protectedPaths, refs } = current;
+  const { repo, pr, rawThreads, protectedPaths, refs } = current;
   let receiptProblem: string | null = null;
   let historyProblem: string | null = null;
   let gate: PrEscalationEvidence["gate"] = null;
@@ -171,27 +172,38 @@ async function localReceipt(root: string, current: CurrentReceiptEvidence, run: 
         outputSha256: saved.output_sha256,
         failures: saved.failures ?? [],
       };
-      try {
-        const history = await readFailedReviewSummary(root, pr.head, saved.command);
-        failedGateRuns = history.count;
-        if (history.last) {
-          const last = history.last.gate;
-          lastFailedGate = {
-            command: last.command,
-            exitCode: last.exit_code,
-            outputSha256: last.output_sha256,
-            failures: last.failures ?? [],
-          };
-        }
-      } catch (error) {
-        historyProblem = `review history cannot be verified: ${errorMessage(error)}`;
-      }
     }
   } catch (error) {
     receiptProblem =
       (error as NodeJS.ErrnoException).code === "ENOENT"
         ? "review receipt missing for the current PR head"
         : `review receipt unavailable: ${errorMessage(error)}`;
+  }
+  try {
+    const history = await readFailedReviewSummary(
+      root,
+      pr.head,
+      gate?.command ?? "kit review --receipt",
+    );
+    failedGateRuns = history.count;
+    if (history.last) {
+      const last = history.last.gate;
+      lastFailedGate = {
+        command: last.command,
+        exitCode: last.exit_code,
+        outputSha256: last.output_sha256,
+        failures: last.failures ?? [],
+      };
+    }
+    const unresolved = history.unresolved.filter(
+      (item) => item.repo === repo && item.pr === pr.number,
+    );
+    if (unresolved.length)
+      historyProblem =
+        "unresolved interrupted reviews: " +
+        unresolved.map((item) => item.run_id + " (" + item.head + ")").join(", ");
+  } catch (error) {
+    historyProblem = `review history cannot be verified: ${errorMessage(error)}`;
   }
   return { receiptProblem, historyProblem, gate, lastFailedGate, failedGateRuns };
 }
@@ -218,7 +230,11 @@ export async function collectPrEvidence(
     reviewCommentProblem = `review comments unavailable: ${errorMessage(error)}`;
   }
   const current = prView(root, run);
-  const receipt = await localReceipt(root, { pr: current, rawThreads, protectedPaths, refs }, run);
+  const receipt = await localReceipt(
+    root,
+    { repo, pr: current, rawThreads, protectedPaths, refs },
+    run,
+  );
   if (
     run("git", ["rev-parse", "HEAD"], root).trim() !== pr.head ||
     current.head !== pr.head ||

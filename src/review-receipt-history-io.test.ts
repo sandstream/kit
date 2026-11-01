@@ -92,6 +92,7 @@ it("returns an empty summary when no history exists", async () => {
       count: 0,
       last: null,
       signatures: [],
+      unresolved: [],
     });
     assert.equal(existsSync(join(root, REVIEW_RECEIPT_HISTORY_FILE)), false);
   });

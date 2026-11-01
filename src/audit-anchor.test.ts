@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { appendAuditEventDirect } from "./audit.js";
@@ -20,6 +20,7 @@ import {
   type AnchorRecord,
 } from "./audit-anchor.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { privateFileIsControlled } from "./utils/secure-perms.js";
 
 // Build a real hash-chained log without auto-anchoring (KIT_AUDIT_ANCHOR=0 is
 // set by the test runner) so each test controls anchoring explicitly.
@@ -143,6 +144,57 @@ describe("audit anchor - key file", () => {
     } finally {
       rmTemp(empty);
     }
+  });
+
+  it("preserves a secured key observed by a concurrent reader after publication", async () => {
+    const path = join(dir, "audit-anchor.key");
+    let temp = "";
+    let calls = 0;
+    let reader: Promise<Buffer> | undefined;
+    await assert.rejects(
+      getAuditAnchorKey(dir, () => {
+        calls += 1;
+        if (calls === 4) {
+          temp = join(dir, readdirSync(dir).find((name) => name.startsWith(".kit-audit-anchor-"))!);
+          assert.equal(readFileSync(temp, "utf8"), "");
+          assert.equal(privateFileIsControlled(temp), true);
+          if (process.platform !== "win32") assert.equal(statSync(temp).mode & 0o077, 0);
+        }
+        if (calls === 6) {
+          reader = getAuditAnchorKey(dir);
+          throw new Error("interrupted after publication");
+        }
+      }),
+      /interrupted after publication/,
+    );
+    assert.ok(reader);
+    const observed = await reader;
+    assert.equal(privateFileIsControlled(path), true);
+    assert.equal(observed.toString("hex"), readFileSync(path, "utf8").trim());
+    assert.equal(statSync(path).ino, statSync(temp).ino);
+    assert.equal(statSync(path).nlink, 2);
+    await assert.rejects(
+      getAuditAnchorKey(dir, () => {}),
+      /links to the same file/,
+    );
+    unlinkSync(temp);
+    assert.deepEqual(await getAuditAnchorKey(dir, () => {}), observed);
+    assert.deepEqual(await getAuditAnchorKey(dir), observed);
+  });
+
+  it("preserves its empty temporary file when interrupted before writing the key", async () => {
+    let calls = 0;
+    await assert.rejects(
+      getAuditAnchorKey(dir, () => {
+        calls += 1;
+        if (calls === 4) throw new Error("interrupted before write");
+      }),
+      /interrupted before write/,
+    );
+    assert.equal(existsSync(join(dir, "audit-anchor.key")), false);
+    const temp = join(dir, readdirSync(dir).find((name) => name.startsWith(".kit-audit-anchor-"))!);
+    assert.equal(readFileSync(temp, "utf8"), "");
+    assert.equal(privateFileIsControlled(temp), true);
   });
 });
 

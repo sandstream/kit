@@ -1,24 +1,37 @@
 /** Collect and store a signed receipt for the exact pull request head. */
-import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { hostname } from "node:os";
-import { getAuditAnchorKey, tryReadAuditAnchorKey } from "./audit-anchor.js";
+import { getAuditAnchorKey, tryReadProtectedAuditAnchorKey } from "./audit-anchor.js";
+import { assertPrRefsUnchanged, readPrRefs, type PrRefs } from "./review-protected-paths-github.js";
 import {
-  assertPrRefsUnchanged,
-  collectPrProtectedPaths,
-  readPrRefs,
-  type PrRefs,
-} from "./review-protected-paths-github.js";
-import { parseGitHubPrView, parseGitHubReviewThreads } from "./review-receipt-github.js";
+  assertReviewSnapshot,
+  collectReviewReceipt,
+  defaultReadCommand,
+  gitHead,
+  prEvidence,
+  type ReadCommand,
+  type ReviewSnapshot,
+} from "./review-receipt-evidence.js";
+export {
+  assertReviewSnapshot,
+  captureReviewSnapshot,
+  collectReviewReceipt,
+  defaultReadCommand,
+} from "./review-receipt-evidence.js";
+export type { ReadCommand, ReviewSnapshot } from "./review-receipt-evidence.js";
+export { verifyReviewReceiptFile } from "./review-receipt-verify.js";
 import { assertNoRecoveryArtifacts } from "./review-receipt-artifacts.js";
-import { cleanReviewWorktree, REVIEW_RECEIPT_FILE } from "./review-receipt-worktree.js";
+import { publishReviewReceipt } from "./review-receipt-publish.js";
+import { assessUnknownPending, selectPendingReceipt } from "./review-receipt-pending.js";
+import { cleanReviewWorktree } from "./review-receipt-worktree.js";
 export { REVIEW_RECEIPT_FILE } from "./review-receipt-worktree.js";
 import {
   persistHistory,
+  countFailedReviewReceipts,
   readReceipt,
-  readFailedReviewSummary,
+  readHistory,
+  unresolvedInterruptions,
 } from "./review-receipt-history-io.js";
 export {
   countFailedReviewReceipts,
@@ -28,7 +41,7 @@ export {
 } from "./review-receipt-history-io.js";
 import {
   assertReviewOwner,
-  assertReviewReadStamp,
+  beginReviewTransaction,
   claimReviewRecovery,
   finishReviewTransaction,
   loadReviewTransaction,
@@ -36,13 +49,13 @@ import {
   readReviewPending,
   readReviewStagedPending,
   releaseReviewRecovery,
-  reviewReadStamp,
   reviewStarted,
   writeReviewPending,
   type RecoveryClaim,
   type ReviewTransaction,
 } from "./review-receipt-transaction.js";
 import { isReadOnlyMode, refuseWrite } from "./read-only-mode.js";
+import { assertReviewWritable, withReviewWrite } from "./review-receipt-write-guard.js";
 import {
   buildReviewReceipt,
   signReviewReceipt,
@@ -52,160 +65,8 @@ import {
   type SignedReviewReceipt,
 } from "./review-receipt.js";
 
-export type ReadCommand = (command: string, args: string[], cwd: string) => string;
-
-const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){totalCount pageInfo{hasNextPage} nodes{id isResolved path line resolvedBy{login} comments(first:100){pageInfo{hasNextPage} nodes{url body}}}}}}}`;
-const PR_VIEW_FIELDS = "number,headRefOid,changedFiles,files,statusCheckRollup";
-
-export function defaultReadCommand(command: string, args: string[], cwd: string): string {
-  return execFileSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    timeout: 30_000,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-}
-
-function gitHead(root: string, run: ReadCommand): string {
-  const head = run("git", ["rev-parse", "HEAD"], root).trim();
-  if (!/^[a-f0-9]{40}$/.test(head)) throw new Error("invalid local commit");
-  return head;
-}
-
-function prEvidence(root: string, run: ReadCommand) {
-  return parseGitHubPrView(run("gh", ["pr", "view", "--json", PR_VIEW_FIELDS], root));
-}
-
-export interface ReviewSnapshot {
-  root: string;
-  repo: string;
-  pr: number;
-  head: string;
-  refs: PrRefs;
-}
-
-/** Capture the source and PR identity before any review stages run. */
-export function captureReviewSnapshot(
-  cwd: string,
-  run: ReadCommand = defaultReadCommand,
-): ReviewSnapshot {
-  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
-  const stamp = reviewReadStamp(root, run);
-  cleanReviewWorktree(root, run);
-  const head = gitHead(root, run);
-  const repoValue = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
-    nameWithOwner?: unknown;
-  };
-  if (
-    typeof repoValue.nameWithOwner !== "string" ||
-    !/^[^/\s]+\/[^/\s]+$/.test(repoValue.nameWithOwner)
-  ) {
-    throw new Error("invalid GitHub repository identity");
-  }
-  const repo = repoValue.nameWithOwner;
-  const pr = prEvidence(root, run);
-  const refs = readPrRefs(root, repo, pr.number, run);
-  if (pr.head !== head || refs.head !== head)
-    throw new Error("pull request head changed before review");
-  const snapshot = { root, repo, pr: pr.number, head, refs };
-  assertReviewSnapshot(snapshot, run);
-  assertReviewReadStamp(root, run, stamp);
-  return snapshot;
-}
-
-export function assertReviewSnapshot(
-  snapshot: ReviewSnapshot,
-  run: ReadCommand = defaultReadCommand,
-): void {
-  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], snapshot.root).trim());
-  if (root !== snapshot.root) throw new Error("review root changed during review");
-  cleanReviewWorktree(root, run);
-  if (gitHead(root, run) !== snapshot.head) throw new Error("local commit changed during review");
-  const repoValue = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
-    nameWithOwner?: unknown;
-  };
-  const pr = prEvidence(root, run);
-  if (
-    repoValue.nameWithOwner !== snapshot.repo ||
-    pr.number !== snapshot.pr ||
-    pr.head !== snapshot.head
-  ) {
-    throw new Error("pull request changed during review");
-  }
-  assertPrRefsUnchanged(snapshot.refs, root, snapshot.repo, run);
-}
-
-export function collectReviewReceipt(
-  cwd: string,
-  gate: ReviewReceiptInput["gate"],
-  run: ReadCommand = defaultReadCommand,
-  createdAt = new Date().toISOString(),
-  runId?: string,
-): ReviewReceipt {
-  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
-  cleanReviewWorktree(root, run);
-  const localHead = gitHead(root, run);
-  const repoResponse = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
-    nameWithOwner?: unknown;
-  };
-  const repo = repoResponse.nameWithOwner;
-  if (typeof repo !== "string") throw new Error("invalid GitHub repository identity");
-  const pr = prEvidence(root, run);
-  if (pr.head !== localHead) throw new Error("pull request head does not match the local commit");
-  const [owner, name] = repo.split("/");
-  if (!owner || !name) throw new Error("invalid GitHub repository identity");
-  const threads = parseGitHubReviewThreads(
-    run(
-      "gh",
-      [
-        "api",
-        "graphql",
-        "-F",
-        `owner=${owner}`,
-        "-F",
-        `name=${name}`,
-        "-F",
-        `number=${pr.number}`,
-        "-f",
-        `query=${REVIEW_THREADS_QUERY}`,
-      ],
-      root,
-    ),
-  );
-  const { refs, protectedPaths } = collectPrProtectedPaths(
-    root,
-    { repo, number: pr.number, head: localHead },
-    pr.changedPaths,
-    run,
-  );
-
-  // Refuse a receipt if the branch or PR moved while evidence was collected.
-  cleanReviewWorktree(root, run);
-  if (gitHead(root, run) !== localHead || prEvidence(root, run).head !== localHead) {
-    throw new Error("pull request head changed during receipt collection");
-  }
-  assertPrRefsUnchanged(refs, root, repo, run);
-  return buildReviewReceipt({
-    repo,
-    pr: pr.number,
-    localHead,
-    remoteHead: pr.head,
-    baseBranch: refs.baseName,
-    baseHead: refs.base,
-    policyBranch: refs.defaultName,
-    policyHead: refs.defaultHead,
-    runId,
-    createdAt,
-    gate,
-    checks: pr.checks,
-    threads,
-    changedPaths: pr.changedPaths,
-    protectedPaths,
-  });
-}
-
 /** Persist an interruption record before starting the review stages. */
-export async function prepareReviewReceipt(
+async function prepareReviewReceiptImpl(
   snapshot: ReviewSnapshot,
   transaction: ReviewTransaction,
   run: ReadCommand = defaultReadCommand,
@@ -237,7 +98,9 @@ export async function prepareReviewReceipt(
     changedPaths: [],
     protectedPaths: [],
   });
-  const key = await getAuditAnchorKey();
+  const key = await getAuditAnchorKey(undefined, () =>
+    assertReviewWritable(snapshot.root, "review-prepare-receipt"),
+  );
   assertReviewSnapshot(snapshot, run);
   writeReviewPending(transaction, JSON.stringify(signReviewReceipt(receipt, key)) + "\n");
   markReviewStarted(transaction);
@@ -248,19 +111,9 @@ function writeCurrentReceipt(
   signed: SignedReviewReceipt,
   afterTempWrite?: (temp: string) => void,
 ): string {
-  const path = join(root, REVIEW_RECEIPT_FILE);
-  const temp = join(root, `${REVIEW_RECEIPT_FILE}.${randomBytes(6).toString("hex")}.tmp`);
-  try {
-    writeFileSync(temp, JSON.stringify(signed, null, 2) + "\n", {
-      encoding: "utf8",
-      mode: 0o600,
-      flag: "wx",
-    });
-    afterTempWrite?.(temp);
-    renameSync(temp, path);
-  } finally {
-    rmSync(temp, { force: true });
-  }
+  const path = publishReviewReceipt(root, JSON.stringify(signed, null, 2) + "\n", {
+    afterTempWrite,
+  });
   const saved = readReceipt(path);
   if (saved === null || JSON.stringify(JSON.parse(saved) as unknown) !== JSON.stringify(signed)) {
     throw new Error("review receipt did not retain the signed run");
@@ -285,6 +138,86 @@ function validatePreparedPending(
     !receiptMatchesRefs(prior, snapshot.repo, snapshot.refs)
   )
     throw new Error("review transaction pending record is invalid");
+}
+
+/** Save the local gate result before output or remote evidence collection. */
+async function recordReviewGateImpl(
+  snapshot: ReviewSnapshot,
+  transaction: ReviewTransaction,
+  gate: ReviewReceiptInput["gate"],
+): Promise<SignedReviewReceipt> {
+  if (transaction.root !== snapshot.root) throw new Error("review transaction root does not match");
+  assertReviewOwner(transaction);
+  const key = await getAuditAnchorKey(undefined, () =>
+    assertReviewWritable(snapshot.root, "review-record-gate"),
+  );
+  validatePreparedPending(transaction, snapshot, key);
+  const receipt = buildReviewReceipt({
+    repo: snapshot.repo,
+    pr: snapshot.pr,
+    localHead: snapshot.head,
+    remoteHead: snapshot.head,
+    baseBranch: snapshot.refs.baseName,
+    baseHead: snapshot.refs.base,
+    policyBranch: snapshot.refs.defaultName,
+    policyHead: snapshot.refs.defaultHead,
+    runId: transaction.runId,
+    createdAt: new Date().toISOString(),
+    gate,
+    checks: [],
+    threads: [],
+    changedPaths: [],
+    protectedPaths: [],
+  });
+  receipt.gate_only = true;
+  const signed = signReviewReceipt(receipt, key);
+  writeReviewPending(transaction, JSON.stringify(signed) + "\n");
+  return signed;
+}
+
+async function requireRecordedGate(
+  snapshot: ReviewSnapshot,
+  transaction: ReviewTransaction,
+  gate: ReviewReceiptInput["gate"],
+): Promise<SignedReviewReceipt> {
+  const key = await getAuditAnchorKey(undefined, () =>
+    assertReviewWritable(snapshot.root, "review-receipt"),
+  );
+  let pending = readReviewPending(transaction);
+  if (pending === null) throw new Error("review transaction pending record is missing");
+  let recorded = JSON.parse(pending) as SignedReviewReceipt;
+  if (recorded.run_status === "interrupted") {
+    recorded = await recordReviewGate(snapshot, transaction, gate);
+    pending = readReviewPending(transaction);
+  }
+  const expected = buildReviewReceipt({
+    repo: snapshot.repo,
+    pr: snapshot.pr,
+    localHead: snapshot.head,
+    remoteHead: snapshot.head,
+    baseBranch: snapshot.refs.baseName,
+    baseHead: snapshot.refs.base,
+    policyBranch: snapshot.refs.defaultName,
+    policyHead: snapshot.refs.defaultHead,
+    runId: transaction.runId,
+    createdAt: recorded.created_at,
+    gate,
+    checks: [],
+    threads: [],
+    changedPaths: [],
+    protectedPaths: [],
+  });
+  if (
+    !pending ||
+    !verifyReviewReceipt(recorded, key, snapshot.head).ok ||
+    !recorded.gate_only ||
+    recorded.run_id !== transaction.runId ||
+    !receiptMatchesRefs(recorded, snapshot.repo, snapshot.refs) ||
+    JSON.stringify(recorded.gate) !== JSON.stringify(expected.gate)
+  ) {
+    throw new Error("signed local gate result is missing or changed");
+  }
+  return recorded;
 }
 
 function assertReceiptMatchesSnapshot(receipt: ReviewReceipt, snapshot: ReviewSnapshot): void {
@@ -315,7 +248,7 @@ interface ReceiptWriteOptions {
   hooks?: ReceiptWriteHooks;
 }
 
-export async function writeReviewReceipt(
+async function writeReviewReceiptImpl(
   cwd: string,
   gate: ReviewReceiptInput["gate"],
   options: ReceiptWriteOptions = {},
@@ -330,13 +263,16 @@ export async function writeReviewReceipt(
     throw new Error("review receipt requires an active review transaction");
   }
   assertReviewOwner(transaction);
+  await requireRecordedGate(snapshot, transaction, gate);
   if (resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim()) !== snapshot.root) {
     throw new Error("review root changed during review");
   }
   assertReviewSnapshot(snapshot, run);
   const receipt = collectReviewReceipt(cwd, gate, run, undefined, transaction.runId);
-  const key = await getAuditAnchorKey();
-  validatePreparedPending(transaction, snapshot, key);
+  const key = await getAuditAnchorKey(undefined, () =>
+    assertReviewWritable(snapshot.root, "review-receipt"),
+  );
+  await requireRecordedGate(snapshot, transaction, gate);
   assertReviewSnapshot(snapshot, run);
   assertReceiptMatchesSnapshot(receipt, snapshot);
   const signed = signReviewReceipt(receipt, key);
@@ -380,42 +316,6 @@ function receiptMatchesRefs(signed: SignedReviewReceipt, repo: string, refs: PrR
   );
 }
 
-function selectPendingReceipt(
-  pending: string,
-  staged: string[],
-  key: Buffer,
-  runId: string,
-): SignedReviewReceipt {
-  const receipts = [pending, ...staged].map(
-    (content) => JSON.parse(content) as SignedReviewReceipt,
-  );
-  for (const signed of receipts) {
-    if (!verifyReviewReceipt(signed, key, signed.head).ok || signed.run_id !== runId) {
-      throw new Error("pending review signature or identity is invalid");
-    }
-    const first = receipts[0]!;
-    if (
-      signed.repo !== first.repo ||
-      signed.pr !== first.pr ||
-      signed.head !== first.head ||
-      signed.base_branch !== first.base_branch ||
-      signed.base_head !== first.base_head ||
-      signed.policy_branch !== first.policy_branch ||
-      signed.policy_head !== first.policy_head
-    )
-      throw new Error("pending review identity changed");
-  }
-  const completed = receipts.filter((item) => item.run_status === "completed");
-  const interrupted = receipts.filter((item) => item.run_status === "interrupted");
-  if (new Set(interrupted.map((item) => item.signature)).size > 1) {
-    throw new Error("conflicting interrupted pending reviews");
-  }
-  if (new Set(completed.map((item) => item.signature)).size > 1) {
-    throw new Error("conflicting completed pending reviews");
-  }
-  return completed[0] ?? receipts[0]!;
-}
-
 async function recoverBeforeReviewStarted(
   transaction: ReviewTransaction,
   claim: RecoveryClaim,
@@ -423,7 +323,7 @@ async function recoverBeforeReviewStarted(
   const pending = readReviewPending(transaction);
   const staged = readReviewStagedPending(transaction);
   if (pending !== null || staged.length > 0) {
-    const key = await tryReadAuditAnchorKey();
+    const key = await tryReadProtectedAuditAnchorKey();
     if (!key) throw new Error("review receipt signing key is unavailable");
     const first = pending ?? staged[0]!.content;
     const others = pending === null ? staged.slice(1) : staged;
@@ -434,9 +334,83 @@ async function recoverBeforeReviewStarted(
       transaction.runId,
     );
     if (signed.run_status !== "interrupted") throw new Error("review start marker is missing");
+    if (signed.resolves_run_id) {
+      persistHistory(transaction.root, signed, key, transaction.dir);
+      finishReviewTransaction(transaction, claim, staged, pending, false);
+      return "Human assessment recorded for the interrupted review.";
+    }
   }
   finishReviewTransaction(transaction, claim, staged, pending, false);
   return "Review had not started. Run a new review.";
+}
+
+/** Record a human decision for an older interrupted run already in history. */
+async function resolveReviewInterruptionImpl(
+  cwd: string,
+  runId: string,
+  note: string | undefined,
+  acknowledge: boolean,
+  run: ReadCommand = defaultReadCommand,
+): Promise<string> {
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite("review-resolve-interruption", {}, { cwd });
+    throw new Error(refusal.reason);
+  }
+  const review = note?.trim();
+  if (
+    !/^[a-f0-9]{32}$/.test(runId) ||
+    !acknowledge ||
+    !review ||
+    review.length < 10 ||
+    review.length > 2000
+  )
+    throw new Error(
+      "provide a run id, --acknowledge-unknown, and --interruption-review with 10 to 2000 characters",
+    );
+  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
+  const transaction = beginReviewTransaction(root, run);
+  let preserve = false;
+  try {
+    cleanReviewWorktree(root, run);
+    const key = await tryReadProtectedAuditAnchorKey();
+    if (!key) throw new Error("review receipt signing key is unavailable");
+    const history = readHistory(root, key, transaction.dir);
+    const original = unresolvedInterruptions(history).find((item) => item.run_id === runId);
+    if (!original) throw new Error(`unresolved interrupted run ${runId} was not found`);
+    countFailedReviewReceipts(history, key, original.head, original.gate.command);
+    const repo = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
+      nameWithOwner?: unknown;
+    };
+    if (repo.nameWithOwner !== original.repo || prEvidence(root, run).number !== original.pr)
+      throw new Error("interrupted run belongs to a different repository or pull request");
+    const { signature: _signature, sig_alg: _algorithm, ...body } = original;
+    const resolution = signReviewReceipt(
+      {
+        ...body,
+        run_id: transaction.runId,
+        resolves_run_id: original.run_id,
+        interruption_disposition: "risk-accepted",
+        interruption_review: review,
+      },
+      key,
+    );
+    const content = JSON.stringify(resolution) + "\n";
+    preserve = true;
+    writeReviewPending(transaction, content);
+    cleanReviewWorktree(root, run);
+    persistHistory(root, resolution, key, transaction.dir);
+    finishReviewTransaction(transaction, undefined, [], content, false);
+    return `Human assessment recorded for run ${runId} at ${original.head}.`;
+  } catch (error) {
+    if (!preserve && !isReadOnlyMode()) finishReviewTransaction(transaction);
+    throw error;
+  }
+}
+
+interface RecoveryOptions {
+  interruptionReview?: string;
+  acknowledgeUnknown?: boolean;
+  afterAssessment?: () => void;
 }
 
 async function recoverStartedReview(
@@ -444,19 +418,29 @@ async function recoverStartedReview(
   transaction: ReviewTransaction,
   claim: RecoveryClaim,
   run: ReadCommand,
+  options: RecoveryOptions,
 ): Promise<string> {
   const pending = readReviewPending(transaction);
   if (pending === null)
     throw new Error("signed pending review is missing; inspect the lock manually");
-  const key = await tryReadAuditAnchorKey();
+  const key = await tryReadProtectedAuditAnchorKey();
   if (!key) throw new Error("review receipt signing key is unavailable");
   const staged = readReviewStagedPending(transaction);
-  const signed = selectPendingReceipt(
+  const selected = selectPendingReceipt(
     pending,
     staged.map((item) => item.content),
     key,
     transaction.runId,
   );
+  const assessed = assessUnknownPending(selected, pending, {
+    transaction,
+    claim,
+    key,
+    note: options.interruptionReview,
+    acknowledge: options.acknowledgeUnknown ?? false,
+  });
+  options.afterAssessment?.();
+  const signed = assessed.signed;
   persistHistory(root, signed, key, transaction.dir);
   const repoResponse = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
     nameWithOwner?: unknown;
@@ -474,19 +458,22 @@ async function recoverStartedReview(
     throw new Error("local commit changed during review recovery");
   }
   assertPrRefsUnchanged(refs, root, repoResponse.nameWithOwner, run);
-  finishReviewTransaction(transaction, claim, staged, pending, true);
+  finishReviewTransaction(transaction, claim, staged, assessed.pending, true);
   if (!matches)
     return "Review history recovered, but the pull request or local commit changed. Run a new review.";
   return signed.run_status === "interrupted"
-    ? "Interrupted review recorded. Run a new review."
-    : "Review receipt and history recovered.";
+    ? "Unknown review result and human assessment recorded. Run a new review."
+    : signed.gate_only
+      ? "Local gate result recorded. Run a new review to collect current PR evidence."
+      : "Review receipt and history recovered.";
 }
 
 /** Complete an interrupted local transaction after its owner has stopped. */
-export async function recoverReviewReceipt(
+async function recoverReviewReceiptImpl(
   cwd: string,
   confirmStopped: boolean,
   run: ReadCommand = defaultReadCommand,
+  options: RecoveryOptions = {},
 ): Promise<string> {
   if (isReadOnlyMode()) {
     const refusal = await refuseWrite("review-recover-receipt", {}, { cwd });
@@ -503,75 +490,63 @@ export async function recoverReviewReceipt(
     assertNoRecoveryArtifacts(root, transaction.dir);
     cleanReviewWorktree(root, run);
     const result = reviewStarted(transaction)
-      ? await recoverStartedReview(root, transaction, claim, run)
+      ? await recoverStartedReview(root, transaction, claim, run, options)
       : await recoverBeforeReviewStarted(transaction, claim);
     finished = true;
     return result;
   } finally {
-    if (!finished && existsSync(transaction.dir)) releaseReviewRecovery(claim);
+    if (!finished && existsSync(transaction.dir) && !isReadOnlyMode()) releaseReviewRecovery(claim);
   }
 }
 
-async function verifyReceiptHistory(
-  root: string,
-  receipt: SignedReviewReceipt,
-): Promise<string | null> {
-  try {
-    const history = await readFailedReviewSummary(root, receipt.head, receipt.gate.command);
-    if (receipt.gate.exit_code !== 0 && !history.signatures.includes(receipt.signature)) {
-      return "failed review is missing from signed history";
-    }
-    return null;
-  } catch (error) {
-    return `review history cannot be verified: ${error instanceof Error ? error.message : String(error)}`;
-  }
-}
-
-export async function verifyReviewReceiptFile(
-  cwd: string,
-  file = REVIEW_RECEIPT_FILE,
+/** Write entry points preserve refusal audit records for synchronous and asynchronous failures. */
+export function prepareReviewReceipt(
+  snapshot: ReviewSnapshot,
+  transaction: ReviewTransaction,
   run: ReadCommand = defaultReadCommand,
-): Promise<{ ok: boolean; reason: string; receipt?: SignedReviewReceipt }> {
-  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
-  const stamp = reviewReadStamp(root, run);
-  cleanReviewWorktree(root, run);
-  const json = readReceipt(resolve(root, file));
-  if (json === null) {
-    return { ok: false, reason: "review receipt is too large" };
-  }
-  const receipt = JSON.parse(json) as SignedReviewReceipt;
-  const key = await tryReadAuditAnchorKey();
-  if (!key) return { ok: false, reason: "review receipt signing key is unavailable" };
-  const head = gitHead(root, run);
-  const signature = verifyReviewReceipt(receipt, key, head);
-  if (!signature.ok) return signature;
-  if (receipt.run_status === "interrupted") {
-    return { ok: false, reason: "review was interrupted; run a new review" };
-  }
-  const historyError = await verifyReceiptHistory(root, receipt);
-  if (historyError) return { ok: false, reason: historyError };
-  const pr = prEvidence(root, run);
-  const repoResponse = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
-    nameWithOwner?: unknown;
-  };
-  if (
-    receipt.repo !== repoResponse.nameWithOwner ||
-    receipt.pr !== pr.number ||
-    receipt.head !== pr.head
-  ) {
-    return { ok: false, reason: "review receipt does not match the current pull request" };
-  }
-  const refs = readPrRefs(root, receipt.repo, receipt.pr, run);
-  if (
-    refs.head !== receipt.head ||
-    refs.baseName !== receipt.base_branch ||
-    refs.base !== receipt.base_head ||
-    refs.defaultName !== receipt.policy_branch ||
-    refs.defaultHead !== receipt.policy_head
-  ) {
-    return { ok: false, reason: "review receipt does not match the current PR base or head" };
-  }
-  assertPrRefsUnchanged(refs, root, receipt.repo, run);
-  assertReviewReadStamp(root, run, stamp);
-  return { ...signature, receipt };
+): Promise<void> {
+  return withReviewWrite(snapshot.root, "review-prepare-receipt", () =>
+    prepareReviewReceiptImpl(snapshot, transaction, run),
+  );
+}
+
+export function recordReviewGate(
+  snapshot: ReviewSnapshot,
+  transaction: ReviewTransaction,
+  gate: ReviewReceiptInput["gate"],
+): Promise<SignedReviewReceipt> {
+  return withReviewWrite(snapshot.root, "review-record-gate", () =>
+    recordReviewGateImpl(snapshot, transaction, gate),
+  );
+}
+
+export function writeReviewReceipt(
+  cwd: string,
+  gate: ReviewReceiptInput["gate"],
+  options: ReceiptWriteOptions = {},
+): Promise<{ path: string; receipt: ReviewReceipt }> {
+  return withReviewWrite(cwd, "review-receipt", () => writeReviewReceiptImpl(cwd, gate, options));
+}
+
+export function resolveReviewInterruption(
+  cwd: string,
+  runId: string,
+  note: string | undefined,
+  acknowledge: boolean,
+  run: ReadCommand = defaultReadCommand,
+): Promise<string> {
+  return withReviewWrite(cwd, "review-resolve-interruption", () =>
+    resolveReviewInterruptionImpl(cwd, runId, note, acknowledge, run),
+  );
+}
+
+export function recoverReviewReceipt(
+  cwd: string,
+  confirmStopped: boolean,
+  run: ReadCommand = defaultReadCommand,
+  options: RecoveryOptions = {},
+): Promise<string> {
+  return withReviewWrite(cwd, "review-recover-receipt", () =>
+    recoverReviewReceiptImpl(cwd, confirmStopped, run, options),
+  );
 }

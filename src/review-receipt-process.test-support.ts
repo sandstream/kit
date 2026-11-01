@@ -1,12 +1,14 @@
 /** Separate process fixture for receipt transactions. */
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, linkSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import {
   captureReviewSnapshot,
   collectReviewReceipt,
   prepareReviewReceipt,
+  recordReviewGate,
   recoverReviewReceipt,
+  resolveReviewInterruption,
   verifyReviewReceiptFile,
   writeReviewReceipt,
   type ReadCommand,
@@ -15,7 +17,10 @@ import {
   beginReviewTransaction,
   claimReviewRecovery,
   loadReviewTransaction,
+  readReviewPending,
+  finishReviewTransaction,
 } from "./review-receipt-transaction.js";
+import { persistHistory } from "./review-receipt-history-io.js";
 import { collectPrEvidence } from "./escalate-pr-io.js";
 import { collectPrEscalations } from "./escalate-pr.js";
 import { getAuditAnchorKey } from "./audit-anchor.js";
@@ -72,9 +77,14 @@ function graph(args: string[]): string {
   });
 }
 
+let failRemote = false;
 const run: ReadCommand = (command, args, cwd) => {
   if (command === "git") return execFileSync(command, args, { cwd, encoding: "utf8" });
+  if (failRemote) throw new Error("simulated GitHub outage");
   if (args[0] === "repo") return '{"nameWithOwner":"sandstream/kit"}';
+  if (args[0] === "pr" && mode === "resolve-track-during-gh") {
+    execFileSync("git", ["add", ".kit-review-receipt-history.jsonl"], { cwd });
+  }
   if (args[0] === "pr")
     return JSON.stringify({
       number: 12,
@@ -129,7 +139,7 @@ function crashHooks() {
   };
 }
 
-async function main(): Promise<void> {
+async function handleSpecialMode(): Promise<boolean> {
   if (mode === "claim-crash") {
     const canonicalRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
       cwd: root,
@@ -138,22 +148,47 @@ async function main(): Promise<void> {
     claimReviewRecovery(loadReviewTransaction(canonicalRoot, run));
     writeFileSync(join(signals, `${mode}.ready`), "ready");
     while (!existsSync(join(signals, "release"))) await new Promise((done) => setTimeout(done, 20));
-    return;
+    return true;
   }
-  if (mode === "recover") {
-    console.log(await recoverReviewReceipt(root, true, run));
-    return;
+  if (mode === "recover" || mode === "recover-reviewed" || mode === "recover-assess-crash") {
+    console.log(
+      await recoverReviewReceipt(root, true, run, {
+        interruptionReview:
+          mode !== "recover" ? "Human inspected the available review output." : undefined,
+        acknowledgeUnknown: mode !== "recover",
+        afterAssessment: mode === "recover-assess-crash" ? stopAtBarrier : undefined,
+      }),
+    );
+    return true;
   }
   if (mode === "verify") {
     const result = await verifyReviewReceiptFile(root, undefined, run);
     console.log(JSON.stringify(result));
-    return;
+    return true;
+  }
+  if (mode === "resolve" || mode === "resolve-track-during-gh") {
+    const runId = readFileSync(join(signals, "unresolved-run"), "utf8").trim();
+    console.log(
+      await resolveReviewInterruption(
+        root,
+        runId,
+        "Inspected previous output and accepted the remaining unknown risk.",
+        true,
+        run,
+      ),
+    );
+    return true;
   }
   if (mode === "escalate") {
     const evidence = await collectPrEvidence(root, { mergeDenied: false }, run);
     console.log(JSON.stringify(collectPrEscalations(evidence)));
-    return;
+    return true;
   }
+  return false;
+}
+
+async function main(): Promise<void> {
+  if (await handleSpecialMode()) return;
   if (mode === "append-failure") {
     const history = join(root, ".kit-review-receipt-history.jsonl");
     writeFileSync(history, "");
@@ -166,12 +201,29 @@ async function main(): Promise<void> {
     mode === "crash-ownerless" ? stopAtBarrier : undefined,
   );
   await prepareReviewReceipt(snapshot, transaction, run);
+  if (mode === "crash-unknown") stopAtBarrier();
+  if (mode === "legacy-interrupted") {
+    const pending = readReviewPending(transaction)!;
+    persistHistory(root, JSON.parse(pending), await getAuditAnchorKey(), transaction.dir);
+    finishReviewTransaction(transaction, undefined, [], pending, true);
+    return;
+  }
   if (mode === "staged-completed") await stageCompleted(transaction);
   writeFileSync(join(signals, `${mode}.ready`), "ready");
   if (mode === "crash" || mode === "hold" || mode === "staged-completed") {
     while (!existsSync(join(signals, "release"))) {
       await new Promise((done) => setTimeout(done, 20));
     }
+  }
+  if (mode === "crash-gate" || mode === "gate-network-error") {
+    await recordReviewGate(snapshot, transaction, {
+      command: "kit review --receipt",
+      exitCode: 1,
+      stdout: mode,
+      stderr: "",
+    });
+    if (mode === "crash-gate") stopAtBarrier();
+    failRemote = true;
   }
   await writeReviewReceipt(
     root,

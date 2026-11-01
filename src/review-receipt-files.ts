@@ -11,11 +11,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { isReadOnlyMode } from "./read-only-mode.js";
+import { assertReviewWritable, ReviewReadOnlyRefusal } from "./review-receipt-write-guard.js";
 
 const noFollow = constants.O_NOFOLLOW ?? 0;
 const nonBlock = constants.O_NONBLOCK ?? 0;
 
-function assertSameEntry(fd: number, path: string): void {
+export function assertSameEntry(fd: number, path: string): void {
   const opened = fstatSync(fd, { bigint: true });
   const entry = lstatSync(path, { bigint: true });
   if (
@@ -27,6 +29,11 @@ function assertSameEntry(fd: number, path: string): void {
   ) {
     throw new Error("review receipt file changed while opening");
   }
+}
+
+/** Decode only valid UTF-8, so malformed bytes cannot be normalised into signed text. */
+export function decodeReceiptUtf8(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 }
 
 function checkOpenedFile(fd: number, path: string): void {
@@ -69,8 +76,13 @@ function createHistory(path: string, flags: number, publish: typeof linkSync): n
   try {
     try {
       publish(temp, path);
+      assertReviewWritable(dirname(path), "review-history");
       assertSameEntry(fd, path);
     } catch (error) {
+      if (isReadOnlyMode()) {
+        if (error instanceof ReviewReadOnlyRefusal) throw error;
+        assertReviewWritable(dirname(path), "review-history");
+      }
       try {
         unlinkOwnedTemp(fd, temp);
       } catch (cleanupError) {
@@ -133,6 +145,7 @@ export function appendReceiptHistory(
   text: string,
   options: AppendReceiptHistoryOptions = {},
 ): void {
+  assertReviewWritable(dirname(path), "review-history");
   const fd = openHistoryForAppend(
     path,
     options.noFollowFlag ?? noFollow,
@@ -140,6 +153,7 @@ export function appendReceiptHistory(
     options.publish ?? linkSync,
   );
   try {
+    assertReviewWritable(dirname(path), "review-history");
     const write = options.write ?? ((handle, data) => writeFileSync(handle, data, "utf8"));
     write(fd, text);
   } finally {

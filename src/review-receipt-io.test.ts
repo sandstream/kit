@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -279,6 +279,37 @@ describe("writeReviewReceipt base identity", () => {
 });
 
 describe("verifyReviewReceiptFile", () => {
+  it("refuses an existing signing key readable by other users", async (t) => {
+    if (process.platform === "win32") {
+      t.skip("POSIX permission test");
+      return;
+    }
+    const dir = mkdtempSync(join(tmpdir(), "kit-review-key-permissions-"));
+    const previous = process.env.KIT_AUDIT_ANCHOR_DIR;
+    process.env.KIT_AUDIT_ANCHOR_DIR = join(dir, "anchor");
+    try {
+      mkdirSync(join(dir, ".git"));
+      const run = fakeCommands({ rootDir: dir });
+      const signed = signReviewReceipt(
+        collectReviewReceipt(dir, gate, run),
+        await getAuditAnchorKey(),
+      );
+      writeFileSync(join(dir, ".kit-review-receipt.json"), JSON.stringify(signed));
+      const key = join(dir, "anchor", "audit-anchor.key");
+      chmodSync(key, 0o644);
+      await assert.rejects(
+        verifyReviewReceiptFile(dir, undefined, run),
+        /not a private regular file/,
+      );
+      chmodSync(key, 0o600);
+      assert.equal((await verifyReviewReceiptFile(dir, undefined, run)).ok, true);
+    } finally {
+      if (previous === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
+      else process.env.KIT_AUDIT_ANCHOR_DIR = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never accepts an interrupted review as a current receipt", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-review-interrupted-"));
     const previous = process.env.KIT_AUDIT_ANCHOR_DIR;

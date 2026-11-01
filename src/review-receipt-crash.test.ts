@@ -11,6 +11,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -167,7 +168,7 @@ it("preserves receipt temp files without an ignore rule", async () => {
   try {
     await crash(test, "crash-receipt-temp");
     const temp = readdirSync(test.root).find((name) =>
-      /^\.kit-review-receipt\.json\.[a-f0-9]{12}\.tmp$/.test(name),
+      /^\.kit-review-receipt\.json\.(?:[a-f0-9]{12}|[a-f0-9]{32})\.tmp$/.test(name),
     );
     assert.ok(temp);
     const tempPath = join(test.root, temp),
@@ -223,5 +224,143 @@ it("gives preservation guidance for complete invalid history records", () => {
     } finally {
       rmSync(test.dir, { recursive: true, force: true });
     }
+  }
+});
+
+it("keeps two failures visible after a signed gate result and process termination", async () => {
+  const test = setup();
+  try {
+    mustSucceed(test, "first");
+    await crash(test, "crash-gate");
+    const recovered = mustSucceed(test, "recover");
+    assert.match(recovered.stdout, /Local gate result recorded/);
+    const incomplete = mustSucceed(test, "verify");
+    assert.equal(JSON.parse(incomplete.stdout).ok, false);
+    assert.match(mustSucceed(test, "escalate").stdout, /Failed 2 times/);
+    mustSucceed(test, "pass");
+    const escalated = mustSucceed(test, "escalate");
+    assert.match(escalated.stdout, /Failed 2 times/);
+  } finally {
+    rmSync(test.dir, { recursive: true, force: true });
+  }
+});
+
+it("recovers a signed gate failure after a GitHub outage", () => {
+  const test = setup();
+  try {
+    mustSucceed(test, "first");
+    const failed = mustBlock(test, "gate-network-error");
+    assert.match(failed.stderr, /simulated GitHub outage/);
+    mustSucceed(test, "recover");
+    mustSucceed(test, "pass");
+    assert.match(mustSucceed(test, "escalate").stdout, /Failed 2 times/);
+  } finally {
+    rmSync(test.dir, { recursive: true, force: true });
+  }
+});
+
+it("blocks old unresolved interruptions until a signed human decision", () => {
+  const test = setup();
+  try {
+    mustSucceed(test, "pass");
+    mustSucceed(test, "legacy-interrupted");
+    const history = readFileSync(test.history, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const original = history.find((entry) => entry.run_status === "interrupted");
+    assert.ok(original);
+    const blocked = JSON.parse(mustSucceed(test, "verify").stdout) as {
+      ok: boolean;
+      reason: string;
+    };
+    assert.equal(blocked.ok, false);
+    assert.ok(blocked.reason.includes(original.run_id));
+    assert.ok(blocked.reason.includes(original.head));
+    assert.ok(mustSucceed(test, "escalate").stdout.includes(original.run_id));
+    writeFileSync(join(test.signals, "unresolved-run"), original.run_id);
+    mustSucceed(test, "resolve");
+    assert.equal(JSON.parse(mustSucceed(test, "verify").stdout).ok, true);
+    const entries = readFileSync(test.history, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const decision = entries.find((entry) => entry.resolves_run_id === original.run_id);
+    assert.equal(decision.head, original.head);
+    assert.equal(decision.interruption_disposition, "risk-accepted");
+    assert.match(decision.interruption_review, /Inspected previous output/);
+  } finally {
+    rmSync(test.dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps a signed human assessment across a second process interruption", async () => {
+  const test = setup();
+  try {
+    await crash(test, "crash-unknown");
+    assert.match(mustBlock(test, "recover").stderr, /Review result is unknown/);
+    await crash(test, "recover-assess-crash");
+    const pending = JSON.parse(readFileSync(join(test.lock, "pending.json"), "utf8"));
+    assert.equal(pending.interruption_disposition, "risk-accepted");
+    assert.match(pending.interruption_review, /Human inspected/);
+    assert.match(mustBlock(test, "recover").stderr, /recovery is running or incomplete/);
+    const claim = join(test.lock, "recovery");
+    const owner = JSON.parse(readFileSync(join(claim, "owner.json"), "utf8"));
+    assert.ok(Number.isSafeInteger(owner.pid));
+    unlinkSync(join(claim, "owner.json"));
+    rmdirSync(claim);
+    mustSucceed(test, "recover");
+    const history = readFileSync(test.history, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(history.length, 1);
+    assert.equal(history[0].signature, pending.signature);
+    mustSucceed(test, "pass");
+    assert.equal(JSON.parse(mustSucceed(test, "verify").stdout).ok, true);
+  } finally {
+    rmSync(test.dir, { recursive: true, force: true });
+  }
+});
+
+it("does not append a human assessment to tracked history", () => {
+  const test = setup();
+  try {
+    mustSucceed(test, "legacy-interrupted");
+    const before = readFileSync(test.history);
+    const original = JSON.parse(before.toString()) as { run_id: string };
+    writeFileSync(join(test.signals, "unresolved-run"), original.run_id);
+    execFileSync("git", ["add", ".kit-review-receipt-history.jsonl"], { cwd: test.root });
+    const blocked = mustBlock(test, "resolve");
+    assert.match(blocked.stderr, /output paths must not contain tracked files/);
+    assert.deepEqual(readFileSync(test.history), before);
+    assert.equal(existsSync(test.lock), false);
+  } finally {
+    rmSync(test.dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps the assessment pending when history becomes tracked during GitHub lookup", () => {
+  const test = setup();
+  try {
+    mustSucceed(test, "legacy-interrupted");
+    const before = readFileSync(test.history);
+    const original = JSON.parse(before.toString()) as { run_id: string };
+    writeFileSync(join(test.signals, "unresolved-run"), original.run_id);
+    const blocked = mustBlock(test, "resolve-track-during-gh");
+    assert.match(blocked.stderr, /output paths must not contain tracked files/);
+    assert.deepEqual(readFileSync(test.history), before);
+    assert.ok(existsSync(join(test.lock, "pending.json")));
+    execFileSync("git", ["reset", "-q", "--", ".kit-review-receipt-history.jsonl"], {
+      cwd: test.root,
+    });
+    mustSucceed(test, "recover");
+    const records = readFileSync(test.history, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(records[1].resolves_run_id, original.run_id);
+  } finally {
+    rmSync(test.dir, { recursive: true, force: true });
   }
 });

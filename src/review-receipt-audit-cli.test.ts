@@ -132,9 +132,22 @@ it("recovers after a read-only refusal without ignoring or changing its audit lo
     const audit = join(root, ".kit-audit.jsonl");
     const before = readFileSync(audit, "utf8");
     assert.match(before, /review-recover-receipt/);
-    const recovered = run(process.execPath, args, root, env);
+    const unresolved = run(process.execPath, args, root, env);
+    assert.notEqual(unresolved.status, 0);
+    assert.match(unresolved.stderr, /Review result is unknown/);
+    const recovered = run(
+      process.execPath,
+      [
+        ...args,
+        "--acknowledge-unknown",
+        "--interruption-review",
+        "Human inspected the available review output.",
+      ],
+      root,
+      env,
+    );
     assert.equal(recovered.status, 0, `${recovered.stdout}\n${recovered.stderr}`);
-    assert.match(recovered.stdout, /Interrupted review recorded/);
+    assert.match(recovered.stdout, /Unknown review result and human assessment recorded/);
     assert.equal(readFileSync(audit, "utf8"), before);
     const receipt = JSON.parse(readFileSync(join(root, ".kit-review-receipt.json"), "utf8")) as {
       run_status: string;
@@ -143,6 +156,69 @@ it("recovers after a read-only refusal without ignoring or changing its audit lo
     const verify = run(process.execPath, [cli, "review", "verify-receipt"], root, env);
     assert.notEqual(verify.status, 0);
     assert.match(`${verify.stdout}\n${verify.stderr}`, /review was interrupted/i);
+  } finally {
+    rmTemp(dir);
+  }
+});
+
+it("assesses an older interruption through the real CLI", () => {
+  const dir = mkdtempSync(join(tmpdir(), "kit-review-resolve-cli-"));
+  const root = join(dir, "repo"),
+    home = join(dir, "home"),
+    bin = join(dir, "bin"),
+    signals = join(dir, "signals");
+  try {
+    for (const path of [root, home, bin, signals]) mkdirSync(path);
+    runGit(["init", "-q"], root);
+    writeFileSync(join(root, ".kit.toml"), "");
+    runGit(["add", ".kit.toml"], root);
+    runGit(
+      [
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.test",
+        "commit",
+        "-qm",
+        "fixture",
+      ],
+      root,
+    );
+    const env = environment(home, bin, join(dir, "anchor"), runGit(["rev-parse", "HEAD"], root));
+    const seeded = run(process.execPath, [fixture, root, "legacy-interrupted", signals], root, env);
+    assert.equal(seeded.status, 0, seeded.stderr);
+    const history = join(root, ".kit-review-receipt-history.jsonl");
+    const original = JSON.parse(readFileSync(history, "utf8")) as { run_id: string; head: string };
+    const flags = [
+      "--acknowledge-unknown",
+      "--interruption-review",
+      "Inspected logs and accepted the remaining unknown risk.",
+    ];
+    const wrong = run(
+      process.execPath,
+      [cli, "review", "resolve-interruption", "a".repeat(32), ...flags],
+      root,
+      env,
+    );
+    assert.notEqual(wrong.status, 0);
+    assert.equal(existsSync(join(root, ".git", "kit-review-receipt.lock")), false);
+    const result = run(
+      process.execPath,
+      [cli, "review", "resolve-interruption", original.run_id, ...flags],
+      root,
+      env,
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.ok(result.stdout.includes(original.run_id));
+    assert.ok(result.stdout.includes(original.head));
+    const records = readFileSync(history, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(records[1].resolves_run_id, original.run_id);
+    assert.equal(records[1].interruption_disposition, "risk-accepted");
   } finally {
     rmTemp(dir);
   }

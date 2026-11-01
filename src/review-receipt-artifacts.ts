@@ -3,7 +3,7 @@ import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const HISTORY_TEMP = /^\.kit-receipt-[a-f0-9]{32}\.tmp$/;
-const RECEIPT_TEMP = /^\.kit-review-receipt\.json\.[a-f0-9]{12}\.tmp$/;
+const RECEIPT_TEMP = /^\.kit-review-receipt\.json\.(?:[a-f0-9]{12}|[a-f0-9]{32})\.tmp$/;
 
 function describeHistoryLink(root: string, temp: string): string | null {
   const history = join(root, ".kit-review-receipt-history.jsonl");

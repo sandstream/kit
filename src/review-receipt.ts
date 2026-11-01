@@ -32,6 +32,10 @@ export interface ReviewReceipt {
   schema: "kit-pr-review-receipt/v3";
   run_id: string;
   run_status: "completed" | "interrupted";
+  gate_only?: boolean;
+  interruption_review?: string;
+  interruption_disposition?: "risk-accepted";
+  resolves_run_id?: string;
   repo: string;
   pr: number;
   head: string;

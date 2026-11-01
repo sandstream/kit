@@ -137,9 +137,12 @@ describe("review receipt interruption recovery", () => {
       const blocked = runChild(test.root, "verify", test.signals, test.anchor);
       assert.notEqual(blocked.status, 0);
       assert.match(blocked.stderr, /review is running or incomplete/);
-      const recovered = runChild(test.root, "recover", test.signals, test.anchor);
+      const unresolved = runChild(test.root, "recover", test.signals, test.anchor);
+      assert.notEqual(unresolved.status, 0);
+      assert.match(unresolved.stderr, /Review result is unknown/);
+      const recovered = runChild(test.root, "recover-reviewed", test.signals, test.anchor);
       assert.equal(recovered.status, 0, recovered.stderr);
-      assert.match(recovered.stdout, /Interrupted review recorded/);
+      assert.match(recovered.stdout, /Unknown review result and human assessment recorded/);
       assert.equal(await count(test.root, test.anchor, test.head), 0);
       const current = JSON.parse(
         readFileSync(join(test.root, ".kit-review-receipt.json"), "utf8"),
@@ -221,9 +224,9 @@ it("keeps a partial staged record locked until it is inspected", async () => {
     assert.notEqual(blocked.status, 0);
     assert.equal(existsSync(staged), true);
     unlinkSync(staged);
-    const recovered = runChild(test.root, "recover", test.signals, test.anchor);
+    const recovered = runChild(test.root, "recover-reviewed", test.signals, test.anchor);
     assert.equal(recovered.status, 0, recovered.stderr);
-    assert.match(recovered.stdout, /Interrupted review recorded/);
+    assert.match(recovered.stdout, /Unknown review result and human assessment recorded/);
     assert.equal(await count(test.root, test.anchor, test.head), 0);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill();
@@ -348,7 +351,7 @@ it("does not publish a recovered receipt after the local commit changes", async 
       ],
       { cwd: test.root },
     );
-    const recovered = runChild(test.root, "recover", test.signals, test.anchor, test.head);
+    const recovered = runChild(test.root, "recover-reviewed", test.signals, test.anchor, test.head);
     assert.equal(recovered.status, 0, recovered.stderr);
     assert.match(recovered.stdout, /pull request or local commit changed/);
     assert.equal(existsSync(join(test.root, ".kit-review-receipt.json")), false);
@@ -422,9 +425,9 @@ it("requires inspection before clearing an interrupted recovery claim", async ()
     assert.equal(record.pid, recovery.pid);
     unlinkSync(ownerFile);
     rmdirSync(claim);
-    const recovered = runChild(test.root, "recover", test.signals, test.anchor);
+    const recovered = runChild(test.root, "recover-reviewed", test.signals, test.anchor);
     assert.equal(recovered.status, 0, recovered.stderr);
-    assert.match(recovered.stdout, /Interrupted review recorded/);
+    assert.match(recovered.stdout, /Unknown review result and human assessment recorded/);
   } finally {
     if (owner.exitCode === null && owner.signalCode === null) owner.kill();
     if (recovery && recovery.exitCode === null && recovery.signalCode === null) recovery.kill();

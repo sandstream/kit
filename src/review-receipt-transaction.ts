@@ -17,7 +17,8 @@ import {
 import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { ReadCommand } from "./review-receipt-io.js";
-import { openReceiptForRead } from "./review-receipt-files.js";
+import { decodeReceiptUtf8, openReceiptForRead } from "./review-receipt-files.js";
+import { assertReviewWritable } from "./review-receipt-write-guard.js";
 
 const LOCK_NAME = "kit-review-receipt.lock";
 const GENERATION_NAME = "kit-review-receipt-generation";
@@ -32,6 +33,7 @@ export interface ReviewTransaction {
 }
 
 export interface RecoveryClaim {
+  root: string;
   dir: string;
   id: string;
   pid: number;
@@ -106,7 +108,16 @@ function readOptionalFile(path: string, maxBytes = 16 * 1024 * 1024): string | n
     while (total <= maxBytes) {
       const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1 - total));
       const count = readSync(fd, chunk, 0, chunk.length, null);
-      if (count === 0) return Buffer.concat(chunks, total).toString("utf8");
+      if (count === 0) {
+        try {
+          return decodeReceiptUtf8(Buffer.concat(chunks, total));
+        } catch (error) {
+          throw new Error(
+            `Invalid UTF-8 in review transaction file ${path}. Preserve the file and inspect it manually.`,
+            { cause: error },
+          );
+        }
+      }
       total += count;
       if (total > maxBytes) throw new Error("review transaction file is too large");
       chunks.push(chunk.subarray(0, count));
@@ -122,8 +133,10 @@ export function beginReviewTransaction(
   run: ReadCommand,
   afterLockCreated?: () => void,
 ): ReviewTransaction {
+  assertReviewWritable(root, "review-transaction");
   const dir = lockPath(root, run);
   const runId = randomBytes(16).toString("hex");
+  assertReviewWritable(root, "review-transaction");
   try {
     mkdirSync(dir, { mode: 0o700 });
   } catch (error) {
@@ -136,6 +149,7 @@ export function beginReviewTransaction(
     throw error;
   }
   afterLockCreated?.();
+  assertReviewWritable(root, "review-transaction");
   const transaction = { root, dir, runId, pid: process.pid, host: hostname() };
   writeExclusive(join(dir, "owner.json"), JSON.stringify(transaction));
   const temp = join(dir, "generation");
@@ -169,13 +183,28 @@ export function assertReviewOwner(transaction: ReviewTransaction): void {
 }
 
 export function writeReviewPending(transaction: ReviewTransaction, content: string): void {
+  assertReviewWritable(transaction.root, "review-pending");
   assertReviewOwner(transaction);
   const temp = join(transaction.dir, `pending-${randomBytes(8).toString("hex")}`);
   writeExclusive(temp, content);
   renameSync(temp, join(transaction.dir, "pending.json"));
 }
 
+export function writeRecoveryPending(
+  transaction: ReviewTransaction,
+  claim: RecoveryClaim,
+  content: string,
+): void {
+  assertReviewWritable(transaction.root, "review-recovery-pending");
+  assertTransactionMetadata(transaction);
+  assertRecoveryOwner(claim);
+  const temp = join(transaction.dir, `pending-${randomBytes(8).toString("hex")}`);
+  writeExclusive(temp, content);
+  renameSync(temp, join(transaction.dir, "pending.json"));
+}
+
 export function markReviewStarted(transaction: ReviewTransaction): void {
+  assertReviewWritable(transaction.root, "review-start");
   assertReviewOwner(transaction);
   writeExclusive(join(transaction.dir, "started"), transaction.runId);
 }
@@ -203,6 +232,7 @@ export function readReviewStagedPending(
 }
 
 export function claimReviewRecovery(transaction: ReviewTransaction): RecoveryClaim {
+  assertReviewWritable(transaction.root, "review-recovery-claim");
   assertTransactionMetadata(transaction);
   const dir = join(transaction.dir, "recovery");
   try {
@@ -216,7 +246,13 @@ export function claimReviewRecovery(transaction: ReviewTransaction): RecoveryCla
     }
     throw error;
   }
-  const claim = { dir, id: randomBytes(16).toString("hex"), pid: process.pid, host: hostname() };
+  const claim = {
+    root: transaction.root,
+    dir,
+    id: randomBytes(16).toString("hex"),
+    pid: process.pid,
+    host: hostname(),
+  };
   writeExclusive(join(dir, "owner.json"), JSON.stringify(claim));
   return claim;
 }
@@ -226,6 +262,7 @@ function assertRecoveryOwner(claim: RecoveryClaim): void {
   if (content === null) throw new Error("review recovery owner is missing");
   const actual = JSON.parse(content) as RecoveryClaim;
   if (
+    actual.root !== claim.root ||
     actual.id !== claim.id ||
     actual.pid !== claim.pid ||
     actual.host !== claim.host ||
@@ -237,6 +274,7 @@ function assertRecoveryOwner(claim: RecoveryClaim): void {
 }
 
 export function releaseReviewRecovery(claim: RecoveryClaim): void {
+  assertReviewWritable(claim.root, "review-recovery-release");
   assertRecoveryOwner(claim);
   unlinkSync(join(claim.dir, "owner.json"));
   rmdirSync(claim.dir);
@@ -249,6 +287,7 @@ export function finishReviewTransaction(
   expectedPending: string | null = null,
   expectedStarted = false,
 ): void {
+  assertReviewWritable(transaction.root, "review-transaction-finish");
   if (claim) {
     assertTransactionMetadata(transaction);
     assertRecoveryOwner(claim);

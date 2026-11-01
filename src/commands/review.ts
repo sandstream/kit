@@ -29,7 +29,9 @@ import {
   captureReviewSnapshot,
   defaultReadCommand,
   prepareReviewReceipt,
+  recordReviewGate,
   recoverReviewReceipt,
+  resolveReviewInterruption,
   verifyReviewReceiptFile,
   writeReviewReceipt,
   type ReviewSnapshot,
@@ -245,12 +247,45 @@ async function recoverReceiptCommand(cwd: string): Promise<boolean> {
     { operation: "review", operationType: "write", metadata: {} },
     async () => {
       try {
-        const result = await recoverReviewReceipt(cwd, hasFlag(process.argv, "--confirm-stopped"));
+        const result = await recoverReviewReceipt(
+          cwd,
+          hasFlag(process.argv, "--confirm-stopped"),
+          defaultReadCommand,
+          {
+            interruptionReview: flagValue(process.argv, "--interruption-review"),
+            acknowledgeUnknown: hasFlag(process.argv, "--acknowledge-unknown"),
+          },
+        );
         console.log(result);
         return true;
       } catch (error) {
         console.error(
           `✗ Review recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return false;
+      }
+    },
+  );
+}
+
+async function resolveInterruptionCommand(cwd: string): Promise<boolean> {
+  const config = await loadConfig(resolve(cwd, KIT_FILE));
+  return withGovernance(
+    config,
+    { operation: "review", operationType: "write", metadata: {} },
+    async () => {
+      try {
+        const result = await resolveReviewInterruption(
+          cwd,
+          process.argv[4] ?? "",
+          flagValue(process.argv, "--interruption-review"),
+          hasFlag(process.argv, "--acknowledge-unknown"),
+        );
+        console.log(result);
+        return true;
+      } catch (error) {
+        console.error(
+          `✗ Review assessment failed: ${error instanceof Error ? error.message : String(error)}`,
         );
         return false;
       }
@@ -266,12 +301,37 @@ function incompatibleReceiptOptions(
   return receiptMode && (!!stages || !!category || hasFlag(process.argv, "--lenient"));
 }
 
+function misplacedRecoveryFlag(): string | null {
+  if (hasFlag(process.argv, "--confirm-stopped")) {
+    return "--confirm-stopped requires review recover-receipt";
+  }
+  if (hasFlag(process.argv, "--interruption-review")) {
+    return "--interruption-review requires review recover-receipt";
+  }
+  if (hasFlag(process.argv, "--acknowledge-unknown")) {
+    return "--acknowledge-unknown requires review recovery or interruption assessment";
+  }
+  return null;
+}
+
+function specialReviewCommand(cwd: string): Promise<boolean> | undefined {
+  switch (process.argv[3]) {
+    case "verify-receipt":
+      return verifyReceiptCommand(cwd);
+    case "recover-receipt":
+      return recoverReceiptCommand(cwd);
+    case "resolve-interruption":
+      return resolveInterruptionCommand(cwd);
+  }
+}
+
 export async function cmdReview(): Promise<boolean> {
   const cwd = await reviewDirectory();
-  if (process.argv[3] === "verify-receipt") return verifyReceiptCommand(cwd);
-  if (process.argv[3] === "recover-receipt") return recoverReceiptCommand(cwd);
-  if (hasFlag(process.argv, "--confirm-stopped")) {
-    console.error("--confirm-stopped requires review recover-receipt");
+  const special = specialReviewCommand(cwd);
+  if (special) return special;
+  const flagError = misplacedRecoveryFlag();
+  if (flagError) {
+    console.error(flagError);
     return false;
   }
   const receiptMode = hasFlag(process.argv, "--receipt");
@@ -392,29 +452,28 @@ async function renderJsonReview(
   transaction: ReviewTransaction | undefined,
 ): Promise<boolean> {
   const output = JSON.stringify(report, null, 2) + "\n";
-  process.stdout.write(output);
   if (receiptMode) {
     try {
-      const { path, receipt } = await writeReviewReceipt(
-        cwd,
-        {
-          command: "kit review --receipt",
-          exitCode: report.ok ? 0 : 1,
-          stdout: output,
-          stderr: "",
-          failures: report.stages
-            .filter((stage) => !stage.ok)
-            .flatMap((stage) => {
-              const findings = stage.findings
-                .filter((finding) => finding.status === "fail" || finding.status === "warn")
-                .map(
-                  (finding) => `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
-                );
-              return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
-            }),
-        },
-        { snapshot, transaction },
-      );
+      if (!snapshot || !transaction) throw new Error("review transaction is missing");
+      const gate = {
+        command: "kit review --receipt",
+        exitCode: report.ok ? 0 : 1,
+        stdout: output,
+        stderr: "",
+        failures: report.stages
+          .filter((stage) => !stage.ok)
+          .flatMap((stage) => {
+            const findings = stage.findings
+              .filter((finding) => finding.status === "fail" || finding.status === "warn")
+              .map(
+                (finding) => `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
+              );
+            return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
+          }),
+      };
+      await recordReviewGate(snapshot, transaction, gate);
+      process.stdout.write(output);
+      const { path, receipt } = await writeReviewReceipt(cwd, gate, { snapshot, transaction });
       console.error(`Review receipt: ${path}`);
       for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);
       return receipt.evidence_issues.length === 0;
@@ -425,6 +484,7 @@ async function renderJsonReview(
       return false;
     }
   }
+  process.stdout.write(output);
   return report.ok;
 }
 

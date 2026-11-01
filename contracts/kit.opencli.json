@@ -2078,8 +2078,9 @@
     },
     "review": {
       "kind": "command",
-      "summary": "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks it. recover-receipt --confirm-stopped restores an interrupted transaction. --json emits a report; --stages and --category scope runs.",
+      "summary": "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks it. recover-receipt restores a stopped transaction. resolve-interruption records a review of an unknown result. --json emits a report; --stages and --category scope runs.",
       "x-kit-accepted-flags": [
+        "--acknowledge-unknown",
         "--attest",
         "--category",
         "--confirm-stopped",
@@ -2088,6 +2089,7 @@
         "--env",
         "--fail-on-warning",
         "--help",
+        "--interruption-review",
         "--json",
         "--lenient",
         "--no-auto-install",

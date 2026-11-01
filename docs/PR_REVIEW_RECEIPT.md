@@ -25,6 +25,13 @@ Run `kit review verify-receipt` to check the signature and current PR head.
 You can pass a receipt path after `verify-receipt`.
 The signature uses the local audit anchor key in `~/.kit`.
 Verification needs that key on the same machine.
+Review receipts require an owner-only key file owned by the current user.
+Keep the key directory under trusted control during key creation and use.
+The checks cannot prevent every concurrent replacement between file operations.
+If Kit rejects an existing key, preserve that file and inspect its owner and permissions.
+On POSIX systems, restrict the existing key file to mode `600` before retrying.
+On Windows, restore an owner-only access control list on the existing key file.
+Do not replace the key. Earlier signatures need the same key.
 
 The receipt records GitHub review threads only.
 Other security findings need their own recorded source in a later review step.
@@ -47,10 +54,36 @@ Version 1 receipts remain valid only as signed failure history.
 
 Kit permits one receipt review at a time in each Git worktree.
 The lock stays in the worktree's Git metadata until the signed receipt and history are complete.
+Read-only mode blocks receipt and history writes.
+If read-only mode starts during a write, Kit preserves the remaining transaction evidence.
+Inspect and recover that transaction after write access is restored.
+Protected review key creation requires hard links on the key file system.
+For review, Kit secures a temporary file before it writes key material.
+Kit then links the completed key into place.
+Other audit operations retain the earlier key creation behavior.
+Those operations can write a new key before its permissions are restricted.
+If read-only mode starts during key creation, Kit preserves any temporary key file.
+A process interruption after linking can leave two names for the same key.
+Kit refuses that key until a qualified person has inspected and resolved both names.
+Preserve both names and confirm every key user has stopped before any manual action.
+Only remove a temporary name after confirming it belongs to the interrupted creation.
+The asynchronous receipt commands wait for the audit attempt before reporting a read-only refusal.
+Synchronous internal file helpers start an audit attempt but cannot wait for it.
+The audit record can be absent if the process stops before that attempt finishes.
 An interrupted review blocks receipt verification and PR escalation until recovery.
 Inspect the review process and confirm that it has stopped.
-Run `kit review recover-receipt --confirm-stopped` to restore the signed pending result.
-Recovery records an interrupted review as incomplete, not as a confirmed gate failure.
+Run `kit review recover-receipt --confirm-stopped` to restore a known signed gate result.
+Kit records the local gate result before it prints the report or requests PR evidence.
+An interruption before that record leaves an unknown result and keeps the review locked.
+An unknown result is not a confirmed gate failure.
+Inspect the available output and decide whether to accept the remaining unknown risk.
+To record that decision, run `kit review recover-receipt --confirm-stopped --acknowledge-unknown --interruption-review "describe the evidence and decision"`.
+The signed local record includes the review identity, commit, decision, and note.
+The signature protects the record against undetected changes.
+The local signature does not prove the identity of the person who made the decision.
+Use `kit review resolve-interruption RUN_ID --acknowledge-unknown --interruption-review "describe the evidence and decision"` for an older unresolved history entry.
+Verification names each unresolved run and commit. It refuses to approve while one remains unresolved.
+Keep evidence outside Kit if it is needed to establish the actual gate result.
 Run a new review after recovery reports an interruption or changed pull request.
 Kit does not automatically remove locks based on age or an absent process ID.
 If a recovery claim is also left behind, inspect its owner and confirm that process has stopped.
