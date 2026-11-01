@@ -242,11 +242,11 @@ async function verifyReceiptCommand(cwd: string): Promise<boolean> {
 
 async function recoverReceiptCommand(cwd: string): Promise<boolean> {
   const config = await loadConfig(resolve(cwd, KIT_FILE));
-  return withGovernance(
-    config,
-    { operation: "review", operationType: "write", metadata: {} },
-    async () => {
-      try {
+  try {
+    return await withGovernance(
+      config,
+      { operation: "review", operationType: "write", metadata: {} },
+      async () => {
         const result = await recoverReviewReceipt(
           cwd,
           hasFlag(process.argv, "--confirm-stopped"),
@@ -258,23 +258,23 @@ async function recoverReceiptCommand(cwd: string): Promise<boolean> {
         );
         console.log(result);
         return true;
-      } catch (error) {
-        console.error(
-          `✗ Review recovery failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return false;
-      }
-    },
-  );
+      },
+    );
+  } catch (error) {
+    console.error(
+      `✗ Review recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
 }
 
 async function resolveInterruptionCommand(cwd: string): Promise<boolean> {
   const config = await loadConfig(resolve(cwd, KIT_FILE));
-  return withGovernance(
-    config,
-    { operation: "review", operationType: "write", metadata: {} },
-    async () => {
-      try {
+  try {
+    return await withGovernance(
+      config,
+      { operation: "review", operationType: "write", metadata: {} },
+      async () => {
         const result = await resolveReviewInterruption(
           cwd,
           process.argv[4] ?? "",
@@ -283,14 +283,14 @@ async function resolveInterruptionCommand(cwd: string): Promise<boolean> {
         );
         console.log(result);
         return true;
-      } catch (error) {
-        console.error(
-          `✗ Review assessment failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return false;
-      }
-    },
-  );
+      },
+    );
+  } catch (error) {
+    console.error(
+      `✗ Review assessment failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
 }
 
 function incompatibleReceiptOptions(

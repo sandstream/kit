@@ -96,7 +96,7 @@ async function interruptedReview(root: string, signals: string, env: NodeJS.Proc
   }
 }
 
-it("recovers after a read-only refusal without ignoring or changing its audit log", async () => {
+it("records governance outcomes after a read-only recovery refusal", async () => {
   const dir = mkdtempSync(join(tmpdir(), "kit-review-audit-cli-"));
   const root = join(dir, "repo");
   const home = join(dir, "home");
@@ -106,7 +106,7 @@ it("recovers after a read-only refusal without ignoring or changing its audit lo
     for (const path of [root, home, bin, signals]) mkdirSync(path);
     runGit(["init", "-q"], root);
     runGit(["config", "core.hooksPath", join(dir, "no-hooks")], root);
-    writeFileSync(join(root, ".kit.toml"), "");
+    writeFileSync(join(root, ".kit.toml"), '[governance]\nenabled = true\nenvironment = "dev"\n');
     runGit(["add", ".kit.toml"], root);
     runGit(
       [
@@ -135,6 +135,13 @@ it("recovers after a read-only refusal without ignoring or changing its audit lo
     const unresolved = run(process.execPath, args, root, env);
     assert.notEqual(unresolved.status, 0);
     assert.match(unresolved.stderr, /Review result is unknown/);
+    assert.ok(
+      auditEvents(root).some((event) => event.operation === "review" && event.success === false),
+    );
+    assert.equal(
+      auditEvents(root).some((event) => event.operation === "review" && event.success),
+      false,
+    );
     const recovered = run(
       process.execPath,
       [
@@ -148,7 +155,9 @@ it("recovers after a read-only refusal without ignoring or changing its audit lo
     );
     assert.equal(recovered.status, 0, `${recovered.stdout}\n${recovered.stderr}`);
     assert.match(recovered.stdout, /Unknown review result and human assessment recorded/);
-    assert.equal(readFileSync(audit, "utf8"), before);
+    assert.ok(readFileSync(audit, "utf8").startsWith(before));
+    assert.ok(auditEvents(root).some((event) => event.operation === "review" && event.success));
+    assert.equal(existsSync(join(root, ".kit-budget.json")), true);
     const receipt = JSON.parse(readFileSync(join(root, ".kit-review-receipt.json"), "utf8")) as {
       run_status: string;
     };
@@ -161,6 +170,85 @@ it("recovers after a read-only refusal without ignoring or changing its audit lo
   }
 });
 
+interface AuditEntry {
+  operation: string;
+  success: boolean;
+  metadata?: { refused_operation?: string };
+}
+
+function auditEvents(root: string): AuditEntry[] {
+  return readFileSync(join(root, ".kit-audit.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as AuditEntry);
+}
+
+function checkReadOnlyResolution(
+  root: string,
+  env: NodeJS.ProcessEnv,
+  history: string,
+  command: string[],
+): void {
+  const before = readFileSync(history);
+  for (const mode of ["env", "flag", "leading-flag"] as const) {
+    const args =
+      mode === "flag"
+        ? [...command, "--read-only"]
+        : mode === "leading-flag"
+          ? ["--read-only", ...command]
+          : command;
+    const denied = run(
+      process.execPath,
+      [cli, ...args],
+      root,
+      mode === "env" ? { ...env, KIT_READ_ONLY: "1" } : env,
+    );
+    assert.notEqual(denied.status, 0, mode);
+    assert.match(`${denied.stdout}\n${denied.stderr}`, /read-only mode active/);
+    assert.doesNotMatch(
+      `${denied.stdout}\n${denied.stderr}`,
+      /approval required|approve this|\[y\/n\]/i,
+    );
+    assert.deepEqual(readFileSync(history), before);
+    assert.equal(existsSync(join(root, ".git", "kit-review-receipt.lock")), false);
+  }
+  const refused = auditEvents(root).filter(
+    (event) =>
+      event.operation === "read-only-mode-refusal" &&
+      event.metadata?.refused_operation === "review-resolve-interruption",
+  );
+  assert.equal(refused.length, 3);
+  assert.ok(refused.every((event) => event.success === false));
+  assert.equal(
+    auditEvents(root).some((event) => event.operation === "review" && event.success),
+    false,
+  );
+}
+
+function checkApprovalPrecedence(root: string, env: NodeJS.ProcessEnv, command: string[]): void {
+  const config = join(root, ".kit.toml");
+  const original = readFileSync(config, "utf8");
+  try {
+    writeFileSync(config, '[governance]\nenabled = true\nenvironment = "prod"\n');
+    const denied = run(process.execPath, [cli, ...command], root, { ...env, KIT_READ_ONLY: "1" });
+    assert.notEqual(denied.status, 0);
+    assert.match(`${denied.stdout}\n${denied.stderr}`, /read-only mode active/);
+    assert.doesNotMatch(`${denied.stdout}\n${denied.stderr}`, /APPROVAL REQUIRED/i);
+    const control = run(process.execPath, [cli, ...command], root, env);
+    assert.notEqual(control.status, 0);
+    assert.match(`${control.stdout}\n${control.stderr}`, /APPROVAL REQUIRED/i);
+    assert.ok(
+      auditEvents(root).some((event) => event.operation === "review" && event.success === false),
+    );
+    assert.equal(
+      auditEvents(root).some((event) => event.operation === "review" && event.success),
+      false,
+    );
+  } finally {
+    writeFileSync(config, original);
+  }
+}
+
 it("assesses an older interruption through the real CLI", () => {
   const dir = mkdtempSync(join(tmpdir(), "kit-review-resolve-cli-"));
   const root = join(dir, "repo"),
@@ -170,7 +258,7 @@ it("assesses an older interruption through the real CLI", () => {
   try {
     for (const path of [root, home, bin, signals]) mkdirSync(path);
     runGit(["init", "-q"], root);
-    writeFileSync(join(root, ".kit.toml"), "");
+    writeFileSync(join(root, ".kit.toml"), '[governance]\nenabled = true\nenvironment = "dev"\n');
     runGit(["add", ".kit.toml"], root);
     runGit(
       [
@@ -196,6 +284,9 @@ it("assesses an older interruption through the real CLI", () => {
       "--interruption-review",
       "Inspected logs and accepted the remaining unknown risk.",
     ];
+    const command = ["review", "resolve-interruption", original.run_id, ...flags];
+    checkReadOnlyResolution(root, env, history, command);
+    checkApprovalPrecedence(root, env, command);
     const wrong = run(
       process.execPath,
       [cli, "review", "resolve-interruption", "a".repeat(32), ...flags],
@@ -204,6 +295,13 @@ it("assesses an older interruption through the real CLI", () => {
     );
     assert.notEqual(wrong.status, 0);
     assert.equal(existsSync(join(root, ".git", "kit-review-receipt.lock")), false);
+    assert.ok(
+      auditEvents(root).some((event) => event.operation === "review" && event.success === false),
+    );
+    assert.equal(
+      auditEvents(root).some((event) => event.operation === "review" && event.success),
+      false,
+    );
     const result = run(
       process.execPath,
       [cli, "review", "resolve-interruption", original.run_id, ...flags],
@@ -211,6 +309,7 @@ it("assesses an older interruption through the real CLI", () => {
       env,
     );
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.ok(auditEvents(root).some((event) => event.operation === "review" && event.success));
     assert.ok(result.stdout.includes(original.run_id));
     assert.ok(result.stdout.includes(original.head));
     const records = readFileSync(history, "utf8")

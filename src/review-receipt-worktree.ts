@@ -7,7 +7,12 @@ import type { ReadCommand } from "./review-receipt-io.js";
 export const REVIEW_RECEIPT_FILE = ".kit-review-receipt.json";
 
 export function cleanReviewWorktree(root: string, run: ReadCommand): void {
-  const outputFiles = [REVIEW_RECEIPT_FILE, REVIEW_RECEIPT_HISTORY_FILE, ".kit-audit.jsonl"];
+  const outputFiles = [
+    REVIEW_RECEIPT_FILE,
+    REVIEW_RECEIPT_HISTORY_FILE,
+    ".kit-audit.jsonl",
+    ".kit-budget.json",
+  ];
   const indexedPaths = outputFiles.map((file) => `:(icase,literal)${file}`);
   if (run("git", ["ls-files", "-z", "--", ...indexedPaths], root) !== "") {
     throw new Error("review receipt output paths must not contain tracked files");
