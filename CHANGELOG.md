@@ -27,6 +27,20 @@
 
 ### Added
 
+- **`kit services`: leases for the local services agents start (experimental).** Agent sessions
+  start Supabase stacks, compose projects, containers and dev servers and end without stopping
+  them; on one Mac that was 40 containers from four Supabase projects, about 5.4 GB of RAM, one of
+  them left by a test five months earlier. `kit services add` records who started what (the Claude
+  Code or Codex session, from `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`), for which project,
+  and until when (a lease, 4 hours by default) in `~/.kit/services.json`. `ls` checks every entry
+  against what runs (one `docker ps`, `kill -0` for a pid, a connect for a port) and lists running
+  docker workloads nobody registered, grouped by Supabase or compose project, with age and memory.
+  `stop` refuses a non-owner while the lease runs, then verifies the service is gone before it drops
+  the entry. `ask` records a stop request; the owner answers with `keep` or `release` on its next
+  prompt, and an unanswered request leaves the service stoppable once the lease ends. The existing
+  memory hooks show the owner its requests and ending leases, and mark a session's entries when it
+  ends. Docker missing or stopped reads as `unknown`, never `dead`, so `prune` keeps those entries.
+  The macOS path was run on a Mac; Windows `taskkill` and the `supabase` shim path are untested.
 - **`kit escalate feed github` tracks what GitHub reports as broken, so the failure mail is not the only
   record.** It reads the latest push or schedule run of every active workflow on the default branch
   and the open Dependabot alerts (read-only `gh api` calls), and keeps one action item per failure.
