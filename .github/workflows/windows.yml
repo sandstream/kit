@@ -54,7 +54,9 @@ jobs:
       - name: Record PowerShell environment shape
         if: inputs.probe_shell == 'true' && matrix.shard == 1
         shell: pwsh
-        run: node -e "const x=process.env.PSModulePath || ''; console.log(JSON.stringify({shell:'pwsh',present:!!x,length:x.length,semicolons:(x.match(/;/g)||[]).length,colons:(x.match(/:/g)||[]).length}));"
+        run: |
+          node -e "const x=process.env.PSModulePath || ''; console.log(JSON.stringify({shell:'pwsh',present:!!x,length:x.length,semicolons:(x.match(/;/g)||[]).length,colons:(x.match(/:/g)||[]).length}));"
+          [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\kit-pwsh-module-path.txt", $env:PSModulePath)
       - name: Focused Windows test
         if: inputs.test_file != '' && matrix.shard == 1
         shell: pwsh
@@ -80,10 +82,16 @@ jobs:
           set +e
           node --test --test-timeout=180000 --test-concurrency=1 dist/review-receipt-audit-cli.test.js > "$RUNNER_TEMP/kit-acl-shell-probe.log" 2>&1
           status=$?
+          echo 'Results with original Bash environment:'
           grep -E '^not ok|^ok |^# (tests|pass|fail|skipped)' "$RUNNER_TEMP/kit-acl-shell-probe.log" || true
           if grep -q 'ETIMEDOUT' "$RUNNER_TEMP/kit-acl-shell-probe.log"; then echo 'Detected ETIMEDOUT'; fi
           if grep -q 'Unexpected gh invocation' "$RUNNER_TEMP/kit-acl-shell-probe.log"; then echo 'Detected Unexpected gh invocation'; fi
-          exit "$status"
+          PSModulePath="$(cat "$RUNNER_TEMP/kit-pwsh-module-path.txt")" node --test --test-timeout=180000 --test-concurrency=1 dist/review-receipt-audit-cli.test.js > "$RUNNER_TEMP/kit-acl-shell-override.log" 2>&1
+          override_status=$?
+          echo 'Results with PowerShell module path:'
+          grep -E '^not ok|^ok |^# (tests|pass|fail|skipped)' "$RUNNER_TEMP/kit-acl-shell-override.log" || true
+          if grep -q 'ETIMEDOUT' "$RUNNER_TEMP/kit-acl-shell-override.log"; then echo 'Detected ETIMEDOUT'; fi
+          test "$status" -eq 0 && test "$override_status" -eq 0
       - name: Unit tests (shard ${{ matrix.shard }}/4)
         if: inputs.test_file == ''
         shell: bash
