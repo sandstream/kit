@@ -62,6 +62,7 @@ function environment(home: string, bin: string, anchor: string, head: string): N
     HOME: home,
     USERPROFILE: home,
     SystemRoot: process.env.SystemRoot,
+    PSModulePath: process.env.PSModulePath,
     COMSPEC: process.env.COMSPEC,
     PATHEXT: process.env.PATHEXT,
     TMP: home,

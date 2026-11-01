@@ -1,7 +1,7 @@
 /** Separate process fixture for receipt transactions. */
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, linkSync, readFileSync, writeFileSync, writeSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   captureReviewSnapshot,
   collectReviewReceipt,
@@ -141,10 +141,12 @@ function crashHooks() {
 
 async function handleSpecialMode(): Promise<boolean> {
   if (mode === "claim-crash") {
-    const canonicalRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd: root,
-      encoding: "utf8",
-    }).trim();
+    const canonicalRoot = resolve(
+      execFileSync("git", ["rev-parse", "--show-toplevel"], {
+        cwd: root,
+        encoding: "utf8",
+      }).trim(),
+    );
     claimReviewRecovery(loadReviewTransaction(canonicalRoot, run));
     writeFileSync(join(signals, `${mode}.ready`), "ready");
     while (!existsSync(join(signals, "release"))) await new Promise((done) => setTimeout(done, 20));
