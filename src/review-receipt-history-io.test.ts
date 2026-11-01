@@ -71,9 +71,9 @@ function paddedReceipt(key: Buffer, bytes: number) {
   const { signature: _signature, sig_alg: _algorithm, ...body } = receipt(key, "1");
   const sign = (padding: string) =>
     signReviewReceipt({ ...body, gate: { ...body.gate, failures: [padding] } }, key);
-  const base = Buffer.byteLength(JSON.stringify(sign("å")) + "\n");
+  const base = Buffer.byteLength(JSON.stringify(sign("\u00e5")) + "\n");
   assert.ok(bytes >= base);
-  return sign("å" + "x".repeat(bytes - base));
+  return sign("\u00e5" + "x".repeat(bytes - base));
 }
 
 for (const overflow of [false, true]) {
@@ -82,7 +82,7 @@ for (const overflow of [false, true]) {
       const limit = 16 * 1024 * 1024;
       const { signature: _signature, sig_alg: _algorithm, ...nextBody } = receipt(key, "2");
       const next = signReviewReceipt(
-        { ...nextBody, gate: { ...nextBody.gate, failures: ["ö"] } },
+        { ...nextBody, gate: { ...nextBody.gate, failures: ["\u00f6"] } },
         key,
       );
       const nextBytes = Buffer.byteLength(JSON.stringify(next) + "\n");
