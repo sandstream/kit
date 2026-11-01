@@ -101,7 +101,12 @@ jobs:
           echo 'Results with Windows system modules only:'
           grep -E '^not ok|^ok |^# (tests|pass|fail|skipped)' "$RUNNER_TEMP/kit-acl-shell-minimal.log" || true
           if grep -q 'ETIMEDOUT' "$RUNNER_TEMP/kit-acl-shell-minimal.log"; then echo 'Detected ETIMEDOUT'; fi
-          test "$status" -eq 0 && test "$override_status" -eq 0 && test "$minimal_status" -eq 0
+          PSModulePath="" node --test --test-timeout=180000 --test-concurrency=1 dist/review-receipt-audit-cli.test.js > "$RUNNER_TEMP/kit-acl-shell-empty.log" 2>&1
+          empty_status=$?
+          echo 'Results with empty module path:'
+          grep -E '^not ok|^ok |^# (tests|pass|fail|skipped)' "$RUNNER_TEMP/kit-acl-shell-empty.log" || true
+          if grep -q 'ETIMEDOUT' "$RUNNER_TEMP/kit-acl-shell-empty.log"; then echo 'Detected ETIMEDOUT'; fi
+          test "$status" -eq 0 && test "$override_status" -eq 0 && test "$minimal_status" -eq 0 && test "$empty_status" -eq 0
       - name: Unit tests (shard ${{ matrix.shard }}/4)
         if: inputs.test_file == ''
         shell: bash
