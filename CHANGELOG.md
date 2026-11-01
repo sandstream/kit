@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Security
+
+- **`kit triage skill <dir>` triages a Claude Code plugin as a plugin.** A directory with
+  `.claude-plugin/plugin.json` used to be judged by its `SKILL.md` files alone, so a plugin whose
+  hooks block the agent's reads and whose script runs an unpinned `npx` package on every call scored
+  100/100. kit now reads the plugin's hook registrations and scripts and warns on a `PreToolUse`
+  hook over `Read`/`Bash`/`Edit`/`Write`, a `SessionStart`/`UserPromptSubmit` hook (its output
+  enters the agent's context), an unpinned `npx`/`bunx`/`uvx`/`dlx`/`pipx run` package, and a
+  `curl`/`wget` file upload. A hooks path that leaves the plugin directory is refused.
+
 ## [7.1.0] - 2026-11-01
 
 ### Changed
