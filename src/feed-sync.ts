@@ -1,7 +1,8 @@
-/** Reconcile a GitHub feed with the pending action ledger. One source tag per kind, one scope per repo. */
+/** Reconcile outside-service feeds with the pending action ledger. One source tag per kind and source. */
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { GithubFeed } from "./feed-github.js";
+import type { VercelFeed } from "./feed-vercel.js";
 import { palSyncFindings, type SyncFindingsResult } from "./memory/pal.js";
 
 export interface FeedSyncResult {
@@ -16,8 +17,8 @@ export interface FeedSyncResult {
  * the command ran in: with a repo-shaped scope no list would ever show the item. Each repository
  * gets its own source tag instead, so a sync only reconciles its own repository's items.
  */
-function tag(kind: "ci" | "dep", repo: string): string {
-  return `${kind}${createHash("sha256").update(repo).digest("hex").slice(0, 8)}`;
+function tag(kind: "ci" | "dep" | "vc", source: string): string {
+  return `${kind}${createHash("sha256").update(source).digest("hex").slice(0, 8)}`;
 }
 
 export function syncGithubFeed(db: DatabaseSync, feed: GithubFeed): FeedSyncResult {
@@ -29,17 +30,33 @@ export function syncGithubFeed(db: DatabaseSync, feed: GithubFeed): FeedSyncResu
   };
 }
 
+export function syncVercelFeed(db: DatabaseSync, feed: VercelFeed): SyncFindingsResult | null {
+  return feed.production ? palSyncFindings(db, tag("vc", feed.scope), feed.production) : null;
+}
+
+export type FeedService = "github" | "vercel";
+
+const LOGIN: Record<FeedService, { label: string; fix: string }> = {
+  github: { label: "GitHub", fix: "gh auth login" },
+  vercel: { label: "Vercel", fix: "vercel login" },
+};
+
 /** A feed that cannot log in is itself something to act on, or the mail it replaces would just stop. */
-export function syncFeedAuth(db: DatabaseSync, broken: boolean): void {
+export function syncFeedAuth(
+  db: DatabaseSync,
+  broken: boolean,
+  service: FeedService = "github",
+): void {
+  const { label, fix } = LOGIN[service];
   palSyncFindings(
     db,
-    "feedauth",
+    service === "github" ? "feedauth" : `feedauth${service}`,
     broken
       ? [
           {
-            dedupKey: "github",
-            title: "GitHub feed: not logged in",
-            detail: "kit escalate feed github cannot read GitHub. Run: gh auth login",
+            dedupKey: service,
+            title: `${label} feed: not logged in`,
+            detail: `kit escalate feed ${service} cannot read ${label}. Run: ${fix}`,
           },
         ]
       : [],

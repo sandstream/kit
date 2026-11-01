@@ -2,7 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openMemoryDb } from "./memory/db.js";
 import type { GithubFeed } from "./feed-github.js";
-import { syncGithubFeed } from "./feed-sync.js";
+import type { VercelFeed } from "./feed-vercel.js";
+import { syncFeedAuth, syncGithubFeed, syncVercelFeed } from "./feed-sync.js";
 
 const failing = { dedupKey: "ci:CI:main", title: "CI failed: CI on main", detail: "run" };
 const feed = (over: Partial<GithubFeed> = {}): GithubFeed => ({
@@ -61,6 +62,57 @@ describe("syncGithubFeed", () => {
     assert.deepEqual(
       open(db).map((r) => r.title),
       ["CI failed: CI on main"],
+    );
+  });
+});
+
+describe("syncVercelFeed", () => {
+  const failed = {
+    dedupKey: "vercel:shop:production",
+    title: "Vercel deploy failed: shop (production)",
+  };
+  const vercel = (over: Partial<VercelFeed> = {}): VercelFeed => ({
+    scope: "personal",
+    production: [failed],
+    notes: [],
+    ...over,
+  });
+
+  it("opens an item for a failed deploy, keeps it on a repeat run, closes it when it is fixed", () => {
+    const db = openMemoryDb(":memory:");
+    assert.deepEqual(syncVercelFeed(db, vercel()), { added: 1, reopened: 0, closed: [] });
+    assert.equal(syncVercelFeed(db, vercel())?.added, 0);
+    assert.equal(syncVercelFeed(db, vercel({ production: [] }))?.closed.length, 1);
+    assert.equal(open(db).length, 0);
+  });
+
+  it("leaves open items alone when Vercel could not be read", () => {
+    const db = openMemoryDb(":memory:");
+    syncVercelFeed(db, vercel());
+    assert.equal(syncVercelFeed(db, vercel({ production: null })), null);
+    assert.equal(open(db).length, 1);
+  });
+
+  it("keeps the personal scope and a team apart", () => {
+    const db = openMemoryDb(":memory:");
+    syncVercelFeed(db, vercel());
+    syncVercelFeed(db, vercel({ scope: "team_abc" }));
+    assert.equal(open(db).length, 2);
+    syncVercelFeed(db, vercel({ production: [] }));
+    assert.equal(open(db).length, 1);
+  });
+});
+
+describe("syncFeedAuth", () => {
+  it("tracks each service's login on its own", () => {
+    const db = openMemoryDb(":memory:");
+    syncFeedAuth(db, true, "github");
+    syncFeedAuth(db, true, "vercel");
+    assert.equal(open(db).length, 2);
+    syncFeedAuth(db, false, "github");
+    assert.deepEqual(
+      open(db).map((r) => r.title),
+      ["Vercel feed: not logged in"],
     );
   });
 });
