@@ -1,10 +1,33 @@
 /** Isolated Windows probe for PowerShell startup and private ACL handling. */
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { it } from "node:test";
+
+it("compares temporary and Git worktree paths on Windows", (t) => {
+  if (process.platform !== "win32") {
+    t.skip("The probe requires Windows");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "kit-path-probe-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    const gitRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: root,
+      encoding: "utf8",
+    }).trim();
+    const expected = realpathSync(root);
+    const returned = realpathSync(gitRoot);
+    const sameFile = statSync(root).ino === statSync(gitRoot).ino;
+    console.log(JSON.stringify({ original: root, gitRoot, expected, returned, sameFile }));
+    assert.equal(expected.toLowerCase(), returned.toLowerCase());
+    assert.equal(sameFile, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 it(
   "compares Windows ACL handling across isolated process environments",
