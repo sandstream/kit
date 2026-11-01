@@ -17,21 +17,23 @@ async function sourceFiles(dir: string): Promise<string[]> {
 }
 
 describe("Docker plugin runtime", () => {
-  it("pins every Node base image to the reviewed multi-architecture manifest", async () => {
+  it("uses one pinned Node base for the builder, production dependencies, and runtime", async () => {
     const dockerfile = await readFile(resolve(repoRoot, "Dockerfile"), "utf-8");
-    const fromLines = dockerfile.split("\n").filter((line) => line.startsWith("FROM node:"));
+    const fromLines = dockerfile.split("\n").filter((line) => line.startsWith("FROM "));
 
-    // builder, prod-deps, runtime
-    assert.equal(fromLines.length, 3);
-    for (const line of fromLines) {
-      assert.match(line, /^FROM node:22-alpine@sha256:[a-f0-9]{64}(?: AS (?:builder|prod-deps))?$/);
-    }
+    assert.equal(fromLines.length, 4);
+    assert.match(fromLines[0], /^FROM node:22-alpine@sha256:[a-f0-9]{64} AS node-base$/);
+    assert.deepEqual(fromLines.slice(1), [
+      "FROM node-base AS builder",
+      "FROM node-base AS prod-deps",
+      "FROM node-base AS runtime",
+    ]);
   });
 
   it("retains every executable and asset required by triage-gated plugin installs", async () => {
     const dockerfile = await readFile(resolve(repoRoot, "Dockerfile"), "utf-8");
-    const builder = dockerfile.slice(0, dockerfile.lastIndexOf("FROM node:22-alpine@sha256:"));
-    const runtime = dockerfile.slice(dockerfile.lastIndexOf("FROM node:22-alpine@sha256:"));
+    const builder = dockerfile.slice(0, dockerfile.lastIndexOf("FROM node-base AS runtime"));
+    const runtime = dockerfile.slice(dockerfile.lastIndexOf("FROM node-base AS runtime"));
 
     assert.match(builder, /COPY skills \.\/skills/);
     assert.match(runtime, /apk add[^\n\\]*(?:\\\n[^\n]*)*\bbash\b/);
@@ -66,7 +68,7 @@ describe("Docker plugin runtime", () => {
       assert.ok(pkg.files.includes(asset), `${asset} missing from npm files`);
 
     const dockerfile = await readFile(resolve(repoRoot, "Dockerfile"), "utf8");
-    const runtime = dockerfile.slice(dockerfile.lastIndexOf("FROM node:22-alpine@sha256:"));
+    const runtime = dockerfile.slice(dockerfile.lastIndexOf("FROM node-base AS runtime"));
     for (const asset of assets) {
       assert.ok(
         runtime.includes(`COPY --from=builder /build/${asset} ./${asset}`),
@@ -89,7 +91,7 @@ describe("Docker runtime ships production dependencies only (MR-1)", () => {
     const dockerfile = await readFile(resolve(repoRoot, "Dockerfile"), "utf-8");
     return {
       dockerfile,
-      runtime: dockerfile.slice(dockerfile.lastIndexOf("FROM node:22-alpine@sha256:")),
+      runtime: dockerfile.slice(dockerfile.lastIndexOf("FROM node-base AS runtime")),
     };
   };
 
