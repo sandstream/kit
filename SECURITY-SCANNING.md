@@ -102,6 +102,7 @@ The scan permits skips from `.semgrepignore` and Git ignore rules. Semgrep may
 omit ignored files, symbolic links, and unsupported file types from its report
 entirely. Individual rules can also exclude paths without reporting a skip. A
 green result does not prove coverage for those files or unsupported languages.
+Inline `nosemgrep` comments can suppress findings as well.
 Run the scan from the Git repository root with `.` as its target. Before Semgrep
 starts, the job checks every tracked file and each parent path without following
 symbolic links. It checks again after the scan. Missing tracked regular files and
@@ -115,6 +116,8 @@ Semgrep does not report as ignored requires a verifiable explicit exception. An
 ignored link or submodule is not scanned.
 Before each scan, the job checks ignore files without following symbolic links.
 It rejects linked or special `.semgrepignore` and `.gitignore` files, even in ignored directories.
+It also rejects active `:include` directives in `.semgrepignore` files.
+Use regular ignore patterns instead. Comments may mention `:include`.
 The job fails if it cannot inspect a directory.
 Git can also read local excludes from its metadata or `core.excludesFile`.
 The job does not validate those files. They can exclude untracked files.

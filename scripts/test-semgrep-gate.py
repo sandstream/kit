@@ -330,6 +330,78 @@ class TrackedSymlinkTest(unittest.TestCase):
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def assert_include_hides_finding_without_gate(self):
+        result = subprocess.run(
+            ["semgrep", "scan", "--json", "--strict", "--error", "--metrics=off",
+             "--verbose", "--time", "--max-target-bytes", "1000000",
+             "--config", str(self.rule), "."],
+            cwd=self.repo, env=self.env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["results"], [])
+        self.assertIn("clean.js", report["paths"]["scanned"])
+        self.assertNotIn("bad.js", report["paths"]["scanned"])
+
+    def test_external_include_stops_scanner(self):
+        (self.repo / "bad.js").write_text("dangerous(1);\n", encoding="utf-8")
+        (self.root / "outside-ignore").write_text("bad.js\n", encoding="utf-8")
+        (self.repo / ".semgrepignore").write_text(" \t:include../outside-ignore\r\n", encoding="utf-8")
+        self.git("add", "--all")
+        self.assert_include_hides_finding_without_gate()
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("unsupported :include", result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read the external ignore file")
+
+    def test_symlink_include_stops_scanner(self):
+        (self.repo / "bad.js").write_text("dangerous(1);\n", encoding="utf-8")
+        outside = self.root / "outside-ignore"
+        outside.write_text("bad.js\n", encoding="utf-8")
+        (self.repo / "linked-ignore").symlink_to(outside)
+        (self.repo / ".semgrepignore").write_text(":include linked-ignore\n", encoding="utf-8")
+        self.git("add", "--", "bad.js", ".semgrepignore")
+        self.assert_include_hides_finding_without_gate()
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("unsupported :include", result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read the linked ignore file")
+
+    def test_nested_include_stops_scanner(self):
+        directory = self.repo / "nested"
+        directory.mkdir()
+        (directory / ".semgrepignore").write_text(":include ../../outside-ignore\n", encoding="utf-8")
+        sentinel = self.use_semgrep_sentinel()
+        result = self.run_gate()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("unsupported :include", result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read a nested include")
+
+    def test_regular_ignore_and_commented_include_pass(self):
+        (self.repo / "bad.js").write_text("dangerous(1);\n", encoding="utf-8")
+        (self.repo / ".semgrepignore").write_text(
+            "# :include ../outside-ignore\n  # :include linked-ignore\nbad.js\n", encoding="utf-8"
+        )
+        self.git("add", "--all")
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("0 findings", result.stdout)
+
+    def test_fifo_ignore_stops_before_scanner_without_blocking(self):
+        os.mkfifo(self.repo / ".semgrepignore")
+        sentinel = self.use_semgrep_sentinel()
+        result = subprocess.run(
+            [sys.executable, str(GATE), "--config", str(self.rule), "."],
+            cwd=self.repo, env=self.env, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, timeout=5,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("unsafe ignore file", result.stdout)
+        self.assertFalse(sentinel.exists(), "Semgrep must not read a FIFO ignore file")
+
     def test_linked_semgrepignore_stops_scanner_before_read(self):
         outside = self.root / "outside-ignore"
         outside.write_text(".semgrepignore\nclean.js\n", encoding="utf-8")

@@ -87,7 +87,7 @@ def unreported_git_entries(skipped, env):
 
 
 def assert_safe_ignore_files(root):
-    """Reject linked or special ignore files before Semgrep can read them."""
+    """Reject unsafe ignore files and Semgrep include directives."""
     pending = [root]
     while pending:
         directory = pending.pop()
@@ -96,6 +96,16 @@ def assert_safe_ignore_files(root):
                 if entry.name in (".semgrepignore", ".gitignore"):
                     if not stat.S_ISREG(entry.stat(follow_symlinks=False).st_mode):
                         raise ValueError(f"unsafe ignore file: {entry.path!r}")
+                    if entry.name == ".semgrepignore":
+                        # Do not follow a link or block on a FIFO if the path changes
+                        # between the directory check and opening the file.
+                        fd = os.open(entry.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                        with os.fdopen(fd, "rb") as ignore_file:
+                            if not stat.S_ISREG(os.fstat(ignore_file.fileno()).st_mode):
+                                raise ValueError(f"unsafe ignore file: {entry.path!r}")
+                            for line in ignore_file:
+                                if line.lstrip(b" \t").startswith(b":include"):
+                                    raise ValueError(f"unsupported :include in ignore file: {entry.path!r}")
                 elif entry.name != ".git" and entry.is_dir(follow_symlinks=False):
                     pending.append(entry.path)
 
