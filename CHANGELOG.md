@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [7.1.0] - 2026-11-01
+
 ### Changed
 
 - **`npm test` runs one test file per core on Linux and macOS instead of two at a time.** On

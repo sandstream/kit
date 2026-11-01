@@ -77,6 +77,16 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.1.0: several projects in one repository, failure feeds, and a stricter agent audit.**
+  `[projects] paths` in `.kit.toml` lets `kit check` run the repo level once in the root and the
+  project level once per directory, so a root without a manifest no longer reports "looked in the
+  wrong place". `kit escalate feed github` and `kit escalate feed vercel` turn failed workflows,
+  Dependabot alerts and failed production deploys into action items that close when the source is
+  green again. `kit agent-audit` checks the lethal trifecta and names code-loading environment
+  variables. `kit scan` scans container images and runs trivy on Terraform and Dockerfiles. An
+  agent can no longer approve its own `kit policy approve` operation. `kit rig` (experimental)
+  measures model and kit residual risk. No breaking change. Full list in the
+  [CHANGELOG](CHANGELOG.md).
 - **7.0.1: release and image build fixes.** A rerun of the publish workflow no longer stops
   in the npm dry run when the version is already published. The Docker image no longer
   fails to build when Alpine updates a package. No change to the CLI.
