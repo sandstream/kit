@@ -6,6 +6,82 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { it } from "node:test";
 
+it("isolates Windows variables needed for PowerShell startup", { timeout: 100_000 }, (t) => {
+  if (process.platform !== "win32") {
+    t.skip("The probe requires Windows");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "kit-start-probe-"));
+  try {
+    const home = join(root, "home");
+    const appdata = join(home, "AppData", "Roaming");
+    const localAppdata = join(home, "AppData", "Local");
+    for (const path of [home, appdata, localAppdata]) mkdirSync(path, { recursive: true });
+    const reduced: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      HOME: home,
+      USERPROFILE: home,
+      SystemRoot: process.env.SystemRoot,
+      COMSPEC: process.env.COMSPEC,
+      PATHEXT: process.env.PATHEXT,
+      TMP: home,
+      TEMP: home,
+      TMPDIR: home,
+    };
+    const variants: [string, NodeJS.ProcessEnv][] = [
+      ["reduced", {}],
+      ["windir", { WINDIR: process.env.WINDIR }],
+      ["system-drive", { SystemDrive: process.env.SystemDrive }],
+      ["program-data", { ProgramData: process.env.ProgramData }],
+      ["ps-module-path", { PSModulePath: process.env.PSModulePath }],
+      ["user", { USERDOMAIN: process.env.USERDOMAIN, USERNAME: process.env.USERNAME }],
+      ["appdata", { APPDATA: appdata, LOCALAPPDATA: localAppdata }],
+      [
+        "expanded",
+        {
+          WINDIR: process.env.WINDIR,
+          SystemDrive: process.env.SystemDrive,
+          ProgramData: process.env.ProgramData,
+          PSModulePath: process.env.PSModulePath,
+          USERDOMAIN: process.env.USERDOMAIN,
+          USERNAME: process.env.USERNAME,
+          APPDATA: appdata,
+          LOCALAPPDATA: localAppdata,
+        },
+      ],
+    ];
+    const powershell = join(
+      process.env.SystemRoot!,
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe",
+    );
+    const results = variants.map(([name, extra]) => {
+      const began = Date.now();
+      const result = spawnSync(
+        powershell,
+        ["-NoProfile", "-NonInteractive", "-Command", "Write-Output PROBE"],
+        {
+          env: { ...reduced, ...extra },
+          encoding: "utf8",
+          timeout: 4000,
+        },
+      );
+      return {
+        name,
+        ok: result.status === 0 && result.stdout.trim() === "PROBE",
+        durationMs: Date.now() - began,
+        code: (result.error as NodeJS.ErrnoException | undefined)?.code ?? String(result.status),
+      };
+    });
+    console.log(JSON.stringify(results));
+    assert.equal(results.find((entry) => entry.name === "expanded")?.ok, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it("compares temporary and Git worktree paths on Windows", (t) => {
   if (process.platform !== "win32") {
     t.skip("The probe requires Windows");
