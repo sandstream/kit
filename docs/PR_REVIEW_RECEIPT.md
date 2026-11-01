@@ -73,6 +73,10 @@ The audit record can be absent if the process stops before that attempt finishes
 An interrupted review blocks receipt verification and PR escalation until recovery.
 Inspect the review process and confirm that it has stopped.
 Run `kit review recover-receipt --confirm-stopped` to restore a known signed gate result.
+Moving or renaming the worktree or its Git directory after an interruption can prevent recovery.
+Preserve the worktree, Git metadata, lock, and signed pending evidence.
+A qualified person must inspect the owner file and evidence before any manual action.
+Do not edit or remove the lock to bypass the check.
 Kit records the local gate result before it prints the report or requests PR evidence.
 An interruption before that record leaves an unknown result and keeps the review locked.
 An unknown result is not a confirmed gate failure.
