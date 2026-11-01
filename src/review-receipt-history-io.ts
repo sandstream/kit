@@ -5,13 +5,13 @@ import { tryReadProtectedAuditAnchorKey } from "./audit-anchor.js";
 import {
   appendReceiptHistory,
   decodeReceiptUtf8,
+  MAX_RECEIPT_BYTES,
   openReceiptForRead,
 } from "./review-receipt-files.js";
 import { verifyReviewReceipt, type SignedReviewReceipt } from "./review-receipt.js";
 import { assertReviewWritable } from "./review-receipt-write-guard.js";
 
 export const REVIEW_RECEIPT_HISTORY_FILE = ".kit-review-receipt-history.jsonl";
-const MAX_RECEIPT_BYTES = 16 * 1024 * 1024;
 
 function historyGuidance(path: string, lockDir?: string): string {
   const evidence = lockDir

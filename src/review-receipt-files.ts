@@ -17,6 +17,7 @@ import { sameIdentity } from "./utils/same-file.js";
 
 const noFollow = constants.O_NOFOLLOW ?? 0;
 const nonBlock = constants.O_NONBLOCK ?? 0;
+export const MAX_RECEIPT_BYTES = 16 * 1024 * 1024;
 
 export function assertSameEntry(fd: number, path: string): void {
   const opened = fstatSync(fd, { bigint: true });
@@ -141,6 +142,12 @@ export function appendReceiptHistory(
   options: AppendReceiptHistoryOptions = {},
 ): void {
   assertReviewWritable(dirname(path), "review-history");
+  const appendedBytes = Buffer.byteLength(text, "utf8");
+  const tooLarge = () =>
+    new Error(
+      `Review history at ${path} would exceed the size limit. Preserve the history, pending evidence, and staged files for inspection.`,
+    );
+  if (appendedBytes > MAX_RECEIPT_BYTES) throw tooLarge();
   const fd = openHistoryForAppend(
     path,
     options.noFollowFlag ?? noFollow,
@@ -149,6 +156,7 @@ export function appendReceiptHistory(
   );
   try {
     assertReviewWritable(dirname(path), "review-history");
+    if (fstatSync(fd).size + appendedBytes > MAX_RECEIPT_BYTES) throw tooLarge();
     const write = options.write ?? ((handle, data) => writeFileSync(handle, data, "utf8"));
     write(fd, text);
   } finally {

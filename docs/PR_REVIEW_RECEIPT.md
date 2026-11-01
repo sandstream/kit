@@ -115,6 +115,11 @@ If history is incomplete or lacks a final newline, preserve its original bytes.
 Have a qualified person verify and repair a separate copy.
 Keep the original backup and place the verified copy at the original history path.
 Then retry recovery.
+History has a 16 MiB size limit.
+If a new entry would exceed the limit, Kit preserves the history and pending evidence.
+The review remains locked and requires expert inspection.
+Kit does not provide automatic history rotation.
+Do not delete history entries to bypass the limit.
 This recovery flow covers process interruption. It does not guarantee recovery after power loss.
 Signatures reveal changes to retained history entries.
 They do not prove that earlier entries or the whole history file still exist.

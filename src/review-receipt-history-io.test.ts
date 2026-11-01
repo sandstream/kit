@@ -1,6 +1,14 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getAuditAnchorKey } from "./audit-anchor.js";
@@ -8,6 +16,7 @@ import {
   persistHistory,
   readFailedReviewRuns,
   readFailedReviewSummary,
+  readHistory,
   REVIEW_RECEIPT_HISTORY_FILE,
 } from "./review-receipt-history-io.js";
 import { buildReviewReceipt, signReviewReceipt } from "./review-receipt.js";
@@ -54,6 +63,48 @@ function receipt(key: Buffer, runId: string, exitCode = 1, interrupted = false) 
     }),
     key,
   );
+}
+
+function paddedReceipt(key: Buffer, bytes: number) {
+  const { signature: _signature, sig_alg: _algorithm, ...body } = receipt(key, "1");
+  const sign = (padding: string) =>
+    signReviewReceipt({ ...body, gate: { ...body.gate, failures: [padding] } }, key);
+  const base = Buffer.byteLength(JSON.stringify(sign("å")) + "\n");
+  assert.ok(bytes >= base);
+  return sign("å" + "x".repeat(bytes - base));
+}
+
+for (const overflow of [false, true]) {
+  it(`preserves signed history at the byte limit, overflow=${overflow}`, async () => {
+    await withHistory(async (root, key) => {
+      const limit = 16 * 1024 * 1024;
+      const { signature: _signature, sig_alg: _algorithm, ...nextBody } = receipt(key, "2");
+      const next = signReviewReceipt(
+        { ...nextBody, gate: { ...nextBody.gate, failures: ["ö"] } },
+        key,
+      );
+      const nextBytes = Buffer.byteLength(JSON.stringify(next) + "\n");
+      const initialBytes = limit - nextBytes + (overflow ? 1 : 0);
+      const initial = paddedReceipt(key, initialBytes);
+      const path = join(root, REVIEW_RECEIPT_HISTORY_FILE);
+      writeFileSync(path, JSON.stringify(initial) + "\n");
+      assert.equal(statSync(path).size, initialBytes);
+      if (overflow) {
+        const before = readFileSync(path);
+        assert.throws(() => persistHistory(root, next, key), /history.*(limit|large)/i);
+        assert.equal(
+          readFileSync(path).equals(before),
+          true,
+          "existing history must remain unchanged",
+        );
+        assert.equal(readHistory(root, key).length, 1);
+      } else {
+        persistHistory(root, next, key);
+        assert.equal(statSync(path).size, limit);
+        assert.equal(readHistory(root, key).length, 2);
+      }
+    });
+  });
 }
 
 it("persists separate signed failures once and returns their verified summary", async () => {

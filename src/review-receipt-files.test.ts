@@ -2,6 +2,7 @@ import { it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   closeSync,
   existsSync,
   linkSync,
@@ -17,7 +18,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendReceiptHistory, openReceiptForRead } from "./review-receipt-files.js";
+import {
+  appendReceiptHistory,
+  MAX_RECEIPT_BYTES,
+  openReceiptForRead,
+} from "./review-receipt-files.js";
 
 function withDirectory(test: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "kit-receipt-files-"));
@@ -46,6 +51,23 @@ it("creates and appends regular history, then reads it through a descriptor", ()
     assert.equal(readReceipt(path, 0), "one\ntwo\n");
     appendReceiptHistory(path, "three\n", { noFollowFlag: 0 });
     assert.equal(readReceipt(path), "one\ntwo\nthree\n");
+  });
+});
+
+it("checks the opened file size before appending", () => {
+  withDirectory((dir) => {
+    const path = join(dir, "history");
+    writeFileSync(path, Buffer.alloc(MAX_RECEIPT_BYTES - 2, 65));
+    assert.throws(
+      () =>
+        appendReceiptHistory(path, "xy", {
+          afterOpen: () => appendFileSync(path, "z"),
+        }),
+      /history.*size limit/i,
+    );
+    const data = readFileSync(path);
+    assert.equal(data.length, MAX_RECEIPT_BYTES - 1);
+    assert.equal(data.subarray(-1).toString(), "z");
   });
 });
 
