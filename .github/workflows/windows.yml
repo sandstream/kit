@@ -19,6 +19,10 @@ on:
         description: Optional Node test name pattern for a focused run
         required: false
         default: ""
+      time_files:
+        description: Set to "true" to print per-file wall times for each shard instead of running the suite (#675)
+        required: false
+        default: ""
   pull_request: {}
   push:
     branches:
@@ -41,6 +45,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          cache: "npm"
       - name: Install
         run: npm ci
       - name: Build (cross-platform — no POSIX rm/chmod)
@@ -64,11 +69,21 @@ jobs:
           if ($env:KIT_TEST_PATTERN) { $testArgs += "--test-name-pattern=$env:KIT_TEST_PATTERN" }
           $testArgs += $env:KIT_TEST_FILE
           & node @testArgs
-      - name: Unit tests (shard ${{ matrix.shard }}/4)
-        if: inputs.test_file == ''
+      - name: Per-file timing (shard ${{ matrix.shard }}/4, dispatch only)
+        if: inputs.time_files == 'true'
         shell: bash
         env:
           KIT_TEST_SHARD: ${{ matrix.shard }}/4
+        run: node scripts/time-test-files.mjs
+      - name: Unit tests (shard ${{ matrix.shard }}/4)
+        if: inputs.test_file == '' && inputs.time_files != 'true'
+        shell: bash
+        env:
+          KIT_TEST_SHARD: ${{ matrix.shard }}/4
+          # Four files at once on the 4-core runner; the heavy memory/PAL files take up to ~170 s
+          # alone, so the per-file timeout is raised to keep slow from reading as hung.
+          KIT_TEST_CONCURRENCY: "4"
+          KIT_TEST_TIMEOUT_MS: "600000"
         run: |
           set -o pipefail
           npm test 2>&1 | tee win-tests.log

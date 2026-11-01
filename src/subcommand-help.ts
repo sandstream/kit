@@ -160,6 +160,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Interactive ChatGPT-web setup through OpenAI Secure MCP Tunnel; keeps kit private and uses its existing stdio server",
   "hooks install": "Install hooks declared in [hooks]",
   "hooks check": "Report whether the git hooks kit manages are installed and intact",
+  "hooks context":
+    "For an agent session-start hook: one plain line when a declared git hook does not run here, nothing otherwise; always exits 0",
   "security advisories":
     "Dependency advisories from the repo's own package manager, split into new debt, known debt, and baseline entries that no longer apply. --accept freezes the current set in .kit/advisories.json (and prunes it)",
   "security scan-artifact":

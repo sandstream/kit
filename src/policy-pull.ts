@@ -51,6 +51,7 @@ import {
   type PolicyVerifyStatus,
 } from "./policy-doc.js";
 import { POLICY_SIGNERS_FILE, getSignersPath, hasPolicyAnchor } from "./policy-trust.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 export type PullStatus =
   /** Verified against the local anchor and written to the project. */
@@ -133,15 +134,15 @@ function readSignatureSnapshot(path: string): SignatureSnapshot | null {
   }
   const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
   try {
-    const opened = fstatSync(fd);
+    const opened = fstatSync(fd, { bigint: true });
     if (!opened.isFile())
       throw Object.assign(new Error("signature is not a regular file"), { code: "EINVAL" });
     const bytes = readFileSync(fd);
-    const entry = lstatSync(path);
-    if (!entry.isFile() || opened.dev !== entry.dev || opened.ino !== entry.ino) {
+    const entry = lstatSync(path, { bigint: true });
+    if (!entry.isFile() || !sameIdentity(opened, entry)) {
       throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
     }
-    return { kind: "file", bytes, mode: opened.mode };
+    return { kind: "file", bytes, mode: Number(opened.mode) };
   } finally {
     closeSync(fd);
   }

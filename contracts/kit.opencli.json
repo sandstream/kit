@@ -1158,6 +1158,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "context": {
+          "kind": "command",
+          "summary": "For an agent session-start hook: one plain line when a declared git hook does not run here, nothing otherwise; always exits 0",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "human",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "install": {
           "kind": "command",
           "summary": "Install hooks declared in [hooks]",

@@ -199,6 +199,7 @@
     "hooks",
     "hooks add",
     "hooks check",
+    "hooks context",
     "hooks install",
     "hooks uninstall",
     "identity",

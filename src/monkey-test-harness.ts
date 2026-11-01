@@ -1,4 +1,4 @@
-import { constants, type Stats } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import {
   link,
   lstat,
@@ -19,6 +19,7 @@ import {
 } from "./monkey-test-contract.js";
 import { monkeySpec } from "./monkey-test-harness-spec.js";
 import { detectMonkeyRequirements } from "./monkey-test-requirements.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 const OPERATOR_CONFIG_FILES = new Set([
   "playwright.monkey.config.ts",
@@ -226,8 +227,8 @@ function harnessFiles(rolesRequired: boolean): Record<string, string> {
   };
 }
 
-async function harnessFileStat(path: string): Promise<Stats | null> {
-  return lstat(path).catch((error: NodeJS.ErrnoException) => {
+async function harnessFileStat(path: string): Promise<BigIntStats | null> {
+  return lstat(path, { bigint: true }).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
     throw error;
   });
@@ -247,13 +248,12 @@ async function harnessDirectory(root: string, relPath: string, create: boolean):
   return true;
 }
 
-function sameHarnessFile(before: Stats, after: Stats | null): boolean {
+function sameHarnessFile(before: BigIntStats, after: BigIntStats | null): boolean {
   return (
     !!after &&
-    before.dev === after.dev &&
-    before.ino === after.ino &&
+    sameIdentity(before, after) &&
     after.isFile() &&
-    after.nlink === 1 &&
+    after.nlink === 1n &&
     before.size === after.size &&
     before.mtimeMs === after.mtimeMs &&
     before.ctimeMs === after.ctimeMs
@@ -262,7 +262,7 @@ function sameHarnessFile(before: Stats, after: Stats | null): boolean {
 
 export async function readHarnessFile(
   path: string,
-  expected: Stats,
+  expected: BigIntStats,
   noFollowFlag: number | null = typeof constants.O_NOFOLLOW === "number"
     ? constants.O_NOFOLLOW
     : null,
@@ -276,10 +276,10 @@ export async function readHarnessFile(
   });
   if (!file) return null;
   try {
-    if (!sameHarnessFile(expected, await file.stat())) return null;
+    if (!sameHarnessFile(expected, await file.stat({ bigint: true }))) return null;
     if (!sameHarnessFile(expected, await harnessFileStat(path))) return null;
     const content = await file.readFile("utf8");
-    return sameHarnessFile(expected, await file.stat()) &&
+    return sameHarnessFile(expected, await file.stat({ bigint: true })) &&
       sameHarnessFile(expected, await harnessFileStat(path))
       ? content
       : null;
@@ -292,7 +292,7 @@ async function publishHarnessFile(
   root: string,
   relPath: string,
   content: string,
-  existing: Stats | null,
+  existing: BigIntStats | null,
 ): Promise<boolean> {
   const path = join(root, relPath);
   const staging = await mkdtemp(join(dirname(path), ".kit-monkey-"));
@@ -301,7 +301,7 @@ async function publishHarnessFile(
     await writeFile(temporary, content, {
       encoding: "utf8",
       flag: "wx",
-      mode: existing ? existing.mode & 0o777 : 0o644,
+      mode: existing ? Number(existing.mode & 0o777n) : 0o644,
     });
     if (!(await harnessDirectory(root, relPath, false))) return false;
     const current = await harnessFileStat(path);
@@ -341,7 +341,7 @@ async function writeManaged(
     return { path: relPath, action: "skipped", reason: "parent is not a regular directory" };
   }
   const existing = await harnessFileStat(path);
-  if (existing && (!existing.isFile() || existing.nlink !== 1)) {
+  if (existing && (!existing.isFile() || existing.nlink !== 1n)) {
     return {
       path: relPath,
       action: "skipped",

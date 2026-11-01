@@ -75,7 +75,7 @@ const ENV_READ_PATTERNS = [
   /\b(KIT_[A-Z0-9_]{2,60})\s*[:=]/g,
 ];
 
-/** Collect every `KIT_*` name the implementation reads or sets. */
+/** Collect every `KIT_*` name the implementation (src/, and the npm scripts in scripts/) reads or sets. */
 export function loadKnownEnvVars(repoRoot: string): Set<string> {
   const known = new Set<string>();
   function visit(dir: string): void {
@@ -91,7 +91,7 @@ export function loadKnownEnvVars(repoRoot: string): Set<string> {
         visit(join(dir, e.name));
         continue;
       }
-      if (!e.name.endsWith(".ts") || e.name.endsWith(".test.ts")) continue;
+      if (!/\.(ts|mjs)$/.test(e.name) || /\.test\.(ts|mjs)$/.test(e.name)) continue;
       let text;
       try {
         text = readFileSync(join(dir, e.name), "utf-8");
@@ -103,7 +103,7 @@ export function loadKnownEnvVars(repoRoot: string): Set<string> {
       }
     }
   }
-  visit(join(repoRoot, "src"));
+  for (const dir of ["src", "scripts"]) visit(join(repoRoot, dir));
   return known;
 }
 

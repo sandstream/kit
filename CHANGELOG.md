@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Changed
+
+- **`npm test` runs one test file per core on Linux and macOS instead of two at a time.** On
+  GitHub's 4-core Linux runner the test step went from 408 s to 288 s with every test passing.
+  Windows stays at 2: at one file per core its heavy memory tests hit the 180 s timeout.
+  `KIT_TEST_CONCURRENCY` overrides both.
+- **The Windows shards are balanced by measured Windows time, not file size (#675).** Split by size,
+  the four shards summed to 1467/1270/1569/1314 s of Windows test time; by the measured table
+  (`scripts/test-weights.json`, from `node scripts/time-test-files.mjs`) each sums to 1406 s.
+  A `workflow_dispatch` of the Windows workflow with `time_files=true` regenerates the measurement.
+- **`KIT_TEST_TIMEOUT_MS` sets the per-file test timeout (default 180 s).** The Windows shards
+  cache npm and run four files at once with a 600 s per-file timeout.
+
 ### Added
 
 - **`kit escalate feed github` tracks what GitHub reports as broken, so the failure mail is not the only
@@ -11,6 +24,13 @@
   prints `Run: gh auth login` and keeps an item until it works. Workflow names are cleaned before
   they are stored. `--dry-run` writes nothing. Open pull requests and GitHub security notices (new
   token, new app) are not covered yet.
+- **The git-hook floor's bootstrap is a hook, not a sentence (#671).** `kit hooks context`
+  prints one plain line when a hook declared in `.kit.toml` does not run in this checkout, nothing
+  when all do, and always exits 0. `kit agent-config` wires it as a Claude Code `SessionStart` hook,
+  and kit's own repository commits `.claude/settings.json` with it, so an agent in a fresh clone is
+  told at session start instead of relying on the managed block's "Start: `kit check`" line, which
+  an agent session skipped for its whole length.
+
 - **`kit rig` — the rig ADR-0007 accepted and kit had not built (experimental).** Measure a
   reviewer prompt or policy against planted defects and clean controls, kept in a private
   `rig.toml` corpus. `plan` freezes the input (a SHA-256 over the manifest, the prompt and every
@@ -21,8 +41,37 @@
   and ADR-0007's three limits. `plant --from-fix <sha>` turns a historical fix into a planted
   defect by reversing it onto the pinned commit, refusing one that does not apply cleanly. kit never
   runs the reviewer and never reads the claim text.
+- **`kit rig`: `[input] extra` freezes what else the reviewer is shown.** A driver that shows code
+  excerpts, change hints or a rules file instead of (or beside) the patches lists them under
+  `extra`; their bytes join the input id, so changing one changes the id. A manifest without
+  `extra` keeps the id it always had (pinned by a test).
 
 ### Security
+
+- **`kit gha-audit` flags a gate that can skip itself green.** In GitHub Actions a job whose
+  job-level `if:` is false is reported as skipped, and a skipped job satisfies a required check. A
+  pull-request job that runs only on a condition another job computes
+  (`if: needs.changes.outputs.server == 'true'`, the affected-only pattern) therefore lets a PR merge
+  untested when the change detection is wrong. The new rule warns unless an aggregator job with
+  `if: always()` (or `!cancelled()`) `needs` it and checks its `.result`.
+
+- **Git hooks in a linked worktree are found where git runs them.** In a `git worktree`, `.git` is a
+  file, and kit looked for hooks in `<worktree>/.git/hooks`: every declared hook read as "not
+  installed" and `kit hooks install` could not land there. kit now asks git for the hooks path.
+
+- **The GitLab CI health sensor no longer sends `GITLAB_TOKEN` to whatever host `origin` names.**
+  It runs whenever `.gitlab-ci.yml` exists, so a GitLab project whose `origin` pointed at a mirror on
+  another host sent the token there as `PRIVATE-TOKEN`. The token now goes only to gitlab.com or to
+  the self-hosted instance named in `GITLAB_HOST` (the variable GitLab's own CLI reads); any other
+  host gives an `unknown` result that says why (#666).
+
+- **File identity checks now use full-width ids everywhere.** Six places compared `dev`/`ino` from
+  number stats, which on Windows squeeze a 64- or 128-bit file id into a double, so a swap check
+  could pass for a different file: the policy-pull signature snapshot, the upstream safe read, the
+  hook-floor hook read, the OneCLI `.env.local` publish, and the monkey-test harness and env-file
+  reads. They now read bigint stats and compare through `sameIdentity`. The rule was prose in
+  `CLAUDE.md`; `src/file-identity-discipline.test.ts` now fails any `ino` comparison outside
+  `src/utils/same-file.ts`.
 
 - **`kit triage npm --sandbox` looks one layer into opaque binaries.** A binary file that is not a
   known executable or media type is no longer silent. gzip and zip streams found anywhere in it are

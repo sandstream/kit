@@ -22,6 +22,23 @@ export function parseGitlabPipelines(json: string): GlPipeline[] {
   }
 }
 
+/**
+ * Whether `GITLAB_TOKEN` may be sent to `host`. The sensor runs whenever `.gitlab-ci.yml` exists,
+ * not when the remote is GitLab, so a GitLab project whose `origin` points at a mirror on another
+ * host would otherwise hand the token to that host. The token goes to gitlab.com, or to the one
+ * self-hosted instance the user names in `GITLAB_HOST` (the variable GitLab's own CLI reads).
+ */
+export function gitlabTokenHost(host: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const want = host.toLowerCase();
+  if (want === "gitlab.com") return true;
+  let named = (env.GITLAB_HOST ?? "").trim().toLowerCase();
+  for (const scheme of ["https:", "http:"]) {
+    if (named.startsWith(scheme + "//")) named = named.slice(scheme.length + 2);
+  }
+  while (named.endsWith("/")) named = named.slice(0, -1);
+  return named !== "" && named === want;
+}
+
 /** Most recent terminal pipeline; returned only when it failed. */
 export function latestFailedPipeline(pipelines: GlPipeline[]): GlPipeline | null {
   const terminal = pipelines.filter((p) => TERMINAL.has(p.status));
@@ -47,6 +64,18 @@ export const gitlabSensor: HealthSensor = {
       ];
     }
     const source = `${slug.host}/${slug.path}`;
+    if (!gitlabTokenHost(slug.host)) {
+      return [
+        {
+          sensor: "gitlab-ci",
+          source,
+          status: "unknown",
+          title: `GitLab CI probe skipped: ${slug.host} is not a known GitLab host`,
+          detail:
+            "GITLAB_TOKEN is sent only to gitlab.com or to GITLAB_HOST; set GITLAB_HOST for a self-hosted instance",
+        },
+      ];
+    }
     const token = process.env.GITLAB_TOKEN;
     if (!token) {
       return [
