@@ -2,7 +2,7 @@
 
 How the required SAST job in `.github/workflows/security.yml` scans and what a green result does and does not prove.
 
-The required SAST job runs Semgrep 1.176.0 with `p/security-audit`,
+The required SAST job runs Semgrep 1.183.0 with `p/security-audit`,
 `p/owasp-top-ten`, `p/typescript`, and `p/nodejs`. Registry rule packs can
 change independently of the pinned scanner version. The job scans each pack
 separately. Each scan must report at least one rule and one scanned file.
@@ -47,7 +47,7 @@ source snippets in job logs. Review log access before adding sensitive material
 to tracked files.
 
 On Linux or macOS, run `python3 scripts/test-semgrep-gate.py` with Semgrep
-1.176.0 on `PATH` to exercise the scanner and gate against local fixtures.
+1.183.0 on `PATH` to exercise the scanner and gate against local fixtures.
 The fixtures skip on Windows because they use POSIX tools and file types.
 The suite is split across `scripts/test-semgrep-gate.py` (scan results),
 `scripts/test_semgrep_gate_links.py` (links, submodules, ignore files) and the shared

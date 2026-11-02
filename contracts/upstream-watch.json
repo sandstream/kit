@@ -296,15 +296,15 @@
     {
       "id": "scanner/semgrep",
       "owner": ".github/workflows/security.yml",
-      "pinned": "1.176.0",
+      "pinned": "1.183.0",
       "track": "minor",
       "source": {
         "kind": "pypi",
         "package": "semgrep"
       },
       "baseline": {
-        "version": "1.182.1",
-        "observedAt": "2026-10-24"
+        "version": "1.183.0",
+        "observedAt": "2026-11-02"
       }
     },
     {
