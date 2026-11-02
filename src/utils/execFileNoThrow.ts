@@ -67,10 +67,14 @@ export async function execFileNoThrow(
 }
 
 /**
- * A failure message that says when the cause was kit's own output limit, so a report that did not
+ * A failure message that says when the cause was kit's own output or time limit, so a report that did not
  * fit is not mistaken for a tool that crashed.
  */
 export function failedDetail(base: string, result: ExecResult): string {
-  if (!result.truncated) return base;
-  return `${base}: the output exceeded kit's buffer limit and was cut off (a kit limit, not a tool failure)`;
+  if (result.truncated) {
+    return `${base}: the output exceeded kit's buffer limit and was cut off (a kit limit, not a tool failure)`;
+  }
+  if (result.timedOut)
+    return `${base}: stopped at kit's time limit (a kit limit, not a tool failure)`;
+  return base;
 }
