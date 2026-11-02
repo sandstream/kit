@@ -192,25 +192,25 @@ describe("tagDeployed", () => {
   });
 });
 
-describe("tagWithDeployed reads the commit from the service and the lockfile from git", () => {
-  async function withService(body: unknown, fn: (url: string) => Promise<void>): Promise<void> {
-    const server = createServer((_req, res) => {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(body));
-    });
-    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
-    try {
-      await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v`);
-    } finally {
-      server.closeAllConnections();
-      await new Promise<void>((ok) => server.close(() => ok()));
-    }
+async function withService(body: unknown, fn: (url: string) => Promise<void>): Promise<void> {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  try {
+    await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((ok) => server.close(() => ok()));
   }
+}
 
-  const config = (url: string): kitConfig =>
-    ({ deploy: { health: { production: { url } } } }) as unknown as kitConfig;
-  const row = (): SecurityCheckResult[] => [osvFinding("osv-scanner (deps)", osvPayload)];
+const config = (url: string): kitConfig =>
+  ({ deploy: { health: { production: { url } } } }) as unknown as kitConfig;
+const row = (): SecurityCheckResult[] => [osvFinding("osv-scanner (deps)", osvPayload)];
 
+describe("tagWithDeployed reads the commit from the service and the lockfile from git", () => {
   it("tags against the commit the service reports, not the checked-out one", async () => {
     const { dir, a } = repo(); // A has lodash 4.17.20 (vulnerable), HEAD is B (4.17.21)
     try {
@@ -242,7 +242,9 @@ describe("tagWithDeployed reads the commit from the service and the lockfile fro
       rmTemp(dir);
     }
   });
+});
 
+describe("tagWithDeployed when the deployed commit cannot be used", () => {
   it("says unverified when the service reports a commit this clone does not have", async () => {
     const { dir } = repo();
     try {
