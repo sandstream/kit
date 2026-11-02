@@ -30,7 +30,7 @@ export interface LockPkg {
   hasInstallScript?: boolean;
 }
 
-const REGISTRY = /registry\.npmjs\.org\//;
+const REGISTRY = /^https:\/\/registry\.npmjs\.org\//;
 
 /** Packages whose install runs a script (npm lockfile v3 records this). */
 export function findInstallScripts(lockPkgs: LockPkg[]): string[] {
