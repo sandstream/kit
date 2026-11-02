@@ -1,0 +1,62 @@
+name: Agent review gate
+
+# Step A of agent review: a deterministic gate, no model. When the pull-request workflows on a
+# head commit have all finished, the reviewer GitHub App approves that commit if every check
+# passed and no file is in a protected class (.github/kit-protected-paths.json); otherwise it
+# comments once with the reason. See scripts/agent-review-gate.mjs.
+#
+# workflow_run always runs this file from the default branch, never from the pull request, and
+# the job checks out the default branch only: the pull request's code never runs here, so it
+# cannot change the gate or reach the App key.
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Security — Full App Scan
+      - Windows (native, probe)
+      - Docker Build & Push
+      - PR hygiene
+      - Triage New Dependencies
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  # Serialise decisions per commit: the last workflow to finish decides once.
+  group: agent-review-gate-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: agent review gate
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Are all checks on the commit finished?
+        id: ready
+        run: node scripts/agent-review-gate.mjs ready "$HEAD_SHA"
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Build the protected-path classifier from the default branch
+        if: steps.ready.outputs.ready == 'true'
+        run: npm ci --ignore-scripts && npm run build
+      - name: Approve or explain
+        if: steps.ready.outputs.ready == 'true'
+        run: node scripts/agent-review-gate.mjs decide "$HEAD_SHA"
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_APP_ID: ${{ vars.REVIEWER_APP_ID }}
+          REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}

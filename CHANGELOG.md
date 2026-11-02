@@ -2,6 +2,12 @@
 
 ### Security
 
+- **Agent review gate (step A, deterministic, no model).** When every check on a pull request's
+  head commit has finished, the reviewer GitHub App approves that exact commit if every check
+  passed, no file is in a protected class (`.github/kit-protected-paths.json`, read from the
+  default branch) and the change is under 1,500 lines. Otherwise it comments once with the reason.
+  The approval says that the gates passed, not that anyone judged the change. The workflow runs
+  from the default branch on `workflow_run` and never runs pull-request code.
 - **`kit gha-audit` reports how many approvals the default branch requires.** It used to read
   only whether the branch is protected, so a protected branch that requires 0 approvals passed.
   On such a branch any identity with write access merges its own pull request, including an agent
