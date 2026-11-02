@@ -127,12 +127,15 @@ Set up with `kit decisions`.
 
 Required platform env-var NAMES per project and environment.
 
-**What it buys.** `kit check --category deploy` diffs the names your platform has against the names this repo needs, and on Vercel fails a readable-secret, a secret shared by production and preview (`shared_ok` lists accepted ones) and a variable no code reads (`implicit_env` lists library-read ones), without reading a single value.
+**What it buys.** `kit check --category deploy` diffs the names your platform has against the names this repo needs, and on Vercel fails a readable-secret, a secret shared by production and preview (`shared_ok` lists accepted ones) and a variable no code reads (`implicit_env` lists library-read ones), without reading a single value. A table `[deploy.health.<env>]` with a `url` names an endpoint that returns the running commit as JSON (`version_field` is an optional dot path, default `version`). `kit check --category deploy --online` reads it, so a finding can later be tied to what is deployed. The read is opt-in, sends no request in air-gap mode, follows no redirect, and refuses private, link-local, metadata and loopback addresses.
 
 ```toml
 [deploy.vercel.environments.production]
 project = "my-app"
 required = ["DATABASE_URL", "STRIPE_SECRET_KEY"]
+
+[deploy.health.production]
+url = "https://www.example.com/api/version"
 ```
 
 Set up with `kit check --category deploy`.

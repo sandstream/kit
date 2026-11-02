@@ -204,6 +204,8 @@ required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
 
 `project` is the Vercel project name/id. With `VERCEL_TOKEN`, kit uses the Management API so multiple projects in one repo can be checked without relinking cwd; without a token, it falls back to the Vercel CLI and the target `cwd` link. `NEXT_PUBLIC_*` keys are treated as build-time keys. If `kit fix` can resolve a missing value from `[secrets.keys]`, it pushes it through the existing Vercel propagation adapter and reminds the operator to redeploy.
 
+`[deploy.health.<env>]` with a `url` (and optional `version_field`) names an endpoint that returns the running commit as JSON. `kit check --category deploy --online` reads it and prints `deployed commit <short hash>`. Without `--online`, or in air-gap mode, nothing is requested. kit refuses private, link-local, metadata and loopback addresses, follows no redirect and sends no credential. A value that is not a commit hash gives `unverified`.
+
 ## MCP orchestrator
 
 | Command                                                | Purpose                                                                                                               |
