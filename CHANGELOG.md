@@ -2,6 +2,12 @@
 
 ### Security
 
+- **`kit gha-audit` reports how many approvals the default branch requires.** It used to read
+  only whether the branch is protected, so a protected branch that requires 0 approvals passed.
+  On such a branch any identity with write access merges its own pull request, including an agent
+  acting under the owner's account. kit now reads the branch's rulesets (read access) and, when the
+  token can, classic protection's review settings, and warns at 0. kit's own `main` was in that
+  state. Whether admins can bypass the rule is not visible to a read token and is not claimed.
 - **A reviewer GitHub App, first step: a manual identity probe.** `scripts/github-app-token.mjs`
   mints the App's installation token with `node:crypto` only. It narrows the token to this
   repository with `pull_requests: write` and `contents: read`, even though the key could mint

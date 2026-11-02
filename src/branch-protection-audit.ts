@@ -6,6 +6,11 @@ import type { SecurityCheckResult } from "./check-security.js";
 import { loadConfig } from "./config.js";
 import { resolveAirGap } from "./airgap/config.js";
 import { resolveViaBackend } from "./secret-backends.js";
+import {
+  approvalsFromClassic,
+  approvalsFromRules,
+  reviewRequirement,
+} from "./branch-review-rules.js";
 
 export interface GitRemote {
   host: "github.com" | "gitlab.com";
@@ -54,12 +59,12 @@ function unverified(detail: string, skip = false): SecurityCheckResult {
   };
 }
 
-async function jsonGet(
+async function jsonValue(
   url: string,
   token: string,
   host: GitRemote["host"],
   fetcher: Fetcher,
-): Promise<Record<string, unknown> | null> {
+): Promise<unknown> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (host === "github.com") {
     headers.Authorization = `Bearer ${token}`;
@@ -74,10 +79,72 @@ async function jsonGet(
   if (!response.ok) return null;
   const body = await response.text();
   if (body.length > 1_000_000) return null;
-  const parsed: unknown = JSON.parse(body);
+  return JSON.parse(body) as unknown;
+}
+
+async function jsonGet(
+  url: string,
+  token: string,
+  host: GitRemote["host"],
+  fetcher: Fetcher,
+): Promise<Record<string, unknown> | null> {
+  const parsed = await jsonValue(url, token, host, fetcher);
   return parsed && typeof parsed === "object" && !Array.isArray(parsed)
     ? (parsed as Record<string, unknown>)
     : null;
+}
+
+function reviewsUnverified(detail: string): SecurityCheckResult {
+  return {
+    category: "exposure",
+    name: "default branch required reviews",
+    status: "warn",
+    detail: `unverified: ${detail}`,
+    didNotRun: true,
+  };
+}
+
+/**
+ * GitHub only: how many approvals the default branch requires. Rulesets are readable with read
+ * access; classic protection's review settings need admin, so a 403 there stays unknown.
+ */
+export async function auditRemoteRequiredReviews(
+  remoteUrl: string,
+  token: string | null,
+  fetcher: Fetcher = fetch,
+): Promise<SecurityCheckResult> {
+  const remote = parseGitRemote(remoteUrl);
+  if (!remote) return reviewsUnverified("origin is not a supported GitHub or GitLab remote");
+  if (remote.host !== "github.com")
+    return reviewsUnverified("approval rules are read for GitHub only");
+  if (!token) return reviewsUnverified(`no ${TOKEN_KEYS[remote.host]} in kit secrets`);
+  const base = `https://api.github.com/repos/${remote.path.split("/").map(encodeURIComponent).join("/")}`;
+  try {
+    const project = await jsonGet(base, token, remote.host, fetcher);
+    if (!project || typeof project.default_branch !== "string" || !project.default_branch)
+      return reviewsUnverified("repository metadata unavailable or incomplete");
+    const branch = encodeURIComponent(project.default_branch);
+    const rules = await jsonValue(`${base}/rules/branches/${branch}`, token, remote.host, fetcher);
+    if (rules === null) return reviewsUnverified("branch rules unavailable");
+    let classic: unknown = null;
+    try {
+      classic = await jsonValue(
+        `${base}/branches/${branch}/protection/required_pull_request_reviews`,
+        token,
+        remote.host,
+        fetcher,
+      );
+    } catch {
+      classic = null;
+    }
+    return reviewRequirement(
+      project.default_branch,
+      approvalsFromRules(rules),
+      approvalsFromClassic(classic),
+    );
+  } catch {
+    return reviewsUnverified("API request failed");
+  }
 }
 
 /** Query only fixed API hosts. No token or incomplete API response stays unverified. */
@@ -153,7 +220,10 @@ export async function runBranchProtectionAudit(root: string): Promise<SecurityCh
     const resolved = await resolveViaBackend(name, key, config.secrets?.infisical, root);
     if (!resolved.resolved || !resolved.value || resolved.managed)
       return [unverified(`configured ${name} unavailable`)];
-    return [await auditRemoteBranchProtection(origin, resolved.value)];
+    return [
+      await auditRemoteBranchProtection(origin, resolved.value),
+      await auditRemoteRequiredReviews(origin, resolved.value),
+    ];
   } catch {
     return [unverified(`configured ${name} unavailable`)];
   }
