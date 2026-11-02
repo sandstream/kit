@@ -2,6 +2,12 @@
 
 ### Security
 
+- **`kit gha-audit` reports how many approvals the default branch requires.** It used to read
+  only whether the branch is protected, so a protected branch that requires 0 approvals passed.
+  On such a branch any identity with write access merges its own pull request, including an agent
+  acting under the owner's account. kit now reads the branch's rulesets (read access) and, when the
+  token can, classic protection's review settings, and warns at 0. kit's own `main` was in that
+  state. Whether admins can bypass the rule is not visible to a read token and is not claimed.
 - **trufflehog 3.99.4 → 3.99.7** (`.kit.toml`, `mise.toml`). The checksums file of both versions
   carries a Sigstore signature from trufflehog's own `release.yml` at the release tag, verified,
   and the 3.99.4 file reproduces the archive hash of the version it replaces.

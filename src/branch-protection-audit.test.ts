@@ -110,20 +110,33 @@ describe("branch protection failures and project config", () => {
           (options?.headers as Record<string, string>).Authorization,
           "Bearer private-test-token",
         );
+        const url = String(_url);
+        if (url.endsWith("/rules/branches/main"))
+          return new Response(JSON.stringify([{ type: "pull_request", parameters: {} }]));
+        if (url.endsWith("/required_pull_request_reviews"))
+          return new Response("{}", { status: 403 });
         return new Response(
-          JSON.stringify(calls === 1 ? { default_branch: "main" } : { protected: true }),
+          JSON.stringify(
+            url.endsWith("/repos/owner/repo") ? { default_branch: "main" } : { protected: true },
+          ),
           { status: 200 },
         );
       };
-      const [row] = await runBranchProtectionAudit(root);
-      assert.equal(row.status, "pass");
-      assert.equal(calls, 2);
-      assert.doesNotMatch(JSON.stringify(row), /private-test-token/);
+      const rows = await runBranchProtectionAudit(root);
+      assert.deepEqual(
+        rows.map((r) => [r.name, r.status]),
+        [
+          ["default branch protection", "pass"],
+          ["default branch required reviews", "warn"],
+        ],
+      );
+      const before = calls;
+      assert.doesNotMatch(JSON.stringify(rows), /private-test-token/);
       process.env.KIT_AIRGAP = "1";
       const [offline] = await runBranchProtectionAudit(root);
       assert.equal(offline.status, "skip");
       assert.equal(offline.didNotRun, true);
-      assert.equal(calls, 2);
+      assert.equal(calls, before);
     } finally {
       if (oldToken === undefined) delete process.env.GITHUB_TOKEN;
       else process.env.GITHUB_TOKEN = oldToken;
