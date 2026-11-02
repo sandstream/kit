@@ -112,7 +112,9 @@ describe("checkDeployHealth", () => {
       assert.match(row.detail, /unverified/);
     });
   });
+});
 
+describe("checkDeployHealth failures", () => {
   it("says unverified on a 500, on non-JSON and on an oversize body", async () => {
     const cases: Handler[] = [
       json({ version: SHA }, 500),
