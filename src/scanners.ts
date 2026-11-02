@@ -12,6 +12,7 @@
  */
 import type { SecurityCheckResult } from "./check-security.js";
 import { ingestStrict, type IngestFormat } from "./adapters/ingest.js";
+import { exitGateFinding } from "./scan-exit-gate.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 
 /**
@@ -570,23 +571,12 @@ export async function runScanners(
     const res = await deps.run(bin, s.args, s.timeoutMs);
     // Exit-code-gated scanners (e.g. Socket): no parseable findings — the tool's
     // own exit status IS the verdict. Never false-green on a crash: any non-zero
-    // exit becomes one high-severity policy-violation finding.
+    // exit becomes one high-severity finding (worded by cause, see scan-exit-gate).
     if (s.exitGate) {
       if (res.ok) {
         runs.push({ id: s.id, status: "ran", findings: 0 });
       } else {
-        perScanner.push({
-          id: s.id,
-          findings: [
-            {
-              category: "supply-chain",
-              name: `${s.id}: policy violation`,
-              status: "fail",
-              detail: `${s.id} ci exited non-zero — dependency security/license policy issues found (see the ${s.id} dashboard)`,
-              severity: "high",
-            },
-          ],
-        });
+        perScanner.push({ id: s.id, findings: [exitGateFinding(s, res)] });
         runs.push({ id: s.id, status: "ran", findings: 1 });
       }
       continue;
