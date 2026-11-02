@@ -1,0 +1,27 @@
+name: PR hygiene
+
+# kit is a public repository, and CLAUDE.md forbids internal session URLs in PR text. A rule that
+# depends on being remembered was broken twice in one week, so it is a check. The PR text reaches
+# the script through the environment and is never interpolated into it.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-text:
+    name: No session URL in the PR text
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the PR title and body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | grep -Eq 'claude\.ai/code/session_'; then
+            echo "::error title=Session URL in the PR text::The PR title or body contains a claude.ai/code/session_ URL. Remove it. It is internal session metadata and this repository is public (CLAUDE.md, Public artifacts)."
+            exit 1
+          fi
