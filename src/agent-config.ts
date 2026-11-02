@@ -13,6 +13,7 @@ import { constants, existsSync, readdirSync, readFileSync, writeFileSync } from 
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
+import { gateSettingsFile, preToolUseGroups } from "./gate-settings.js";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
 import {
@@ -849,28 +850,12 @@ export function markGatesInstalled(cwd: string = process.cwd()): void {
   }
 }
 
-/** PreToolUse groups in one settings file. Missing or unparseable settings hold no gates. */
-function preToolUseGroups(path: string): SettingsHookGroup[] {
-  try {
-    const settings = JSON.parse(readFileSync(path, "utf-8")) as {
-      hooks?: Record<string, SettingsHookGroup[]>;
-    };
-    return Array.isArray(settings.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
-  } catch {
-    return [];
-  }
-}
-
 export function gateLiveness(
   cwd: string = process.cwd(),
   settingsPath: string = resolve(cwd, ".claude/settings.json"),
 ): GateLiveness {
   const everInstalled = existsSync(gateMarkerPath(cwd));
-  // Claude Code merges settings.json and settings.local.json, so a gate in either one is wired.
-  const pre = [
-    ...preToolUseGroups(settingsPath),
-    ...preToolUseGroups(join(dirname(settingsPath), "settings.local.json")),
-  ];
+  const pre = preToolUseGroups(settingsPath); // settings.json and settings.local.json, merged
   const claudeGateCommands = pre
     .flatMap((g) => g.hooks ?? [])
     .map((h) => h.command)
@@ -886,28 +871,6 @@ export function gateLiveness(
     egressGate: has("gate-egress"),
     problems: allGateCommands.flatMap((cmd) => hookCommandProblems(cmd)),
   };
-}
-
-const SHARED_SETTINGS = ".claude/settings.json";
-const LOCAL_SETTINGS = ".claude/settings.local.json";
-
-/**
- * Where a PreToolUse gate is written. A gate command holds a path that only exists on this
- * machine ("$HOME/.kit/bin/kit"), so it must not go into a file that is committed: on another
- * clone or in CI the hook cannot start. When `.claude/settings.json` is tracked by git the gates
- * go to the per-machine `.claude/settings.local.json` instead; otherwise nothing changes.
- */
-async function gateSettingsFile(cwd: string): Promise<string> {
-  const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
-  const tracked = await execFileNoThrow(
-    "git",
-    ["ls-files", "--error-unmatch", "--", SHARED_SETTINGS],
-    {
-      cwd,
-      timeout: 5_000,
-    },
-  );
-  return tracked.ok ? LOCAL_SETTINGS : SHARED_SETTINGS;
 }
 
 /**
