@@ -3,8 +3,7 @@
 import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 export type VerifyCheck =
-  | { type: "http-status"; url: string; expect: number }
-  | { type: "file-exists"; path: string };
+  { type: "http-status"; url: string; expect: number } | { type: "file-exists"; path: string };
 
 export interface PendingAction {
   id: string;

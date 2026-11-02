@@ -45,8 +45,7 @@ export function palConfigure(db: DatabaseSync, id: string, check: VerifyCheck | 
   db.exec("BEGIN IMMEDIATE");
   try {
     const row = db.prepare("SELECT * FROM pending_actions WHERE id = ?").get(id) as unknown as
-      | PendingAction
-      | undefined;
+      PendingAction | undefined;
     if (!row) {
       db.exec("COMMIT");
       return false;

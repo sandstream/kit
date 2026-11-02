@@ -12,12 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 
 export type ContainmentMechanism =
-  | "gvisor"
-  | "firecracker"
-  | "container"
-  | "seccomp"
-  | "none"
-  | "unknown";
+  "gvisor" | "firecracker" | "container" | "seccomp" | "none" | "unknown";
 
 /** Parsed, deterministic containment signals (all optional — unknown when unread). */
 export interface ContainmentSignals {

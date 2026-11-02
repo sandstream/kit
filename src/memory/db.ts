@@ -300,8 +300,7 @@ function migrate(db: DatabaseSync, defaultClass: MemoryClass): void {
   backfillMessageClass(db, defaultClass);
   db.exec("CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL)");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
-    | { version: number }
-    | undefined;
+    { version: number } | undefined;
   if (!row) {
     db.prepare("INSERT INTO schema_meta(version) VALUES (?)").run(SCHEMA_VERSION);
   } else if (row.version < SCHEMA_VERSION) {
@@ -850,8 +849,7 @@ export function quarantineInjectedMessages(db: DatabaseSync): number {
 /** How many messages are currently quarantined (excluded from recall by default). */
 export function countQuarantined(db: DatabaseSync): number {
   const r = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE quarantined = 1").get() as
-    | { n: number }
-    | undefined;
+    { n: number } | undefined;
   return r ? Number(r.n) : 0;
 }
 

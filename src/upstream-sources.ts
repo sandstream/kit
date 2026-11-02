@@ -194,8 +194,7 @@ export function createDefaultFetcher(): UpstreamFetcher {
 }
 
 export type SourceResult<T> =
-  | ({ name: string; ok: true } & T)
-  | { name: string; ok: false; error: string };
+  ({ name: string; ok: true } & T) | { name: string; ok: false; error: string };
 
 export interface UpstreamLookup {
   status: "ok" | "skipped" | "unknown";

@@ -84,6 +84,7 @@ import { cmdTriage } from "./commands/triage.js";
 import { cmdTools } from "./commands/tools.js";
 import { cmdSlopsquat } from "./commands/slopsquat.js";
 import { cmdMemory } from "./commands/memory.js";
+import { cmdServices } from "./commands/services.js";
 import { escapeWorkflowCmd, xmlEscape } from "./utils/ci-escape.js";
 
 // Re-exported for tests + downstream emitters (ci-escaping.test.ts imports these
@@ -887,6 +888,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     // MCP-exposed (search only): cross-session recall is stateful — exactly the
     // case where an MCP tool earns its context cost for shell-less clients.
     mcp: true,
+  },
+  services: {
+    handler: cmdServices,
+    stability: "experimental",
+    help: "Local service leases: who started which container, Supabase stack, process or port, checked against what runs. add | ls | renew | stop | prune | ask | keep | release (--json, --ttl, --force)",
   },
   guard: {
     handler: cmdGuard,

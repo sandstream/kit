@@ -37,9 +37,7 @@ export function isReadOnlyToken(token: string): boolean {
 }
 
 export type ReadOnlyFlagResult =
-  | { kind: "absent" }
-  | { kind: "active" }
-  | { kind: "invalid"; flag: string; value: string };
+  { kind: "absent" } | { kind: "active" } | { kind: "invalid"; flag: string; value: string };
 
 /**
  * Scans argv for a `--read-only` / `--readonly` token. A bare flag or a truthy value

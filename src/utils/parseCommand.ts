@@ -6,8 +6,7 @@
  * Without this guard those strings get exec()'d and spawn fails with ENOENT.
  */
 export type ParsedCommand =
-  | { kind: "informational"; message: string }
-  | { kind: "executable"; cmd: string; args: string[] };
+  { kind: "informational"; message: string } | { kind: "executable"; cmd: string; args: string[] };
 
 export function parseCommand(command: string): ParsedCommand {
   const trimmed = command.trim();

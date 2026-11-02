@@ -90,8 +90,7 @@ export function verifyManifestSignature(
 }
 
 export type VerifyResult =
-  | { ok: true; env: Record<string, string>; artifacts: number }
-  | { ok: false; reason: string };
+  { ok: true; env: Record<string, string>; artifacts: number } | { ok: false; reason: string };
 
 export interface VerifyDeps {
   /** Absolute bundle directory. */

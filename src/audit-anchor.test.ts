@@ -155,7 +155,10 @@ describe("audit anchor - key file", () => {
       getAuditAnchorKey(dir, () => {
         calls += 1;
         if (calls === 4) {
-          temp = join(dir, readdirSync(dir).find((name) => name.startsWith(".kit-audit-anchor-"))!);
+          temp = join(
+            dir,
+            readdirSync(dir).find((name) => name.startsWith(".kit-audit-anchor-"))!,
+          );
           assert.equal(readFileSync(temp, "utf8"), "");
           assert.equal(privateFileIsControlled(temp), true);
           if (process.platform !== "win32") assert.equal(statSync(temp).mode & 0o077, 0);
@@ -192,7 +195,10 @@ describe("audit anchor - key file", () => {
       /interrupted before write/,
     );
     assert.equal(existsSync(join(dir, "audit-anchor.key")), false);
-    const temp = join(dir, readdirSync(dir).find((name) => name.startsWith(".kit-audit-anchor-"))!);
+    const temp = join(
+      dir,
+      readdirSync(dir).find((name) => name.startsWith(".kit-audit-anchor-"))!,
+    );
     assert.equal(readFileSync(temp, "utf8"), "");
     assert.equal(privateFileIsControlled(temp), true);
   });
