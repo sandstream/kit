@@ -98,7 +98,15 @@ export function defaultProbeDeps(): ProbeDeps {
   };
 }
 
-const PS_FORMAT = `{{.ID}}\t{{.Names}}\t{{.Label "${SUPABASE_LABEL}"}}\t{{.Label "${COMPOSE_LABEL}"}}\t{{.CreatedAt}}`;
+const LINE_BREAK = /\r?\n/;
+const labelField = (label: string): string => '{{.Label "' + label + '"}}';
+const PS_FORMAT = [
+  "{{.ID}}",
+  "{{.Names}}",
+  labelField(SUPABASE_LABEL),
+  labelField(COMPOSE_LABEL),
+  "{{.CreatedAt}}",
+].join("\t");
 
 /** `2026-06-10 12:34:56 +0200 CEST` → epoch ms. */
 export function parseDockerTime(text: string): number | undefined {
@@ -110,7 +118,7 @@ export function parseDockerTime(text: string): number | undefined {
 
 export function parsePsOutput(stdout: string): DockerContainer[] {
   const out: DockerContainer[] = [];
-  for (const line of stdout.split(/\r?\n/)) {
+  for (const line of stdout.split(LINE_BREAK)) {
     if (!line.trim()) continue;
     const [id = "", names = "", supabase = "", compose = "", created = ""] = line.split("\t");
     const c: DockerContainer = { id: id.trim(), name: names.split(",")[0]!.trim() };
@@ -144,6 +152,36 @@ export function parseMemUsage(text: string): number | undefined {
   return Math.round(Number(m[1]) * unit);
 }
 
+/** First line of a failed docker call, for the "docker is not available" reason. */
+function failureReason(result: ExecResult): string {
+  const text = (result.stderr || result.stdout).trim();
+  return text.split(LINE_BREAK)[0] || "docker is not available";
+}
+
+/** Memory in bytes per container id, from one `docker stats`. Empty when stats fail. */
+async function memoryById(deps: ProbeDeps): Promise<Map<string, number>> {
+  const mem = new Map<string, number>();
+  const stats = await deps.run(
+    "docker",
+    ["stats", "--no-stream", "--no-trunc", "--format", "{{.ID}}\t{{.MemUsage}}"],
+    { timeout: 30_000 },
+  );
+  if (!stats.ok) return mem;
+  for (const line of stats.stdout.split(LINE_BREAK)) {
+    const [id = "", usage = ""] = line.split("\t");
+    const bytes = parseMemUsage(usage);
+    if (id.trim() && bytes !== undefined) mem.set(id.trim(), bytes);
+  }
+  return mem;
+}
+
+/** `docker stats` may print a short id, so fall back to a prefix match. */
+function memoryOf(container: DockerContainer, mem: Map<string, number>): number | undefined {
+  const exact = mem.get(container.id);
+  if (exact !== undefined) return exact;
+  return [...mem].find(([id]) => container.id.startsWith(id))?.[1];
+}
+
 /** One `docker ps` (and optionally one `docker stats`) for the whole command. */
 export async function dockerSnapshot(
   deps: ProbeDeps,
@@ -152,28 +190,13 @@ export async function dockerSnapshot(
   const ps = await deps.run("docker", ["ps", "--no-trunc", "--format", PS_FORMAT], {
     timeout: 15_000,
   });
-  if (!ps.ok) {
-    const reason = (ps.stderr || ps.stdout).trim().split(/\r?\n/)[0] || "docker is not available";
-    return { available: false, reason };
-  }
+  if (!ps.ok) return { available: false, reason: failureReason(ps) };
   const containers = parsePsOutput(ps.stdout);
   if (opts.stats && containers.length > 0) {
-    const stats = await deps.run(
-      "docker",
-      ["stats", "--no-stream", "--no-trunc", "--format", "{{.ID}}\t{{.MemUsage}}"],
-      { timeout: 30_000 },
-    );
-    if (stats.ok) {
-      const mem = new Map<string, number>();
-      for (const line of stats.stdout.split(/\r?\n/)) {
-        const [id = "", usage = ""] = line.split("\t");
-        const bytes = parseMemUsage(usage);
-        if (id.trim() && bytes !== undefined) mem.set(id.trim(), bytes);
-      }
-      for (const c of containers) {
-        const bytes = mem.get(c.id) ?? [...mem].find(([id]) => c.id.startsWith(id))?.[1];
-        if (bytes !== undefined) c.memBytes = bytes;
-      }
+    const mem = await memoryById(deps);
+    for (const c of containers) {
+      const bytes = memoryOf(c, mem);
+      if (bytes !== undefined) c.memBytes = bytes;
     }
   }
   return { available: true, containers };
@@ -216,6 +239,26 @@ export interface UnregisteredGroup {
   memBytes?: number;
 }
 
+function groupOf(c: DockerContainer): { kind: UnregisteredGroup["kind"]; ref: string } {
+  if (c.supabase) return { kind: "supabase", ref: c.supabase };
+  if (c.compose) return { kind: "compose", ref: c.compose };
+  return { kind: "container", ref: c.name };
+}
+
+function addToGroup(groups: Map<string, UnregisteredGroup>, c: DockerContainer): void {
+  const { kind, ref } = groupOf(c);
+  const key = `${kind}\0${ref}`;
+  const g = groups.get(key) ?? { kind, ref, containers: 0 };
+  g.containers++;
+  if (c.createdAt !== undefined) g.oldest = Math.min(g.oldest ?? c.createdAt, c.createdAt);
+  if (c.memBytes !== undefined) g.memBytes = (g.memBytes ?? 0) + c.memBytes;
+  groups.set(key, g);
+}
+
+function byMemoryThenRef(a: UnregisteredGroup, b: UnregisteredGroup): number {
+  return (b.memBytes ?? 0) - (a.memBytes ?? 0) || a.ref.localeCompare(b.ref);
+}
+
 /** Running docker workloads no registry entry claims, grouped by Supabase or compose label. */
 export function unregisteredGroups(
   entries: readonly ServiceEntry[],
@@ -226,23 +269,9 @@ export function unregisteredGroups(
   for (const e of entries) for (const c of containersFor(e, snap)) claimed.add(c.id);
   const groups = new Map<string, UnregisteredGroup>();
   for (const c of snap.containers) {
-    if (claimed.has(c.id)) continue;
-    const kind: UnregisteredGroup["kind"] = c.supabase
-      ? "supabase"
-      : c.compose
-        ? "compose"
-        : "container";
-    const ref = c.supabase ?? c.compose ?? c.name;
-    const key = `${kind}\0${ref}`;
-    const g = groups.get(key) ?? { kind, ref, containers: 0 };
-    g.containers++;
-    if (c.createdAt !== undefined) g.oldest = Math.min(g.oldest ?? c.createdAt, c.createdAt);
-    if (c.memBytes !== undefined) g.memBytes = (g.memBytes ?? 0) + c.memBytes;
-    groups.set(key, g);
+    if (!claimed.has(c.id)) addToGroup(groups, c);
   }
-  return [...groups.values()].sort(
-    (a, b) => (b.memBytes ?? 0) - (a.memBytes ?? 0) || a.ref.localeCompare(b.ref),
-  );
+  return [...groups.values()].sort(byMemoryThenRef);
 }
 
 export interface StopOutcome {
@@ -258,7 +287,7 @@ export interface StopOutcome {
 export async function stopEntry(entry: ServiceEntry, deps: ProbeDeps): Promise<StopOutcome> {
   const fail = (r: ExecResult, what: string): StopOutcome => ({
     ok: false,
-    detail: `${what} failed: ${(r.stderr || r.stdout).trim().split(/\r?\n/).slice(-3).join(" ")}`,
+    detail: `${what} failed: ${(r.stderr || r.stdout).trim().split(LINE_BREAK).slice(-3).join(" ")}`,
   });
   switch (entry.kind) {
     case "supabase": {

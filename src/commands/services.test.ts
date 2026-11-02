@@ -38,44 +38,48 @@ class FakeDocker {
       platform: "linux",
       pidAlive: () => false,
       portOpen: async () => false,
-      run: async (cmd, args) => {
-        this.calls.push([cmd, ...args].join(" "));
-        if (cmd === "docker" && !this.available) {
-          return {
-            stdout: "",
-            stderr: "Cannot connect to the Docker daemon",
-            exitCode: 1,
-            ok: false,
-          };
-        }
-        if (cmd === "docker" && args[0] === "ps") {
-          return ok(
-            this.containers
-              .map((c) =>
-                [c.id, c.name, c.supabase ?? "", c.compose ?? "", c.created ?? ""].join("\t"),
-              )
-              .join("\n"),
-          );
-        }
-        if (cmd === "docker" && args[0] === "stats") {
-          return ok(this.containers.map((c) => `${c.id}\t${c.mem ?? "0B / 1GiB"}`).join("\n"));
-        }
-        if (this.stubborn) return ok();
-        if (cmd === "docker" && args[0] === "rm") {
-          this.containers = this.containers.filter((c) => c.name !== args[2]);
-          return ok();
-        }
-        if (cmd === "docker" && args[0] === "compose") {
-          this.containers = this.containers.filter((c) => c.compose !== args[2]);
-          return ok();
-        }
-        if (cmd === "supabase") {
-          this.containers = this.containers.filter((c) => c.supabase !== args[2]);
-          return ok();
-        }
-        return { stdout: "", stderr: `unexpected ${cmd}`, exitCode: 1, ok: false };
-      },
+      run: (cmd, args) => this.run(cmd, args),
     };
+  }
+
+  private async run(cmd: string, args: string[]): Promise<ExecResult> {
+    this.calls.push([cmd, ...args].join(" "));
+    if (cmd === "docker" && !this.available) {
+      return { stdout: "", stderr: "Cannot connect to the Docker daemon", exitCode: 1, ok: false };
+    }
+    const listing = this.listing(cmd, args);
+    if (listing) return listing;
+    if (this.stubborn) return ok();
+    return (
+      this.stop(cmd, args) ?? { stdout: "", stderr: `unexpected ${cmd}`, exitCode: 1, ok: false }
+    );
+  }
+
+  private listing(cmd: string, args: string[]): ExecResult | undefined {
+    if (cmd !== "docker") return undefined;
+    if (args[0] === "ps") {
+      const rows = this.containers.map((c) =>
+        [c.id, c.name, c.supabase ?? "", c.compose ?? "", c.created ?? ""].join("\t"),
+      );
+      return ok(rows.join("\n"));
+    }
+    if (args[0] === "stats") {
+      return ok(this.containers.map((c) => `${c.id}\t${c.mem ?? "0B / 1GiB"}`).join("\n"));
+    }
+    return undefined;
+  }
+
+  private stop(cmd: string, args: string[]): ExecResult | undefined {
+    if (cmd === "docker" && args[0] === "rm") {
+      this.containers = this.containers.filter((c) => c.name !== args[2]);
+    } else if (cmd === "docker" && args[0] === "compose") {
+      this.containers = this.containers.filter((c) => c.compose !== args[2]);
+    } else if (cmd === "supabase") {
+      this.containers = this.containers.filter((c) => c.supabase !== args[2]);
+    } else {
+      return undefined;
+    }
+    return ok();
   }
 }
 
@@ -228,7 +232,7 @@ describe("kit services ls", () => {
   });
 });
 
-describe("kit services stop", () => {
+describe("kit services stop ownership", () => {
   beforeEach(() => {
     docker.containers.push({ id: "c1", name: "smoke" });
   });
@@ -276,6 +280,12 @@ describe("kit services stop", () => {
     assert.equal(r.ok, false);
     assert.match(r.err, /still runs/);
     assert.equal(entries().length, 1);
+  });
+});
+
+describe("kit services stop with docker", () => {
+  beforeEach(() => {
+    docker.containers.push({ id: "c1", name: "smoke" });
   });
 
   it("refuses to stop anything when docker is down", async () => {

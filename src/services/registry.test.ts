@@ -56,7 +56,7 @@ function runWriter(file: string, name: string): Promise<number> {
   });
 }
 
-describe("services registry", () => {
+describe("services registry file", () => {
   it("keeps every entry when many processes write at the same time", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-services-reg-"));
     try {
@@ -118,7 +118,9 @@ describe("services registry", () => {
       rmTemp(dir);
     }
   });
+});
 
+describe("services registry values", () => {
   it("computes the lease from leaseUntil", () => {
     const now = Date.parse("2026-11-01T12:00:00Z");
     assert.equal(leaseActive(entry("a", "2026-11-01T12:00:01Z"), now), true);
