@@ -21,10 +21,7 @@ import { scopeFor } from "./elevation-scopes.js";
 import type { SigningKey, SigningKeyRotation } from "sandstream-kit-plugin-supabase";
 
 export type SupabaseRotateMode =
-  | "scoped-key-mint"
-  | "jwt-secret-roll"
-  | "signing-key-rotate"
-  | "signing-key-cutover";
+  "scoped-key-mint" | "jwt-secret-roll" | "signing-key-rotate" | "signing-key-cutover";
 
 const MODES: readonly SupabaseRotateMode[] = [
   "scoped-key-mint",

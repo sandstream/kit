@@ -51,12 +51,7 @@ export interface Observation {
 }
 
 export type WatchState =
-  | "lookup-failed"
-  | "dead"
-  | "changed"
-  | "unobserved"
-  | "unchanged"
-  | "not-watchable";
+  "lookup-failed" | "dead" | "changed" | "unobserved" | "unchanged" | "not-watchable";
 
 export interface WatchResult {
   id: string;

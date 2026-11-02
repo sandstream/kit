@@ -51,8 +51,7 @@ export { deviceId, deviceIdOverrideActive } from "./device.js";
  * pure data operation that cannot be coerced into command execution.
  */
 export type VerifyCheck =
-  | { type: "http-status"; url: string; expect: number }
-  | { type: "file-exists"; path: string };
+  { type: "http-status"; url: string; expect: number } | { type: "file-exists"; path: string };
 
 export interface PendingAction {
   id: string;
@@ -393,8 +392,7 @@ export function palSyncFindings(
     const id = idFor(f.dedupKey);
     currentIds.add(id);
     const existing = db.prepare("SELECT status FROM pending_actions WHERE id = ?").get(id) as
-      | { status: string }
-      | undefined;
+      { status: string } | undefined;
     if (existing && (existing.status === "claimed" || readActionHistory(db, id)?.conflict)) {
       deferred.add(id);
       continue;

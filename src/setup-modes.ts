@@ -15,13 +15,7 @@ export type SetupMode = "full" | "local" | "airgap" | "ci" | "agent" | "review" 
 
 /** Subsystems kit can set up; `kit status` scores the ones a mode `expects`. */
 export type SubsystemKey =
-  | "config"
-  | "tools"
-  | "secrets"
-  | "hooks"
-  | "agent-config"
-  | "memory"
-  | "posture";
+  "config" | "tools" | "secrets" | "hooks" | "agent-config" | "memory" | "posture";
 
 export interface ModeProfile {
   mode: SetupMode;

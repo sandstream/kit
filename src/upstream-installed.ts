@@ -9,11 +9,7 @@ import { isValidVersion } from "./update-check.js";
 import { entryExists, readRegularFileIfPresent } from "./upstream-safe-read.js";
 
 export type InstalledSource =
-  | "package-lock.json"
-  | "bun.lock"
-  | "pnpm-lock.yaml"
-  | "declared-range"
-  | "unresolved";
+  "package-lock.json" | "bun.lock" | "pnpm-lock.yaml" | "declared-range" | "unresolved";
 
 export interface InstalledVersion {
   version: string | null;

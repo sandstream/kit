@@ -100,11 +100,7 @@ export async function list1PasswordAccounts(): Promise<OnePasswordAccount[]> {
  * - "not-installed": op CLI itself is missing
  */
 export type OnePasswordMode =
-  | "service-account"
-  | "desktop-integration"
-  | "eval-signin"
-  | "no-account"
-  | "not-installed";
+  "service-account" | "desktop-integration" | "eval-signin" | "no-account" | "not-installed";
 
 export async function detect1PasswordMode(): Promise<{ mode: OnePasswordMode; hint: string }> {
   if (process.env.OP_SERVICE_ACCOUNT_TOKEN) {

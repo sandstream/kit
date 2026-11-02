@@ -108,12 +108,10 @@ export function latestSessionId(
          ORDER BY timestamp DESC LIMIT 1`,
       )
       .get(...roots.flatMap((root) => [root, `${root.replace(/\/$/, "")}/`])) as
-      | { session_id: string }
-      | undefined;
+      { session_id: string } | undefined;
   } else {
     row = db.prepare("SELECT session_id FROM messages ORDER BY timestamp DESC LIMIT 1").get() as
-      | { session_id: string }
-      | undefined;
+      { session_id: string } | undefined;
   }
   return row?.session_id;
 }
