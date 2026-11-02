@@ -8,6 +8,25 @@ export interface ExecResult {
   stderr: string;
   exitCode: number;
   ok: boolean;
+  /** True when the output exceeded maxBuffer and was cut off (stdout is then only the start). */
+  truncated?: boolean;
+}
+
+const MAXBUFFER_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+
+function failureResult(error: unknown): ExecResult {
+  if (!error || typeof error !== "object") {
+    return { stdout: "", stderr: String(error), exitCode: 1, ok: false };
+  }
+  const e = error as { stdout?: string; stderr?: string; code?: number | string };
+  const result: ExecResult = {
+    stdout: e.stdout ?? "",
+    stderr: e.stderr ?? "",
+    exitCode: typeof e.code === "number" ? e.code : 1,
+    ok: false,
+  };
+  if (e.code === MAXBUFFER_CODE) result.truncated = true;
+  return result;
 }
 
 /**
@@ -30,15 +49,6 @@ export async function execFileNoThrow(
     });
     return { stdout, stderr, exitCode: 0, ok: true };
   } catch (error: unknown) {
-    if (error && typeof error === "object") {
-      const e = error as { stdout?: string; stderr?: string; code?: number | string };
-      return {
-        stdout: e.stdout ?? "",
-        stderr: e.stderr ?? "",
-        exitCode: typeof e.code === "number" ? e.code : 1,
-        ok: false,
-      };
-    }
-    return { stdout: "", stderr: String(error), exitCode: 1, ok: false };
+    return failureResult(error);
   }
 }
