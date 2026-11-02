@@ -256,7 +256,7 @@ max_bytes = 12000
 | `kit security prescan <path> [--deep] [--format=json] [--vs-baseline=<p>]` | Multi-repo baseline sweep (secrets, gitignore, branch-protect; `--deep` adds CVE / workflow-drift / bumblebee).                                                                                                      |
 | `kit security prescan-diff <baseline.jsonl> <latest.jsonl>`                | Diff two prescan reports — surface new regressions + fixed findings.                                                                                                                                                 |
 
-The build scan reports an incomplete check for source maps over 5 MiB or 100,000 source entries.
+The build scan reports an incomplete check, never a pass, when it cannot cover part of the build: any scanned file over 5 MiB, a file or directory it cannot read, a directory nested deeper than 8 levels, or a source map with more than 100,000 source entries.
 It also limits scans of metadata and invalid content to 100,000 string tokens per map.
 It also reports incomplete scans for invalid maps and ambiguous keyed values.
 The report includes credentials found before a limit.
