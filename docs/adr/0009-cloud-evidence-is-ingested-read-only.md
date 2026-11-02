@@ -2,6 +2,7 @@
 id: ADR-0009
 title: cloud evidence is ingested read-only, kit holds no cloud credential
 status: accepted
+enforced_by: [src/ingest-offline.test.ts]
 ---
 
 # ADR-0009: cloud evidence is ingested read-only
@@ -37,10 +38,10 @@ of this one, and a role allowlist that the ADR names.
 
 ## Enforcement
 
-This ADR is documented, not enforced. It has no `kit-enforce` block, because "no cloud call"
-does not fit the grammar without false positives. A grep of `src/adapters/ingest.ts` and
-`src/external-findings.ts` found no `fetch` or network import, only reference URL strings. No
-test asserts that today. A test that `kit ingest` makes no network call is a follow-up, and
-the ADR should then name it in `enforced_by`.
+The "no cloud call" rule does not fit the `kit-enforce` grammar without false positives, so
+it has no `kit-enforce` block. `src/ingest-offline.test.ts` runs the real `kit ingest sarif`
+command with `fetch`, sockets, DNS, `http` and `https` blocked, and it must still succeed. A
+control case proves the block works. Adding a `fetch` call to the built ingest code made the
+test fail. The test covers `kit ingest` only. It does not cover a future cloud delegate.
 
 The owner accepted this ADR on 2026-11-02.
