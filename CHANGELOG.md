@@ -47,6 +47,12 @@
 
 ### Added
 
+- **`[deploy.health.<env>]` reads the deployed commit.** `kit check --category deploy` makes one
+  GET to the configured URL and prints the commit the service reports. No credential, no redirect,
+  64 KB cap, https only (loopback excepted). A value that is not a commit hash gives `unverified`.
+  Air-gap mode makes no request. Checked against a live Vercel deployment. First part of Z4: it
+  does not yet tag findings as `deployed` or `branch`.
+
 - **`kit services`: leases for the local services agents start (experimental).** Agent sessions
   start Supabase stacks, compose projects, containers and dev servers and end without stopping
   them; on one Mac that was 40 containers from four Supabase projects, about 5.4 GB of RAM, one of

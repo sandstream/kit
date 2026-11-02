@@ -15,7 +15,7 @@ import { failedDetail, type ExecResult } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 
 export type DeployCheckStatus = "pass" | "fail" | "warn" | "skip";
-export type DeployCheckProvider = "deploy" | "vercel";
+export type DeployCheckProvider = "deploy" | "vercel" | "health";
 
 export interface DeployCheckResult {
   provider: DeployCheckProvider;
@@ -434,7 +434,7 @@ async function checkVercelDeploy(
 export async function checkDeploy(
   config: DeployConfig | undefined,
   cwd: string = process.cwd(),
-  opts: { listVercelEnvNames?: DeployListEnv } = {},
+  opts: { listVercelEnvNames?: DeployListEnv; airGap?: boolean } = {},
 ): Promise<DeployCheckResult[]> {
   if (!config || Object.keys(config).length === 0) return [noDeployConfigured()];
 
@@ -449,5 +449,19 @@ export async function checkDeploy(
     );
   }
 
+  results.push(...(await readDeployedCommits(config, opts.airGap)));
+
   return results.length > 0 ? results : [noDeployConfigured()];
+}
+
+async function readDeployedCommits(
+  config: DeployConfig,
+  airGap: boolean | undefined,
+): Promise<DeployCheckResult[]> {
+  if (!(config as { health?: unknown }).health) return [];
+  const [{ checkDeployHealth }, { isAirGapPosture }] = await Promise.all([
+    import("./deploy-health.js"),
+    import("./update-check.js"),
+  ]);
+  return checkDeployHealth(config, { airGap: airGap ?? (await isAirGapPosture()) });
 }

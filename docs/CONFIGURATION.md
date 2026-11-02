@@ -10,34 +10,34 @@ list in the terminal, marking which ones this repo already declares.
 
 kit accepts **26 sections**.
 
-| Section | What it configures | Set up with |
-| --- | --- | --- |
-| [`[agent_config]`](#agent_config) | How `kit agent-config` generates the rules files agents read (CLAUDE.md, AGENTS.md, …). | `kit agent-config` |
-| [`[air_gap]`](#air_gap) | No-egress posture: mirrors, offline threat data, and offline provenance verification. | [docs](AIR_GAP.md) |
-| [`[browser]`](#browser) | Browser-verification capability declaration. | `kit browser` |
-| [`[context]`](#context) | The account and project each CLI must be pointed at, per tool. | `kit context check` |
-| [`[coverage]`](#coverage) | Which standards the evidence map scores against. | `kit coverage --list-standards` |
-| [`[decisions]`](#decisions) | Whether a run must leave a decision ledger — the choices it made where the spec was silent. | `kit decisions` |
-| [`[deploy]`](#deploy) | Required platform env-var NAMES per project and environment. | `kit check --category deploy` |
-| [`[env]`](#env) | Per-environment overrides of any section above. | — |
-| [`[governance]`](#governance) | Whether agent operations are audited, under which environment, and the access/approval rules around them. | `kit governance` |
-| [`[hooks]`](#hooks) | Git hooks kit installs, and the commands each one runs. | `kit hooks add secret-scan` |
-| [`[mcp]`](#mcp) | Declared MCP-server connections for this project. | [docs](MCP_TOOLS_GUIDE.md) |
-| [`[memory]`](#memory) | Memory capture and PAL behaviour, including this project's sensitivity class. | `kit memory` |
-| [`[policy]`](#policy) | Which vendor writes an agent may perform, pre-approved by operation. | `kit governance` |
-| [`[projects]`](#projects) | The project directories of a repository that holds several projects. | `kit check` |
-| [`[scan]`](#scan) | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]) and the client-exposed env allowlist. | `kit scan --list-delegates` |
-| [`[secrets]`](#secrets) | Which vault backs this project's secrets, and the key names it needs. | `kit secrets` |
-| [`[services]`](#services) | External CLIs this project authenticates against, with the login and check command for each. | `kit login` |
-| [`[setup]`](#setup) | Project bootstrap commands — install dependencies, migrate, verify. | `kit bootstrap` |
-| [`[skills]`](#skills) | Agent skills this project requires or offers, and the registry to fetch them from. | `kit skills` |
-| [`[standards]`](#standards) | The deterministic dev-standards gate, and whether it fails on net-new findings. | `kit standards` |
-| [`[supply_chain]`](#supply_chain) | Install-time triage settings — notably which package scopes count as internal. | `kit supply-chain` |
-| [`[tools]`](#tools) | Tool versions this project requires, provisioned through mise. | `kit install` |
-| [`[update]`](#update) | Whether kit surfaces a newer published version, and whether it may self-update. | `kit upgrade --self` |
-| [`[upstream]`](#upstream) | Adds or overrides the release sources kit upstream watches: npm packages and GitHub repos per service, or disables a built-in one. | `kit upstream check` |
-| [`[version]`](#version) | Schema version of this file, as a top-level integer. | `kit config migrate` |
-| [`[web]`](#web) | Web-search provider used by the features that need one. | [docs](PERFORMANCE_AND_DIAGNOSTICS.md) |
+| Section                           | What it configures                                                                                                                                                                                                                                                | Set up with                            |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| [`[agent_config]`](#agent_config) | How `kit agent-config` generates the rules files agents read (CLAUDE.md, AGENTS.md, …).                                                                                                                                                                           | `kit agent-config`                     |
+| [`[air_gap]`](#air_gap)           | No-egress posture: mirrors, offline threat data, and offline provenance verification.                                                                                                                                                                             | [docs](AIR_GAP.md)                     |
+| [`[browser]`](#browser)           | Browser-verification capability declaration.                                                                                                                                                                                                                      | `kit browser`                          |
+| [`[context]`](#context)           | The account and project each CLI must be pointed at, per tool.                                                                                                                                                                                                    | `kit context check`                    |
+| [`[coverage]`](#coverage)         | Which standards the evidence map scores against.                                                                                                                                                                                                                  | `kit coverage --list-standards`        |
+| [`[decisions]`](#decisions)       | Whether a run must leave a decision ledger — the choices it made where the spec was silent.                                                                                                                                                                       | `kit decisions`                        |
+| [`[deploy]`](#deploy)             | Required platform env-var NAMES per project and environment.                                                                                                                                                                                                      | `kit check --category deploy`          |
+| [`[env]`](#env)                   | Per-environment overrides of any section above.                                                                                                                                                                                                                   | —                                      |
+| [`[governance]`](#governance)     | Whether agent operations are audited, under which environment, and the access/approval rules around them.                                                                                                                                                         | `kit governance`                       |
+| [`[hooks]`](#hooks)               | Git hooks kit installs, and the commands each one runs.                                                                                                                                                                                                           | `kit hooks add secret-scan`            |
+| [`[mcp]`](#mcp)                   | Declared MCP-server connections for this project.                                                                                                                                                                                                                 | [docs](MCP_TOOLS_GUIDE.md)             |
+| [`[memory]`](#memory)             | Memory capture and PAL behaviour, including this project's sensitivity class.                                                                                                                                                                                     | `kit memory`                           |
+| [`[policy]`](#policy)             | Which vendor writes an agent may perform, pre-approved by operation.                                                                                                                                                                                              | `kit governance`                       |
+| [`[projects]`](#projects)         | The project directories of a repository that holds several projects.                                                                                                                                                                                              | `kit check`                            |
+| [`[scan]`](#scan)                 | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]) and the client-exposed env allowlist. | `kit scan --list-delegates`            |
+| [`[secrets]`](#secrets)           | Which vault backs this project's secrets, and the key names it needs.                                                                                                                                                                                             | `kit secrets`                          |
+| [`[services]`](#services)         | External CLIs this project authenticates against, with the login and check command for each.                                                                                                                                                                      | `kit login`                            |
+| [`[setup]`](#setup)               | Project bootstrap commands — install dependencies, migrate, verify.                                                                                                                                                                                               | `kit bootstrap`                        |
+| [`[skills]`](#skills)             | Agent skills this project requires or offers, and the registry to fetch them from.                                                                                                                                                                                | `kit skills`                           |
+| [`[standards]`](#standards)       | The deterministic dev-standards gate, and whether it fails on net-new findings.                                                                                                                                                                                   | `kit standards`                        |
+| [`[supply_chain]`](#supply_chain) | Install-time triage settings — notably which package scopes count as internal.                                                                                                                                                                                    | `kit supply-chain`                     |
+| [`[tools]`](#tools)               | Tool versions this project requires, provisioned through mise.                                                                                                                                                                                                    | `kit install`                          |
+| [`[update]`](#update)             | Whether kit surfaces a newer published version, and whether it may self-update.                                                                                                                                                                                   | `kit upgrade --self`                   |
+| [`[upstream]`](#upstream)         | Adds or overrides the release sources kit upstream watches: npm packages and GitHub repos per service, or disables a built-in one.                                                                                                                                | `kit upstream check`                   |
+| [`[version]`](#version)           | Schema version of this file, as a top-level integer.                                                                                                                                                                                                              | `kit config migrate`                   |
+| [`[web]`](#web)                   | Web-search provider used by the features that need one.                                                                                                                                                                                                           | [docs](PERFORMANCE_AND_DIAGNOSTICS.md) |
 
 ## agent_config
 
@@ -136,6 +136,16 @@ required = ["DATABASE_URL", "STRIPE_SECRET_KEY"]
 ```
 
 Set up with `kit check --category deploy`.
+
+**Deployed commit.** A table `[deploy.health.<env>]` names a URL that returns the running commit as JSON. `kit check --category deploy` reads it and prints `deployed commit <short hash>`.
+
+```toml
+[deploy.health.production]
+url = "https://www.example.com/api/version"
+version_field = "version" # optional dot path into the JSON, default "version"
+```
+
+kit sends one GET with no credential and does not follow a redirect. The URL must use https (plain http only for loopback) and must not hold a username or password. The answer is capped at 64 KB. A value that is not a commit hash, such as `dev`, gives `unverified`, never a pass. Air-gap mode makes no request. This reads which commit runs. It does not yet tag findings as `deployed` or `branch`.
 
 ## env
 
