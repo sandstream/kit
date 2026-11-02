@@ -1,14 +1,20 @@
 name: PR hygiene
 
 # kit is a public repository, and CLAUDE.md forbids internal session URLs in PR text. A rule that
-# depends on being remembered was broken twice in one week, so it is a check. The PR text reaches
-# the script through the environment and is never interpolated into it.
+# depends on being remembered was broken twice in one week, so it is a check.
+#
+# It checks the PR text as it is now, read from the API, not the snapshot in the event: some PR
+# tools add a session footer on creation that their caller replaces seconds later, and the
+# snapshot then failed a PR whose text was already clean. On `opened` it waits 30 s first, so
+# that replacement lands. Every later edit runs the check again. The text reaches the script
+# through the environment and is never interpolated into it.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   pr-text:
@@ -16,12 +22,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check the PR title and body
+      - name: Let a just-opened PR's text settle
+        if: github.event.action == 'opened'
+        run: sleep 30
+      - name: Check the PR title and body as they are now
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          if printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | grep -Eq 'claude\.ai/code/session_'; then
+          text="$(gh api "repos/$REPO/pulls/$PR" --jq '.title + "\n" + (.body // "")')"
+          if printf '%s' "$text" | grep -Eq 'claude\.ai/code/session_'; then
             echo "::error title=Session URL in the PR text::The PR title or body contains a claude.ai/code/session_ URL. Remove it. It is internal session metadata and this repository is public (CLAUDE.md, Public artifacts)."
             exit 1
           fi
