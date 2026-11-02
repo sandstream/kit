@@ -849,20 +849,28 @@ export function markGatesInstalled(cwd: string = process.cwd()): void {
   }
 }
 
+/** PreToolUse groups in one settings file. Missing or unparseable settings hold no gates. */
+function preToolUseGroups(path: string): SettingsHookGroup[] {
+  try {
+    const settings = JSON.parse(readFileSync(path, "utf-8")) as {
+      hooks?: Record<string, SettingsHookGroup[]>;
+    };
+    return Array.isArray(settings.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
+  } catch {
+    return [];
+  }
+}
+
 export function gateLiveness(
   cwd: string = process.cwd(),
   settingsPath: string = resolve(cwd, ".claude/settings.json"),
 ): GateLiveness {
   const everInstalled = existsSync(gateMarkerPath(cwd));
-  let pre: SettingsHookGroup[];
-  try {
-    const settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as {
-      hooks?: Record<string, SettingsHookGroup[]>;
-    };
-    pre = Array.isArray(settings.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
-  } catch {
-    pre = []; // missing/unparseable settings → no gates present (surfaced as a problem)
-  }
+  // Claude Code merges settings.json and settings.local.json, so a gate in either one is wired.
+  const pre = [
+    ...preToolUseGroups(settingsPath),
+    ...preToolUseGroups(join(dirname(settingsPath), "settings.local.json")),
+  ];
   const claudeGateCommands = pre
     .flatMap((g) => g.hooks ?? [])
     .map((h) => h.command)
@@ -880,6 +888,28 @@ export function gateLiveness(
   };
 }
 
+const SHARED_SETTINGS = ".claude/settings.json";
+const LOCAL_SETTINGS = ".claude/settings.local.json";
+
+/**
+ * Where a PreToolUse gate is written. A gate command holds a path that only exists on this
+ * machine ("$HOME/.kit/bin/kit"), so it must not go into a file that is committed: on another
+ * clone or in CI the hook cannot start. When `.claude/settings.json` is tracked by git the gates
+ * go to the per-machine `.claude/settings.local.json` instead; otherwise nothing changes.
+ */
+async function gateSettingsFile(cwd: string): Promise<string> {
+  const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+  const tracked = await execFileNoThrow(
+    "git",
+    ["ls-files", "--error-unmatch", "--", SHARED_SETTINGS],
+    {
+      cwd,
+      timeout: 5_000,
+    },
+  );
+  return tracked.ok ? LOCAL_SETTINGS : SHARED_SETTINGS;
+}
+
 /**
  * Install the PreToolUse install-gate hook into `.claude/settings.json` so an
  * un-triaged package install is BLOCKED before it runs — the *enforce* layer for
@@ -889,7 +919,7 @@ export function gateLiveness(
  * other hooks. Only wired for Claude Code today (the settings schema we know).
  */
 export async function installInstallGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
-  const file = ".claude/settings.json";
+  const file = await gateSettingsFile(cwd);
   const path = resolve(cwd, file);
 
   const { isReadOnlyMode } = await import("./read-only-mode.js");
@@ -944,7 +974,7 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
  * we know); other agents keep the after-the-fact plaintext scan in `kit check`.
  */
 export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
-  const file = ".claude/settings.json";
+  const file = await gateSettingsFile(cwd);
   const path = resolve(cwd, file);
 
   const { isReadOnlyMode } = await import("./read-only-mode.js");
@@ -1005,7 +1035,7 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
  * each gate command); preserves other hooks.
  */
 export async function installBrokerGates(cwd: string = process.cwd()): Promise<HookInstallResult> {
-  const file = ".claude/settings.json";
+  const file = await gateSettingsFile(cwd);
   const path = resolve(cwd, file);
 
   const { isReadOnlyMode } = await import("./read-only-mode.js");
