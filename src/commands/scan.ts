@@ -7,6 +7,7 @@ import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { hasMarker, scanProvidersTracked } from "../scan-detect.js";
 import { mavenSbomScanners } from "../maven-sbom.js";
+import { DEFAULT_SCAN_TIMEOUT_MS } from "../scan-abort.js";
 
 export async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
@@ -148,7 +149,7 @@ export async function cmdScan(): Promise<boolean> {
       resolve: (bin) => resolveToolBin(bin),
       run: async (bin, args, timeoutMs) => {
         const r = await execFileNoThrow(bin, args, {
-          timeout: timeoutMs ?? 180_000,
+          timeout: timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
           // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
           maxBuffer: 64 * 1024 * 1024,
           env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, process.cwd()),
@@ -159,6 +160,7 @@ export async function cmdScan(): Promise<boolean> {
           stderr: r.stderr,
           exitCode: r.exitCode,
           truncated: r.truncated,
+          timedOut: r.timedOut,
         };
       },
       hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
