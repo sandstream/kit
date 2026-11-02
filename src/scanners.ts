@@ -392,7 +392,8 @@ export function suppressBaselined(
   return { kept, suppressed: merged.length - kept.length };
 }
 
-export type ScannerStatus = "ran" | "not-installed" | "no-token" | "not-applicable" | "error";
+export type ScannerStatus =
+  "ran" | "not-installed" | "no-token" | "not-applicable" | "error" | "timed-out"; // kit stopped it at its time limit
 export interface ScannerRun {
   id: string;
   status: ScannerStatus;
@@ -448,7 +449,12 @@ export function scannerEnv(
  * is unknown (a green result hides the gap). `ran` succeeded; `not-applicable` is
  * a legitimate skip (the scanner does not apply to this project) and is NOT a gap.
  */
-export const NON_RUNNING_STATUSES: ScannerStatus[] = ["not-installed", "no-token", "error"];
+export const NON_RUNNING_STATUSES: ScannerStatus[] = [
+  "not-installed",
+  "no-token",
+  "error",
+  "timed-out",
+];
 
 export interface ScanGateOptions {
   /** Scanner ids that MUST run; if one did not, the gate fails (even without strict). */

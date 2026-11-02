@@ -7,7 +7,7 @@ import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { hasMarker, scanProvidersTracked } from "../scan-detect.js";
 import { mavenSbomScanners } from "../maven-sbom.js";
-import { DEFAULT_SCAN_TIMEOUT_MS } from "../scan-abort.js";
+import { DEFAULT_SCAN_TIMEOUT_MS, isFailedRun } from "../scan-abort.js";
 import { resolveProjectPaths } from "../projects-config.js";
 import { expandPerProject } from "../scan-projects.js";
 
@@ -229,7 +229,7 @@ export async function cmdScan(): Promise<boolean> {
     const mark =
       r.status === "ran"
         ? `${c.green}✓${c.reset}`
-        : r.status === "error"
+        : isFailedRun(r.status)
           ? `${c.red}✗${c.reset}`
           : `${c.dim}−${c.reset}`;
     const note =
