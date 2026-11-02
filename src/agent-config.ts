@@ -13,6 +13,7 @@ import { constants, existsSync, readdirSync, readFileSync, writeFileSync } from 
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
+import { gateSettingsFile, preToolUseGroups } from "./gate-settings.js";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
 import {
@@ -854,15 +855,7 @@ export function gateLiveness(
   settingsPath: string = resolve(cwd, ".claude/settings.json"),
 ): GateLiveness {
   const everInstalled = existsSync(gateMarkerPath(cwd));
-  let pre: SettingsHookGroup[];
-  try {
-    const settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as {
-      hooks?: Record<string, SettingsHookGroup[]>;
-    };
-    pre = Array.isArray(settings.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
-  } catch {
-    pre = []; // missing/unparseable settings → no gates present (surfaced as a problem)
-  }
+  const pre = preToolUseGroups(settingsPath); // settings.json and settings.local.json, merged
   const claudeGateCommands = pre
     .flatMap((g) => g.hooks ?? [])
     .map((h) => h.command)
@@ -889,7 +882,7 @@ export function gateLiveness(
  * other hooks. Only wired for Claude Code today (the settings schema we know).
  */
 export async function installInstallGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
-  const file = ".claude/settings.json";
+  const file = await gateSettingsFile(cwd);
   const path = resolve(cwd, file);
 
   const { isReadOnlyMode } = await import("./read-only-mode.js");
@@ -944,7 +937,7 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
  * we know); other agents keep the after-the-fact plaintext scan in `kit check`.
  */
 export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
-  const file = ".claude/settings.json";
+  const file = await gateSettingsFile(cwd);
   const path = resolve(cwd, file);
 
   const { isReadOnlyMode } = await import("./read-only-mode.js");
@@ -1005,7 +998,7 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
  * each gate command); preserves other hooks.
  */
 export async function installBrokerGates(cwd: string = process.cwd()): Promise<HookInstallResult> {
-  const file = ".claude/settings.json";
+  const file = await gateSettingsFile(cwd);
   const path = resolve(cwd, file);
 
   const { isReadOnlyMode } = await import("./read-only-mode.js");
