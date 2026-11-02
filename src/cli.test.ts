@@ -14,66 +14,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { installFakeVercel } from "./cli-vercel-fixture.test-support.js";
+import { GITIGNORE_CONTENT, runCli } from "./cli-run.test-support.js";
 
 const exec = promisify(execFile);
-
-// Resolve CLI path relative to this compiled test file
-const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
-
-interface CliResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-/**
- * Run the kit CLI in a given directory, capturing output and exit code.
- */
-async function runCli(
-  args: string[],
-  cwd: string,
-  env: Record<string, string> = {},
-): Promise<CliResult> {
-  // Commands such as `kit setup` install lifecycle hooks. Keep those writes in
-  // the disposable fixture instead of touching the developer's real agent config.
-  const agentStateDir = join(cwd, ".kit-test-agent-state");
-  await mkdir(agentStateDir, { recursive: true });
-  try {
-    const { stdout, stderr } = await exec(process.execPath, [CLI_PATH, ...args], {
-      cwd,
-      env: {
-        ...process.env,
-        // Disable governance to avoid budget state side-effects
-        KIT_CLAUDE_SETTINGS: join(agentStateDir, "claude-settings.json"),
-        KIT_CODEX_HOOKS: join(agentStateDir, "codex-hooks.json"),
-        KIT_MEMORY_HOOK_MARKER: join(agentStateDir, "claude-marker"),
-        KIT_CODEX_MEMORY_HOOK_MARKER: join(agentStateDir, "codex-marker"),
-        KIT_MEMORY_DB: join(agentStateDir, "memory.db"),
-        ...env,
-      },
-      timeout: 30_000,
-    });
-    return { exitCode: 0, stdout: stdout ?? "", stderr: stderr ?? "" };
-  } catch (err: unknown) {
-    const e = err as { code?: number; stdout?: string; stderr?: string };
-    return {
-      exitCode: typeof e.code === "number" ? e.code : 1,
-      stdout: e.stdout ?? "",
-      stderr: e.stderr ?? "",
-    };
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
 // Standard .gitignore content for temp dirs so the security check passes
-const GITIGNORE_CONTENT = `.env
-.env.local
-.env.*.local
-.env.keys
-`;
 
 const FIXTURE_EMPTY = `# Minimal kit config — no tools, services, or secrets
 `;
@@ -633,96 +582,6 @@ name = "JSON Test"
 });
 
 // ---------------------------------------------------------------------------
-// kit init — auto-generate .kit.toml
-// ---------------------------------------------------------------------------
-
-describe("kit init — auto-generate", () => {
-  let tempDir: string;
-
-  before(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "kit-integ-init-"));
-    await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
-  });
-
-  after(async () => {
-    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
-
-  it("generates .kit.toml for a Next.js project when file is absent (--non-interactive)", async () => {
-    const projectDir = join(tempDir, "nextjs-project");
-    await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
-    await writeFile(
-      join(projectDir, "package.json"),
-      JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8",
-    );
-
-    const result = await runCli(["init", "--non-interactive"], projectDir);
-
-    // Should have generated .kit.toml
-    const tomlContent = await readFile(join(projectDir, ".kit.toml"), "utf-8");
-    assert.ok(tomlContent.length > 0, "should generate non-empty .kit.toml");
-    assert.ok(tomlContent.includes("node"), "should include node in tools");
-    assert.ok(result.stdout.includes(".kit.toml"), `expected generation message: ${result.stdout}`);
-  });
-
-  it("shows diff preview with + lines before writing", async () => {
-    const projectDir = join(tempDir, "preview-project");
-    await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
-    await writeFile(
-      join(projectDir, "package.json"),
-      JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8",
-    );
-
-    const result = await runCli(["init", "--non-interactive"], projectDir);
-    assert.ok(result.stdout.includes("Preview"), `expected preview header: ${result.stdout}`);
-    assert.ok(result.stdout.includes(".kit.toml"), `expected preview content: ${result.stdout}`);
-  });
-
-  it("generates --yes as alias for --non-interactive", async () => {
-    const projectDir = join(tempDir, "yes-flag-project");
-    await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
-    await writeFile(
-      join(projectDir, "package.json"),
-      JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8",
-    );
-
-    await runCli(["init", "--yes"], projectDir);
-    const tomlContent = await readFile(join(projectDir, ".kit.toml"), "utf-8").catch(() => "");
-    assert.ok(tomlContent.length > 0, "--yes should write .kit.toml");
-  });
-
-  it("does not overwrite existing .kit.toml", async () => {
-    const projectDir = join(tempDir, "existing-config");
-    await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
-    const originalContent = `# existing config\n[tools]\nnode = "18"\n`;
-    await writeFile(join(projectDir, ".kit.toml"), originalContent, "utf-8");
-
-    await runCli(["init", "--non-interactive"], projectDir);
-
-    // Existing file should be unchanged
-    const tomlContent = await readFile(join(projectDir, ".kit.toml"), "utf-8");
-    assert.equal(tomlContent, originalContent, "should not overwrite existing .kit.toml");
-  });
-
-  it("returns non-zero when confidence too low in non-interactive mode", async () => {
-    const projectDir = join(tempDir, "empty-project");
-    await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
-    // No package.json, no known files — confidence will be 0
-
-    const result = await runCli(["init", "--non-interactive"], projectDir);
-    assert.equal(result.exitCode, 1, "should exit 1 when confidence too low");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Wired commands that were previously documented but unrouted
 // ---------------------------------------------------------------------------
 
@@ -779,98 +638,6 @@ describe("kit secrets validate", () => {
     assert.equal(result.exitCode, 1, "missing key → non-zero");
     assert.ok(!result.stderr.includes("Unknown subcommand"), "must be routed");
     assert.ok(result.stdout.includes("_KIT_VAL_ABSENT"), "names the missing key");
-  });
-});
-
-// Regressions from running kit on third-party / vendor repos: `kit scan` must not
-// require (or create) a .kit.toml, and `kit init --no-setup` must actually stop
-// after config instead of running the full setup pipeline.
-describe("vendor-repo safety: config-free scan + honored --no-setup", () => {
-  let dir: string;
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "kit-cfgfree-"));
-    await writeFile(join(dir, "package.json"), '{"name":"t","dependencies":{}}', "utf-8");
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
-
-  it("kit scan runs without a .kit.toml and never creates one", async () => {
-    const result = await runCli(["scan"], dir);
-    // The regression: a missing config used to ENOENT into "Create a .kit.toml".
-    // (Assertion is timeout-safe: that error fires at config-load, before scanners.)
-    assert.ok(
-      !result.stdout.includes("Create a .kit.toml") &&
-        !result.stderr.includes("Create a .kit.toml"),
-      `scan must not demand config; got: ${result.stdout}\n${result.stderr}`,
-    );
-    await assert.rejects(access(join(dir, ".kit.toml")), "scan must not write a .kit.toml");
-  });
-
-  it("kit init --no-setup generates config then stops (no install/login/secrets)", async () => {
-    const result = await runCli(["init", "--no-setup", "--non-interactive"], dir);
-    await access(join(dir, ".kit.toml")); // init's job: the config IS created
-    assert.ok(
-      /Setup skipped/.test(result.stdout),
-      `expected 'Setup skipped'; got: ${result.stdout}`,
-    );
-  });
-
-  // Project-agnostic commands must not require (or create) a .kit.toml either.
-  for (const args of [["supply-chain"], ["sentinel", "status"], ["verify-provenance"]]) {
-    it(`kit ${args.join(" ")} runs without a .kit.toml`, async () => {
-      const result = await runCli(args, dir);
-      assert.ok(
-        !result.stdout.includes("Create a .kit.toml") &&
-          !result.stderr.includes("Create a .kit.toml"),
-        `${args[0]} must not demand config; got: ${result.stdout}\n${result.stderr}`,
-      );
-      await assert.rejects(access(join(dir, ".kit.toml")), `${args[0]} must not write a .kit.toml`);
-    });
-  }
-});
-
-describe("kit self-audit (clean tree, machine output)", () => {
-  let dir: string;
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "kit-selfaudit-"));
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
-
-  it("--json: ok=true, failed=0, advisories separate from warnings, files carried", async () => {
-    const result = await runCli(["self-audit", "--json"], dir);
-    assert.equal(result.exitCode, 0, `expected exit 0; stderr: ${result.stderr}`);
-    const out = JSON.parse(result.stdout) as {
-      ok: boolean;
-      checks: { status: string; category: string; files?: string[]; severity?: string }[];
-      summary: { failed: number; warnings: number; advisories?: number };
-    };
-    assert.equal(out.ok, true);
-    assert.equal(out.summary.failed, 0);
-    // Advisories (R5/R10 info) are tallied apart from warnings.
-    assert.ok((out.summary.advisories ?? 0) > 0, "expected aggregated advisories on kit's tree");
-    // Every non-pass check carries a files path:line (advisory rows are aggregated
-    // and carry only a category, so restrict to gating fail/warn rows).
-    const gating = out.checks.filter(
-      (ch) => (ch.status === "fail" || ch.status === "warn") && ch.severity !== "low",
-    );
-    for (const ch of gating) {
-      assert.ok(
-        ch.files && ch.files.length > 0 && /:\d+$/.test(ch.files[0]),
-        `non-pass check ${ch.category} must carry a file:line; got ${JSON.stringify(ch.files)}`,
-      );
-    }
-  });
-
-  it("--fail-on-warning exits 0 on the clean tree (advisories never gate)", async () => {
-    const result = await runCli(["self-audit", "--fail-on-warning"], dir);
-    assert.equal(
-      result.exitCode,
-      0,
-      `--fail-on-warning must pass on kit's clean tree; stdout: ${result.stdout}\nstderr: ${result.stderr}`,
-    );
   });
 });
 

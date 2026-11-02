@@ -1,0 +1,36 @@
+name: Reviewer identity probe
+
+# Manual only. Posts a COMMENT review (never an approval) on one pull request as the reviewer
+# GitHub App, to confirm the App's identity and token before any approval is wired to it.
+# It checks out the default branch, never the pull request's code, and the App's key reaches
+# only scripts/github-app-token.mjs, which narrows the token to this repository.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number to post the probe review on"
+        required: true
+        type: number
+
+permissions: {}
+
+jobs:
+  probe:
+    name: reviewer identity probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Post a COMMENT review as the reviewer App
+        run: node scripts/github-app-token.mjs probe "$PR"
+        env:
+          PR: ${{ inputs.pr }}
+          REVIEWER_APP_ID: ${{ vars.REVIEWER_APP_ID }}
+          REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
