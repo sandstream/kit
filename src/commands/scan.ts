@@ -149,9 +149,17 @@ export async function cmdScan(): Promise<boolean> {
       run: async (bin, args, timeoutMs) => {
         const r = await execFileNoThrow(bin, args, {
           timeout: timeoutMs ?? 180_000,
+          // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
+          maxBuffer: 64 * 1024 * 1024,
           env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, process.cwd()),
         });
-        return { ok: r.ok, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
+        return {
+          ok: r.ok,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          exitCode: r.exitCode,
+          truncated: r.truncated,
+        };
       },
       hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
       detect: (markers) => hasMarker(cwd, markers),

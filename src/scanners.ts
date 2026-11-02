@@ -501,7 +501,16 @@ export interface ScanDeps {
   detect(markers: string[]): boolean;
 }
 
-type ScanResult = { ok: boolean; stdout: string; stderr?: string; exitCode?: number };
+type ScanResult = {
+  ok: boolean;
+  stdout: string;
+  stderr?: string;
+  exitCode?: number;
+  truncated?: boolean;
+};
+
+const TRUNCATED_REASON =
+  "output exceeded kit's buffer limit and was cut off, so the report was not read (a kit limit, not a scanner error)";
 
 /**
  * Turn a scanner's raw result into its run record and findings.
@@ -517,6 +526,10 @@ function settleRun(
   res: ScanResult,
 ): { run: ScannerRun; findings?: SecurityCheckResult[] } {
   const reason = scannerReason(res.stderr);
+  if (res.truncated) {
+    // A report cut off at the buffer limit is kit's failure, not the scanner's: say so.
+    return { run: { id: s.id, status: "error", findings: 0, reason: TRUNCATED_REASON } };
+  }
   if (!res.stdout && s.noTargetExit !== undefined && res.exitCode === s.noTargetExit) {
     return { run: { id: s.id, status: "not-applicable", findings: 0, reason, noTarget: true } };
   }
