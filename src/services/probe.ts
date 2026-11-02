@@ -29,8 +29,7 @@ export interface DockerContainer {
 }
 
 export type DockerSnapshot =
-  | { available: true; containers: DockerContainer[] }
-  | { available: false; reason: string };
+  { available: true; containers: DockerContainer[] } | { available: false; reason: string };
 
 export type Liveness = "alive" | "dead" | "unknown";
 
