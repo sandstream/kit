@@ -44,10 +44,12 @@ Then ship deterministic checks so kit tells other repositories the same.
 
 ## Phase 1: close the image's security gap
 
-- [ ] Add a `docker` entry to `.github/dependabot.yml` (directory `/`, weekly), so base-image digests move with each patch.
-- [ ] Re-pin all three `FROM node:22-alpine@sha256:` lines to the current digest. Verify the `NODE_VERSION` in its image config is the latest 22.x security release, and record it in the PR.
-- [ ] Add `ignore` rules for semver-major updates of `typescript` and `@types/node` to the `npm` entry.
-- [ ] Close #627 with a pointer to this plan, so Dependabot regenerates the group without the two majors.
+- [x] Add a `docker` entry to `.github/dependabot.yml` (directory `/`, weekly), so base-image digests move with each patch.
+- [x] Re-pin all three `FROM node:22-alpine@sha256:` lines to the current digest. Verify the `NODE_VERSION` in its image config is the latest 22.x security release, and record it in the PR.
+- [x] Add `ignore` rules for semver-major updates of `typescript` and `@types/node` to the `npm` entry.
+- [x] Close #627 with a pointer to this plan, so Dependabot regenerates the group without the two majors.
+
+Done in #688 (image reports Node 22.23.4, built and run). Dependabot closed #627 itself once the ignore rules landed.
 
 ## Phase 2: test the active LTS beside the floor
 
@@ -59,6 +61,7 @@ Then ship deterministic checks so kit tells other repositories the same.
 
 - [ ] Move the three `FROM` lines to `node:26-alpine@sha256:<digest>`, once Phase 2 is green on 26.
 - [ ] Confirm the Docker workflow's build, scan and smoke steps pass, and record the image's `NODE_VERSION`.
+- [ ] Decide npm 12 for the image in the same PR. The image pins `npm@11.21.1`, the latest 11.x; npm 12.2.1's `engines` (`^22.22.2 || ^24.15.0 || >=26.0.0`) allow both 22 and 26, so the only question is the major change, not the runtime.
 
 ## Phase 4: kit check, frozen base image
 
