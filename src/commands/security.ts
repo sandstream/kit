@@ -25,6 +25,7 @@ import {
 } from "../security-policy.js";
 import { clearBumblebeeCache } from "../bumblebee.js";
 import { scanStagedFiles } from "../scan-staged.js";
+import { applyScanAllowlist } from "../scan-allow-run.js";
 import { existsSync } from "node:fs";
 import { cmdSecurityScanBuild } from "./security-scan-build.js";
 import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
@@ -411,7 +412,9 @@ async function cmdSecurityScanStaged(): Promise<boolean> {
   // Designed to run from a git pre-commit hook. Prints nothing on success so
   // the hook output stays quiet for normal commits; exits non-zero with a
   // structured report when a credential pattern is staged.
-  const hits = await scanStagedFiles();
+  const allowed = await applyScanAllowlist(await scanStagedFiles());
+  if (!allowed.ok) return false; // a broken [[scan.allow]] blocks the commit
+  const hits = allowed.hits;
   if (hits.length === 0) return true;
 
   // Test/fixture hits are REPORTED, never blocking: fake credentials live there by
@@ -447,7 +450,7 @@ async function cmdSecurityScanStaged(): Promise<boolean> {
     console.error(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
   }
   console.error(
-    `\n${c.dim}If a finding is a false positive, you can bypass with ${c.bold}git commit --no-verify${c.reset}${c.dim}, but prefer migrating the value to a vault first (${c.bold}kit secrets migrate${c.reset}${c.dim}).${c.reset}`,
+    `\n${c.dim}If a finding is a false positive, add a reviewed ${c.bold}[[scan.allow]]${c.reset}${c.dim} entry to .kit.toml (a reason is required), or bypass with ${c.bold}git commit --no-verify${c.reset}${c.dim}. Prefer migrating the value to a vault first (${c.bold}kit secrets migrate${c.reset}${c.dim}).${c.reset}`,
   );
   return false;
 }
