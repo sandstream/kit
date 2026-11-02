@@ -25,7 +25,19 @@ import { runAdrGate } from "./adr.js";
 import { runSkillGate } from "../skill-run.js";
 import type { JsonCheck } from "../cli-checks-shared.js";
 import type { GateOpts } from "../check-security.js";
-import { verifyReviewReceiptFile, writeReviewReceipt } from "../review-receipt-io.js";
+import {
+  captureReviewSnapshot,
+  defaultReadCommand,
+  prepareReviewReceipt,
+  recordReviewGate,
+  recoverReviewReceipt,
+  resolveReviewInterruption,
+  verifyReviewReceiptFile,
+  writeReviewReceipt,
+  type ReviewSnapshot,
+} from "../review-receipt-io.js";
+import { beginReviewTransaction, type ReviewTransaction } from "../review-receipt-transaction.js";
+import { isReadOnlyMode, refuseWrite } from "../read-only-mode.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 
 export type ReviewStageName = "check" | "design" | "standards" | "adr" | "skill";
@@ -205,17 +217,122 @@ const ICON: Record<JsonCheck["status"], string> = {
   skip: `${c.dim}-${c.reset}`,
 };
 
+function selectReviewStages(value: string | undefined): ReviewStageName[] | undefined {
+  if (!value) return undefined;
+  const parsed = value
+    .split(",")
+    .map((stage) => stage.trim())
+    .filter(Boolean);
+  const bad = parsed.filter((stage) => !REVIEW_STAGES.includes(stage as ReviewStageName));
+  if (bad.length)
+    throw new Error(`unknown stage(s): ${bad.join(", ")}  (valid: ${REVIEW_STAGES.join(", ")})`);
+  return parsed as ReviewStageName[];
+}
+
+async function verifyReceiptCommand(cwd: string): Promise<boolean> {
+  try {
+    const result = await verifyReviewReceiptFile(cwd, process.argv[4]);
+    console.log(`${result.ok ? "✓" : "✗"} ${result.reason}`);
+    return result.ok;
+  } catch (error) {
+    console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+async function recoverReceiptCommand(cwd: string): Promise<boolean> {
+  const config = await loadConfig(resolve(cwd, KIT_FILE));
+  try {
+    return await withGovernance(
+      config,
+      { operation: "review", operationType: "write", metadata: {} },
+      async () => {
+        const result = await recoverReviewReceipt(
+          cwd,
+          hasFlag(process.argv, "--confirm-stopped"),
+          defaultReadCommand,
+          {
+            interruptionReview: flagValue(process.argv, "--interruption-review"),
+            acknowledgeUnknown: hasFlag(process.argv, "--acknowledge-unknown"),
+          },
+        );
+        console.log(result);
+        return true;
+      },
+    );
+  } catch (error) {
+    console.error(
+      `✗ Review recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+}
+
+async function resolveInterruptionCommand(cwd: string): Promise<boolean> {
+  const config = await loadConfig(resolve(cwd, KIT_FILE));
+  try {
+    return await withGovernance(
+      config,
+      { operation: "review", operationType: "write", metadata: {} },
+      async () => {
+        const result = await resolveReviewInterruption(
+          cwd,
+          process.argv[4] ?? "",
+          flagValue(process.argv, "--interruption-review"),
+          hasFlag(process.argv, "--acknowledge-unknown"),
+        );
+        console.log(result);
+        return true;
+      },
+    );
+  } catch (error) {
+    console.error(
+      `✗ Review assessment failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+}
+
+function incompatibleReceiptOptions(
+  receiptMode: boolean,
+  stages: string | undefined,
+  category: string | undefined,
+): boolean {
+  return receiptMode && (!!stages || !!category || hasFlag(process.argv, "--lenient"));
+}
+
+function misplacedRecoveryFlag(): string | null {
+  if (hasFlag(process.argv, "--confirm-stopped")) {
+    return "--confirm-stopped requires review recover-receipt";
+  }
+  if (hasFlag(process.argv, "--interruption-review")) {
+    return "--interruption-review requires review recover-receipt";
+  }
+  if (hasFlag(process.argv, "--acknowledge-unknown")) {
+    return "--acknowledge-unknown requires review recovery or interruption assessment";
+  }
+  return null;
+}
+
+function specialReviewCommand(cwd: string): Promise<boolean> | undefined {
+  switch (process.argv[3]) {
+    case "verify-receipt":
+      return verifyReceiptCommand(cwd);
+    case "recover-receipt":
+      return recoverReceiptCommand(cwd);
+    case "resolve-interruption":
+      return resolveInterruptionCommand(cwd);
+  }
+}
+
 export async function cmdReview(): Promise<boolean> {
   const cwd = await reviewDirectory();
-  if (process.argv[3] === "verify-receipt") {
-    try {
-      const result = await verifyReviewReceiptFile(cwd, process.argv[4]);
-      console.log(`${result.ok ? "✓" : "✗"} ${result.reason}`);
-      return result.ok;
-    } catch (error) {
-      console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
+  const special = specialReviewCommand(cwd);
+  if (special) return special;
+  const flagError = misplacedRecoveryFlag();
+  if (flagError) {
+    console.error(flagError);
+    return false;
   }
   const receiptMode = hasFlag(process.argv, "--receipt");
   const jsonMode = receiptMode || hasFlag(process.argv, "--json");
@@ -232,22 +349,14 @@ export async function cmdReview(): Promise<boolean> {
   // `stages` param). An unknown name is a refusal, not a silent full run.
   const stagesFlag = flagValue(process.argv, "--stages");
   let stages: ReviewStageName[] | undefined;
-  if (stagesFlag) {
-    const parsed = stagesFlag
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const bad = parsed.filter((s) => !REVIEW_STAGES.includes(s as ReviewStageName));
-    if (bad.length > 0) {
-      console.error(
-        `${c.red}✗ unknown stage(s): ${bad.join(", ")}${c.reset}  ${c.dim}(valid: ${REVIEW_STAGES.join(", ")})${c.reset}`,
-      );
-      return false;
-    }
-    stages = parsed as ReviewStageName[];
+  try {
+    stages = selectReviewStages(stagesFlag);
+  } catch (error) {
+    console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
   const category = flagValue(process.argv, "--category");
-  if (receiptMode && (stagesFlag || category || hasFlag(process.argv, "--lenient"))) {
+  if (incompatibleReceiptOptions(receiptMode, stagesFlag, category)) {
     console.error(
       "✗ --receipt requires a full review and cannot use --stages, --category, or --lenient",
     );
@@ -255,77 +364,150 @@ export async function cmdReview(): Promise<boolean> {
   }
   const config = await loadConfig(resolve(cwd, KIT_FILE));
 
-  return await withGovernance(
+  return withGovernance(
     config,
     { operation: "review", operationType: receiptMode ? "write" : "read", metadata: {} },
-    async () => {
-      if (!jsonMode) console.log(`${c.bold}kit review${c.reset} — full repo audit\n`);
-      const report = await collectReview({
+    () =>
+      runGovernedReview({
         cwd,
         config,
+        receiptMode,
+        jsonMode,
         enforce,
         enforceTests,
-        gate: { lenient, failOnWarning },
+        lenient,
+        failOnWarning,
         stages,
         category,
-      });
-
-      if (jsonMode) {
-        const output = JSON.stringify(report, null, 2) + "\n";
-        process.stdout.write(output);
-        if (receiptMode) {
-          try {
-            const { path, receipt } = await writeReviewReceipt(cwd, {
-              command: "kit review --receipt",
-              exitCode: report.ok ? 0 : 1,
-              stdout: output,
-              stderr: "",
-              failures: report.stages
-                .filter((stage) => !stage.ok)
-                .flatMap((stage) => {
-                  const findings = stage.findings
-                    .filter((finding) => finding.status === "fail" || finding.status === "warn")
-                    .map(
-                      (finding) =>
-                        `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
-                    );
-                  return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
-                }),
-            });
-            console.error(`Review receipt: ${path}`);
-            for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);
-            return receipt.evidence_issues.length === 0;
-          } catch (error) {
-            console.error(
-              `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
-            );
-            return false;
-          }
-        }
-        return report.ok;
-      }
-
-      for (const stage of report.stages) {
-        console.log(`${c.bold}=== ${stage.stage} ===${c.reset}`);
-        for (const f of stage.findings) {
-          console.log(`  ${ICON[f.status]} ${f.name}  ${c.dim}${f.detail}${c.reset}`);
-          if (f.files) for (const file of f.files) console.log(`      ${c.dim}- ${file}${c.reset}`);
-        }
-        const s = stage.summary;
-        const verdict = stage.ok ? `${c.green}✓ ok${c.reset}` : `${c.red}✗ failed${c.reset}`;
-        console.log(
-          `  ${verdict} ${c.dim}(${s.pass} pass · ${s.fail} fail · ${s.warn} warn · ${s.skip} skip)${c.reset}\n`,
-        );
-      }
-
-      console.log(
-        `${c.bold}${
-          report.ok
-            ? `${c.green}✓ review passed`
-            : `${c.red}✗ review failed — ${report.failed.join(", ")}`
-        }${c.reset}`,
-      );
-      return report.ok;
-    },
+      }),
   );
+}
+
+interface GovernedReviewOptions {
+  cwd: string;
+  config: kitConfig;
+  receiptMode: boolean;
+  jsonMode: boolean;
+  enforce: boolean;
+  enforceTests: boolean;
+  lenient: boolean;
+  failOnWarning: boolean;
+  stages: ReviewStageName[] | undefined;
+  category: string | undefined;
+}
+
+async function runGovernedReview(options: GovernedReviewOptions): Promise<boolean> {
+  const {
+    cwd,
+    config,
+    receiptMode,
+    jsonMode,
+    enforce,
+    enforceTests,
+    lenient,
+    failOnWarning,
+    stages,
+    category,
+  } = options;
+  let snapshot: ReviewSnapshot | undefined;
+  let transaction: ReviewTransaction | undefined;
+  if (receiptMode) {
+    if (isReadOnlyMode()) {
+      const refusal = await refuseWrite("review-receipt", {}, { cwd });
+      console.error(refusal.reason);
+      return false;
+    }
+    try {
+      snapshot = captureReviewSnapshot(cwd);
+      transaction = beginReviewTransaction(snapshot.root, defaultReadCommand);
+      await prepareReviewReceipt(snapshot, transaction);
+    } catch (error) {
+      console.error(
+        `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+  if (!jsonMode) console.log(`${c.bold}kit review${c.reset} — full repo audit\n`);
+  const report = await collectReview({
+    cwd,
+    config,
+    enforce,
+    enforceTests,
+    gate: { lenient, failOnWarning },
+    stages,
+    category,
+  });
+
+  if (jsonMode) return renderJsonReview(cwd, report, receiptMode, snapshot, transaction);
+
+  return renderTextReview(report);
+}
+
+async function renderJsonReview(
+  cwd: string,
+  report: ReviewReport,
+  receiptMode: boolean,
+  snapshot: ReviewSnapshot | undefined,
+  transaction: ReviewTransaction | undefined,
+): Promise<boolean> {
+  const output = JSON.stringify(report, null, 2) + "\n";
+  if (receiptMode) {
+    try {
+      if (!snapshot || !transaction) throw new Error("review transaction is missing");
+      const gate = {
+        command: "kit review --receipt",
+        exitCode: report.ok ? 0 : 1,
+        stdout: output,
+        stderr: "",
+        failures: report.stages
+          .filter((stage) => !stage.ok)
+          .flatMap((stage) => {
+            const findings = stage.findings
+              .filter((finding) => finding.status === "fail" || finding.status === "warn")
+              .map(
+                (finding) => `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
+              );
+            return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
+          }),
+      };
+      await recordReviewGate(snapshot, transaction, gate);
+      process.stdout.write(output);
+      const { path, receipt } = await writeReviewReceipt(cwd, gate, { snapshot, transaction });
+      console.error(`Review receipt: ${path}`);
+      for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);
+      return receipt.evidence_issues.length === 0;
+    } catch (error) {
+      console.error(
+        `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+  process.stdout.write(output);
+  return report.ok;
+}
+
+function renderTextReview(report: ReviewReport): boolean {
+  for (const stage of report.stages) {
+    console.log(`${c.bold}=== ${stage.stage} ===${c.reset}`);
+    for (const f of stage.findings) {
+      console.log(`  ${ICON[f.status]} ${f.name}  ${c.dim}${f.detail}${c.reset}`);
+      if (f.files) for (const file of f.files) console.log(`      ${c.dim}- ${file}${c.reset}`);
+    }
+    const s = stage.summary;
+    const verdict = stage.ok ? `${c.green}✓ ok${c.reset}` : `${c.red}✗ failed${c.reset}`;
+    console.log(
+      `  ${verdict} ${c.dim}(${s.pass} pass · ${s.fail} fail · ${s.warn} warn · ${s.skip} skip)${c.reset}\n`,
+    );
+  }
+
+  console.log(
+    `${c.bold}${
+      report.ok
+        ? `${c.green}✓ review passed`
+        : `${c.red}✗ review failed — ${report.failed.join(", ")}`
+    }${c.reset}`,
+  );
+  return report.ok;
 }

@@ -1,12 +1,15 @@
 # ─── kit CLI Container ────────────────────────────────────────────────
 # Multi-stage build for production-ready CLI executable
-# Final image: Node 22 Alpine, 384MB (arm64, `docker images`).
+# Final image: Node 22 Alpine, 394MB (arm64, `docker images`).
 # An earlier image copied the builder's node_modules into runtime, including
 # TypeScript, ESLint, and esbuild. The prod-deps stage below uses the committed
 # lockfile and omits dev dependencies instead.
 
+# One external base lets Dependabot update the digest used by every stage.
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS node-base
+
 # Stage 1: Builder
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS builder
+FROM node-base AS builder
 
 WORKDIR /build
 
@@ -32,7 +35,7 @@ RUN npm run build
 # reproducible rather than a pruned leftover of the build tree. Scripts are ignored:
 # all four runtime deps are pure JS, and an install script in the image build is
 # exactly the supply-chain surface kit's own install gate exists to refuse.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS prod-deps
+FROM node-base AS prod-deps
 
 WORKDIR /deps
 
@@ -42,7 +45,7 @@ COPY packages ./packages
 RUN npm ci --omit=dev --ignore-scripts
 
 # Stage 3: Runtime
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
+FROM node-base AS runtime
 
 WORKDIR /app
 

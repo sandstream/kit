@@ -21,6 +21,7 @@ import { checkSecurity, gateStatus } from "../check-security.js";
 import { securityCheckToJson } from "../check-run.js";
 import { checkLockFiles } from "../check-lock.js";
 import { evaluatePolicy } from "../policy-check.js";
+import { markdownCell } from "../markdown-cell.js";
 import {
   type CiFormat,
   type JsonCheck,
@@ -224,13 +225,6 @@ export async function cmdCi(): Promise<boolean> {
 
       if (format === "github") {
         if (process.env.GITHUB_STEP_SUMMARY) {
-          // Emit markdown summary to GitHub Actions step summary. Strip CR/LF so a
-          // crafted detail can't inject new markdown/table rows, and escape `|` so
-          // it can't forge extra table cells.
-          const mdCell = (s: string) =>
-            String(s)
-              .replace(/[\r\n]+/g, " ")
-              .replace(/\|/g, "\\|");
           const lines = [
             "## kit CI Report",
             `| Status | Check | Detail |`,
@@ -245,7 +239,7 @@ export async function cmdCi(): Promise<boolean> {
               .sort((a, b) => statusRank(a.status) - statusRank(b.status))
               .map(
                 (c) =>
-                  `| ${statusIcon(c.status)} | \`${mdCell(`${c.category}/${c.name}`)}\` | ${mdCell(c.detail)} |`,
+                  `| ${statusIcon(c.status)} | \`${markdownCell(`${c.category}/${c.name}`)}\` | ${markdownCell(c.detail)} |`,
               ),
             ``,
             // Skipped belongs in the tally: the rows and the count must add up, or the report

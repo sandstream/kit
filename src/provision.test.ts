@@ -6,16 +6,33 @@ import { resolve } from "node:path";
 import { provisionService, listAvailableServices, getServiceInfo } from "./provision.js";
 
 let testProjectPath: string;
+let emptyBinDir: string;
+const savedPath = { PATH: process.env.PATH, Path: process.env.Path };
 
+// provisionService runs the real CLIs (`supabase start`, `stripe ...`) when
+// they are on PATH. On a developer machine with the Supabase CLI installed,
+// that started a full local Supabase stack in a temp dir that was then
+// deleted, so the stack was never stopped and Docker restarted it forever.
+// These tests only check result shapes, so point PATH at an empty directory:
+// every external tool then reads as "not installed" and nothing starts.
 beforeEach(async () => {
   testProjectPath = await fs.mkdtemp(resolve(tmpdir(), "kit-test-"));
+  emptyBinDir = await fs.mkdtemp(resolve(tmpdir(), "kit-test-nobin-"));
+  process.env.PATH = emptyBinDir;
+  if (process.platform === "win32") process.env.Path = emptyBinDir;
 });
 
 afterEach(async () => {
-  try {
-    await fs.rm(testProjectPath, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
+  for (const key of ["PATH", "Path"] as const) {
+    if (savedPath[key] === undefined) delete process.env[key];
+    else process.env[key] = savedPath[key];
+  }
+  for (const dir of [testProjectPath, emptyBinDir]) {
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
   }
 });
 

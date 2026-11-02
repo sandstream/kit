@@ -39,9 +39,10 @@ import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { secureFile } from "./utils/secure-perms.js";
-import { reReadHexKey } from "./utils/key-file.js";
+import { readProtectedAnchorKey } from "./audit-anchor-protected.js";
+import { getAuditAnchorKeyAt } from "./audit-anchor-key.js";
 
 const ANCHOR_KEY_FILE = "audit-anchor.key";
 const ANCHOR_RECORD_FILE = "audit-anchor.json";
@@ -72,45 +73,17 @@ export function anchorRecordPath(dir?: string): string {
   return join(anchorDir(dir), ANCHOR_RECORD_FILE);
 }
 
-/**
- * Machine-local HMAC key, created once (0600). Create is atomic (flag "wx"):
- * on a lost create race the winner's key is re-read so all callers agree.
- * Mirrors elevation.ts:getElevationSigningKey. Creating the key is a WRITE to
- * `~/.kit`, so a project-sandboxed principal that cannot write there will throw
- * here - callers on the append path must treat that as "anchoring unavailable",
- * never as a hard error.
- */
-export async function getAuditAnchorKey(dir?: string): Promise<Buffer> {
-  const keyPath = anchorKeyPath(dir);
-  try {
-    const hex = (await readFile(keyPath, "utf-8")).trim();
-    if (hex.length >= 64) return Buffer.from(hex, "hex");
-  } catch {
-    /* fall through to create */
-  }
-  const key = randomBytes(32);
-  await mkdir(anchorDir(dir), { recursive: true });
-  try {
-    await writeFile(keyPath, key.toString("hex") + "\n", {
-      encoding: "utf-8",
-      mode: 0o600,
-      flag: "wx",
-    });
-    secureFile(keyPath); // owner-only on Windows (NTFS ignores mode)
-    return key;
-  } catch {
-    // Lost the create race. Re-read the winner's key WITH the same length guard
-    // as the happy path (+ retry) so a mid-write read can never hand back a
-    // short/empty key (which would later look like a tip-mismatch). #fix5
-    return reReadHexKey(keyPath);
-  }
+/** Read or create the machine key. A supplied guard enables protected creation and reads. */
+export async function getAuditAnchorKey(dir?: string, beforeCreate?: () => void): Promise<Buffer> {
+  return getAuditAnchorKeyAt(anchorKeyPath(dir), anchorDir(dir), beforeCreate);
 }
 
-/**
- * Read the anchor key WITHOUT creating it. Returns null when the key is absent
- * or unreadable (e.g. a sandboxed principal). Verify uses this so that a missing
- * key downgrades to "cannot check the anchor" rather than minting a fresh key.
- */
+/** Read a protected key without creating it. Unsafe files cause an error. */
+export async function tryReadProtectedAuditAnchorKey(dir?: string): Promise<Buffer | null> {
+  return readProtectedAnchorKey(anchorKeyPath(dir));
+}
+
+/** Read the key without creating it. Missing or unreadable files return null. */
 export async function tryReadAuditAnchorKey(dir?: string): Promise<Buffer | null> {
   try {
     const hex = (await readFile(anchorKeyPath(dir), "utf-8")).trim();

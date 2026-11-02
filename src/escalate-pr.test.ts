@@ -228,7 +228,27 @@ describe("receipt escalation", () => {
     );
     const items = collectPrEscalations(evidence({ gate, failedGateRuns: 2 }));
     assert.match(items[0]?.issue ?? "", /standards: complexity/);
-    assert.match(items[0]?.action ?? "", /kit review --receipt/);
+    assert.match(items[0]?.action ?? "", /human review/);
+  });
+
+  it("retains the last failure after a later passing run", () => {
+    const gate = {
+      command: "kit review --receipt",
+      exitCode: 0,
+      outputSha256: "a".repeat(64),
+      failures: [],
+    };
+    const lastFailedGate = {
+      command: gate.command,
+      exitCode: 1,
+      outputSha256: "b".repeat(64),
+      failures: ["the failing test"],
+    };
+    const items = collectPrEscalations(evidence({ gate, lastFailedGate, failedGateRuns: 2 }));
+    const item = items.find((entry) => entry.name === "review gate");
+    assert.match(item?.issue ?? "", /the failing test/);
+    assert.match(item?.issue ?? "", new RegExp("b{64}"));
+    assert.doesNotMatch(item?.issue ?? "", new RegExp("a{64}"));
   });
 });
 

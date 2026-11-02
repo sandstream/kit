@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
+import {
+  classifyProtectedPaths,
+  DEFAULT_PROTECTED_PATH_RULES,
+  loadProtectedPathRules,
+} from "./review-protected-paths.js";
+
+it("keeps the built-in defaults aligned with the shipped rule file", () => {
+  assert.deepEqual(DEFAULT_PROTECTED_PATH_RULES, loadProtectedPathRules(process.cwd()));
+});
 
 it("names each protected class from the repository rule file", () => {
   const rules = loadProtectedPathRules(process.cwd());
@@ -35,4 +43,18 @@ it("uses the shipped rules when a project has no rule file", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+it("protects the secrets and policy command surfaces", () => {
+  const rules = loadProtectedPathRules(process.cwd());
+  const gaps = [
+    "src/commands/secrets.ts",
+    "src/commands/secrets-onecli-keyname.test.ts",
+    "src/commands/policy.ts",
+    "src/commands/policy-approve.test.ts",
+    "src/check-secrets-infisical.test.ts",
+    "src/check-policy-ops.ts",
+  ];
+  const unprotected = gaps.filter((path) => classifyProtectedPaths([path], rules).length === 0);
+  assert.deepEqual(unprotected, []);
 });
