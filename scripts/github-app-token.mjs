@@ -45,6 +45,17 @@ export function tokenRequest(repository) {
   return { repositories: [name], permissions: { ...REVIEWER_PERMISSIONS } };
 }
 
+/** Where the App is installed, for the "not installed on this repository" error. Pure. */
+export function describeInstallations(repository, app, installations) {
+  const name = app?.slug ? `App "${app.slug}" (id ${app.id})` : "The App";
+  const list = Array.isArray(installations) ? installations : [];
+  if (list.length === 0) return `${name} has no installations: install it on ${repository}.`;
+  const where = list
+    .map((i) => `${i.account?.login ?? "?"} (${i.repository_selection ?? "?"} repositories)`)
+    .join(", ");
+  return `${name} is installed on: ${where}. Add ${repository} to the installation on its owner.`;
+}
+
 async function api(path, token, init = {}) {
   const response = await fetch(`${API}${path}`, {
     ...init,
@@ -68,7 +79,20 @@ export async function installationToken(env = process.env) {
     throw new Error("REVIEWER_APP_ID and REVIEWER_APP_PRIVATE_KEY are required");
   const request = tokenRequest(env.GITHUB_REPOSITORY);
   const jwt = appJwt(env.REVIEWER_APP_ID, key);
-  const installation = await api(`/repos/${env.GITHUB_REPOSITORY}/installation`, jwt);
+  let installation;
+  try {
+    installation = await api(`/repos/${env.GITHUB_REPOSITORY}/installation`, jwt);
+  } catch (err) {
+    // The JWT was accepted (a bad key or App ID gives 401), so say where the App IS installed.
+    const [app, installs] = await Promise.all([
+      api("/app", jwt).catch(() => null),
+      api("/app/installations", jwt).catch(() => null),
+    ]);
+    throw new Error(
+      `${err.message}. ${describeInstallations(env.GITHUB_REPOSITORY, app, installs)}`,
+      { cause: err },
+    );
+  }
   const minted = await api(`/app/installations/${installation.id}/access_tokens`, jwt, {
     method: "POST",
     body: JSON.stringify(request),
