@@ -2,6 +2,9 @@
 
 ### Security
 
+- **trufflehog 3.99.4 → 3.99.7** (`.kit.toml`, `mise.toml`). The checksums file of both versions
+  carries a Sigstore signature from trufflehog's own `release.yml` at the release tag, verified,
+  and the 3.99.4 file reproduces the archive hash of the version it replaces.
 - **`kit triage skill <dir>` triages a Claude Code plugin as a plugin.** A directory with
   `.claude-plugin/plugin.json` used to be judged by its `SKILL.md` files alone, so a plugin whose
   hooks block the agent's reads and whose script runs an unpinned `npx` package on every call scored

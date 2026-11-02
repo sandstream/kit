@@ -173,15 +173,15 @@
     {
       "id": "scanner/trufflehog",
       "owner": ".kit.toml",
-      "pinned": "3.99.4",
+      "pinned": "3.99.7",
       "track": "minor",
       "source": {
         "kind": "github-release",
         "repo": "trufflesecurity/trufflehog"
       },
       "baseline": {
-        "version": "v3.99.4",
-        "observedAt": "2026-10-23"
+        "version": "v3.99.7",
+        "observedAt": "2026-11-02"
       }
     },
     {
