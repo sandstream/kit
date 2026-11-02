@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
+import {
+  classifyProtectedPaths,
+  DEFAULT_PROTECTED_PATH_RULES,
+  loadProtectedPathRules,
+} from "./review-protected-paths.js";
+
+it("keeps the built-in defaults aligned with the shipped rule file", () => {
+  assert.deepEqual(DEFAULT_PROTECTED_PATH_RULES, loadProtectedPathRules(process.cwd()));
+});
 
 it("names each protected class from the repository rule file", () => {
   const rules = loadProtectedPathRules(process.cwd());
