@@ -76,13 +76,15 @@ function bareHost(url: URL): string {
 
 /** The IPv4 address inside an IPv4-mapped IPv6 address (::ffff:a.b.c.d or ::ffff:hhhh:hhhh). */
 function mappedV4(address: string): string | null {
-  const dotted = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
-  if (dotted) return dotted[1];
-  const hex = address.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-  if (!hex) return null;
-  const hi = parseInt(hex[1], 16);
-  const lo = parseInt(hex[2], 16);
-  return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  const prefix = "::ffff:";
+  if (!address.toLowerCase().startsWith(prefix)) return null;
+  const rest = address.slice(prefix.length);
+  if (isIP(rest) === 4) return rest;
+  const groups = rest.split(":");
+  if (groups.length !== 2 || !groups.every((g) => g.length >= 1 && g.length <= 4)) return null;
+  const [hi, lo] = groups.map((g) => parseInt(g, 16));
+  if (Number.isNaN(hi) || Number.isNaN(lo)) return null;
+  return [hi >> 8, hi & 255, lo >> 8, lo & 255].join(".");
 }
 
 export function isPrivateAddress(address: string): boolean {
