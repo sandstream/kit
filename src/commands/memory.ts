@@ -1276,10 +1276,7 @@ async function memShare(): Promise<boolean> {
   const status = flagValue(process.argv, "--status") as SharedStatus | undefined;
   const provenance = (flagValue(process.argv, "--provenance") ?? "operator") as SharedProvenance;
   const confidence = flagValue(process.argv, "--confidence") as
-    | "low"
-    | "medium"
-    | "high"
-    | undefined;
+    "low" | "medium" | "high" | undefined;
   const usage = `${c.red}usage: kit memory share --area <a> --title <t> [--kind ${SHARED_KINDS.join("|")}] [--body <b>] [--ref <r>] [--provenance operator|derived|inferred] [--confidence low|medium|high] [--supersedes <id>] [--reverses <id>]${c.reset}`;
   if (!area || !title) {
     console.error(usage);

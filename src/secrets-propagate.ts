@@ -29,13 +29,7 @@ import { propagateVercel } from "./secrets-propagate-vercel.js";
 import { safeDiagnostic, spawnWithStdin } from "./secrets-propagate-exec.js";
 
 export type PropagationTarget =
-  | "vercel"
-  | "github"
-  | "fly"
-  | "cloudflare"
-  | "railway"
-  | "aws-ssm"
-  | "supabase";
+  "vercel" | "github" | "fly" | "cloudflare" | "railway" | "aws-ssm" | "supabase";
 
 export const ALL_TARGETS: PropagationTarget[] = [
   "vercel",

@@ -96,8 +96,7 @@ export async function runStandardsGate(
   if (runSpecific && language) {
     if (SPECIFIC_LANGUAGES.includes(language)) {
       const langCfg = (config.standards as Record<string, unknown> | undefined)?.[language] as
-        | Record<string, boolean>
-        | undefined;
+        Record<string, boolean> | undefined;
       checks.push(
         ...(await checkStandardsSpecific({
           cwd,

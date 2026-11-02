@@ -22,13 +22,7 @@ import { join } from "node:path";
 import { shellQuote } from "./monkey-test-runner.test-support.js";
 
 export type FakeDesktopMode =
-  | "good"
-  | "torn"
-  | "silent"
-  | "realdir"
-  | "panic"
-  | "crash"
-  | "keepalive";
+  "good" | "torn" | "silent" | "realdir" | "panic" | "crash" | "keepalive";
 
 const FAKE_APP = String.raw`
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";

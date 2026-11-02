@@ -194,8 +194,7 @@ export function ingest(format: IngestFormat, json: string): SecurityCheckResult[
 }
 
 export type IngestOutcome =
-  | { ok: true; findings: SecurityCheckResult[] }
-  | { ok: false; reason: string };
+  { ok: true; findings: SecurityCheckResult[] } | { ok: false; reason: string };
 
 /**
  * Strict ingest: distinguishes a *valid but empty* report (scanner ran, found

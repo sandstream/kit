@@ -352,17 +352,15 @@ function evaluateDirectImport(
   return ctx
     .importsOf(file.path, file.content)
     .filter((ref) => matcher.test(ref.specifier))
-    .map(
-      (ref): AdrViolation => ({
-        adrId,
-        file: file.path,
-        line: ref.line,
-        rule: "forbid-import",
-        detail: ref.specifier,
-        kind: "violation",
-        message: rule.message ?? `${adrId} forbids importing "${ref.specifier}"`,
-      }),
-    );
+    .map((ref): AdrViolation => ({
+      adrId,
+      file: file.path,
+      line: ref.line,
+      rule: "forbid-import",
+      detail: ref.specifier,
+      kind: "violation",
+      message: rule.message ?? `${adrId} forbids importing "${ref.specifier}"`,
+    }));
 }
 
 function evaluateForbidImport(

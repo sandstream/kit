@@ -192,7 +192,7 @@ describe("shared memory — decision lifecycle (gap #2)", () => {
       "t2",
     );
     const all = readShared(r);
-    assert.equal(effectiveStatus(all.find((e) => e.id === a.id)!, all), "reversed");
+    assert.equal(effectiveStatus(all.filter((e) => e.id === a.id)[0]!, all), "reversed");
     // explicit status on an unreferenced entry wins
     const c = shareEntry(
       r,
