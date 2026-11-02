@@ -121,6 +121,7 @@ export interface ScannerDef {
   exitGate?: boolean;
   /** Exit code that means "nothing here to scan" (osv-scanner: 128), not a failure. */
   noTargetExit?: number;
+  cwd?: string; // repo-relative directory to run in; set by expandPerProject (scan-projects.ts)
 }
 
 export const SCANNERS: ScannerDef[] = [
@@ -497,7 +498,7 @@ export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): 
 
 export interface ScanDeps {
   resolve(bin: string): Promise<string | null>;
-  run(bin: string, args: string[], timeoutMs?: number): Promise<ScanResult>;
+  run(bin: string, args: string[], timeoutMs?: number, cwd?: string): Promise<ScanResult>;
   hasEnv(name: string): boolean;
   detect(markers: string[]): boolean;
 }
@@ -568,7 +569,7 @@ export async function runScanners(
       runs.push({ id: s.id, status: "no-token", findings: 0 });
       continue;
     }
-    const res = await deps.run(bin, s.args, s.timeoutMs);
+    const res = await deps.run(bin, s.args, s.timeoutMs, s.cwd);
     // Exit-code-gated scanners (e.g. Socket): no parseable findings — the tool's
     // own exit status IS the verdict. Never false-green on a crash: any non-zero
     // exit becomes one high-severity finding (worded by cause, see scan-exit-gate).

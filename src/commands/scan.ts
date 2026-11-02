@@ -7,6 +7,8 @@ import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { hasMarker, scanProvidersTracked } from "../scan-detect.js";
 import { mavenSbomScanners } from "../maven-sbom.js";
+import { resolveProjectPaths } from "../projects-config.js";
+import { expandPerProject } from "../scan-projects.js";
 
 export async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
@@ -49,7 +51,15 @@ export async function cmdScan(): Promise<boolean> {
     }
     return true;
   }
-  const selectedScanners = enabledScanners(SCANNERS, delegates);
+  // `[projects] paths`: a scanner that does not recurse runs once per project directory.
+  const declared = resolveProjectPaths(cwd, config.projects?.paths);
+  for (const r of declared.refused) {
+    console.error(`${c.yellow}! [projects] path not scanned: ${r.path} (${r.reason})${c.reset}`);
+  }
+  const selectedScanners = expandPerProject(
+    enabledScanners(SCANNERS, delegates),
+    declared.projects,
+  );
   selectedScanners.push(...mavenSbomScanners(cwd, delegates));
 
   // Container images (L1): `[scan].images` and, when asked, the Dockerfiles' FROM lines. Each image
@@ -146,9 +156,10 @@ export async function cmdScan(): Promise<boolean> {
   const { merged, runs } = await runScanners(
     {
       resolve: (bin) => resolveToolBin(bin),
-      run: async (bin, args, timeoutMs) => {
+      run: async (bin, args, timeoutMs, projectDir) => {
         const r = await execFileNoThrow(bin, args, {
           timeout: timeoutMs ?? 180_000,
+          cwd: projectDir ? resolve(cwd, projectDir) : undefined,
           // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
           maxBuffer: 64 * 1024 * 1024,
           env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, process.cwd()),
