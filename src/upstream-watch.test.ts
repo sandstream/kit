@@ -204,6 +204,15 @@ describe("contracts/upstream-watch.json", () => {
     for (const e of contract.entries) assert.doesNotThrow(() => source(e.owner), e.owner);
   });
 
+  // A pin the contract does not name drifts unwatched: semgrep sat in security.yml as
+  // "not pinned" here while CI installed one exact version.
+  it("names the version its owner file actually pins", () => {
+    for (const e of contract.entries) {
+      if (!e.pinned || e.pinned === "latest") continue;
+      assert.ok(source(e.owner).includes(e.pinned), `${e.id} pins ${e.pinned} in ${e.owner}`);
+    }
+  });
+
   it("pins the API version the plugin actually sends", () => {
     for (const e of contract.entries) {
       if (e.source.kind !== "api-versions") continue;
