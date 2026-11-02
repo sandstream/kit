@@ -145,7 +145,7 @@ url = "https://www.example.com/api/version"
 version_field = "version" # optional dot path into the JSON, default "version"
 ```
 
-kit sends one GET with no credential and does not follow a redirect. The URL must use https (plain http only for loopback) and must not hold a username or password. The answer is capped at 64 KB. A value that is not a commit hash, such as `dev`, gives `unverified`, never a pass. Air-gap mode makes no request. This reads which commit runs. It does not yet tag findings as `deployed` or `branch`.
+The read is opt-in: run `kit check --category deploy --online`. Without `--online`, or when the project's `[air_gap]` is enabled, kit sends no request and the row says `skip`. The URL comes from the repository, so kit refuses private, link-local, metadata and loopback addresses, also after name resolution (a DNS answer that changes between kit's lookup and its request is not covered). kit sends one GET with no credential and does not follow a redirect. The URL must use https and must not hold a username or password. The answer is capped at 64 KB. A value that is not a commit hash, such as `dev`, gives `unverified`, never a pass. This reads which commit runs. It does not yet tag findings as `deployed` or `branch`.
 
 ## env
 

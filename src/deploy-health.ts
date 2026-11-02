@@ -6,8 +6,13 @@
  *   version_field = "version"        # optional, dot path into the JSON, default "version"
  *
  * One GET per target, no credential, no redirect, 64 KB cap. A value that is not a commit
- * hash (for example "dev") is unverified, never a pass. Air-gap mode makes no request.
+ * hash (for example "dev") is unverified, never a pass. The URL comes from the repository, so
+ * the read is opt-in (`--online`), makes no request in air-gap mode, and refuses private,
+ * link-local and metadata addresses. The address check resolves the name once and fetch
+ * resolves it again, so a DNS answer that changes between the two is not covered.
  */
+import { lookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 import type { DeployCheckResult } from "./check-deploy.js";
 
 export interface DeployHealthTarget {
@@ -27,13 +32,82 @@ export interface DeployHealthRow extends DeployCheckResult {
 
 export interface DeployHealthOptions {
   airGap: boolean;
+  /** The caller opted in to outbound reads (`--online`). Without it nothing is requested. */
+  online: boolean;
   timeoutMs?: number;
+  /** Tests only: allow plain http to the literal loopback address 127.0.0.1 or ::1. */
+  allowLoopback?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const MAX_BODY_BYTES = 64 * 1024;
 const COMMIT_RE = /^[0-9a-f]{7,40}$/i;
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const LOOPBACK = new Set(["127.0.0.1", "::1"]);
+
+const PRIVATE = new BlockList();
+for (const [net, bits] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+] as const) {
+  PRIVATE.addSubnet(net, bits, "ipv4");
+}
+for (const [net, bits] of [
+  ["::", 128],
+  ["::1", 128],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["ff00::", 8],
+] as const) {
+  PRIVATE.addSubnet(net, bits, "ipv6");
+}
+
+function bareHost(url: URL): string {
+  return url.hostname.replace(/^\[|\]$/g, "");
+}
+
+/** The IPv4 address inside an IPv4-mapped IPv6 address (::ffff:a.b.c.d or ::ffff:hhhh:hhhh). */
+function mappedV4(address: string): string | null {
+  const dotted = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (dotted) return dotted[1];
+  const hex = address.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (!hex) return null;
+  const hi = parseInt(hex[1], 16);
+  const lo = parseInt(hex[2], 16);
+  return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+}
+
+export function isPrivateAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 0) return true;
+  if (family === 6) {
+    const inner = mappedV4(address);
+    if (inner) return isPrivateAddress(inner);
+    return PRIVATE.check(address, "ipv6");
+  }
+  return PRIVATE.check(address, "ipv4");
+}
+
+/** True when every address the host resolves to is public (or loopback, when allowed). */
+async function resolvesPublic(url: URL, allowLoopback: boolean): Promise<boolean> {
+  const host = bareHost(url);
+  if (allowLoopback && LOOPBACK.has(host)) return true;
+  if (isIP(host)) return !isPrivateAddress(host);
+  try {
+    const found = await lookup(host, { all: true });
+    return found.length > 0 && found.every((a) => !isPrivateAddress(a.address));
+  } catch {
+    return false;
+  }
+}
 
 function row(
   environment: string,
@@ -44,7 +118,11 @@ function row(
   return { provider: "health", environment, project: "-", status, detail, ...extra };
 }
 
-function parseTarget(environment: string, raw: unknown): DeployHealthTarget | DeployHealthRow {
+function parseTarget(
+  environment: string,
+  raw: unknown,
+  allowLoopback: boolean,
+): DeployHealthTarget | DeployHealthRow {
   const table = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const url = table.url;
   if (typeof url !== "string" || url === "") {
@@ -59,7 +137,8 @@ function parseTarget(environment: string, raw: unknown): DeployHealthTarget | De
   if (parsed.username || parsed.password) {
     return row(environment, "warn", `[deploy.health.${environment}] url must not hold credentials`);
   }
-  const loopbackHttp = parsed.protocol === "http:" && LOOPBACK.has(parsed.hostname);
+  const loopbackHttp =
+    allowLoopback && parsed.protocol === "http:" && LOOPBACK.has(bareHost(parsed));
   if (parsed.protocol !== "https:" && !loopbackHttp) {
     return row(environment, "warn", `[deploy.health.${environment}] url must use https`);
   }
@@ -67,13 +146,16 @@ function parseTarget(environment: string, raw: unknown): DeployHealthTarget | De
   return { environment, url, versionField: field };
 }
 
-export function parseDeployHealth(config: object | undefined): DeployHealthParse {
+export function parseDeployHealth(
+  config: object | undefined,
+  allowLoopback = false,
+): DeployHealthParse {
   const health = (config as { health?: unknown } | undefined)?.health;
   if (!health || typeof health !== "object") return { targets: [], errors: [] };
   const targets: DeployHealthTarget[] = [];
   const errors: DeployHealthRow[] = [];
   for (const [environment, raw] of Object.entries(health)) {
-    const parsed = parseTarget(environment, raw);
+    const parsed = parseTarget(environment, raw, allowLoopback);
     if ("url" in parsed && "versionField" in parsed) targets.push(parsed);
     else errors.push(parsed);
   }
@@ -107,9 +189,16 @@ async function readCapped(res: Response): Promise<string | null> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-async function readTarget(target: DeployHealthTarget, timeoutMs: number): Promise<DeployHealthRow> {
+async function readTarget(
+  target: DeployHealthTarget,
+  timeoutMs: number,
+  allowLoopback: boolean,
+): Promise<DeployHealthRow> {
   const unverified = (why: string) =>
     row(target.environment, "warn", `unverified: ${why} (${target.url})`, { didNotRun: true });
+  if (!(await resolvesPublic(new URL(target.url), allowLoopback))) {
+    return unverified("the host is not a public address, kit does not read it");
+  }
   let res: Response;
   try {
     res = await fetch(target.url, {
@@ -142,16 +231,13 @@ export async function checkDeployHealth(
   config: object | undefined,
   opts: DeployHealthOptions,
 ): Promise<DeployHealthRow[]> {
-  const { targets, errors } = parseDeployHealth(config);
-  if (opts.airGap) {
-    return [
-      ...errors,
-      ...targets.map((t) =>
-        row(t.environment, "skip", "air-gap mode: the deployed commit was not read"),
-      ),
-    ];
-  }
+  const allowLoopback = opts.allowLoopback === true;
+  const { targets, errors } = parseDeployHealth(config, allowLoopback);
+  const skipped = (why: string) =>
+    targets.map((t) => row(t.environment, "skip", `${why}: the deployed commit was not read`));
+  if (opts.airGap) return [...errors, ...skipped("air-gap mode")];
+  if (!opts.online) return [...errors, ...skipped("run with --online to read it")];
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const read = await Promise.all(targets.map((t) => readTarget(t, timeoutMs)));
+  const read = await Promise.all(targets.map((t) => readTarget(t, timeoutMs, allowLoopback)));
   return [...errors, ...read];
 }

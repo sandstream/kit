@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type {
   DeployConfig,
   DeployEnvironmentConfig,
@@ -431,10 +431,20 @@ async function checkVercelDeploy(
   return results;
 }
 
+export interface DeployCheckOptions {
+  listVercelEnvNames?: DeployListEnv;
+  /** Override the air-gap posture (tests). Default: read from this project's config. */
+  airGap?: boolean;
+  /** Opt in to outbound reads of [deploy.health] URLs (`--online`). */
+  online?: boolean;
+  /** Tests only: allow http to the literal loopback address. */
+  allowLoopback?: boolean;
+}
+
 export async function checkDeploy(
   config: DeployConfig | undefined,
   cwd: string = process.cwd(),
-  opts: { listVercelEnvNames?: DeployListEnv; airGap?: boolean } = {},
+  opts: DeployCheckOptions = {},
 ): Promise<DeployCheckResult[]> {
   if (!config || Object.keys(config).length === 0) return [noDeployConfigured()];
 
@@ -449,19 +459,36 @@ export async function checkDeploy(
     );
   }
 
-  results.push(...(await readDeployedCommits(config, opts.airGap)));
+  results.push(...(await readDeployedCommits(config, cwd, opts)));
 
   return results.length > 0 ? results : [noDeployConfigured()];
 }
 
+/** Air-gap posture from THIS project's config. A config that cannot be read counts as air-gapped. */
+async function airGapFor(cwd: string): Promise<boolean> {
+  const { isAirGap } = await import("./scanners.js");
+  if (isAirGap()) return true;
+  try {
+    const [{ loadConfig }, { resolveAirGap }] = await Promise.all([
+      import("./config.js"),
+      import("./airgap/config.js"),
+    ]);
+    return resolveAirGap((await loadConfig(join(cwd, ".kit.toml"))).air_gap).enabled;
+  } catch {
+    return true;
+  }
+}
+
 async function readDeployedCommits(
   config: DeployConfig,
-  airGap: boolean | undefined,
+  cwd: string,
+  opts: DeployCheckOptions,
 ): Promise<DeployCheckResult[]> {
   if (!(config as { health?: unknown }).health) return [];
-  const [{ checkDeployHealth }, { isAirGapPosture }] = await Promise.all([
-    import("./deploy-health.js"),
-    import("./update-check.js"),
-  ]);
-  return checkDeployHealth(config, { airGap: airGap ?? (await isAirGapPosture()) });
+  const { checkDeployHealth } = await import("./deploy-health.js");
+  return checkDeployHealth(config, {
+    airGap: opts.airGap ?? (await airGapFor(cwd)),
+    online: opts.online === true,
+    allowLoopback: opts.allowLoopback,
+  });
 }

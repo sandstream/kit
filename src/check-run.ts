@@ -206,7 +206,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       ? await step("web search", () => checkWebSearch(config.web!.search!))
       : null;
   const deploy = wants("deploy")
-    ? await step("deploy config", () => checkDeploy(config.deploy, cwd))
+    ? await step("deploy config", () => checkDeploy(config.deploy, cwd, { online: opts.online }))
     : [];
   const security = wants("security")
     ? await step("security scan", () => securityRows(cwd, opts.online, config))

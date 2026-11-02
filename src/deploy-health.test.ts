@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { checkDeployHealth, parseDeployHealth } from "./deploy-health.js";
+import { checkDeployHealth, isPrivateAddress, parseDeployHealth } from "./deploy-health.js";
 
 const SHA = "34d0351be5a77c051bab3e7684e75aa55dcb39f0";
 
@@ -82,7 +82,7 @@ describe("checkDeployHealth", () => {
     await withServer(json({ version: SHA }), async (base) => {
       const rows = await checkDeployHealth(
         { health: { production: { url: `${base}/api/version` } } },
-        { airGap: false },
+        { airGap: false, online: true, allowLoopback: true },
       );
       assert.equal(rows.length, 1);
       assert.equal(rows[0].status, "pass");
@@ -95,7 +95,7 @@ describe("checkDeployHealth", () => {
     await withServer(json({ build: { sha: SHA } }), async (base) => {
       const rows = await checkDeployHealth(
         { health: { production: { url: base, version_field: "build.sha" } } },
-        { airGap: false },
+        { airGap: false, online: true, allowLoopback: true },
       );
       assert.equal(rows[0].commit, SHA);
     });
@@ -105,7 +105,7 @@ describe("checkDeployHealth", () => {
     await withServer(json({ version: "dev" }), async (base) => {
       const [row] = await checkDeployHealth(
         { health: { production: { url: base } } },
-        { airGap: false },
+        { airGap: false, online: true, allowLoopback: true },
       );
       assert.equal(row.status, "warn");
       assert.equal(row.commit, undefined);
@@ -125,7 +125,7 @@ describe("checkDeployHealth failures", () => {
       await withServer(handler, async (base) => {
         const [row] = await checkDeployHealth(
           { health: { production: { url: base } } },
-          { airGap: false },
+          { airGap: false, online: true, allowLoopback: true },
         );
         assert.equal(row.status, "warn");
         assert.equal(row.commit, undefined);
@@ -143,7 +143,7 @@ describe("checkDeployHealth failures", () => {
       async (base) => {
         const [row] = await checkDeployHealth(
           { health: { production: { url: base } } },
-          { airGap: false },
+          { airGap: false, online: true, allowLoopback: true },
         );
         assert.equal(row.status, "warn");
         assert.match(row.detail, /redirect/);
@@ -154,7 +154,7 @@ describe("checkDeployHealth failures", () => {
   it("says unverified when the host is unreachable", async () => {
     const [row] = await checkDeployHealth(
       { health: { production: { url: "http://127.0.0.1:1/v" } } },
-      { airGap: false, timeoutMs: 2000 },
+      { airGap: false, online: true, allowLoopback: true, timeoutMs: 2000 },
     );
     assert.equal(row.status, "warn");
     assert.match(row.detail, /unverified/);
@@ -164,7 +164,7 @@ describe("checkDeployHealth failures", () => {
     await withServer(json({ version: SHA }), async (base, hits) => {
       const [row] = await checkDeployHealth(
         { health: { production: { url: base } } },
-        { airGap: true },
+        { airGap: true, online: true, allowLoopback: true },
       );
       assert.equal(row.status, "skip");
       assert.equal(hits(), 0);
@@ -188,11 +188,116 @@ describe("kit check deploy with [deploy.health]", () => {
           `[deploy.health.production]\nurl = "${base}/api/version"\n`,
         );
         const config = await loadConfig(join(dir, ".kit.toml"));
-        const rows = await checkDeploy(config.deploy, dir, { airGap: false });
+        const rows = await checkDeploy(config.deploy, dir, { online: true, allowLoopback: true });
         const health = rows.filter((r) => r.provider === "health");
         assert.equal(health.length, 1);
         assert.equal(health[0].status, "pass");
         assert.match(health[0].detail, /34d0351/);
+      } finally {
+        rmTemp(dir);
+      }
+    });
+  });
+});
+
+describe("checkDeployHealth refuses to reach where the repository points it", () => {
+  it("makes no request without --online", async () => {
+    await withServer(json({ version: SHA }), async (base, hits) => {
+      const [row] = await checkDeployHealth(
+        { health: { production: { url: base } } },
+        { airGap: false, online: false, allowLoopback: true },
+      );
+      assert.equal(row.status, "skip");
+      assert.match(row.detail, /--online/);
+      assert.equal(hits(), 0);
+    });
+  });
+
+  it("refuses plain http to loopback unless the test option allows it", () => {
+    const { targets, errors } = parseDeployHealth({
+      health: { production: { url: "http://127.0.0.1:8080/v" } },
+    });
+    assert.equal(targets.length, 0);
+    assert.match(errors[0].detail, /https/);
+  });
+
+  it("does not read private, link-local, metadata or loopback https hosts", async () => {
+    const hosts = [
+      "10.0.0.5",
+      "192.168.1.1",
+      "172.16.0.9",
+      "169.254.169.254",
+      "127.0.0.1",
+      "[::1]",
+      "[fe80::1]",
+      "[::ffff:127.0.0.1]",
+      "localhost",
+    ];
+    for (const host of hosts) {
+      const [row] = await checkDeployHealth(
+        { health: { production: { url: `https://${host}/v` } } },
+        { airGap: false, online: true, timeoutMs: 2000 },
+      );
+      assert.equal(row.status, "warn", host);
+      assert.match(row.detail, /not a public address/, host);
+    }
+  });
+});
+
+describe("isPrivateAddress", () => {
+  it("lets public addresses through, IPv4 and IPv6, also IPv4-mapped", () => {
+    for (const a of [
+      "216.198.79.1",
+      "64.29.17.1",
+      "8.8.8.8",
+      "2606:4700::1111",
+      "::ffff:8.8.8.8",
+    ]) {
+      assert.equal(isPrivateAddress(a), false, a);
+    }
+  });
+
+  it("blocks private, link-local, metadata, loopback and mapped private addresses", () => {
+    for (const a of [
+      "10.1.2.3",
+      "172.31.0.1",
+      "192.168.0.1",
+      "100.64.0.1",
+      "169.254.169.254",
+      "127.0.0.1",
+      "0.0.0.0",
+      "::1",
+      "fe80::1",
+      "fd00::1",
+      "::ffff:127.0.0.1",
+      "::ffff:7f00:1",
+      "::ffff:a9fe:a9fe",
+      "not-an-ip",
+    ]) {
+      assert.equal(isPrivateAddress(a), true, a);
+    }
+  });
+});
+
+describe("kit check deploy air-gap from the project's own config", () => {
+  it("reads no URL when the project's .kit.toml enables air_gap", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { loadConfig } = await import("./config.js");
+    const { checkDeploy } = await import("./check-deploy.js");
+    const { rmTemp } = await import("./temp-cleanup.test-support.js");
+    await withServer(json({ version: SHA }), async (base, hits) => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-deploy-health-airgap-"));
+      try {
+        writeFileSync(
+          join(dir, ".kit.toml"),
+          `[air_gap]\nenabled = true\n\n[deploy.health.production]\nurl = "${base}/v"\n`,
+        );
+        const config = await loadConfig(join(dir, ".kit.toml"));
+        const rows = await checkDeploy(config.deploy, dir, { online: true, allowLoopback: true });
+        assert.equal(rows.filter((r) => r.provider === "health")[0].status, "skip");
+        assert.equal(hits(), 0);
       } finally {
         rmTemp(dir);
       }
