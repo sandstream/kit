@@ -15,6 +15,7 @@ interface TokenScript {
   appJwt(appId: string, pem: string, now?: number): string;
   tokenRequest(repository: string): { repositories: string[]; permissions: Record<string, string> };
   installationToken(env: Record<string, string | undefined>): Promise<string>;
+  describeInstallations(repository: string, app: unknown, installations: unknown): string;
 }
 
 const load = async () =>
@@ -54,6 +55,17 @@ describe("github-app-token", () => {
     });
     assert.throws(() => tokenRequest("kit"), /owner\/name/);
     assert.throws(() => tokenRequest("a/b/c"), /owner\/name/);
+  });
+
+  it("names where the App is installed when this repository is not among them", async () => {
+    const { describeInstallations } = await load();
+    assert.equal(
+      describeInstallations("o/r", { slug: "kit-reviewer", id: 7 }, [
+        { account: { login: "other" }, repository_selection: "selected" },
+      ]),
+      'App "kit-reviewer" (id 7) is installed on: other (selected repositories). Add o/r to the installation on its owner.',
+    );
+    assert.match(describeInstallations("o/r", null, []), /^The App has no installations/);
   });
 
   it("refuses to run without the App ID and a PEM key, before any network call", async () => {
