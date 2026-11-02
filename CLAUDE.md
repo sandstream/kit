@@ -38,6 +38,23 @@ CI runs Linux and Windows (`.github/workflows/windows.yml`, four shards plus `wi
 **No CI job runs macOS.** A macOS-specific path is unverified until someone runs it on a Mac, so
 say so in the PR instead of claiming it works.
 
+## Before you push
+
+CI runs its steps in order and stops at the first red one, so a push used to show one failure at a
+time. Run the whole local gate first:
+
+```
+node scripts/prepush.mjs
+```
+
+It checks, in one pass: that the installed tools match `package-lock.json` (a stale `prettier` gave a
+false green format check), that the branch is current with `origin/main` (CI tests the merge), build,
+format, lint, `kit review --enforce` over **all** stages, the tests of the changed files, and that
+the PR text holds no session URL. It lists every problem, then exits non-zero if there is one.
+
+`--allow "<check name>"` names a `kit review` check that fails for a reason outside your change, for
+example `enforcement gate liveness` in a worktree. It must be the exact name, and it is printed.
+
 ## Public artifacts — issue & PR hygiene
 
 `sandstream/kit` is a **public** repository. When opening issues or PRs here:
