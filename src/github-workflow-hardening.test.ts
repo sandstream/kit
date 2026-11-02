@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -51,6 +53,120 @@ describe("GitHub workflow hardening", () => {
     assert.match(security, /python3 -m pip install --user pipx==1\.17\.2/);
     assert.match(security, /pipx install guarddog==3\.2\.0/);
     assert.match(security, /pipx install semgrep==1\.176\.0/);
+  });
+
+  it("runs the pinned Semgrep scanner with every required rule pack", () => {
+    const sast = section(workflow("security.yml"), "sast", "codeql");
+    assert.match(sast, /(?:pipx install|pip install|pip3 install) semgrep==1\.176\.0/);
+    assert.doesNotMatch(sast, /semgrep\/semgrep-action@/);
+    const scanStep = sast.match(
+      /- name: Semgrep \(application code only\)[\s\S]*?(?=\n {6}- name:|$)/,
+    )?.[0];
+    assert.ok(scanStep, "missing Semgrep scan step");
+    assert.match(scanStep, /set -e/);
+    assert.match(
+      scanStep,
+      /for config in p\/security-audit p\/owasp-top-ten p\/typescript p\/nodejs; do/,
+    );
+    assert.match(scanStep, /python3 scripts\/run-semgrep\.py --config "\$config" \./);
+    for (const pack of ["p/security-audit", "p/owasp-top-ten", "p/typescript", "p/nodejs"]) {
+      assert.ok(scanStep.includes(pack), `Semgrep scan is missing ${pack}`);
+    }
+    assert.doesNotMatch(scanStep, /^\s+if:/m);
+    assert.doesNotMatch(scanStep, /continue-on-error:\s*true/);
+  });
+
+  it("executes all Semgrep packs and stops if any pack fails", (t) => {
+    if (process.platform === "win32") {
+      t.skip("The Semgrep step runs in a Linux GitHub Actions runner");
+      return;
+    }
+    const sast = section(workflow("security.yml"), "sast", "codeql");
+    const scanStep = sast.match(
+      /- name: Semgrep \(application code only\)[\s\S]*?(?=\n {6}- name:|$)/,
+    )?.[0];
+    assert.ok(scanStep, "missing Semgrep scan step");
+    const shell = scanStep.match(/\n {8}run: \|\n((?: {10}[^\n]*(?:\n|$))*)/)?.[1];
+    assert.ok(shell, "missing Semgrep shell block");
+
+    const packs = ["p/security-audit", "p/owasp-top-ten", "p/typescript", "p/nodejs"];
+    const temp = mkdtempSync(join(tmpdir(), "kit-semgrep-workflow-test-"));
+    try {
+      const calls = join(temp, "calls");
+      writeFileSync(
+        join(temp, "python3"),
+        [
+          "#!/bin/sh",
+          'if [ "$#" -ne 4 ] || [ "$1" != scripts/run-semgrep.py ] || [ "$2" != --config ] || [ "$4" != . ]; then exit 99; fi',
+          'printf "%s\\n" "$3" >> "$SEMGREP_TEST_CALLS"',
+          'if [ "$3" = "$SEMGREP_TEST_FAIL_PACK" ]; then exit 42; fi',
+          "exit 0",
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      for (const [index, failedPack] of ["", ...packs].entries()) {
+        writeFileSync(calls, "");
+        const run: SpawnSyncReturns<string> = spawnSync(
+          "bash",
+          ["--noprofile", "--norc", "-eo", "pipefail", "-c", shell],
+          {
+            cwd: root,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              PATH: `${temp}${delimiter}${process.env.PATH ?? ""}`,
+              SEMGREP_TEST_CALLS: calls,
+              SEMGREP_TEST_FAIL_PACK: failedPack,
+            },
+          },
+        );
+        assert.equal(run.status, failedPack ? 42 : 0, run.stderr);
+        const called = readFileSync(calls, "utf8").trim().split("\n").filter(Boolean);
+        assert.deepEqual(called, failedPack ? packs.slice(0, index) : packs);
+      }
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
+  it("requires SAST to succeed before the security gate can pass", () => {
+    const security = workflow("security.yml");
+    const gate = security.slice(security.indexOf("\n  gate:"));
+    assert.match(gate, /needs:\s*\[[^\]]*\bsast\b[^\]]*\]/);
+    assert.match(gate, /\n {4}if:\s*always\(\)/);
+    assert.match(
+      gate,
+      /if \[ "\$\{\{ contains\(needs\.\*\.result, 'failure'\) \|\| contains\(needs\.\*\.result, 'cancelled'\) \|\| contains\(needs\.\*\.result, 'skipped'\) \}\}" = "true" \]; then[\s\S]*?exit 1[\s\S]*?fi/,
+    );
+  });
+
+  it("executes the gate shell for success and each non-success result", (t) => {
+    if (process.platform === "win32") {
+      t.skip("The security gate runs in a Linux GitHub Actions runner");
+      return;
+    }
+    const security = workflow("security.yml");
+    const gate = security.slice(security.indexOf("\n  gate:"));
+    const shell = gate.match(/\n {8}run: \|\n((?: {10}[^\n]*(?:\n|$))*)/)?.[1];
+    assert.ok(shell, "missing security gate shell");
+    const expression =
+      /\$\{\{ contains\(needs\.\*\.result, 'failure'\) \|\| contains\(needs\.\*\.result, 'cancelled'\) \|\| contains\(needs\.\*\.result, 'skipped'\) \}\}/;
+    assert.match(shell, expression);
+    for (const [result, expected] of [
+      ["success", 0],
+      ["failure", 1],
+      ["cancelled", 1],
+      ["skipped", 1],
+    ] as const) {
+      const expanded: string = shell.replace(expression, result === "success" ? "false" : "true");
+      const executed = spawnSync("bash", ["-e", "-c", expanded], { encoding: "utf8" });
+      assert.equal(
+        executed.status,
+        expected,
+        `gate returned ${executed.status} for ${result}: ${executed.stderr}`,
+      );
+    }
   });
 
   it("makes a missing Snyk token visible in the dependency job", () => {

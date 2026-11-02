@@ -88,7 +88,7 @@ Where `npm audit` / Snyk flag *known CVEs*, bumblebee flags *known compromises*:
 
 ### Stage 2: Static Application Security Testing (SAST)
 
-**Tool:** SonarQube + ESLint Security Plugin
+**Tool:** SonarQube + ESLint Security Plugin. The required CI job runs Semgrep 1.176.0; see [docs/SEMGREP-GATE.md](docs/SEMGREP-GATE.md).
 
 **Local Setup:**
 ```bash

@@ -259,7 +259,8 @@ function copyCodeWithoutComments(cursor: CommentCursor, interpolation = false): 
 
 function stripHtmlComments(text: string): string {
   // Script bodies have JavaScript strings/templates; prose apostrophes do not open strings.
-  const tokens = /<!--[\s\S]*?(?:-->|$)|<script\b[^>]*>[\s\S]*?(?:<\/script\s*>|$)|<[^>]*>/gi;
+  // \x3c is "<"; it avoids a Semgrep parser error on HTML comment regexes.
+  const tokens = /\x3c!--[\s\S]*?(?:-->|$)|<script\b[^>]*>[\s\S]*?(?:<\/script\s*>|$)|<[^>]*>/gi;
   return text.replace(tokens, (token) => {
     if (token.startsWith("<!--")) return blankComment(token);
     if (!/^<script\b/i.test(token)) return token;

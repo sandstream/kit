@@ -77,7 +77,8 @@ function declaredModules(root: string, dir: string): string[] {
   } catch {
     return [];
   }
-  const tokens = xml.match(/<!--[\s\S]*?-->|<[^>]*>|[^<]+/g) ?? [];
+  // \x3c is "<"; it avoids a Semgrep parser error on HTML comment regexes.
+  const tokens = xml.match(/\x3c!--[\s\S]*?-->|<[^>]*>|[^<]+/g) ?? [];
   const stack: string[] = [];
   const modules: string[] = [];
   let value = "";
