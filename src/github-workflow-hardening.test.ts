@@ -52,12 +52,12 @@ describe("GitHub workflow hardening", () => {
     const security = workflow("security.yml");
     assert.match(security, /python3 -m pip install --user pipx==1\.17\.2/);
     assert.match(security, /pipx install guarddog==3\.2\.0/);
-    assert.match(security, /pipx install semgrep==1\.176\.0/);
+    assert.match(security, /pipx install semgrep==1\.183\.0/);
   });
 
   it("runs the pinned Semgrep scanner with every required rule pack", () => {
     const sast = section(workflow("security.yml"), "sast", "codeql");
-    assert.match(sast, /(?:pipx install|pip install|pip3 install) semgrep==1\.176\.0/);
+    assert.match(sast, /(?:pipx install|pip install|pip3 install) semgrep==1\.183\.0/);
     assert.doesNotMatch(sast, /semgrep\/semgrep-action@/);
     const scanStep = sast.match(
       /- name: Semgrep \(application code only\)[\s\S]*?(?=\n {6}- name:|$)/,
