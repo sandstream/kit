@@ -1,7 +1,7 @@
 ---
 id: ADR-0009
 title: cloud evidence is ingested read-only, kit holds no cloud credential
-status: proposed
+status: accepted
 ---
 
 # ADR-0009: cloud evidence is ingested read-only
@@ -32,7 +32,7 @@ of this one, and a role allowlist that the ADR names.
 ## What is not decided here
 
 - Which roles a future cloud delegate may hold. Candidates are `roles/viewer` and
-  `roles/cloudasset.viewer`. Peter decides the list before L4b.
+  `roles/cloudasset.viewer`. The owner decides the list before L4b.
 - Registry discovery of running images. It needs a cloud read, so it waits for L4b.
 
 ## Enforcement
@@ -43,4 +43,4 @@ does not fit the grammar without false positives. A grep of `src/adapters/ingest
 test asserts that today. A test that `kit ingest` makes no network call is a follow-up, and
 the ADR should then name it in `enforced_by`.
 
-Status is `proposed` until Peter accepts it.
+The owner accepted this ADR on 2026-11-02.
