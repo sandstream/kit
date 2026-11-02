@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
-import { LOCAL_COVER, staleCatalogDetail } from "./bumblebee-age.js";
+import { LOCAL_COVER, staleCatalogDetail, staleCatalogStatus } from "./bumblebee-age.js";
 import { checkEnvIgnoreProtection } from "./check-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
@@ -2546,7 +2546,7 @@ export function bumblebeeStaleCatalogVerdict(
   return {
     category: "supply-chain",
     name: BUMBLEBEE_NAME,
-    status: "pass",
+    status: staleCatalogStatus(ageDays),
     detail: staleCatalogDetail(outcome.packagesScanned, ageDays, update),
     suggestion,
     ...(update && {

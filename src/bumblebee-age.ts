@@ -4,8 +4,15 @@
  * approval, so the text says what a pass does and does not cover, and why the catalogs are old.
  */
 
-/** From this many days the row warns instead of noting. Advisory either way, never gated. */
+/** From this many days the detail text switches from a note to a warning. */
 const STALE_AFTER_DAYS = 90;
+
+/** Past this many days the row stops being `pass`: a pass this old is not evidence about newer compromises. */
+export const WARN_AFTER_DAYS = 180;
+
+export function staleCatalogStatus(ageDays: number): "pass" | "warn" {
+  return ageDays > WARN_AFTER_DAYS ? "warn" : "pass";
+}
 
 type Update = { latest: string; pinned: string } | null;
 
@@ -24,7 +31,8 @@ export function staleCatalogDetail(
   if (ageDays <= STALE_AFTER_DAYS) {
     return `${head}; note: threat-intel catalogs are ${ageDays} days old (advisory, not gated); ${why(update)}`;
   }
-  return `${head}; WARNING: threat-intel catalogs are ${ageDays} days old, so this pass is not evidence about newer ones (advisory, not gated); ${why(update)}`;
+  const gate = ageDays > WARN_AFTER_DAYS ? "warning, not a failure" : "advisory, not gated";
+  return `${head}; WARNING: threat-intel catalogs are ${ageDays} days old, so this pass is not evidence about newer ones (${gate}); ${why(update)}`;
 }
 
 /** What replaces Socket in a local-first check, without promising fresh threat data. */

@@ -177,6 +177,13 @@ describe("bumblebeeStaleCatalogVerdict", () => {
     assert.match(result.detail, /111 days old/);
   });
 
+  it("warns instead of passing once the catalogs are over 180 days old", () => {
+    assert.equal(bumblebeeStaleCatalogVerdict(outcome, 180, null).status, "pass");
+    const result = bumblebeeStaleCatalogVerdict(outcome, 181, null);
+    assert.equal(result.status, "warn");
+    assert.match(result.detail, /181 days old/);
+  });
+
   it("opens an action item when a newer release is available", () => {
     const result = bumblebeeStaleCatalogVerdict(outcome, 111, { latest: "0.2.0", pinned: "0.1.2" });
     assert.equal(result.status, "pass");

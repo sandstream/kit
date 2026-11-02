@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { LOCAL_COVER, staleCatalogDetail } from "./bumblebee-age.js";
+import {
+  LOCAL_COVER,
+  WARN_AFTER_DAYS,
+  staleCatalogDetail,
+  staleCatalogStatus,
+} from "./bumblebee-age.js";
 
 const newer = { latest: "0.2.0", pinned: "0.1.2" };
 
@@ -39,6 +44,20 @@ describe("staleCatalogDetail", () => {
 
   it("never uses an em-dash", () => {
     for (const age of [10, 135]) assert.doesNotMatch(staleCatalogDetail(1, age, newer), /—/);
+  });
+});
+
+describe("staleCatalogStatus", () => {
+  it("passes up to and including 180 days, warns after", () => {
+    assert.equal(WARN_AFTER_DAYS, 180);
+    assert.equal(staleCatalogStatus(0), "pass");
+    assert.equal(staleCatalogStatus(180), "pass");
+    assert.equal(staleCatalogStatus(181), "warn");
+  });
+
+  it("calls the warning a warning, not an advisory that is never gated", () => {
+    assert.match(staleCatalogDetail(1, 181, null), /warning, not a failure/);
+    assert.match(staleCatalogDetail(1, 135, null), /advisory, not gated/);
   });
 });
 
