@@ -12,6 +12,7 @@
  */
 import type { SecurityCheckResult } from "./check-security.js";
 import { ingestStrict, type IngestFormat } from "./adapters/ingest.js";
+import { abortedRun } from "./scan-abort.js";
 import { exitGateFinding } from "./scan-exit-gate.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 
@@ -179,6 +180,7 @@ export const SCANNERS: ScannerDef[] = [
   {
     id: "osv-scanner",
     bin: "osv-scanner",
+    timeoutMs: 600_000, // resolves Maven transitive dependencies over the network
     args: ["--format", "json", "--experimental-exclude", `g:${PROVIDER_GLOB}`, "-r", "."],
     format: "osv",
     offline: { args: ["--offline"] },
@@ -390,7 +392,8 @@ export function suppressBaselined(
   return { kept, suppressed: merged.length - kept.length };
 }
 
-export type ScannerStatus = "ran" | "not-installed" | "no-token" | "not-applicable" | "error";
+export type ScannerStatus =
+  "ran" | "not-installed" | "no-token" | "not-applicable" | "error" | "timed-out"; // kit stopped it at its time limit
 export interface ScannerRun {
   id: string;
   status: ScannerStatus;
@@ -446,7 +449,12 @@ export function scannerEnv(
  * is unknown (a green result hides the gap). `ran` succeeded; `not-applicable` is
  * a legitimate skip (the scanner does not apply to this project) and is NOT a gap.
  */
-export const NON_RUNNING_STATUSES: ScannerStatus[] = ["not-installed", "no-token", "error"];
+export const NON_RUNNING_STATUSES: ScannerStatus[] = [
+  "not-installed",
+  "no-token",
+  "error",
+  "timed-out",
+];
 
 export interface ScanGateOptions {
   /** Scanner ids that MUST run; if one did not, the gate fails (even without strict). */
@@ -509,10 +517,8 @@ type ScanResult = {
   stderr?: string;
   exitCode?: number;
   truncated?: boolean;
+  timedOut?: boolean;
 };
-
-const TRUNCATED_REASON =
-  "output exceeded kit's buffer limit and was cut off, so the report was not read (a kit limit, not a scanner error)";
 
 /**
  * Turn a scanner's raw result into its run record and findings.
@@ -528,10 +534,8 @@ function settleRun(
   res: ScanResult,
 ): { run: ScannerRun; findings?: SecurityCheckResult[] } {
   const reason = scannerReason(res.stderr);
-  if (res.truncated) {
-    // A report cut off at the buffer limit is kit's failure, not the scanner's: say so.
-    return { run: { id: s.id, status: "error", findings: 0, reason: TRUNCATED_REASON } };
-  }
+  const aborted = abortedRun(s, res);
+  if (aborted) return { run: aborted };
   if (!res.stdout && s.noTargetExit !== undefined && res.exitCode === s.noTargetExit) {
     return { run: { id: s.id, status: "not-applicable", findings: 0, reason, noTarget: true } };
   }

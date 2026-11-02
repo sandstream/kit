@@ -10,6 +10,8 @@ export interface ExecResult {
   ok: boolean;
   /** True when the output exceeded maxBuffer and was cut off (stdout is then only the start). */
   truncated?: boolean;
+  /** True when the timeout killed the process (stdout is then only what it had printed). */
+  timedOut?: boolean;
 }
 
 /** 64 MiB, the limit most callers already set. A report grows with what a scanner finds. */
@@ -21,7 +23,13 @@ function failureResult(error: unknown): ExecResult {
   if (!error || typeof error !== "object") {
     return { stdout: "", stderr: String(error), exitCode: 1, ok: false };
   }
-  const e = error as { stdout?: string; stderr?: string; code?: number | string };
+  const e = error as {
+    stdout?: string;
+    stderr?: string;
+    code?: number | string;
+    killed?: boolean;
+    signal?: string;
+  };
   const result: ExecResult = {
     stdout: e.stdout ?? "",
     stderr: e.stderr ?? "",
@@ -29,6 +37,7 @@ function failureResult(error: unknown): ExecResult {
     ok: false,
   };
   if (e.code === MAXBUFFER_CODE) result.truncated = true;
+  else if (e.killed === true && e.signal === "SIGTERM") result.timedOut = true;
   return result;
 }
 
