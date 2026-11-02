@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
+import { LOCAL_COVER, staleCatalogDetail } from "./bumblebee-age.js";
 import { checkEnvIgnoreProtection } from "./check-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
@@ -1708,8 +1709,7 @@ async function checkSocket(): Promise<SecurityCheckResult> {
     category: "supply-chain",
     name: "socket scan",
     status: "skip",
-    detail:
-      "Socket is cloud-only (uploads manifest; no offline/air-gap) — excluded from kit's local-first check. Local cover: bumblebee + osv-scanner + kit supply-chain",
+    detail: `Socket is cloud-only (uploads manifest; no offline/air-gap), excluded from kit's local-first check. ${LOCAL_COVER}`,
   };
 }
 
@@ -2547,11 +2547,7 @@ export function bumblebeeStaleCatalogVerdict(
     category: "supply-chain",
     name: BUMBLEBEE_NAME,
     status: "pass",
-    detail:
-      `no known exposures (${outcome.packagesScanned} packages); note: threat-intel catalogs are ${ageDays} days old (advisory — not gated)` +
-      (update
-        ? `; bumblebee ${update.latest} is available upstream (pinned ${update.pinned})`
-        : ""),
+    detail: staleCatalogDetail(outcome.packagesScanned, ageDays, update),
     suggestion,
     ...(update && {
       advisory: {
