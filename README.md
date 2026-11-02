@@ -370,6 +370,20 @@ kit memory suggest | your-llm                     # zero-LLM core; pipe a review
 Full reference: [`docs/MEMORY.md`](docs/MEMORY.md). Original schema + hook design
 credited to [cloudctx](https://github.com/chadptk1238/cloudctx) (MIT).
 
+## Local services
+
+Agent sessions start containers, Supabase stacks and dev servers, and often end without stopping
+them. `kit services` keeps a local list of who started what, for which project, and until when.
+
+```bash
+kit services add app-db --kind supabase --ref my-project --purpose "e2e tests"  # 4h lease
+kit services ls                     # what runs, who owns it, plus docker workloads nobody registered
+kit services stop app-db            # stop it, check it is gone, remove the entry
+kit services ask app-db             # someone else's? ask the owner; when the lease ends, anyone may stop it
+```
+
+Full guide: [`docs/SERVICES.md`](docs/SERVICES.md).
+
 ## Lock Files
 
 kit uses lock files in `.kit/` to track exact versions of skills and tools:
@@ -500,6 +514,7 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 - Deploy env: `[deploy]` declares required platform key names; `kit check --category deploy` diffs remote names without reading values.
 - Deps the install gate hasn't covered (git repos, URLs, vendored code): `kit triage repo <target>` first.
 - After a batch of edits: `kit check --category security`; halt and surface findings on `fail`.
+- Local services you start (containers, Supabase, dev servers): `kit services add <name> --kind <k> --ref <r>` right after, `kit services stop <name>` when done.
 - Everything else: `kit --help` — the commands are self-documenting.
 <!-- END kit -->
 ```

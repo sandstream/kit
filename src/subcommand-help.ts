@@ -194,6 +194,18 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Recall and spread per config for tune and holdout, control false-positive rate, comparisons, and ADR-0007's three limits",
   "rig plant":
     "Turn a past fix into a planted defect: reverse it onto the pinned commit in a throwaway index, write the patch, print the [[defect]] block; refused when the reverse does not apply cleanly",
+  "services add":
+    "Register a service you started (--kind supabase|compose|container|pid|port --ref <ref>), with a lease (--ttl, default 4h) and your agent session as owner",
+  "services ls":
+    "Registry merged with live probes (running / dead / expired / unknown), plus running docker workloads nobody registered, with age and memory (--json)",
+  "services renew": "Extend your lease (--ttl); only the owner, unless --force",
+  "services stop":
+    "Stop it, verify it is gone, drop the entry; refused for a non-owner while the lease runs (--force overrides)",
+  "services prune": "Drop entries whose service no longer runs",
+  "services ask": "Ask the owner to stop it (--message); the owner sees it on its next prompt",
+  "services keep":
+    "Owner's answer to a stop request: still needed; renews the lease and clears the request",
+  "services release": "Owner's answer to a stop request: stop it now, verified",
   "decisions add":
     "Record one choice the run made where the spec was silent. kit never writes the content — that is model work — it provides the form and refuses a malformed entry",
   "decisions list":

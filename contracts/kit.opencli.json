@@ -2602,6 +2602,105 @@
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
+    "services": {
+      "commands": {
+        "add": {
+          "kind": "command",
+          "summary": "Register a service you started (--kind supabase|compose|container|pid|port --ref <ref>), with a lease (--ttl, default 4h) and your agent session as owner",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "ask": {
+          "kind": "command",
+          "summary": "Ask the owner to stop it (--message); the owner sees it on its next prompt",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "keep": {
+          "kind": "command",
+          "summary": "Owner's answer to a stop request: still needed; renews the lease and clears the request",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "ls": {
+          "kind": "command",
+          "summary": "Registry merged with live probes (running / dead / expired / unknown), plus running docker workloads nobody registered, with age and memory (--json)",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "prune": {
+          "kind": "command",
+          "summary": "Drop entries whose service no longer runs",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "release": {
+          "kind": "command",
+          "summary": "Owner's answer to a stop request: stop it now, verified",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "renew": {
+          "kind": "command",
+          "summary": "Extend your lease (--ttl); only the owner, unless --force",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "stop": {
+          "kind": "command",
+          "summary": "Stop it, verify it is gone, drop the entry; refused for a non-owner while the lease runs (--force overrides)",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        }
+      },
+      "kind": "group",
+      "summary": "Local service leases: who started which container, Supabase stack, process or port, checked against what runs. add | ls | renew | stop | prune | ask | keep | release (--json, --ttl, --force)",
+      "x-kit-accepted-flags": [
+        "--env",
+        "--force",
+        "--help",
+        "--json",
+        "--kind",
+        "--message",
+        "--non-interactive",
+        "--owner",
+        "--project",
+        "--purpose",
+        "--read-only",
+        "--readonly",
+        "--ref",
+        "--ttl",
+        "--version"
+      ],
+      "x-kit-args-modeled": true,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "setup": {
       "commands": {
         "--recommended": {

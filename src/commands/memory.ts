@@ -5,6 +5,12 @@ import { hasFlag, flagValue } from "../utils/flags.js";
 import { isReadOnlyMode } from "../read-only-mode.js";
 import { memPalList } from "./memory-pal-list.js";
 import { planSessionStartLines } from "./memory-plan-hook.js";
+import {
+  markServicesAtSessionEnd,
+  servicesPromptLines,
+  servicesStartLines,
+  sessionEndHarness,
+} from "../services/memory-hook.js";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -1067,17 +1073,14 @@ async function memHook(): Promise<boolean> {
     maybeStartMidSessionIndex(); // debounced, detached — keeps recall fresh mid-session
     const text = userPromptSubmitReminder();
     if (text) console.log(text);
+    for (const line of await servicesPromptLines()) console.log(line);
     return true;
   }
-  if (event === "session-end") {
-    // Return instantly: a SessionEnd hook that blocks on the index (or the
-    // opt-in network push) gets cancelled by Claude Code on exit ("Hook
-    // cancelled"). The real work runs in a detached worker below.
-    startDetachedSessionEnd();
-    return true;
-  }
-  if (event === "session-end-codex") {
-    startDetachedSessionEnd("codex");
+  const endHarness = sessionEndHarness(event);
+  if (endHarness) {
+    await markServicesAtSessionEnd();
+    // Return instantly: a blocking SessionEnd hook is cancelled on exit; a detached worker does the work.
+    startDetachedSessionEnd(endHarness);
     return true;
   }
   if (event === "session-end-run") {
@@ -1117,6 +1120,9 @@ async function memHook(): Promise<boolean> {
     }
     const recovery = recoverSessionStart();
     if (recovery.context) contextLines.push(recovery.context);
+    const serviceLines = await servicesStartLines();
+    contextLines.push(...serviceLines);
+    recovery.notices.push(...serviceLines);
     const context = contextLines.join("\n");
     if (context) {
       if (process.env.KIT_HOOK_JSON === "claude")
