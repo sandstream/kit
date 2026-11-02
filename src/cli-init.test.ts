@@ -13,18 +13,19 @@ import { GITIGNORE_CONTENT, runCli } from "./cli-run.test-support.js";
 // kit init — auto-generate .kit.toml
 // ---------------------------------------------------------------------------
 
+// One fixture directory for the whole file; each test makes its own project inside it.
+let tempDir: string;
+
+before(async () => {
+  tempDir = await mkdtemp(join(tmpdir(), "kit-integ-init-"));
+  await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
+});
+
+after(async () => {
+  await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
+
 describe("kit init — auto-generate", () => {
-  let tempDir: string;
-
-  before(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "kit-integ-init-"));
-    await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
-  });
-
-  after(async () => {
-    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
-
   it("generates .kit.toml for a Next.js project when file is absent (--non-interactive)", async () => {
     const projectDir = join(tempDir, "nextjs-project");
     await mkdir(projectDir, { recursive: true });
@@ -73,7 +74,9 @@ describe("kit init — auto-generate", () => {
     const tomlContent = await readFile(join(projectDir, ".kit.toml"), "utf-8").catch(() => "");
     assert.ok(tomlContent.length > 0, "--yes should write .kit.toml");
   });
+});
 
+describe("kit init — existing config and low confidence", () => {
   it("does not overwrite existing .kit.toml", async () => {
     const projectDir = join(tempDir, "existing-config");
     await mkdir(projectDir, { recursive: true });
