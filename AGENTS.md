@@ -11,6 +11,7 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 - Deploy env: `[deploy]` declares required platform key names; `kit check --category deploy` diffs remote names without reading values.
 - Deps the install gate hasn't covered (git repos, URLs, vendored code): `kit triage repo <target>` first.
 - After a batch of edits: `kit check --category security`; halt and surface findings on `fail`.
+- Local services you start (containers, Supabase, dev servers): `kit services add <name> --kind <k> --ref <r>` right after, `kit services stop <name>` when done.
 - Everything else: `kit --help` — the commands are self-documenting.
 
 <!-- END kit -->

@@ -70,6 +70,9 @@ export const HELP_CATEGORIES: [string, string[]][] = [
     "Governance & access",
     ["governance", "audit", "decisions", "auth", "team", "escalate", "identity", "panic", "policy"],
   ],
-  ["Packages & services", ["pkg", "add", "plugin", "create-plugin", "run", "open", "ci"]],
+  [
+    "Packages & services",
+    ["pkg", "add", "plugin", "create-plugin", "run", "open", "ci", "services"],
+  ],
   ["Meta", ["whoami", "usage", "version", "completions", "help"]],
 ];
