@@ -26,7 +26,7 @@ kit accepts **26 sections**.
 | [`[memory]`](#memory) | Memory capture and PAL behaviour, including this project's sensitivity class. | `kit memory` |
 | [`[policy]`](#policy) | Which vendor writes an agent may perform, pre-approved by operation. | `kit governance` |
 | [`[projects]`](#projects) | The project directories of a repository that holds several projects. | `kit check` |
-| [`[scan]`](#scan) | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist. | `kit scan --list-delegates` |
+| [`[scan]`](#scan) | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]) and the client-exposed env allowlist. | `kit scan --list-delegates` |
 | [`[secrets]`](#secrets) | Which vault backs this project's secrets, and the key names it needs. | `kit secrets` |
 | [`[services]`](#services) | External CLIs this project authenticates against, with the login and check command for each. | `kit login` |
 | [`[setup]`](#setup) | Project bootstrap commands — install dependencies, migrate, verify. | `kit bootstrap` |
@@ -231,15 +231,21 @@ Set up with `kit check`.
 
 ## scan
 
-Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist.
+Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]) and the client-exposed env allowlist.
 
-**What it buys.** The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically.
+**What it buys.** The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically. An entry in [[scan.allow]] silences one finding label in one file for kit security scan-staged. Kit reads it from the staged or committed .kit.toml, never the working copy, so review sees it. It needs a reason, a directory or a pattern is refused, the output names the entry that applied, and an entry that matches nothing is reported as stale.
 
 ```toml
 [scan]
 guarddog = true
 delegates = ["osv-scanner", "trivy"]
 images = ["ghcr.io/acme/api:1.4.2"]
+
+[[scan.allow]]
+path = ".gitlab-ci.yml"
+match = "keyed-secret"
+reason = "CI cache key, not a cryptographic key"
+reviewed = "2026-11-01"
 ```
 
 Set up with `kit scan --list-delegates`.

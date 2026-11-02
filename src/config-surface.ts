@@ -131,10 +131,10 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
   },
   scan: {
     purpose:
-      "Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist.",
-    buys: "The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically.",
+      "Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]) and the client-exposed env allowlist.",
+    buys: "The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically. An entry in [[scan.allow]] silences one finding label in one file for kit security scan-staged. Kit reads it from the staged or committed .kit.toml, never the working copy, so review sees it. It needs a reason, a directory or a pattern is refused, the output names the entry that applied, and an entry that matches nothing is reported as stale.",
     example:
-      '[scan]\nguarddog = true\ndelegates = ["osv-scanner", "trivy"]\nimages = ["ghcr.io/acme/api:1.4.2"]',
+      '[scan]\nguarddog = true\ndelegates = ["osv-scanner", "trivy"]\nimages = ["ghcr.io/acme/api:1.4.2"]\n\n[[scan.allow]]\npath = ".gitlab-ci.yml"\nmatch = "keyed-secret"\nreason = "CI cache key, not a cryptographic key"\nreviewed = "2026-11-01"',
     command: "kit scan --list-delegates",
   },
   air_gap: {
