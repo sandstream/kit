@@ -111,7 +111,9 @@ export function printToolsTable(tools: ToolStatus[]): void {
     const name = pad(tool.name, nameWidth);
     const version = tool.installed
       ? `${c.dim}${tool.installed}${c.reset}`
-      : `${c.red}not installed${c.reset}`;
+      : tool.blockedByTriage
+        ? `${c.red}blocked by triage${c.reset}  ${c.dim}${tool.blockedByTriage}${c.reset}`
+        : `${c.red}not installed${c.reset}`;
     const required = `${c.gray}(need ${tool.required})${c.reset}`;
     const note =
       drift?.drift === "behind"

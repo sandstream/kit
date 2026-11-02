@@ -3,6 +3,7 @@ import { exec } from "./utils/exec.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { homedir } from "node:os";
 import { classifyToolPath, type ToolSource } from "./tool-provenance.js";
+import { blockedByTriageNote } from "./tool-blocked.js";
 import { isPresencePin, probeName, versionSatisfies } from "./tool-inventory.js";
 
 export { isPresencePin };
@@ -17,6 +18,11 @@ export interface ToolStatus {
   installed: string | null;
   /** Satisfies the declared pin. Unchanged meaning — every existing consumer reads this. */
   ok: boolean;
+  /**
+   * Set when the tool is missing AND `kit install` would refuse it: a bare name has no triage
+   * path. "not installed" alone reads as a forgotten install, not as a refused one.
+   */
+  blockedByTriage?: string;
   /** Resolved executable path, when known. */
   path?: string;
   /** Which installer owns that path (measured, never assumed). */
@@ -89,7 +95,16 @@ export async function checkTools(
       currency && required === "latest"
         ? await currency(name, source ?? "unknown", installed, path ?? null)
         : undefined;
-    results.push({ name, required, installed, ok, path, source, currency: drift });
+    results.push({
+      name,
+      required,
+      installed,
+      ok,
+      path,
+      source,
+      currency: drift,
+      blockedByTriage: blockedByTriageNote(name, installed),
+    });
   }
 
   return results;
