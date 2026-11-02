@@ -40,7 +40,12 @@ approval says so. A pull request that touches a protected class always needs the
 
 ## Setup it depends on
 
-- The App is installed on this repository.
+- The App is installed on this repository with **Contents: Read and write** and **Pull requests:
+  Read and write**. GitHub counts an approval toward required reviews only from an identity with
+  write access: with Contents read-only, the App's approval was posted but did not satisfy the
+  rule (tested on #723). The App's key can therefore mint tokens that push; it lives only in the
+  Actions secret, is used only by this gate from the default branch, and every token the gate
+  mints is narrowed to `pull_requests: write` and `contents: read`.
 - Actions variable `REVIEWER_APP_ID` and Actions secret `REVIEWER_APP_PRIVATE_KEY` are set.
 - The `main` ruleset requires 1 approval, with approval of the most recent push.
 
