@@ -44,3 +44,17 @@ it("uses the shipped rules when a project has no rule file", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+it("protects the secrets and policy command surfaces", () => {
+  const rules = loadProtectedPathRules(process.cwd());
+  const gaps = [
+    "src/commands/secrets.ts",
+    "src/commands/secrets-onecli-keyname.test.ts",
+    "src/commands/policy.ts",
+    "src/commands/policy-approve.test.ts",
+    "src/check-secrets-infisical.test.ts",
+    "src/check-policy-ops.ts",
+  ];
+  const unprotected = gaps.filter((path) => classifyProtectedPaths([path], rules).length === 0);
+  assert.deepEqual(unprotected, []);
+});
