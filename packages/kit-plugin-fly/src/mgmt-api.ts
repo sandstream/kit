@@ -4,7 +4,10 @@
  * App secrets have two routes:
  *   - Machines REST API (https://api.machines.dev/v1, spec at
  *     docs.fly.io/api/machines/openapi.json): `listAppSecretsV1`, `setAppSecretsV1`,
- *     `deleteAppSecretV1`. This is the documented API (checked 2026-10-23) and the one to use.
+ *     `deleteAppSecretV1` here call `GET`/`POST /v1/apps/{app}/secrets` and
+ *     `DELETE /v1/apps/{app}/secrets/{name}`, which the spec names `Secrets_list`,
+ *     `Secrets_update` and `Secret_delete` (renamed from `*AppSecret*V1`; paths unchanged,
+ *     checked 2026-11-02). This is the documented API and the one to use.
  *   - GraphQL (https://api.fly.io/graphql): `listAppSecrets`, `setAppSecrets`,
  *     `unsetAppSecrets`. Kept for existing callers; Fly's published API reference no longer
  *     covers it.
