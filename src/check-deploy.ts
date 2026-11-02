@@ -11,6 +11,7 @@ import {
   type VercelEnvMeta,
 } from "./check-deploy-vercel-safety.js";
 import { execFileNoThrow } from "./utils/exec.js";
+import { failedDetail, type ExecResult } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 
 export type DeployCheckStatus = "pass" | "fail" | "warn" | "skip";
@@ -71,6 +72,12 @@ function cleanLine(value: string): string {
 
 function firstLine(value: string): string {
   return cleanLine(value).split("\n").map(cleanLine).find(Boolean) ?? "no output";
+}
+
+/** Why `vercel env ls` failed. A kill by kit's time limit says so, instead of an empty reason. */
+export function deployListDetail(result: ExecResult): string {
+  const reason = firstLine(result.stderr || result.stdout);
+  return failedDetail(reason ? `vercel env ls failed: ${reason}` : "vercel env ls failed", result);
 }
 
 function isEnvName(value: unknown): value is string {
@@ -276,7 +283,7 @@ async function listVercelEnvNames(target: VercelDeployTarget): Promise<DeployLis
     return {
       ok: false,
       names: [],
-      detail: `vercel env ls failed: ${firstLine(result.stderr || result.stdout)}`,
+      detail: deployListDetail(result),
       didNotRun: true,
     };
   }

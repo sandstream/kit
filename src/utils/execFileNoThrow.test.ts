@@ -47,3 +47,20 @@ describe("failedDetail", () => {
     assert.match(detail, /not a tool failure/);
   });
 });
+
+describe("failedDetail for a timeout", () => {
+  const base = { stdout: "", stderr: "", exitCode: 1, ok: false };
+
+  it("names the time limit when the process was killed", () => {
+    const detail = failedDetail("vercel env ls failed", { ...base, timedOut: true });
+    assert.match(detail, /^vercel env ls failed: /);
+    assert.match(detail, /time limit/);
+    assert.match(detail, /not a tool failure/);
+  });
+
+  it("names the buffer, not the time, for a cut-off report", () => {
+    const detail = failedDetail("scan failed", { ...base, truncated: true });
+    assert.match(detail, /buffer limit/);
+    assert.doesNotMatch(detail, /time limit/);
+  });
+});

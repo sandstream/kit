@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import type { MonkeyPackageJson } from "./monkey-test-contract.js";
 import { isUnsafeEntry } from "./triage-sandbox.js";
-import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
 
 const PUBLIC_REGISTRY = "https://registry.npmjs.org/";
 /** A registry version, never a range, tag, URL or git spec: it ends up in the `npm pack` spec. */
@@ -113,14 +113,18 @@ export async function verifyAgainstRegistry(
     if (!packed.ok || !tarball) {
       return {
         ok: false,
-        detail: `could not fetch the registry tarball: ${packed.stderr.trim().slice(0, 200)}`,
+        detail: failedDetail(
+          `could not fetch the registry tarball: ${packed.stderr.trim().slice(0, 200)}`,
+          packed,
+        ),
       };
     }
     if (!/^[\w.-]+\.tgz$/.test(tarball)) return { ok: false, detail: "unexpected tarball name" };
     // List before extracting: a link or a path outside the package root never reaches the disk.
     const listing = await execFileNoThrow("tar", ["-tvzf", tarball], { cwd: scratch });
     if (!listing.ok || listing.stdout.split("\n").some((line) => isUnsafeEntry(line))) {
-      return { ok: false, detail: "the registry tarball has an unsafe entry or cannot be listed" };
+      const why = "the registry tarball has an unsafe entry or cannot be listed";
+      return { ok: false, detail: failedDetail(why, listing) };
     }
     const unpacked = await execFileNoThrow("tar", ["-xzf", tarball], { cwd: scratch });
     if (!unpacked.ok) return { ok: false, detail: "could not unpack the registry tarball" };
