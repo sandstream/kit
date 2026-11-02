@@ -178,7 +178,7 @@ with them. It runs them, folds in their results, and adds the layer they do not 
 
 For a GitHub pull request, `kit review --receipt` writes signed evidence for the current commit.
 Use `kit review verify-receipt` to check its signature and commit.
-See [pull request review receipts](docs/PR_REVIEW_RECEIPT.md).
+See [pull request review receipts](docs/PR_REVIEW_RECEIPT.md). Pull requests on this repository are approved by a separate reviewer App only when every check passed and no protected path changed; see [agent review gate](docs/AGENT_REVIEW_GATE.md).
 Run `kit escalate pr` to list the actions needed for a blocked pull request.
 Ask your agent to follow `skills/independent-pr-review/SKILL.md` in the Kit repository or installed package.
 The skill records a separate review for a pull request commit.
