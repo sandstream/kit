@@ -8,6 +8,11 @@
   acting under the owner's account. kit now reads the branch's rulesets (read access) and, when the
   token can, classic protection's review settings, and warns at 0. kit's own `main` was in that
   state. Whether admins can bypass the rule is not visible to a read token and is not claimed.
+- **A reviewer GitHub App, first step: a manual identity probe.** `scripts/github-app-token.mjs`
+  mints the App's installation token with `node:crypto` only. It narrows the token to this
+  repository with `pull_requests: write` and `contents: read`, even though the key could mint
+  more, and never prints it. The manual `reviewer-probe` workflow uses it to post a COMMENT review,
+  never an approval, so the App's identity can be confirmed before any approval depends on it.
 - **trufflehog 3.99.4 → 3.99.7** (`.kit.toml`, `mise.toml`). The checksums file of both versions
   carries a Sigstore signature from trufflehog's own `release.yml` at the release tag, verified,
   and the 3.99.4 file reproduces the archive hash of the version it replaces.
