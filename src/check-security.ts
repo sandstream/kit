@@ -103,6 +103,8 @@ export interface SecurityCheckResult extends Partial<{ hasFindings: true; scanIn
   severity?: "critical" | "high" | "medium" | "low";
   files?: string[]; // Files with issues (for secrets scan)
   suggestion?: string; // Installation or remediation instructions
+  /** Vulnerable packages behind a dependency row (name and version, sanitised), for deployed-vs-branch tagging. */
+  affected?: { name: string; version: string }[];
   rule?: RuleRef; // citation for the rule this check enforces (CWE/OWASP), if mapped
   /**
    * True when the check could NOT actually run (tool/binary absent, token missing,
