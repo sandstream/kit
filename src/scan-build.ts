@@ -92,7 +92,10 @@ async function walk(
 ): Promise<void> {
   const rel = relative(root, dir).split(sep).join("/");
   if (depth > MAX_DEPTH) {
-    issues.push({ file: rel, detail: `${rel}: nested deeper than ${MAX_DEPTH} levels, not scanned` });
+    issues.push({
+      file: rel,
+      detail: `${rel}: nested deeper than ${MAX_DEPTH} levels, not scanned`,
+    });
     return;
   }
   let entries;
