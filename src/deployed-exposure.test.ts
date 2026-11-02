@@ -85,7 +85,9 @@ describe("lockedPackagesAt", () => {
       rmTemp(dir);
     }
   });
+});
 
+describe("lockedPackagesAt when the lockfile cannot be read", () => {
   it("is not ok, with a reason, for a commit this clone does not have", async () => {
     const { dir } = repo();
     try {
