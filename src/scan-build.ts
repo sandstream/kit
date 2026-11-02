@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { resolve, join, relative, sep } from "node:path";
 import type { SecretFinding } from "./utils/redactSecrets.js";
 import { ArtifactIncompleteError, findArtifactSecrets, MAX_BYTES } from "./scan-build-sourcemap.js";
@@ -81,24 +81,52 @@ function isBrowserVisibleNextArtifact(file: string): boolean {
   return /\.(?:html|rsc|body|json|txt)$/.test(file);
 }
 
-async function walk(dir: string, out: string[], depth = 0, maxDepth = 8): Promise<void> {
-  if (depth > maxDepth) return;
+const MAX_DEPTH = 8;
+
+async function walk(
+  dir: string,
+  root: string,
+  out: string[],
+  issues: BuildScanIssue[],
+  depth = 0,
+): Promise<void> {
+  const rel = relative(root, dir).split(sep).join("/");
+  if (depth > MAX_DEPTH) {
+    issues.push({
+      file: rel,
+      detail: `${rel}: nested deeper than ${MAX_DEPTH} levels, not scanned`,
+    });
+    return;
+  }
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
+    issues.push({ file: rel, detail: `${rel}: directory could not be read` });
     return;
   }
   for (const ent of entries) {
     if (SKIP_DIRS.has(ent.name)) continue;
     const full = join(dir, ent.name);
     if (ent.isDirectory()) {
-      await walk(full, out, depth + 1, maxDepth);
+      await walk(full, root, out, issues, depth + 1);
     } else if (ent.isFile()) {
       const ext = ent.name.includes(".") ? ent.name.slice(ent.name.lastIndexOf(".")) : "";
       if (!SCANNABLE_EXTS.has(ext) && !ent.name.startsWith(".env")) continue;
       out.push(full);
     }
+  }
+}
+
+/** Read at most MAX_BYTES + 1 bytes, so a file that grows after stat() cannot be read whole. */
+async function readBounded(path: string): Promise<string | "too-large"> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(MAX_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return bytesRead > MAX_BYTES ? "too-large" : buffer.subarray(0, bytesRead).toString("utf-8");
+  } finally {
+    await handle.close();
   }
 }
 
@@ -108,6 +136,7 @@ export async function scanBuildArtifacts(
 ): Promise<BuildHit[]> {
   const dirsToScan = customDirs ?? DEFAULT_BUILD_DIRS;
   const files: string[] = [];
+  const incomplete: BuildScanIssue[] = [];
 
   for (const d of dirsToScan) {
     const full = resolve(cwd, d);
@@ -117,34 +146,23 @@ export async function scanBuildArtifacts(
     } catch {
       continue;
     }
-    await walk(full, files);
+    await walk(full, cwd, files, incomplete);
   }
 
   const hits: BuildHit[] = [];
-  const incomplete: BuildScanIssue[] = [];
   for (const path of files) {
     const rel = relative(cwd, path).split(sep).join("/");
     if (!isBrowserVisibleNextArtifact(rel)) continue;
-    let size: number;
+    let content: string | "too-large";
     try {
-      const st = await stat(path);
-      size = st.size;
+      content = await readBounded(path);
     } catch {
-      if (rel.endsWith(".map"))
-        incomplete.push({ file: rel, detail: `${rel}: source map could not be inspected` });
+      incomplete.push({ file: rel, detail: `${rel}: file could not be read` });
       continue;
     }
-    if (size > MAX_BYTES) {
-      if (rel.endsWith(".map"))
-        incomplete.push({ file: rel, detail: `${rel}: source map exceeds 5 MiB` });
-      continue;
-    }
-    let content: string;
-    try {
-      content = await readFile(path, "utf-8");
-    } catch {
-      if (rel.endsWith(".map"))
-        incomplete.push({ file: rel, detail: `${rel}: source map could not be read` });
+    if (content === "too-large") {
+      const kind = rel.endsWith(".map") ? "source map" : "file";
+      incomplete.push({ file: rel, detail: `${rel}: ${kind} exceeds 5 MiB` });
       continue;
     }
     let findings: SecretFinding[];
