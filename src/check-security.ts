@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
 import { checkEnvIgnoreProtection } from "./check-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
@@ -1858,7 +1858,7 @@ async function checkTrivy(root: string): Promise<SecurityCheckResult> {
       category: "supply-chain",
       name: "trivy container scan",
       status: "warn",
-      detail: "trivy scan failed",
+      detail: failedDetail("trivy scan failed", result),
       severity: "medium",
       didNotRun: true,
     };
@@ -1880,7 +1880,7 @@ async function checkTrivy(root: string): Promise<SecurityCheckResult> {
       category: "supply-chain",
       name: "trivy container scan",
       status: "warn",
-      detail: "trivy scan failed",
+      detail: failedDetail("trivy scan failed", result),
       severity: "medium",
       didNotRun: true,
     };
@@ -1959,7 +1959,7 @@ async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
       category: "supply-chain",
       name,
       status: "warn",
-      detail: "trivy config scan failed",
+      detail: failedDetail("trivy config scan failed", result),
       severity: "medium",
     };
   }
@@ -2144,7 +2144,7 @@ async function checkMavenAudit(root: string): Promise<SecurityCheckResult> {
       category: "dependency",
       name,
       status: "warn",
-      detail: "trivy JVM scan failed",
+      detail: failedDetail("trivy JVM scan failed", result),
       severity: "medium",
     };
   }
@@ -2154,7 +2154,7 @@ async function checkMavenAudit(root: string): Promise<SecurityCheckResult> {
       category: "dependency",
       name,
       status: "warn",
-      detail: "trivy JVM scan failed",
+      detail: failedDetail("trivy JVM scan failed", result),
       severity: "medium",
     };
   }
@@ -2174,6 +2174,8 @@ async function checkMavenAudit(root: string): Promise<SecurityCheckResult> {
     severity: "high",
   };
 }
+
+const OSV_NO_RESULT = "osv-scanner gave no parseable result despite manifests; deps are UNSCANNED";
 
 /** Count vulnerabilities in an `osv-scanner --format json` payload. PURE so it
  *  can be unit-tested without running osv-scanner. -1 = unparseable. */
@@ -2228,16 +2230,14 @@ async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
   });
   const count = parseOsvVulnCount(result.stdout);
   if (count < 0) {
-    // No parseable JSON. If an osv ecosystem IS present the run FAILED (crash/timeout/
-    // arg-incompat) and must not read as clean → WARN. Otherwise it's the genuine
-    // no-lockfiles case → honest skip.
+    // No parseable JSON. With an osv ecosystem present the run FAILED (crash, timeout, a report
+    // cut off at kit's buffer) and must not read as clean → WARN; otherwise no lockfiles → skip.
     return (await osvEcosystemPresent())
       ? {
           category: "supply-chain",
           name,
           status: "warn",
-          detail:
-            "osv-scanner produced no parseable result despite go/rust/php manifests — the run likely failed (crash/timeout); deps are UNSCANNED",
+          detail: failedDetail(OSV_NO_RESULT, result),
           severity: "medium",
           didNotRun: true,
         }

@@ -12,6 +12,9 @@ export interface ExecResult {
   truncated?: boolean;
 }
 
+/** 64 MiB, the limit most callers already set. A report grows with what a scanner finds. */
+export const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
+
 const MAXBUFFER_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
 
 function failureResult(error: unknown): ExecResult {
@@ -43,12 +46,22 @@ export async function execFileNoThrow(
       timeout: options?.timeout ?? 30_000,
       env: options?.env ?? process.env,
       cwd: options?.cwd,
-      // Tool reporters (lizard --csv, scc --by-file) can exceed Node's 1 MB default
-      // on a large repo; a truncated stream would corrupt the parse. Let callers raise it.
-      maxBuffer: options?.maxBuffer ?? 1024 * 1024,
+      // Tool reporters (lizard --csv, scc --by-file, trivy, osv-scanner) can exceed Node's 1 MB
+      // default on a large repo; a truncated stream would corrupt the parse. The default is
+      // generous and callers may still set their own.
+      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
     });
     return { stdout, stderr, exitCode: 0, ok: true };
   } catch (error: unknown) {
     return failureResult(error);
   }
+}
+
+/**
+ * A failure message that says when the cause was kit's own output limit, so a report that did not
+ * fit is not mistaken for a tool that crashed.
+ */
+export function failedDetail(base: string, result: ExecResult): string {
+  if (!result.truncated) return base;
+  return `${base}: the output exceeded kit's buffer limit and was cut off (a kit limit, not a tool failure)`;
 }
