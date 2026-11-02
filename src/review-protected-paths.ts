@@ -25,6 +25,8 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
     prefix: [
       "src/secrets",
       "src/secret-",
+      "src/check-secrets",
+      "src/commands/secrets",
       "src/vault-",
       "src/keystore/",
       "src/audit-anchor",
@@ -38,7 +40,15 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
       "src/hook-floor.ts",
       "src/install-gate.ts",
     ],
-    prefix: ["src/exec-broker/", "src/read-only-", "src/policy", "src/governance", "src/rbac/"],
+    prefix: [
+      "src/exec-broker/",
+      "src/read-only-",
+      "src/policy",
+      "src/check-policy",
+      "src/commands/policy",
+      "src/governance",
+      "src/rbac/",
+    ],
   },
 };
 
