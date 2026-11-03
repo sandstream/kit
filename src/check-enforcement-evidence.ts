@@ -6,9 +6,10 @@
  * three facts and never reads "pass" from configuration alone:
  *
  *   - wired:    the install gate and the env-write gate are in the settings (liveness).
- *   - refuses:  the negative controls of `kit usage prove` held recently: kit's own gate code
- *               refuses what it must refuse and allows what it must allow. The result is kept for
- *               24 hours per kit version, and refreshed here when it is older.
+ *   - refuses:  the negative controls of `kit usage prove` held just now: kit's own gate code
+ *               refuses what it must refuse and allows what it must allow. They run on every
+ *               check (about two seconds) and the result is not stored. A stored result would be a
+ *               claim in a file that the agent being checked can write, so it would prove nothing.
  *   - bypassed: no commit skipped the pre-commit hook in the last 14 days (the existing skip log).
  *
  * Deliberately not run: the commands a settings file names. That file is repository content, so
@@ -18,26 +19,18 @@
  * Not built yet: a record of what the gates allowed and blocked in real sessions (`recorded`).
  * Allowed calls are not logged today, and the gates are protected code.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import type { GateLiveness } from "./agent-config.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 export const EVIDENCE_CHECK = "enforcement evidence";
 
-const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
-const PROOF_MAX_AGE_MS = 24 * HOUR_MS;
-const CLOCK_SKEW_MS = 5 * 60_000;
+const DAY_MS = 86_400_000;
 export const BYPASS_WINDOW_DAYS = 14;
 
-/** The stored result of one run of the negative controls. No secret and no path: names and counts. */
+/** The result of one run of the negative controls: counts and names, nothing else. */
 export interface GateProof {
-  version: string;
-  /** ISO time the controls ran. */
-  at: string;
   total: number;
   failed: string[];
 }
@@ -53,8 +46,7 @@ export interface EvidenceFacts {
   proof: GateProof | null;
   bypass: { entries: BypassEntry[] };
   now: number;
-  version: string;
-  /** Why a stale proof was not refreshed. */
+  /** Why the controls did not run. */
   refreshNote?: string;
 }
 
@@ -67,18 +59,6 @@ function plain(value: unknown, max = 80): string {
     .slice(0, max);
 }
 
-function proofAge(proof: GateProof, now: number): number | null {
-  const at = Date.parse(proof.at);
-  return Number.isNaN(at) ? null : now - at;
-}
-
-/** A proof counts when it is from this kit version, under 24 hours old and not from the future. */
-export function proofIsFresh(proof: GateProof | null, now: number, version: string): boolean {
-  if (!proof || proof.version !== version) return false;
-  const age = proofAge(proof, now);
-  return age !== null && age <= PROOF_MAX_AGE_MS && age >= -CLOCK_SKEW_MS;
-}
-
 function recentBypass(entries: BypassEntry[], now: number): BypassEntry[] {
   const since = now - BYPASS_WINDOW_DAYS * DAY_MS;
   // An entry whose time cannot be read stays counted: a bypass kit cannot date is not one it can dismiss.
@@ -89,29 +69,13 @@ function recentBypass(entries: BypassEntry[], now: number): BypassEntry[] {
 }
 
 function unverified(f: EvidenceFacts): SecurityCheckResult {
-  const p = f.proof;
-  let why = "no gate proof has been made yet";
-  if (p && p.version !== f.version) {
-    why = `the last proof was made by kit ${plain(p.version, 20)}, this is ${plain(f.version, 20)}`;
-  } else if (p) {
-    const age = proofAge(p, f.now);
-    why =
-      age === null
-        ? "the last proof has no readable time"
-        : `the last proof is ${Math.floor(age / HOUR_MS)} hours old`;
-  }
   const note = f.refreshNote ? ` (${plain(f.refreshNote, 120)})` : "";
   return {
     ...base,
     status: "warn",
     didNotRun: true,
-    detail: `unverified: ${why}${note}. Run \`kit usage prove\` to produce one`,
+    detail: `unverified: the negative controls did not run${note}. Run \`kit usage prove\` to see them`,
   };
-}
-
-function ageText(proof: GateProof, now: number): string {
-  const age = proofAge(proof, now) ?? 0;
-  return age < HOUR_MS ? "under an hour ago" : `${Math.floor(age / HOUR_MS)} hours ago`;
 }
 
 /** The verdict for one set of facts. Pure. */
@@ -125,7 +89,7 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
         "the gates are not wired here, so there is nothing to prove: see enforcement gate liveness",
     };
   }
-  if (f.proof && proofIsFresh(f.proof, f.now, f.version) && f.proof.failed.length > 0) {
+  if (f.proof && f.proof.failed.length > 0) {
     const names = f.proof.failed.map((n) => plain(n)).join("; ");
     return {
       ...base,
@@ -137,7 +101,7 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
         "Run `kit usage prove` to see what each control did, and fix the gate before relying on it.",
     };
   }
-  if (!proofIsFresh(f.proof, f.now, f.version) || !f.proof) return unverified(f);
+  if (!f.proof) return unverified(f);
   const skipped = recentBypass(f.bypass.entries, f.now);
   if (skipped.length > 0) {
     const last = skipped[skipped.length - 1];
@@ -158,43 +122,18 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
     ...base,
     status: "pass",
     detail:
-      `install gate and env-write gate wired; ${held} of ${f.proof.total} negative controls held ` +
-      `${ageText(f.proof, f.now)}; no skipped hook in the last ${BYPASS_WINDOW_DAYS} days. ` +
+      `install gate and env-write gate wired; ${held} of ${f.proof.total} negative controls held just now; ` +
+      `no skipped hook in the last ${BYPASS_WINDOW_DAYS} days. ` +
       `Not proven: that another tool than Claude Code is gated, or that the settings file was not edited after the proof`,
   };
 }
 
-/** The stored proof, or null for a missing, unreadable or malformed file. */
-export function readProofFile(file: string): GateProof | null {
-  try {
-    const text = readFileSync(file, "utf8");
-    const v = JSON.parse(text) as Partial<GateProof>;
-    const ok =
-      typeof v.version === "string" &&
-      typeof v.at === "string" &&
-      typeof v.total === "number" &&
-      Array.isArray(v.failed) &&
-      v.failed.every((n) => typeof n === "string");
-    return ok ? (v as GateProof) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeProofFile(file: string, proof: GateProof): void {
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  writeFileSync(file, `${JSON.stringify(proof, null, 2)}\n`, { mode: 0o600 });
-}
-
 export interface EvidenceDeps {
   now: () => number;
-  version: string;
   liveness: (root: string) => EvidenceFacts["liveness"];
-  readProof: () => GateProof | null;
-  writeProof: (proof: GateProof) => void;
   /** Run the negative controls. */
-  prove: (root: string) => { total: number; failed: string[] };
-  /** False where running processes and writing the proof is not allowed (read-only mode). */
+  prove: (root: string) => GateProof;
+  /** False where running processes is not allowed (read-only mode). */
   canRun: () => boolean;
   skipped: (root: string) => Promise<{ entries: BypassEntry[] }>;
 }
@@ -203,14 +142,9 @@ async function defaultDeps(): Promise<EvidenceDeps> {
   const { gateLiveness } = await import("./agent-config.js");
   const { proveFloor } = await import("./usage-prove.js");
   const { isReadOnlyMode } = await import("./read-only-mode.js");
-  const { getKitVersionSync } = await import("./update-check.js");
-  const file = join(homedir(), ".kit", "gate-proof.json");
   return {
     now: () => Date.now(),
-    version: getKitVersionSync(),
     liveness: (root) => gateLiveness(root),
-    readProof: () => readProofFile(file),
-    writeProof: (proof) => writeProofFile(file, proof),
     prove: (root) => {
       const r = proveFloor(root);
       return {
@@ -235,7 +169,7 @@ async function readSkippedCommits(root: string): Promise<{ entries: BypassEntry[
   return { entries: live };
 }
 
-/** The evidence row for a checkout. Refreshes the stored proof when it is stale, never throws. */
+/** The evidence row for a checkout. Runs the controls, never throws. */
 export async function checkEnforcementEvidence(
   root: string,
   deps?: EvidenceDeps,
@@ -247,27 +181,17 @@ export async function checkEnforcementEvidence(
     liveness.installGate &&
     liveness.envGate &&
     liveness.problems.length === 0;
-  const now = d.now();
-  let proof = wired ? d.readProof() : null;
+  let proof: GateProof | null = null;
   let refreshNote: string | undefined;
-  if (wired && !proofIsFresh(proof, now, d.version)) {
-    if (!d.canRun()) {
-      refreshNote = "read-only mode: the controls were not run";
-    } else {
-      try {
-        const ran = d.prove(root);
-        proof = {
-          version: d.version,
-          at: new Date(now).toISOString(),
-          total: ran.total,
-          failed: ran.failed,
-        };
-        d.writeProof(proof);
-      } catch (err) {
-        refreshNote = `the controls could not run: ${err instanceof Error ? err.message : String(err)}`;
-      }
+  if (wired && !d.canRun()) {
+    refreshNote = "read-only mode: the controls were not run";
+  } else if (wired) {
+    try {
+      proof = d.prove(root);
+    } catch (err) {
+      refreshNote = `the controls could not run: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
   const bypass = wired ? await d.skipped(root).catch(() => ({ entries: [] })) : { entries: [] };
-  return judgeEvidence({ liveness, proof, bypass, now, version: d.version, refreshNote });
+  return judgeEvidence({ liveness, proof, bypass, now: d.now(), refreshNote });
 }
