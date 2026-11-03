@@ -2,6 +2,11 @@
 
 ### Security
 
+- **The review gate re-reads the pull request before it decides and before it posts.** It read the
+  file list, the diff and the model review at the head of that moment but posted the review for the
+  commit it was started on, so a push in between could give the decision for one commit on the
+  content of another. It now skips the pull request if its head is no longer the reviewed commit,
+  and a failed read counts as "moved". The new push is judged on its own run.
 - **`kit check` compares Dockerfile `apk add` floors with Alpine's security database.** `trivy fs`
   and `trivy config` read the repository, not a built image, so they never saw the OS packages an
   `apk add` installs. The libexpat CVEs above reached `main` that way, and only the image scan
