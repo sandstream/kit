@@ -67,14 +67,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   adr: ["--emit", "--json", "--min-support", "--root"],
   "agent-audit": ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
-  "agent-config": [
-    "--broker-gate",
-    "--help",
-    "--install-gate",
-    "--limit",
-    "--no-install-gate",
-    "--worktree-gates",
-  ],
+  "agent-config": ["--broker-gate", "--help", "--install-gate", "--limit", "--no-install-gate"],
   airgap: ["--json"],
   analyze: [
     "--attest",
@@ -703,6 +696,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   "verify-provenance": ["--bundle", "--identity", "--issuer", "--offline", "--trusted-root"],
   watch: ["--force", "--hour", "--json", "--minute", "--no-pal", "--target"],
   whoami: ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
+  "worktree-gates": [],
 };
 
 /**

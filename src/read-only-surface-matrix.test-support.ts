@@ -202,6 +202,7 @@ export const MUTATING_COMMANDS: readonly CommandCase[] = [
   mutation("security policy init", "security-policy-update", "security", "policy", "init"),
   mutation("sentinel install", "sentinel-install", "sentinel", "install"),
   mutation("watch install", "watch-install", "watch", "install"),
+  mutation("worktree-gates", "worktree-gates", "worktree-gates"),
   mutation("setup", "setup", "setup"),
   mutation(
     "skill snapshot",

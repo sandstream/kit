@@ -1,5 +1,5 @@
 /**
- * `kit agent-config --worktree-gates` through the real CLI, in a real linked worktree. HOME is a
+ * `kit worktree-gates` through the real CLI, in a real linked worktree. HOME is a
  * temporary folder so the self-healing wrapper the gates embed is not written into the real one.
  */
 import { describe, it } from "node:test";
@@ -22,7 +22,7 @@ const git = (cwd: string, ...args: string[]): string =>
   });
 
 function run(cwd: string, home: string) {
-  const r = spawnSync(process.execPath, [CLI, "agent-config", "--worktree-gates"], {
+  const r = spawnSync(process.execPath, [CLI, "worktree-gates"], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, HOME: home, USERPROFILE: home, KIT_NO_UPDATE_CHECK: "1" },
@@ -31,7 +31,7 @@ function run(cwd: string, home: string) {
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
-describe("kit agent-config --worktree-gates", () => {
+describe("kit worktree-gates", () => {
   it("gates a new worktree of a gated checkout, quietly, and is silent when nothing is to do", () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-wt-gates-cli-")));
     try {

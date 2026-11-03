@@ -5,7 +5,6 @@
  * boolean verdict for the COMMANDS dispatch table.
  */
 import { installSessionStartCheck } from "../session-start-gate.js";
-import { runWorktreeGatesCommand } from "../worktree-gates.js";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagInt } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
@@ -69,11 +68,6 @@ export async function cmdSkills(): Promise<boolean> {
   console.log();
   const requiredMissing = results.filter((r) => r.required && !r.installed);
   return requiredMissing.length === 0;
-}
-
-/** `kit agent-config`, or with --worktree-gates only the gate install for a new worktree. */
-export async function cmdAgentConfigEntry(): Promise<boolean> {
-  return hasFlag(process.argv, "--worktree-gates") ? runWorktreeGatesCommand() : cmdAgentConfig();
 }
 
 export async function cmdAgentConfig(): Promise<boolean> {

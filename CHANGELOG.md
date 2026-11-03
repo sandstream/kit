@@ -2,6 +2,14 @@
 
 ### Security
 
+- **A new worktree gets the PreToolUse gates when git creates it.** The install gate and the env-write
+  gate live in the ignored `.claude/` of each checkout, so every new worktree started without them and
+  `enforcement gate liveness` failed in it: the agent there ran ungated, and a gate added during a
+  session is not active in it. `kit agent-config` now also installs a `post-checkout` hook
+  (`kit hooks add worktree-gates` does it alone). The hook leaves at once on an ordinary checkout and
+  acts only for a new worktree, where it runs `kit worktree-gates`. That mirrors a main
+  checkout that has the gates, does nothing in a checkout that never had them, and reports a failed
+  install instead of claiming it. A `post-checkout` hook that kit did not write is left alone.
 - **`kit triage npm` warns about a release younger than 14 days, and a security patch does not wait.**
   A compromised release is usually caught within days, so a version younger than
   `[supply_chain].min_release_age_days` (default 14, 0 turns it off) gets a cooling warning that names

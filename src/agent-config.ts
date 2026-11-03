@@ -1625,8 +1625,24 @@ export interface GateInstallEntry {
     | "Gemini CLI"
     | "Cursor"
     | "OpenCode"
-    | "Cline";
+    | "Cline"
+    | "Git post-checkout (new worktrees)";
   result: HookInstallResult;
+}
+
+/**
+ * The post-checkout hook that gates a new worktree (see worktree-gates.ts). A worktree starts without
+ * the per-checkout gates, so git is told to install them when it creates one. Idempotent, and a hook
+ * kit did not write is left alone.
+ */
+export async function installWorktreeGateHook(
+  cwd: string = process.cwd(),
+): Promise<HookInstallResult> {
+  const file = ".git/hooks/post-checkout";
+  const { installOneHook } = await import("./hooks-single.js");
+  const r = await installOneHook("post-checkout", ["kit worktree-gates"], ".git", cwd);
+  const action = r.action === "installed" ? "created" : r.action;
+  return { file, action, detail: r.detail };
 }
 
 /** Wire the PreToolUse install-gate for every supported agent present in the project. */
@@ -1655,5 +1671,7 @@ export async function installAllInstallGates(
     // Env-write-gate (block plaintext secrets aimed at .env* BEFORE they land) —
     // Claude Code only today; other agents keep the after-the-fact plaintext scan.
     { agent: "Claude Code (env-write)", result: await installEnvWriteGate(cwd) },
+    // Git post-checkout: a new worktree starts without the per-checkout gates above.
+    { agent: "Git post-checkout (new worktrees)", result: await installWorktreeGateHook(cwd) },
   ];
 }

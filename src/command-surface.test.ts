@@ -120,6 +120,7 @@ describe("kit help audience filter", () => {
     "gate-fs",
     "guard-observe",
     "statusline",
+    "worktree-gates",
   ];
 
   it("hides harness commands by default, with a counted note", () => {
@@ -131,7 +132,7 @@ describe("kit help audience filter", () => {
         `${cmd} should not be listed in default help`,
       );
     }
-    assert.match(out, /6 harness hook commands/, "the hidden set is counted, never silent");
+    assert.match(out, /7 harness hook commands/, "the hidden set is counted, never silent");
     assert.match(out, /kit help --all/, "the note says how to reveal them");
   });
 

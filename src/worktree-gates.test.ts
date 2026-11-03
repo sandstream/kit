@@ -82,7 +82,9 @@ describe("ensureWorktreeGates", () => {
       rmTemp(r.root);
     }
   });
+});
 
+describe("ensureWorktreeGates: when it does nothing or fails", () => {
   it("does nothing in the main checkout itself", async () => {
     const r = repo(true);
     try {

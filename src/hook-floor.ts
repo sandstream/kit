@@ -49,6 +49,7 @@ export const BUILTIN_HOOK_FILES: Record<string, { name: string; command: string 
   "pre-commit": { name: "secret-scan", command: "security scan-staged" },
   "post-merge": { name: "post-pull-audit", command: "security verify-pull" },
   "pre-push": { name: "context-check", command: "context check" },
+  "post-checkout": { name: "worktree-gates", command: "worktree-gates" },
 };
 
 export interface HookFloorReport {

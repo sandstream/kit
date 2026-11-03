@@ -53,7 +53,8 @@ import {
 } from "./commands/info.js";
 import { cmdCreatePlugin, cmdClone, cmdRun, cmdOpen } from "./commands/project.js";
 import { cmdHeal, cmdPkg } from "./commands/maintain.js";
-import { cmdSkills, cmdAgentConfigEntry, cmdGovernance, cmdTeam } from "./commands/agent.js";
+import { cmdSkills, cmdAgentConfig, cmdGovernance, cmdTeam } from "./commands/agent.js";
+import { cmdWorktreeGates } from "./commands/worktree-gates.js";
 import { cmdEscalate } from "./commands/escalate.js";
 import { cmdStatusline } from "./commands/statusline.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
@@ -674,9 +675,14 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     help: "View governance status and agent access controls",
   },
   "agent-config": {
-    handler: cmdAgentConfigEntry,
+    handler: cmdAgentConfig,
     stability: "stable",
     help: "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md",
+  },
+  "worktree-gates": {
+    handler: cmdWorktreeGates,
+    stability: "experimental",
+    help: "Run by the post-checkout hook: install the PreToolUse gates in a new git worktree of a gated checkout",
   },
   hooks: { handler: cmdHooks, stability: "stable", help: "Manage git hooks" },
   add: {
@@ -972,6 +978,7 @@ const AUDIENCE_OVERRIDES: Record<string, CommandAudience> = {
   "gate-egress": "harness",
   "gate-env": "harness",
   "gate-fs": "harness",
+  "worktree-gates": "harness",
   // Invoked by the ~/.kit/shims wrappers — a protocol surface like the gates,
   // never chosen by a human or an agent.
   "guard-observe": "harness",

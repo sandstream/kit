@@ -21,6 +21,12 @@ const BUILTIN_HOOKS: Record<string, { hookName: string; commands: string[]; desc
       commands: ["kit security verify-pull"],
       description: "After git pull/merge, audit new deps, gitignore drops, and introduced secrets.",
     },
+    "worktree-gates": {
+      hookName: "post-checkout",
+      commands: ["kit worktree-gates"],
+      description:
+        "When git creates a worktree, install the PreToolUse gates there if the main checkout has them. A new worktree starts without them.",
+    },
     "context-check": {
       hookName: "pre-push",
       // --require-declaration: without a [context] block the check has nothing to compare

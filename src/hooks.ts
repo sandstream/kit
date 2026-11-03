@@ -1,4 +1,5 @@
 import { open, writeFile, mkdir, readFile, rename, rm, unlink, lstat } from "node:fs/promises";
+import { postCheckoutScript } from "./hooks-post-checkout.js";
 import { randomBytes } from "node:crypto";
 import { resolve, isAbsolute, dirname, relative } from "node:path";
 import { existsSync, statSync } from "node:fs";
@@ -294,7 +295,7 @@ fi`;
 /**
  * Install a single git hook
  */
-async function installHook(
+export async function installHook(
   hooksDir: string,
   hookName: string,
   commands: string[],
@@ -386,6 +387,7 @@ function generateHookScript(hookName: string, commands: string[]): string {
   const total = commands.length;
   const kitBin = resolveHookKitBin();
   commands = commands.map((cmd) => rewriteKitInvocation(cmd, kitBin));
+  if (hookName === "post-checkout") return postCheckoutScript(commands);
 
   // Each command is framed as a numbered step with live ▶ / ✓ / ✗ markers and
   // a per-step duration, mirroring the runStep() util used by the CLI

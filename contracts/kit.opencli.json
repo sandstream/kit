@@ -113,8 +113,7 @@
         "--non-interactive",
         "--read-only",
         "--readonly",
-        "--version",
-        "--worktree-gates"
+        "--version"
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
@@ -3180,6 +3179,15 @@
       "x-kit-audience": "human",
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
+    },
+    "worktree-gates": {
+      "kind": "command",
+      "summary": "Run by the post-checkout hook: install the PreToolUse gates in a new git worktree of a gated checkout",
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
+      "x-kit-args-modeled": true,
+      "x-kit-audience": "harness",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
     }
   },
   "info": {
