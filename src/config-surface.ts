@@ -124,9 +124,11 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
     command: "kit check",
   },
   supply_chain: {
-    purpose: "Install-time triage settings — notably which package scopes count as internal.",
-    buys: "A first-party scope is not triaged as an unknown third-party package, so the gate stops crying wolf on your own code.",
-    example: '[supply_chain]\ninternal_scopes = ["@acme"]',
+    purpose:
+      "Install-time triage settings: which package scopes count as internal, and the cooling period for new releases.",
+    buys: "A first-party scope is not triaged as an unknown third-party package, so the gate stops crying wolf on your own code. A release younger than min_release_age_days (default 14, 0 turns it off) gets a cooling warning in kit triage. A security patch does not wait: the warning is waived when OSV says the release is the first one that fixes an advisory for a version in your lockfile. With min_release_age_enforce = true a release inside the cooling period holds back the pass instead of only warning, and so does a release whose age cannot be established.",
+    example:
+      '[supply_chain]\ninternal_scopes = ["@acme"]\nmin_release_age_days = 14\nmin_release_age_enforce = false',
     command: "kit supply-chain",
   },
   scan: {

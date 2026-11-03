@@ -32,7 +32,7 @@ kit accepts **26 sections**.
 | [`[setup]`](#setup) | Project bootstrap commands — install dependencies, migrate, verify. | `kit bootstrap` |
 | [`[skills]`](#skills) | Agent skills this project requires or offers, and the registry to fetch them from. | `kit skills` |
 | [`[standards]`](#standards) | The deterministic dev-standards gate, and whether it fails on net-new findings. | `kit standards` |
-| [`[supply_chain]`](#supply_chain) | Install-time triage settings — notably which package scopes count as internal. | `kit supply-chain` |
+| [`[supply_chain]`](#supply_chain) | Install-time triage settings: which package scopes count as internal, and the cooling period for new releases. | `kit supply-chain` |
 | [`[tools]`](#tools) | Tool versions this project requires, provisioned through mise. | `kit install` |
 | [`[update]`](#update) | Whether kit surfaces a newer published version, and whether it may self-update. | `kit upgrade --self` |
 | [`[upstream]`](#upstream) | Adds or overrides the release sources kit upstream watches: npm packages and GitHub repos per service, or disables a built-in one. | `kit upstream check` |
@@ -325,13 +325,15 @@ Set up with `kit standards`. Fuller treatment: [`docs/STANDARDS.md`](STANDARDS.m
 
 ## supply_chain
 
-Install-time triage settings — notably which package scopes count as internal.
+Install-time triage settings: which package scopes count as internal, and the cooling period for new releases.
 
-**What it buys.** A first-party scope is not triaged as an unknown third-party package, so the gate stops crying wolf on your own code.
+**What it buys.** A first-party scope is not triaged as an unknown third-party package, so the gate stops crying wolf on your own code. A release younger than min_release_age_days (default 14, 0 turns it off) gets a cooling warning in kit triage. A security patch does not wait: the warning is waived when OSV says the release is the first one that fixes an advisory for a version in your lockfile. With min_release_age_enforce = true a release inside the cooling period holds back the pass instead of only warning, and so does a release whose age cannot be established.
 
 ```toml
 [supply_chain]
 internal_scopes = ["@acme"]
+min_release_age_days = 14
+min_release_age_enforce = false
 ```
 
 Set up with `kit supply-chain`.

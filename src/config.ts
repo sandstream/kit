@@ -464,7 +464,7 @@ export interface kitConfig {
   context?: ContextConfig;
   projects?: ProjectsConfig;
   /** Install-time supply-chain triage settings (`kit supply-chain`). */
-  supply_chain?: { internal_scopes?: string[] };
+  supply_chain?: import("./triage-cooling.js").SupplyChainConfig;
   /** `kit scan` / `kit check` scanner settings. `tooling` = an Infisical project to
    *  resolve scanner tokens (SNYK_TOKEN, …) from; `guarddog` = enable the local
    *  behavioral-malware scan in `kit check` (persistent alt to KIT_GUARDDOG=1). */
