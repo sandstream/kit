@@ -610,6 +610,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--verify",
     "--write",
   ],
+  watch: ["--force", "--hour", "--json", "--minute", "--no-pal", "--target"],
   sentinel: ["--force", "--json", "--label", "--limit", "--schedule", "--state"],
   services: [
     "--force",
