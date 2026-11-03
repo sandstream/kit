@@ -2693,6 +2693,8 @@ async function appendProjectSecurityChecks(
   const governed = await loadGovernedConfig(root);
   const { checkExposureSet } = await import("./check-exposure-set.js");
   results.push(...(await checkExposureSet(root, governed)));
+  const { checkEnforcementEvidence } = await import("./check-enforcement-evidence.js");
+  results.push(await checkEnforcementEvidence(root));
   const { checkDecisionLedger } = await import("./check-decision-ledger.js");
   results.push(await checkDecisionLedger(root, governed?.decisions?.require === true));
   const { checkExternalFindings } = await import("./external-findings.js");
