@@ -610,7 +610,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--verify",
     "--write",
   ],
-  watch: ["--force", "--hour", "--json", "--minute", "--no-pal", "--target"],
   sentinel: ["--force", "--json", "--label", "--limit", "--schedule", "--state"],
   services: [
     "--force",
@@ -695,6 +694,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   upstream: ["--enforce", "--json"],
   usage: ["--deep", "--json", "--prove", "--tab"],
   "verify-provenance": ["--bundle", "--identity", "--issuer", "--offline", "--trusted-root"],
+  watch: ["--force", "--hour", "--json", "--minute", "--no-pal", "--target"],
   whoami: ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
 };
 

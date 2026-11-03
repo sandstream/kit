@@ -4,8 +4,8 @@
  * GitHub (ADR-0009: kit reads cloud reports and holds no cloud credential of its own).
  * A missing source gives `unverified`, never an empty green list.
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import {
   rankSecurityPrs,
   securityPrsLine,
@@ -27,13 +27,67 @@ export interface WatchCache {
 
 export type GhRunner = (args: string[]) => Promise<{ ok: boolean; stdout: string }>;
 
-/** Read the cache written by `kit watch run`; null when absent or unreadable. */
+const SEVERITY_SET = new Set<string>(["critical", "high", "medium", "low"]);
+const CI_SET = new Set<string>(["failing", "pending", "passing", "none"]);
+
+function validRanked(v: unknown): RankedPr[] {
+  if (!Array.isArray(v)) return [];
+  const out: RankedPr[] = [];
+  for (const r of v as Partial<RankedPr>[]) {
+    if (
+      Number.isInteger(r?.number) &&
+      SEVERITY_SET.has(String(r.severity)) &&
+      CI_SET.has(String(r.ci)) &&
+      typeof r.title === "string" &&
+      typeof r.updatedAt === "string"
+    ) {
+      out.push(r as RankedPr);
+    }
+  }
+  return out;
+}
+
+/**
+ * Read the cache written by `kit watch run`; null when absent or unreadable. The file sits
+ * in the working tree, so a hostile checkout can plant it: only known severity and CI
+ * values and integer PR numbers survive, and the repo name is not shown.
+ */
 export function readWatchCache(cwd: string): WatchCache | null {
   try {
-    return JSON.parse(readFileSync(resolve(cwd, WATCH_CACHE), "utf8")) as WatchCache;
+    const raw: unknown = JSON.parse(readFileSync(resolve(cwd, WATCH_CACHE), "utf8"));
+    const c = raw as Partial<WatchCache> | null;
+    if (!c || typeof c !== "object" || Array.isArray(c) || typeof c.at !== "string") return null;
+    return {
+      at: c.at,
+      repo: typeof c.repo === "string" ? c.repo : "",
+      ranked: validRanked(c.ranked),
+      ...(typeof c.unverified === "string" ? { unverified: c.unverified } : {}),
+    };
   } catch {
     return null;
   }
+}
+
+function assertNotSymlink(path: string): void {
+  try {
+    if (lstatSync(path).isSymbolicLink())
+      throw new Error(`refusing to write through a symlink: ${path}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+/** Write the cache without following a symlink at `.kit` or `.kit/watch.json`. */
+export function writeWatchCache(cwd: string, cache: WatchCache): void {
+  const path = resolve(cwd, WATCH_CACHE);
+  assertNotSymlink(dirname(path));
+  mkdirSync(dirname(path), { recursive: true });
+  assertNotSymlink(dirname(path));
+  assertNotSymlink(path);
+  // A rename replaces a link at `path` instead of writing through it.
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cache, null, 2) + "\n", { flag: "wx" });
+  renameSync(tmp, path);
 }
 
 /** The status-line segment for a cache; null = stay quiet. */
@@ -60,6 +114,7 @@ interface RawPr {
   number: number;
   title: string;
   updatedAt: string;
+  author?: { login?: string; is_bot?: boolean };
   statusCheckRollup?: { conclusion?: string | null; status?: string; state?: string }[];
 }
 interface RawAlert {
@@ -77,6 +132,9 @@ function toOpenPr(raw: RawPr): OpenPr {
     number: raw.number,
     title: raw.title,
     updatedAt: raw.updatedAt,
+    author: raw.author?.login
+      ? { login: raw.author.login, isBot: raw.author.is_bot === true }
+      : undefined,
     // A finished check reports its conclusion; an unfinished one its status.
     checks: (raw.statusCheckRollup ?? []).map((c) => ({
       state: (c.conclusion || c.status || c.state || "PENDING").toUpperCase(),
@@ -123,7 +181,7 @@ export async function gatherWatch(gh: GhRunner, now: () => number): Promise<Watc
       "--limit",
       "100",
       "--json",
-      "number,title,updatedAt,statusCheckRollup",
+      "number,title,updatedAt,author,statusCheckRollup",
     ]),
   );
   if (!prs) return { at, repo, ranked: [], unverified: "gh could not list open PRs" };

@@ -14,15 +14,14 @@ import { execFileNoThrow } from "../utils/execFileNoThrow.js";
 import { flagValue, hasFlag } from "../utils/flags.js";
 import { isReadOnlyMode } from "../read-only-mode.js";
 import {
-  WATCH_CACHE,
   cronLine,
   gatherWatch,
   launchdPlist,
   palTitlesFor,
   readWatchCache,
+  writeWatchCache,
   watchSegment,
   watchWorkflow,
-  type WatchCache,
 } from "../watch.js";
 
 export async function cmdWatch(): Promise<boolean> {
@@ -60,12 +59,6 @@ async function openPalItems(titles: string[]): Promise<string[]> {
   }
 }
 
-function writeCache(cache: WatchCache): void {
-  const path = resolve(process.cwd(), WATCH_CACHE);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(cache, null, 2) + "\n");
-}
-
 async function cmdWatchRun(): Promise<boolean> {
   const gh = async (args: string[]) => {
     const r = await execFileNoThrow("gh", args, { timeout: 30_000 });
@@ -73,7 +66,7 @@ async function cmdWatchRun(): Promise<boolean> {
   };
   const cache = await gatherWatch(gh, Date.now);
   const readOnly = isReadOnlyMode();
-  if (!readOnly) writeCache(cache);
+  if (!readOnly) writeWatchCache(process.cwd(), cache);
   let opened: string[] = [];
   if (!readOnly && !hasFlag(process.argv, "--no-pal") && !cache.unverified) {
     opened = await openPalItems(palTitlesFor(cache.ranked, await openPalTitles()));

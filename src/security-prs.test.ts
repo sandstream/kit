@@ -13,6 +13,7 @@ const pr = (number: number, title: string, over: Partial<OpenPr> = {}): OpenPr =
   number,
   title,
   updatedAt: "2026-11-01T00:00:00Z",
+  author: { login: "dependabot", isBot: true },
   checks: [{ state: "SUCCESS" }],
   ...over,
 });
@@ -30,6 +31,10 @@ describe("bumpTarget", () => {
   });
   it("returns null for a title that is not a bump", () => {
     assert.equal(bumpTarget("feat: add a thing"), null);
+  });
+  it("refuses a name or version that holds anything but package characters", () => {
+    assert.equal(bumpTarget("bump vite\u001b[2J from 1.0.0 to 2.0.0"), null);
+    assert.equal(bumpTarget("bump vite from 1.0.0 to 2.0.0\u001b]0;x\u0007"), null);
   });
 });
 
@@ -94,6 +99,23 @@ describe("rankSecurityPrs", () => {
       ranked.map((r) => r.number),
       [2, 1],
     );
+  });
+
+  it("ignores a PR that is not from Dependabot, however its title reads", () => {
+    const ranked = rankSecurityPrs(
+      [
+        pr(1, "bump vite from 6.4.1 to 6.4.5", { author: { login: "someone", isBot: false } }),
+        pr(2, "bump vite from 6.4.1 to 6.4.5", { author: { login: "dependabot", isBot: false } }),
+        pr(3, "bump vite from 6.4.1 to 6.4.5", { author: undefined }),
+      ],
+      alerts,
+    );
+    assert.deepEqual(ranked, []);
+  });
+
+  it("builds the shown title from the package and version, not from the PR text", () => {
+    const [top] = rankSecurityPrs([pr(1, "chore: bump vite from 6.4.1 to 6.4.5 now")], alerts);
+    assert.equal(top?.title, "bump vite to 6.4.5");
   });
 
   it("does not count a bump that stays below the patched version", () => {

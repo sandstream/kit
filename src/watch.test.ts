@@ -1,10 +1,15 @@
 import { describe, it } from "node:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import {
   cronLine,
   gatherWatch,
   launchdPlist,
   palTitlesFor,
+  readWatchCache,
+  writeWatchCache,
   watchSegment,
   watchWorkflow,
   type WatchCache,
@@ -79,6 +84,7 @@ describe("gatherWatch", () => {
       number: 3,
       title: "bump vite from 6.4.1 to 6.4.5",
       updatedAt: "2026-11-01T00:00:00Z",
+      author: { login: "dependabot", is_bot: true },
       statusCheckRollup: [{ conclusion: "FAILURE", status: "COMPLETED" }],
     },
   ]);
@@ -157,5 +163,73 @@ describe("scheduler entries", () => {
     assert.match(y, /kit watch run/);
     assert.match(y, /pull-requests: read/);
     assert.doesNotMatch(y, /write/);
+  });
+});
+
+describe("watch cache on disk", () => {
+  const tmp = () => mkdtempSync(join(tmpdir(), "kit-watch-"));
+
+  it("round-trips a cache", () => {
+    const dir = tmp();
+    try {
+      writeWatchCache(dir, cache());
+      assert.deepEqual(readWatchCache(dir), cache());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to write through a symlinked cache file or directory", () => {
+    const dir = tmp();
+    const victim = join(dir, "victim.txt");
+    try {
+      writeFileSync(victim, "keep");
+      mkdirSync(join(dir, ".kit"));
+      symlinkSync(victim, join(dir, ".kit", "watch.json"));
+      assert.throws(() => writeWatchCache(dir, cache()), /symlink/);
+      assert.equal(readFileSync(victim, "utf8"), "keep");
+      rmSync(join(dir, ".kit"), { recursive: true });
+      symlinkSync(dir, join(dir, ".kit"));
+      assert.throws(() => writeWatchCache(dir, cache()), /symlink/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops entries a planted cache fills with anything but known values", () => {
+    const dir = tmp();
+    try {
+      mkdirSync(join(dir, ".kit"));
+      writeFileSync(
+        join(dir, ".kit", "watch.json"),
+        JSON.stringify({
+          at: "2026-11-03T06:00:00Z",
+          repo: "o/r",
+          ranked: [
+            { number: 3, title: "ok", severity: "critical", ci: "failing", updatedAt: "x" },
+            { number: 4, title: "x", severity: "\u001b[2Jcritical", ci: "passing", updatedAt: "x" },
+            { number: 5, title: "x", severity: "low", ci: "\u001b]0;pwn\u0007", updatedAt: "x" },
+            { number: "6; rm", title: "x", severity: "low", ci: "none", updatedAt: "x" },
+          ],
+        }),
+      );
+      assert.deepEqual(
+        readWatchCache(dir)?.ranked.map((r) => r.number),
+        [3],
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null for a cache that is not an object with a time", () => {
+    const dir = tmp();
+    try {
+      mkdirSync(join(dir, ".kit"));
+      writeFileSync(join(dir, ".kit", "watch.json"), "[1,2]");
+      assert.equal(readWatchCache(dir), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
