@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 
 import {
   checkEnforcementEvidence,
+  classifyControls,
   judgeEvidence,
   type EvidenceDeps,
   type EvidenceFacts,
@@ -246,5 +247,48 @@ describe("checkEnforcementEvidence: when it must not run the controls", () => {
     assert.equal(r.didNotRun, true);
     assert.match(r.detail, /read-only/i);
     assert.equal(d.state.proveCalls, 0);
+  });
+});
+
+describe("classifyControls", () => {
+  const control = (name: string, ok: boolean, verdict: string, observed: string) =>
+    ({ name, expected: "x", observed, verdict, ok }) as Parameters<
+      typeof classifyControls
+    >[0][number];
+
+  it("counts a control that ran and did not hold as failed", () => {
+    const got = classifyControls([control("a", false, "allowed", "exit 0, NOT blocked")]);
+    assert.deepEqual(got, { total: 1, failed: ["a"], inconclusive: [] });
+  });
+
+  it("counts a control that held as neither", () => {
+    assert.deepEqual(classifyControls([control("a", true, "refused", "exit 2")]), {
+      total: 1,
+      failed: [],
+      inconclusive: [],
+    });
+  });
+
+  it("calls only an environmental cause unknown: git could not even start", () => {
+    const got = classifyControls([
+      control("a", false, "inconclusive", "inconclusive: git init failed"),
+    ]);
+    assert.deepEqual(got.inconclusive, ["a"]);
+    assert.deepEqual(got.failed, []);
+  });
+
+  it("counts a broken kit, which is what the controls prove, as failed even when it is inconclusive", () => {
+    const got = classifyControls([
+      control("a", false, "inconclusive", "inconclusive: could not install the hook"),
+    ]);
+    assert.deepEqual(got.failed, ["a"]);
+    assert.deepEqual(got.inconclusive, []);
+  });
+
+  it("counts a reason it does not know as failed: doubt about the cause is not an excuse", () => {
+    const got = classifyControls([
+      control("a", false, "inconclusive", "inconclusive: something new"),
+    ]);
+    assert.deepEqual(got.failed, ["a"]);
   });
 });

@@ -131,6 +131,32 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
   };
 }
 
+/** The control, as `kit usage prove` reports it. */
+export interface ControlResult {
+  name: string;
+  observed: string;
+  verdict: string;
+  ok: boolean;
+}
+
+/**
+ * The only reasons for an inconclusive control that say nothing about kit: git could not even start.
+ * Any other reason (the hook could not be installed, an unexpected error) is a break in the thing
+ * the controls exist to prove, so it counts as a failure; a cause kit does not recognise does too.
+ */
+const ENVIRONMENTAL = /^inconclusive: git init failed$/;
+
+/** Sort the controls into failed (ran and did not hold, or kit itself broke) and unknown (environment). */
+export function classifyControls(controls: ControlResult[]): GateProof {
+  const unknown = (c: ControlResult) =>
+    c.verdict === "inconclusive" && ENVIRONMENTAL.test(c.observed);
+  return {
+    total: controls.length,
+    failed: controls.filter((c) => !c.ok && !unknown(c)).map((c) => c.name),
+    inconclusive: controls.filter(unknown).map((c) => c.name),
+  };
+}
+
 export interface EvidenceDeps {
   now: () => number;
   liveness: (root: string) => EvidenceFacts["liveness"];
@@ -148,16 +174,7 @@ async function defaultDeps(): Promise<EvidenceDeps> {
   return {
     now: () => Date.now(),
     liveness: (root) => gateLiveness(root),
-    prove: (root) => {
-      const r = proveFloor(root);
-      const names = (keep: (c: (typeof r.controls)[number]) => boolean) =>
-        r.controls.filter(keep).map((c) => c.name);
-      return {
-        total: r.controls.length,
-        failed: names((c) => !c.ok && c.verdict !== "inconclusive"),
-        inconclusive: names((c) => c.verdict === "inconclusive"),
-      };
-    },
+    prove: (root) => classifyControls(proveFloor(root).controls),
     canRun: () => !isReadOnlyMode(),
     skipped: readSkippedCommits,
   };
