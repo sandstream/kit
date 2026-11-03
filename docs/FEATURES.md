@@ -205,6 +205,7 @@ Error-severity findings (missing CI script, reintroduced `|| true`, unguarded im
 - `secret-scan` (pre-commit): Block commits that introduce known credential patterns
 - `post-pull-audit` (post-merge): Run `verify-pull` after every `git pull` / merge
 - `context-check` (pre-push): Block a push when the live CLI context does not match `.kit.toml [context]` (see Context lock)
+- `worktree-gates` (post-checkout): When git creates a worktree, install the PreToolUse gates there if the main checkout has them. `kit agent-config` installs it by default
 
 ### Environments + elevation
 

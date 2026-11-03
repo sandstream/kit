@@ -1,0 +1,19 @@
+#!/bin/sh
+# post-checkout: give a new worktree the PreToolUse gates.
+#
+# The gates live in the ignored .claude/ of each checkout, so a new worktree starts without them and
+# an agent working there runs ungated. A new worktree has an all-zero previous HEAD ($1), so any
+# other checkout leaves here at once and kit is not started. This directory is tracked and git
+# resolves core.hooksPath per worktree, so committing the hook is what makes it run in a new one.
+#
+# kit worktree-gates mirrors the gates of a gated main checkout, and does nothing otherwise.
+# A failure never fails the checkout. Without kit this is a no-op.
+
+case "$1" in
+  ""|*[!0]*) exit 0 ;;
+esac
+
+KIT="$HOME/.kit/bin/kit"
+[ -x "$KIT" ] || KIT=$(command -v kit) || exit 0
+"$KIT" worktree-gates || true
+exit 0

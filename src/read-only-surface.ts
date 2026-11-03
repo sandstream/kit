@@ -290,6 +290,7 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   },
   { command: "sentinel", subcommand: "install", operation: "sentinel-install" },
   { command: "watch", subcommand: "install", operation: "watch-install" },
+  { command: "worktree-gates", operation: "worktree-gates" },
   {
     command: "setup",
     unlessFlagValues: [{ flag: "--mode", values: ["review"] }],

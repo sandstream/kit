@@ -90,7 +90,8 @@
     "usage": "stable",
     "verify-provenance": "stable",
     "watch": "stable",
-    "whoami": "stable"
+    "whoami": "stable",
+    "worktree-gates": "experimental"
   },
   "config": {
     "knownSections": [
@@ -354,7 +355,8 @@
     "verify-provenance",
     "version",
     "watch",
-    "whoami"
+    "whoami",
+    "worktree-gates"
   ],
   "mcpTools": [
     "kit_check",

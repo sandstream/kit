@@ -2,6 +2,16 @@
 
 ### Security
 
+- **A new worktree gets the PreToolUse gates when git creates it.** The install gate and the env-write
+  gate live in the ignored `.claude/` of each checkout, so every new worktree started without them and
+  `enforcement gate liveness` failed in it: the agent there ran ungated, and a gate added during a
+  session is not active in it. `kit agent-config` now also installs a `post-checkout` hook
+  (`kit hooks add worktree-gates` does it alone). The hook leaves at once on an ordinary checkout and
+  acts only for a new worktree, where it runs `kit worktree-gates`. That mirrors a main
+  checkout that has the gates, does nothing in a checkout that never had them, and reports a failed
+  install instead of claiming it. A `post-checkout` hook that kit did not write is left alone. Where `core.hooksPath` points
+  inside the working tree (kit's own `.githooks`), a new worktree gets only the tracked files, so the
+  install says to commit the hook, and this repository commits `.githooks/post-checkout`.
 - **`yarn.lock` gives the installed version, for `kit upstream` and the cooling period.** The installed
   version was read from `package-lock.json`, `bun.lock` and `pnpm-lock.yaml` only. In a yarn project
   `kit upstream` fell back to an estimate from the declared range, and the cooling period could not tell
