@@ -2,6 +2,13 @@
 
 ### Security
 
+- **`yarn.lock` gives the installed version, for `kit upstream` and the cooling period.** The installed
+  version was read from `package-lock.json`, `bun.lock` and `pnpm-lock.yaml` only. In a yarn project
+  `kit upstream` fell back to an estimate from the declared range, and the cooling period could not tell
+  a security patch from a plain new release, so a patch kept its warning. `yarn.lock` version 1 and
+  version 2 and later are now read. A package locked at several versions (one per range asked for) is
+  picked by the range `package.json` declares; when that matches nothing, or no range is given and two
+  versions are locked, kit takes none and says so instead of guessing.
 - **`kit triage npm` warns about a release younger than 14 days, and a security patch does not wait.**
   A compromised release is usually caught within days, so a version younger than
   `[supply_chain].min_release_age_days` (default 14, 0 turns it off) gets a cooling warning that names

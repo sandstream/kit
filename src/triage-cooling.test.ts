@@ -38,6 +38,18 @@ describe("npmName and lockedVersion", () => {
     assert.equal(npmName("a b"), null);
   });
 
+  it("reads the version yarn.lock pins for the range package.json declares", () => {
+    const yarn = tree({
+      "package.json": JSON.stringify({ dependencies: { fixture: "^4.0.0" } }),
+      "yarn.lock": 'fixture@^4.0.0:\n  version "4.18.2"\n\nfixture@^3.0.0:\n  version "3.1.0"\n',
+    });
+    try {
+      assert.equal(lockedVersion(yarn, "fixture@5"), "4.18.2");
+    } finally {
+      rmTemp(yarn);
+    }
+  });
+
   it("reads the version the lockfile pins, and takes no declared range for it", () => {
     const pinned = tree({ "package.json": "{}", "package-lock.json": lock("4.18.2") });
     const ranged = tree({
