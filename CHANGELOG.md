@@ -2,6 +2,16 @@
 
 ### Security
 
+- **`kit check` compares Dockerfile `apk add` floors with Alpine's security database.** `trivy fs`
+  and `trivy config` read the repository, not a built image, so they never saw the OS packages an
+  `apk add` installs. The libexpat CVEs above reached `main` that way, and only the image scan
+  found them. The new `alpine apk floors` check reads each lower-bound floor (`'libexpat>=2.8.5-r0'`)
+  with its stage's Alpine branch. It maps a subpackage to its origin through the APKINDEX
+  (`libexpat` → `expat`) and warns when Alpine's secdb lists a CVE fixed above the floor, naming
+  the version to raise it to. A base tag that names no branch (`node:22-alpine`) is checked
+  against the newest stable branch, and the result says so. Air-gap mode skips the check and
+  calls the floors unverified; an unreachable secdb is a check that did not run, never a pass.
+
 - **Docker image: libexpat 2.10.0.** The image scan failed on `main` with CVE-2026-117610 and
   CVE-2026-118370 (libexpat through 2.9.0). Alpine ships the fix in 2.10.0-r0, but the build reused
   a cached `apk` layer that still met the old `>=2.8.5-r0` floor. The floor is now `>=2.10.0-r0`,

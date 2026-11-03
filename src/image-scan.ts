@@ -37,7 +37,8 @@ export function isSafeImageRef(ref: string): boolean {
   return SAFE_REF.test(ref) && !ref.includes("//") && !ref.endsWith("/");
 }
 
-function joinContinuations(text: string): string[] {
+/** Dockerfile instructions, with `\` continuations joined and comment lines dropped. */
+export function joinContinuations(text: string): string[] {
   const lines: string[] = [];
   let current = "";
   for (const raw of text.split("\n")) {
