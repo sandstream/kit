@@ -18,6 +18,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { resolveInstalledVersion } from "./upstream-installed.js";
+import { readRegularFileIfPresent } from "./upstream-safe-read.js";
 
 export interface SupplyChainConfig {
   internal_scopes?: string[];
@@ -31,7 +32,13 @@ export const DEFAULT_COOLING_DAYS = 14;
 const DAY_MS = 86_400_000;
 const NPM_NAME = /^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/;
 const STABLE = /^(\d+)\.(\d+)\.(\d+)$/;
-const LOCKFILES = new Set(["package-lock.json", "bun.lock", "pnpm-lock.yaml"]);
+const LOCKFILES = new Set(["package-lock.json", "bun.lock", "pnpm-lock.yaml", "yarn.lock"]);
+const DEPENDENCY_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+];
 
 /** A vulnerability record as far as the waiver reads it. */
 export interface OsvVuln {
@@ -52,11 +59,26 @@ export function npmName(target: string): string | null {
   return NPM_NAME.test(name) ? name : null;
 }
 
+/** The range package.json declares for the package, or "" when it names none. A yarn.lock needs it. */
+function declaredRange(cwd: string, name: string): string {
+  try {
+    const text = readRegularFileIfPresent(join(cwd, "package.json"));
+    const manifest = text === null ? {} : (JSON.parse(text) as Record<string, unknown>);
+    for (const field of DEPENDENCY_FIELDS) {
+      const range = (manifest[field] as Record<string, unknown> | undefined)?.[name];
+      if (typeof range === "string") return range;
+    }
+  } catch {
+    /* an unreadable manifest names no range */
+  }
+  return "";
+}
+
 /** The version a lockfile pins for the package, or undefined when none does. */
 export function lockedVersion(cwd: string, target: string): string | undefined {
   const name = npmName(target);
   if (!name) return undefined;
-  const found = resolveInstalledVersion(cwd, "package.json", name, "");
+  const found = resolveInstalledVersion(cwd, "package.json", name, declaredRange(cwd, name));
   return found.version && LOCKFILES.has(found.source) ? found.version : undefined;
 }
 
