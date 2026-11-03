@@ -289,6 +289,7 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
     operation: "security-policy-update",
   },
   { command: "sentinel", subcommand: "install", operation: "sentinel-install" },
+  { command: "watch", subcommand: "install", operation: "watch-install" },
   {
     command: "setup",
     unlessFlagValues: [{ flag: "--mode", values: ["review"] }],

@@ -89,6 +89,7 @@
     "upstream": "experimental",
     "usage": "stable",
     "verify-provenance": "stable",
+    "watch": "stable",
     "whoami": "stable"
   },
   "config": {
@@ -352,6 +353,7 @@
     "usage",
     "verify-provenance",
     "version",
+    "watch",
     "whoami"
   ],
   "mcpTools": [
