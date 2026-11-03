@@ -1,8 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,9 +20,18 @@ function script(): string {
     .join("\n");
 }
 
+/** A stand-in `gh` that answers `gh api … --jq …` with the title and body the test sets. */
+function fakeGh(): string {
+  const dir = mkdtempSync(join(tmpdir(), "kit-pr-hygiene-"));
+  const gh = join(dir, "gh");
+  writeFileSync(gh, '#!/bin/sh\nprintf \'%s\\n%s\' "$PR_TITLE" "$PR_BODY"\n');
+  chmodSync(gh, 0o755);
+  return dir;
+}
+
 function check(env: Record<string, string>) {
   return spawnSync("sh", ["-c", script()], {
-    env: { PATH: process.env.PATH ?? "", ...env },
+    env: { PATH: `${fakeGh()}${delimiter}${process.env.PATH ?? ""}`, REPO: "o/r", PR: "1", ...env },
     encoding: "utf8",
   });
 }
@@ -39,13 +49,21 @@ describe("PR hygiene workflow", posix, () => {
   });
 
   it("asks for no more than read access and checks out no code", () => {
-    assert.match(text, /permissions:\s*\n\s+contents: read/);
+    assert.match(text, /permissions:\s*\n\s+contents: read\n\s+pull-requests: read/);
     assert.doesNotMatch(text, /actions\/checkout/);
   });
 
-  it("passes the PR text through the environment, never into the script", () => {
+  // A PR tool can add a session footer on creation that its caller replaces seconds later. The
+  // event's snapshot then failed a PR whose text was already clean, so the check reads the text
+  // as it is now, and waits on `opened` for that replacement.
+  it("checks the PR text as it is now, not the event snapshot", () => {
+    assert.doesNotMatch(text, /github\.event\.pull_request\.(body|title)/);
+    assert.match(script(), /gh api "repos\/\$REPO\/pulls\/\$PR"/);
+    assert.match(text, /if: github\.event\.action == 'opened'\n\s+run: sleep 30/);
+  });
+
+  it("never interpolates workflow expressions into the script", () => {
     assert.doesNotMatch(script(), /\$\{\{/);
-    assert.match(text, /PR_BODY: \$\{\{ github\.event\.pull_request\.body \}\}/);
   });
 
   it("accepts a clean PR text, including the generic footer", () => {
