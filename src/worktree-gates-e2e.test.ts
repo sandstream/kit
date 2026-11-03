@@ -15,6 +15,11 @@ import { fileURLToPath } from "node:url";
 import { gateLiveness } from "./agent-config.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
+const SKIP_WINDOWS =
+  process.platform === "win32"
+    ? "POSIX sh hooks and a colon-separated PATH: the hook is not verified on Windows"
+    : false;
+
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
 function project(root: string): string {
@@ -37,7 +42,7 @@ function project(root: string): string {
   return main;
 }
 
-describe("kit agent-config, then git worktree add", () => {
+describe("kit agent-config, then git worktree add", { skip: SKIP_WINDOWS }, () => {
   it("gates the new worktree with no further step", () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-wt-e2e-")));
     try {

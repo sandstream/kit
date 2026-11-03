@@ -24,6 +24,11 @@ import { fileURLToPath } from "node:url";
 import { installHooks } from "./hooks.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
+const SKIP_WINDOWS =
+  process.platform === "win32"
+    ? "POSIX sh hooks and a colon-separated PATH: the hook is not verified on Windows"
+    : false;
+
 const COMMAND = "kit worktree-gates";
 const ZEROS40 = "0".repeat(40);
 const ZEROS64 = "0".repeat(64);
@@ -83,7 +88,7 @@ async function setup(): Promise<Setup> {
 const calls = (s: Setup): string[] =>
   existsSync(s.log) ? readFileSync(s.log, "utf8").trim().split("\n") : [];
 
-describe("the post-checkout hook", () => {
+describe("the post-checkout hook", { skip: SKIP_WINDOWS }, () => {
   it("is written as an executable hook that names the command", async () => {
     const s = await setup();
     try {
@@ -150,7 +155,7 @@ describe("the post-checkout hook", () => {
   });
 });
 
-describe("the committed .githooks/post-checkout of this repository", () => {
+describe("the committed .githooks/post-checkout of this repository", { skip: SKIP_WINDOWS }, () => {
   const COMMITTED = resolve(
     dirname(fileURLToPath(import.meta.url)),
     "..",
