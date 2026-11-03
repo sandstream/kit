@@ -64,3 +64,31 @@ describe("installOneHook", () => {
     }
   });
 });
+
+describe("installOneHook where the hooks directory is inside the working tree", () => {
+  it("says a new worktree will not get the hook unless it is committed", async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-one-hook-rel-")));
+    try {
+      const main = project(root);
+      execFileSync("git", ["-C", main, "config", "core.hooksPath", ".githooks"]);
+      const r = await installOneHook("post-checkout", ["kit worktree-gates"], ".git", main);
+      assert.equal(r.action, "installed");
+      assert.equal(existsSync(join(main, ".githooks", "post-checkout")), true);
+      assert.match(r.detail, /inside the working tree/);
+      assert.match(r.detail, /commit/);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("adds no such note for the ordinary shared hooks directory", async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-one-hook-shared-")));
+    try {
+      const main = project(root);
+      const r = await installOneHook("post-checkout", ["kit worktree-gates"], ".git", main);
+      assert.doesNotMatch(r.detail, /inside the working tree/);
+    } finally {
+      rmTemp(root);
+    }
+  });
+});

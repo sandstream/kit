@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 
 import { installHook, resolveHooksDir, type HookInstallResult } from "./hooks.js";
 
@@ -26,5 +26,22 @@ export async function installOneHook(
   } catch (error) {
     return { hookName, action: "failed", detail: `Failed to create hooks directory: ${error}` };
   }
-  return installHook(hooksDir, hookName, commands);
+  const result = await installHook(hooksDir, hookName, commands);
+  const where = insideWorkingTree(hooksDir, cwd);
+  if (where && (result.action === "installed" || result.action === "updated")) {
+    result.detail += `; ${where} is inside the working tree, so a new worktree gets only the tracked files: commit this hook or it will not run there`;
+  }
+  return result;
+}
+
+/** The hooks directory relative to the working tree when it lies in it (outside .git), else null. */
+function insideWorkingTree(hooksDir: string, cwd: string): string | null {
+  try {
+    const rel = relative(realpathSync.native(cwd), realpathSync.native(hooksDir));
+    const first = rel.split(sep)[0];
+    const inside = rel !== "" && first !== ".." && first !== ".git";
+    return inside ? rel : null;
+  } catch {
+    return null;
+  }
 }

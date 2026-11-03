@@ -26,7 +26,7 @@ export interface WorktreeGatesResult {
 }
 
 async function installDefault(cwd: string): Promise<void> {
-  await installAllInstallGates(cwd);
+  await installAllInstallGates(cwd, { worktreeHook: false });
 }
 
 function sameDir(a: string, b: string): boolean {

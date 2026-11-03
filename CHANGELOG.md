@@ -9,7 +9,9 @@
   (`kit hooks add worktree-gates` does it alone). The hook leaves at once on an ordinary checkout and
   acts only for a new worktree, where it runs `kit worktree-gates`. That mirrors a main
   checkout that has the gates, does nothing in a checkout that never had them, and reports a failed
-  install instead of claiming it. A `post-checkout` hook that kit did not write is left alone.
+  install instead of claiming it. A `post-checkout` hook that kit did not write is left alone. Where `core.hooksPath` points
+  inside the working tree (kit's own `.githooks`), a new worktree gets only the tracked files, so the
+  install says to commit the hook, and this repository commits `.githooks/post-checkout`.
 - **`kit triage npm` warns about a release younger than 14 days, and a security patch does not wait.**
   A compromised release is usually caught within days, so a version younger than
   `[supply_chain].min_release_age_days` (default 14, 0 turns it off) gets a cooling warning that names

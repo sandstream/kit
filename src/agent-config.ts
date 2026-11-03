@@ -1648,6 +1648,7 @@ export async function installWorktreeGateHook(
 /** Wire the PreToolUse install-gate for every supported agent present in the project. */
 export async function installAllInstallGates(
   cwd: string = process.cwd(),
+  opts: { worktreeHook?: boolean } = {},
 ): Promise<GateInstallEntry[]> {
   // Write/refresh the self-healing wrapper FIRST so every gate hook below embeds a
   // wrapper invocation (which survives a node-version switch) instead of a baked
@@ -1656,7 +1657,7 @@ export async function installAllInstallGates(
   // absolute node+cli form.
   const { isReadOnlyMode } = await import("./read-only-mode.js");
   if (!isReadOnlyMode()) ensureKitWrapper();
-  return [
+  const entries: GateInstallEntry[] = [
     { agent: "Claude Code", result: await installInstallGate(cwd) },
     { agent: "Codex", result: await installInstallGateCodex(cwd) },
     { agent: "Amazon Q", result: await installInstallGateAmazonQ(cwd) },
@@ -1671,7 +1672,12 @@ export async function installAllInstallGates(
     // Env-write-gate (block plaintext secrets aimed at .env* BEFORE they land) —
     // Claude Code only today; other agents keep the after-the-fact plaintext scan.
     { agent: "Claude Code (env-write)", result: await installEnvWriteGate(cwd) },
-    // Git post-checkout: a new worktree starts without the per-checkout gates above.
-    { agent: "Git post-checkout (new worktrees)", result: await installWorktreeGateHook(cwd) },
   ];
+  // Git post-checkout: a new worktree starts without the per-checkout gates above. The hook belongs
+  // to the shared repository, so installing the gates in a worktree (worktreeHook: false) leaves it.
+  if (opts.worktreeHook !== false) {
+    const result = await installWorktreeGateHook(cwd);
+    entries.push({ agent: "Git post-checkout (new worktrees)", result });
+  }
+  return entries;
 }

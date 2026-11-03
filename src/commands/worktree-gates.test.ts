@@ -5,15 +5,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { gateLiveness, markGatesInstalled } from "./agent-config.js";
-import { rmTemp } from "./temp-cleanup.test-support.js";
+import { gateLiveness, markGatesInstalled } from "../agent-config.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
-const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
+const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "..", "cli.js");
 
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync("git", ["-C", cwd, ...args], {
@@ -55,6 +55,10 @@ describe("kit worktree-gates", () => {
       const live = gateLiveness(wt);
       assert.equal(live.installGate, true);
       assert.equal(live.envGate, true);
+      // The git hook belongs to the shared repository. Installing the gates in a worktree must not
+      // also write it: in a repository with a relative core.hooksPath that is a new untracked file.
+      assert.equal(existsSync(join(main, ".git", "hooks", "post-checkout")), false);
+      assert.equal(git(wt, "status", "--short").trim(), "");
 
       const second = run(wt, home);
       assert.equal(second.status, 0, second.out);
