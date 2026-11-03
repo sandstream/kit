@@ -241,6 +241,8 @@ max_bytes = 12000
 
 `kit agent-config` injects the text inside the managed kit block for every detected rules file. Missing config is a no-op. Oversized sources refuse with filename, line count and byte count. Lines that look like deterministic gates produce a warning pointing to `.kit/standards.d/`.
 
+`kit agent-config --worktree-gates` is for a new linked worktree. It installs the PreToolUse gates there when the main checkout has them and the worktree does not, prints one line when it installs (or fails), and does nothing in the main checkout, in a worktree of a checkout that never had gates, or when the gates are already wired. The gates live in the ignored `.claude/` of each checkout, so a new worktree starts without them. The `post-checkout` hook of `kit hooks add worktree-gates` runs this command when a worktree is created.
+
 ## Security
 
 | Command                                                                    | Purpose                                                                                                                                                                                                              |

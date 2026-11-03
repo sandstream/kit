@@ -113,7 +113,8 @@
         "--non-interactive",
         "--read-only",
         "--readonly",
-        "--version"
+        "--version",
+        "--worktree-gates"
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",

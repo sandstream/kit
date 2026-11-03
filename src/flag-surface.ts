@@ -67,7 +67,14 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   adr: ["--emit", "--json", "--min-support", "--root"],
   "agent-audit": ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
-  "agent-config": ["--broker-gate", "--help", "--install-gate", "--limit", "--no-install-gate"],
+  "agent-config": [
+    "--broker-gate",
+    "--help",
+    "--install-gate",
+    "--limit",
+    "--no-install-gate",
+    "--worktree-gates",
+  ],
   airgap: ["--json"],
   analyze: [
     "--attest",

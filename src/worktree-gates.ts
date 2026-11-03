@@ -73,3 +73,12 @@ export async function ensureWorktreeGates(
   }
   return { outcome: "installed", detail: `the gates of ${main} are now wired here` };
 }
+
+/** `kit agent-config --worktree-gates`: one quiet line, for the post-checkout hook. False only on a failed install. */
+export async function runWorktreeGatesCommand(): Promise<boolean> {
+  const got = await ensureWorktreeGates();
+  if (got.outcome === "installed" || got.outcome === "failed") {
+    console.log(`kit: worktree gates: ${got.detail}`);
+  }
+  return got.outcome !== "failed";
+}

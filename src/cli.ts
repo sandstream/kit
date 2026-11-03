@@ -53,7 +53,7 @@ import {
 } from "./commands/info.js";
 import { cmdCreatePlugin, cmdClone, cmdRun, cmdOpen } from "./commands/project.js";
 import { cmdHeal, cmdPkg } from "./commands/maintain.js";
-import { cmdSkills, cmdAgentConfig, cmdGovernance, cmdTeam } from "./commands/agent.js";
+import { cmdSkills, cmdAgentConfigEntry, cmdGovernance, cmdTeam } from "./commands/agent.js";
 import { cmdEscalate } from "./commands/escalate.js";
 import { cmdStatusline } from "./commands/statusline.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
@@ -674,7 +674,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     help: "View governance status and agent access controls",
   },
   "agent-config": {
-    handler: cmdAgentConfig,
+    handler: cmdAgentConfigEntry,
     stability: "stable",
     help: "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md",
   },
