@@ -23,6 +23,32 @@ pull-request workflow finishes. Once every check on the head commit has finished
 
 Otherwise it comments once with the reason and approves nothing.
 
+## The agent's own identity
+
+The gate keeps an agent from approving its own work only if the agent is not the owner. A coding
+agent in Claude Code on the web acts as whichever GitHub account is connected at
+`claude.ai/connect-github`. Connected as the owner, its pull requests are authored by the owner,
+so the owner cannot approve them (GitHub refuses an author's approval), and the owner's admin
+bypass is the agent's too.
+
+The fix is a machine account for the agent:
+
+- **Its own GitHub account** (GitHub allows one machine account per person), added to each
+  repository as a collaborator with the **Write** role. Not Maintain, not Admin: Write cannot
+  change rulesets, and the ruleset's bypass list names only Repository admin.
+- **Connected at `claude.ai/connect-github`** in place of the owner's account. The Claude GitHub App
+  stays installed by the owner on the owner's repositories.
+
+Then, for a pull request the agent opens:
+
+| Change | Who approves | Who can merge |
+|---|---|---|
+| no protected path, every check passes | the reviewer App | the agent |
+| a protected path (release, `.github/`, secrets, permissions) | the owner, as a normal review | the owner or the agent, after that approval |
+
+The agent never approves its own pull request: it is the author. The owner's admin bypass stays
+for the owner's own pull requests, and the agent cannot use it.
+
 ## The model review (optional): a veto, never an approval
 
 With the Actions secret `CLAUDE_CODE_OAUTH_TOKEN` set, from `claude setup-token` on a Pro or Max
