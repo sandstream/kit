@@ -7,8 +7,9 @@
 //
 // --allow  a `kit review` check that fails for a reason outside the change (an expired login, a
 //          worktree without gates). Exact name only. Printed, so it stays visible.
-// --skip   one of: tools, build, format, lint, review, tests, pr-text.
-// --strict a branch that is behind origin/main fails instead of warning.
+// --skip   one of: tools, build, format, lint, review, tests, coverage, semgrep, pr-text.
+// --strict a branch that is behind origin/main, or a Semgrep that is not the CI version, fails
+//          instead of warning.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -17,8 +18,12 @@ import {
   failedChecks,
   parseArgs,
   parseReviewJson,
+  pinnedSemgrepVersion,
+  semgrepPacks,
+  semgrepVersionFrom,
   sessionUrlIn,
   testsForChanged,
+  untestedFiles,
   versionMismatches,
 } from "./prepush-lib.mjs";
 
@@ -27,7 +32,12 @@ const opts = parseArgs(process.argv.slice(2));
 const shell = process.platform === "win32";
 
 function run(cmd, args) {
-  const r = spawnSync(cmd, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell });
+  const r = spawnSync(cmd, args, {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    shell,
+  });
   return {
     ok: r.status === 0,
     out: `${r.stdout ?? ""}${r.stderr ?? ""}`,
@@ -48,9 +58,15 @@ function installedVersion(name) {
 }
 
 function tools() {
-  const bad = versionMismatches(readJson(join(root, "package.json")), readJson(join(root, "package-lock.json")), installedVersion);
+  const bad = versionMismatches(
+    readJson(join(root, "package.json")),
+    readJson(join(root, "package-lock.json")),
+    installedVersion,
+  );
   if (bad.length === 0) return { ok: true };
-  const lines = bad.map((b) => `  ${b.name}: installed ${b.installed ?? "none"}, lockfile ${b.locked}`);
+  const lines = bad.map(
+    (b) => `  ${b.name}: installed ${b.installed ?? "none"}, lockfile ${b.locked}`,
+  );
   return { ok: false, detail: `${lines.join("\n")}\n  fix: npm ci --ignore-scripts` };
 }
 
@@ -65,7 +81,8 @@ function behind() {
 function review() {
   const r = run(process.execPath, ["dist/cli.js", "review", "--enforce", "--json"]);
   const report = parseReviewJson(r.stdout);
-  if (!report) return { ok: false, detail: `  could not read the review report\n${tail(r.out, 8)}` };
+  if (!report)
+    return { ok: false, detail: `  could not read the review report\n${tail(r.out, 8)}` };
   const bad = failedChecks(report, opts.allow);
   const known = opts.allow.length > 0 ? `  allowed by you: ${opts.allow.join(", ")}\n` : "";
   if (bad.length === 0) return { ok: true, warn: known.trimEnd() || undefined };
@@ -84,14 +101,62 @@ function tests() {
   const files = testsForChanged(changedFiles(), (p) => existsSync(join(root, p)));
   if (files.length === 0) return { ok: true, warn: "  no changed source file has a compiled test" };
   const r = run(process.execPath, ["--test", ...files]);
-  return r.ok ? { ok: true, warn: `  ${files.length} test file(s)` } : { ok: false, detail: tail(r.out) };
+  return r.ok
+    ? { ok: true, warn: `  ${files.length} test file(s)` }
+    : { ok: false, detail: tail(r.out) };
+}
+
+// CI's "Test-coverage gate": a new source file with no test fails. `kit review` does not run it.
+function coverage() {
+  const r = run(process.execPath, [
+    "dist/cli.js",
+    "check",
+    "--category",
+    "tests",
+    "--enforce-tests",
+  ]);
+  if (r.ok) return { ok: true };
+  const files = untestedFiles(r.out);
+  const detail =
+    files.length > 0 ? files.map((f) => `  untested: ${f}`).join("\n") : tail(r.out, 12);
+  return { ok: false, detail };
+}
+
+// CI's Semgrep scan, with the version and the rule packs the workflow names. Another Semgrep version
+// parses source differently (a variable named `using` parsed locally and failed in CI), so a
+// different version is not a substitute: it skips with a warning, and --strict makes it a failure.
+function semgrep() {
+  const workflow = readFileSync(join(root, ".github", "workflows", "security.yml"), "utf8");
+  const pinned = pinnedSemgrepVersion(workflow);
+  const packs = semgrepPacks(workflow);
+  if (!pinned || packs.length === 0) {
+    return {
+      ok: false,
+      detail: "  could not read the Semgrep version and packs from .github/workflows/security.yml",
+    };
+  }
+  const have = semgrepVersionFrom(run("semgrep", ["--version"]).out);
+  if (have !== pinned) {
+    const detail = `  semgrep ${have ?? "not found"}, CI uses ${pinned}: not run. Install ${pinned} in a virtual environment and put it on PATH`;
+    return opts.strict ? { ok: false, detail } : { ok: true, notRun: true, warn: detail };
+  }
+  const python = process.platform === "win32" ? "python" : "python3";
+  for (const pack of packs) {
+    const r = run(python, ["scripts/run-semgrep.py", "--config", pack, "."]);
+    if (!r.ok) return { ok: false, detail: `  pack ${pack}\n${tail(r.out, 12)}` };
+  }
+  return { ok: true, warn: `  semgrep ${have}, ${packs.length} packs` };
 }
 
 function prText() {
   const r = run("gh", ["pr", "view", "--json", "title,body"]);
   if (!r.ok) return { ok: true, warn: "  no open PR for this branch, or gh is not available" };
   return sessionUrlIn(r.out)
-    ? { ok: false, detail: "  the PR title or body holds a session URL: remove it (CLAUDE.md, Public artifacts)" }
+    ? {
+        ok: false,
+        detail:
+          "  the PR title or body holds a session URL: remove it (CLAUDE.md, Public artifacts)",
+      }
     : { ok: true };
 }
 
@@ -108,22 +173,32 @@ const steps = [
   ["lint", "lint", npm("lint")],
   ["review", "kit review --enforce (all stages)", review],
   ["tests", "tests of the changed files", tests],
+  ["coverage", "every new source file has a test (CI coverage gate)", coverage],
+  ["semgrep", "Semgrep at the CI version and packs", semgrep],
   ["pr-text", "PR text has no session URL", prText],
 ];
 
 let failed = 0;
+let notRun = 0;
 for (const [key, label, step] of steps) {
   if (opts.skip.includes(key)) {
     console.log(`- ${label} (skipped)`);
     continue;
   }
   const r = step();
-  console.log(`${r.ok ? "✓" : "✗"} ${label}`);
+  // A step that could not run is not a pass: it shows "!" and is counted in the summary.
+  console.log(`${r.notRun ? "!" : r.ok ? "✓" : "✗"} ${label}`);
+  if (r.notRun) notRun++;
   if (r.warn) console.log(r.warn);
   if (!r.ok) {
     failed++;
     if (r.detail) console.log(r.detail);
   }
 }
-console.log(failed === 0 ? "\nready to push" : `\n${failed} step(s) failed: fix them before you push`);
+const unrun = notRun > 0 ? ` (${notRun} step(s) did not run: see the lines marked !)` : "";
+console.log(
+  failed === 0
+    ? `\nready to push${unrun}`
+    : `\n${failed} step(s) failed: fix them before you push${unrun}`,
+);
 process.exit(failed === 0 ? 0 : 1);
