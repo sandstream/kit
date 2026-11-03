@@ -5,6 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -22,6 +23,13 @@ interface ChecksState {
   total: number;
 }
 interface Gate {
+  headIsStill(
+    repo: string,
+    number: number,
+    sha: string,
+    token: string,
+    read?: (path: string, token: string) => Promise<{ head?: { sha?: string }; state?: string }>,
+  ): Promise<boolean>;
   MAX_CHANGED_LINES: number;
   latestChecks(runs: Run[]): Run[];
   checksState(runs: Run[]): ChecksState;
@@ -113,5 +121,44 @@ describe("agent review gate: decision", () => {
   it("marks every review so a repeat run can recognise its own decision", async () => {
     const { decide } = await load();
     assert.ok(decide({ ...base, checks: green }).body.startsWith("<!-- kit-review-gate -->"));
+  });
+});
+
+describe("agent review gate: the reviewed commit is still the head", () => {
+  const SHA2 = "b".repeat(40);
+  const reads =
+    (head: string, state = "open") =>
+    async () => ({ head: { sha: head }, state });
+
+  it("is true only while the pull request is open and its head is the reviewed commit", async () => {
+    const gate = await load();
+    assert.equal(await gate.headIsStill("o/r", 1, SHA, "t", reads(SHA)), true);
+    assert.equal(await gate.headIsStill("o/r", 1, SHA, "t", reads(SHA2)), false);
+    assert.equal(await gate.headIsStill("o/r", 1, SHA, "t", reads(SHA, "closed")), false);
+  });
+
+  it("is false when the read fails, so a failure never approves", async () => {
+    const gate = await load();
+    const broken = async () => {
+      throw new Error("HTTP 502");
+    };
+    assert.equal(await gate.headIsStill("o/r", 1, SHA, "t", broken), false);
+  });
+
+  it("is checked after the files and the diff were read and before the review is posted", () => {
+    const src = readFileSync(join(REPO_ROOT, "scripts", "agent-review-gate.mjs"), "utf8");
+    const body = src.slice(src.indexOf("async function decideAll"));
+    const files = body.indexOf("/files`");
+    const model = body.indexOf("withModel(repo, pull");
+    const post = body.indexOf("await post(repo");
+    const checks = [...body.matchAll(/headIsStill\(/g)].map((m) => m.index ?? -1);
+    assert.ok(
+      checks.some((i) => i > files && i < model),
+      "a check between the files and the model review",
+    );
+    assert.ok(
+      checks.some((i) => i > model && i < post),
+      "a check between the model review and the post",
+    );
   });
 });

@@ -109,6 +109,21 @@ async function getText(path, token) {
   return response.text();
 }
 
+/**
+ * The pull request is still open and its head is still the commit that was judged. The files, the
+ * diff and the model review are read at the head of that moment, not at `sha`, so a push in
+ * between would give the decision for one commit on the content of another. Any read failure
+ * counts as "not the same", so a failure never approves.
+ */
+export async function headIsStill(repo, number, sha, token, read = get) {
+  try {
+    const pull = await read(`/repos/${repo}/pulls/${number}`, token);
+    return pull.state === "open" && pull.head?.sha === sha;
+  } catch {
+    return false;
+  }
+}
+
 async function paged(path, token, key, max = 30) {
   const all = [];
   for (let page = 1; page <= max; page++) {
@@ -205,6 +220,12 @@ async function decideAll(sha) {
   let appToken = null;
   for (const pull of await openPullsAt(repo, sha, token)) {
     const files = await paged(`/repos/${repo}/pulls/${pull.number}/files`, token);
+    if (!(await headIsStill(repo, pull.number, sha, token))) {
+      console.log(
+        `#${pull.number}: head moved while reading the files; the new push is judged on its own run`,
+      );
+      continue;
+    }
     const paths = files.items.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
     const decision = decide({
       sha,
@@ -220,6 +241,12 @@ async function decideAll(sha) {
       continue;
     }
     const final = await withModel(repo, pull, decision, token);
+    if (!(await headIsStill(repo, pull.number, sha, token))) {
+      console.log(
+        `#${pull.number}: head moved during the review; nothing posted for ${sha.slice(0, 12)}`,
+      );
+      continue;
+    }
     appToken ??= await installationToken();
     await post(repo, pull.number, sha, { ...final, body: `${final.body}\n${key}` }, appToken);
     console.log(`#${pull.number}: ${final.event}`);
