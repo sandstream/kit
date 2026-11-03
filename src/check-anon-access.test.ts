@@ -258,6 +258,61 @@ describe("analyzeAnonAccess: parsing that must not hide an open table", () => {
   });
 });
 
+describe("analyzeAnonAccess: lexer edge cases", () => {
+  const POLICY = "CREATE POLICY p ON content FOR SELECT USING (true);";
+  const open = (text: string) => analyzeAnonAccess(sql(CONTENT_TABLE, text)).readable.length;
+
+  it("reads a backslash-escaped quote inside an E string", () => {
+    const text = ["COMMENT ON TABLE content IS E'a\\'b; c';", POLICY].join("\n");
+    assert.equal(open(text), 1);
+  });
+
+  it("does not take a dollar sign inside an identifier for a dollar quote", () => {
+    const text = ["CREATE TABLE my$tbl$x (id int);", POLICY, "SELECT $tbl$;"].join("\n");
+    assert.equal(open(text), 1);
+  });
+
+  it("marks a file with an unterminated block comment, string or dollar quote as incomplete", () => {
+    for (const tail of ["/* never closed", "SELECT 'never closed", "SELECT $$ never closed"]) {
+      const r = analyzeAnonAccess([{ file: "bad.sql", text: `${POLICY}\n${tail}` }]);
+      assert.deepEqual(r.incomplete, ["bad.sql"], tail);
+    }
+  });
+
+  it("does not mark a complete file as incomplete", () => {
+    const r = analyzeAnonAccess(sql(CONTENT_TABLE, POLICY, "-- a comment at the end"));
+    assert.deepEqual(r.incomplete, []);
+  });
+});
+
+describe("checkAnonAccess: incomplete SQL", () => {
+  it("warns that the scan is incomplete instead of passing", async () => {
+    const dir = tree({ "db/a.sql": "CREATE TABLE t (id int);\n/* never closed" });
+    try {
+      const r = await checkAnonAccess(dir);
+      assert.equal(r.status, "warn");
+      assert.equal(r.didNotRun, true);
+      assert.match(r.detail, /a\.sql/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("keeps a finding and adds the incomplete note", async () => {
+    const dir = tree({
+      "db/a.sql": `${CONTENT_TABLE}\nCREATE POLICY p ON content FOR SELECT USING (true);\n/* never closed`,
+    });
+    try {
+      const r = await checkAnonAccess(dir);
+      assert.equal(r.status, "fail");
+      assert.match(r.detail, /phone/);
+      assert.match(r.detail, /incomplete/i);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
 describe("analyzeAnonAccess: personal columns", () => {
   it("finds phone, email, person names and national ids, from CREATE TABLE and ALTER TABLE", () => {
     const r = analyzeAnonAccess(

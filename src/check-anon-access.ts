@@ -37,6 +37,8 @@ export interface ReadableTable {
 
 export interface AnonAnalysis {
   readable: ReadableTable[];
+  /** Files with an unterminated quote, comment or dollar quote, which may hide statements. */
+  incomplete: string[];
 }
 
 const PERSONAL_COLUMN =
@@ -51,7 +53,7 @@ const SQ = String.fromCharCode(39);
 const DQ = String.fromCharCode(34);
 
 /** What a lexer step consumed: the index after it and the text it leaves behind. */
-type Skip = { end: number; keep: string };
+type Skip = { end: number; keep: string; unterminated?: true };
 
 function skipLineComment(text: string, i: number): Skip | null {
   if (!text.startsWith(LINE_COMMENT, i)) return null;
@@ -75,20 +77,34 @@ function skipBlockComment(text: string, i: number): Skip | null {
       at++;
     }
   }
-  return { end: text.length, keep: " " };
+  return { end: text.length, keep: " ", unterminated: true };
+}
+
+function isIdentChar(ch: string | undefined): boolean {
+  return ch === "$" || isTagChar(ch, false);
+}
+
+/** An E string (a lone E or e right before the quote) treats a backslash as an escape. */
+function isEscapeString(text: string, i: number): boolean {
+  const before = text[i - 1];
+  return (before === "E" || before === "e") && !isIdentChar(text[i - 2]);
 }
 
 /** A quoted run, with a doubled quote as the escape. A string loses its content, an identifier keeps it. */
 function skipQuoted(text: string, i: number, quote: string): Skip | null {
   if (text[i] !== quote) return null;
+  const backslash = quote === SQ && isEscapeString(text, i);
   let at = i + 1;
   while (at < text.length) {
-    if (text[at] === quote && text[at + 1] === quote) at += 2;
+    if (backslash && text[at] === "\\") at += 2;
+    else if (text[at] === quote && text[at + 1] === quote) at += 2;
     else if (text[at] === quote) break;
     else at++;
   }
+  const closed = at < text.length;
   const end = Math.min(at + 1, text.length);
-  return { end, keep: quote === SQ ? SQ + SQ : text.slice(i, end) };
+  const keep = quote === SQ ? SQ + SQ : text.slice(i, end);
+  return closed ? { end, keep } : { end, keep, unterminated: true };
 }
 
 function isTagChar(ch: string | undefined, first: boolean): boolean {
@@ -105,11 +121,12 @@ function dollarTagAt(text: string, i: number): string | null {
 }
 
 function skipDollarQuote(text: string, i: number): Skip | null {
-  if (text[i] !== "$") return null;
+  if (text[i] !== "$" || isIdentChar(text[i - 1])) return null;
   const tag = dollarTagAt(text, i);
   if (!tag) return null;
   const close = text.indexOf(tag, i + tag.length);
-  return { end: close === -1 ? text.length : close + tag.length, keep: " " };
+  if (close === -1) return { end: text.length, keep: " ", unterminated: true };
+  return { end: close + tag.length, keep: " " };
 }
 
 function skipSpecial(text: string, i: number): Skip | null {
@@ -127,25 +144,27 @@ function skipSpecial(text: string, i: number): Skip | null {
  * recognised only where they can start, so a dollar sign or comment opener inside another
  * construct cannot hide the statements that follow it.
  */
-export function splitStatements(text: string): string[] {
-  const out: string[] = [];
+export function splitStatements(text: string): { statements: string[]; unterminated: boolean } {
+  const statements: string[] = [];
   let current = "";
+  let unterminated = false;
   let i = 0;
   while (i < text.length) {
     const skip = skipSpecial(text, i);
     if (skip) {
       current += skip.keep;
       i = skip.end;
+      unterminated ||= skip.unterminated === true;
     } else if (text[i] === ";") {
-      out.push(current);
+      statements.push(current);
       current = "";
       i++;
     } else {
       current += text[i++];
     }
   }
-  out.push(current);
-  return out;
+  statements.push(current);
+  return { statements, unterminated };
 }
 
 function normTable(raw: string): string {
@@ -352,7 +371,7 @@ function personalOf(state: State, table: string): string[] {
     .sort();
 }
 
-function summarise(state: State): AnonAnalysis {
+function summarise(state: State): Omit<AnonAnalysis, "incomplete"> {
   const via = new Map<string, string[]>();
   const note = (table: string, how: string) => via.set(table, [...(via.get(table) ?? []), how]);
   for (const [key, p] of state.policies) {
@@ -382,10 +401,13 @@ export function analyzeAnonAccess(sources: SqlSource[]): AnonAnalysis {
     columnLimit: new Map(),
     wildcard: false,
   };
+  const incomplete: string[] = [];
   for (const source of sources) {
-    for (const stmt of splitStatements(source.text)) applyStatement(state, stmt);
+    const { statements, unterminated } = splitStatements(source.text);
+    if (unterminated) incomplete.push(source.file);
+    for (const stmt of statements) applyStatement(state, stmt);
   }
-  return summarise(state);
+  return { ...summarise(state), incomplete };
 }
 
 interface Collected {
@@ -459,31 +481,47 @@ export async function checkAnonAccess(root: string): Promise<SecurityCheckResult
       detail: "no SQL files in the project, nothing to read policies from",
     };
   }
-  const { readable } = analyzeAnonAccess(sources);
+  const analysis = analyzeAnonAccess(sources);
   const count = `${sources.length} SQL file${sources.length === 1 ? "" : "s"}`;
+  return withIncompleteNote(resultFor(analysis.readable, count), analysis.incomplete);
+}
+
+const BASE = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
+const SUGGESTION =
+  "Replace USING (true) with a row-scoped condition, or move personal columns to a table anon cannot read. Run `kit check --category security` again after the migration.";
+
+function resultFor(readable: ReadableTable[], count: string): SecurityCheckResult {
   if (readable.length === 0) {
-    return { ...base, status: "pass", detail: `no table is readable by anon in ${count}` };
+    return { ...BASE, status: "pass", detail: `no table is readable by anon in ${count}` };
   }
-  const personal = readable.filter((t) => t.personalColumns.length > 0);
   const list = readable.map(describe).join("; ");
-  const suggestion =
-    "Replace USING (true) with a row-scoped condition, or move personal columns to a table anon cannot read. Run `kit check --category security` again after the migration.";
-  if (personal.length > 0) {
+  if (readable.some((t) => t.personalColumns.length > 0)) {
     return {
-      ...base,
+      ...BASE,
       status: "fail",
       severity: "high",
       hasFindings: true,
       detail: `anon can read ${readable.length} table(s) in ${count}: ${list}`,
-      suggestion,
+      suggestion: SUGGESTION,
     };
   }
   return {
-    ...base,
+    ...BASE,
     status: "warn",
     severity: "medium",
     hasFindings: true,
     detail: `anon can read ${readable.length} table(s) in ${count}, none with a personal-looking column: ${list}`,
-    suggestion,
+    suggestion: SUGGESTION,
   };
+}
+
+/** A file the lexer could not finish may hide statements: a pass becomes an incomplete scan, a finding keeps its status. */
+function withIncompleteNote(
+  result: SecurityCheckResult,
+  incomplete: string[],
+): SecurityCheckResult {
+  if (incomplete.length === 0) return result;
+  const note = `scan incomplete: unterminated quote, comment or dollar quote in ${incomplete.join(", ")}`;
+  if (result.status !== "pass") return { ...result, detail: `${result.detail}; ${note}` };
+  return { ...result, status: "warn", didNotRun: true, scanIncomplete: true, detail: note };
 }
