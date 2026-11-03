@@ -18,6 +18,7 @@ import { resolve, join } from "node:path";
 import { loadConfig, type kitConfig } from "./config.js";
 import { resolveConfigPath } from "./cli-shared.js";
 import { resolveMode, modeScore, type SubsystemStatus } from "./setup-modes.js";
+import { readWatchCache, watchSegment } from "./watch.js";
 import { readCachedUpdateSync, getKitVersionSync } from "./update-check.js";
 
 export interface StatuslineParts {
@@ -27,6 +28,8 @@ export interface StatuslineParts {
   update?: string | null;
   /** open PAL ("blocked on you") count */
   pal?: number;
+  /** ranked open security PRs from the daily watch cache, e.g. "sec-prs:2 critical #3 ci:failing" */
+  secPrs?: string | null;
   /** The ONE next setup command when adoption is incomplete (e.g. "kit init").
    *  A bare "kit:full 1/6" is true but actionless — the score says something is
    *  missing without saying what to DO, which is how a new repo stays un-kitted. */
@@ -57,6 +60,7 @@ export function formatStatusline(p: StatuslineParts): string {
   }
   if (p.update) seg.push(`update:${p.update}`);
   if (typeof p.pal === "number" && p.pal > 0) seg.push(`actions:${p.pal}`);
+  if (p.secPrs) seg.push(p.secPrs);
   return seg.join(" · ");
 }
 
@@ -167,6 +171,7 @@ export async function buildStatuslineParts(
     score: { done, total },
     update: update?.latest ?? null,
     pal: await quickPalCount(cwd),
+    secPrs: watchSegment(readWatchCache(cwd), Date.now()),
     // First gap in subsystem order = the natural next step (config → "kit init"
     // first, so a repo with no .kit.toml is told how to START, not just scored).
     next: gaps[0]?.next,

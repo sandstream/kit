@@ -6,6 +6,26 @@ import { join } from "node:path";
 import { buildStatuslineParts, formatStatusline, quickSubsystems } from "./statusline.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
+describe("formatStatusline security PRs", () => {
+  it("appends the ranked security-PR segment after the other segments", () => {
+    assert.equal(
+      formatStatusline({
+        mode: "full",
+        score: { done: 6, total: 6 },
+        pal: 1,
+        secPrs: "sec-prs:2 critical #3 ci:failing",
+      }),
+      "kit:full 6/6 · actions:1 · sec-prs:2 critical #3 ci:failing",
+    );
+  });
+  it("omits the segment when there is none", () => {
+    assert.equal(
+      formatStatusline({ mode: "full", score: { done: 6, total: 6 }, secPrs: null }),
+      "kit:full 6/6",
+    );
+  });
+});
+
 describe("formatStatusline", () => {
   it("renders mode score + update + actions, dot-separated", () => {
     assert.equal(

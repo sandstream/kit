@@ -3138,6 +3138,28 @@
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
+    "watch": {
+      "kind": "command",
+      "summary": "Daily watch: rank open security PRs by advisory severity and CI state, cache them for the status line (run|install|status)",
+      "x-kit-accepted-flags": [
+        "--env",
+        "--force",
+        "--help",
+        "--hour",
+        "--json",
+        "--minute",
+        "--no-pal",
+        "--non-interactive",
+        "--read-only",
+        "--readonly",
+        "--target",
+        "--version"
+      ],
+      "x-kit-args-modeled": true,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
     "whoami": {
       "kind": "command",
       "summary": "Show current agent / user identity",

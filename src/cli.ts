@@ -70,6 +70,7 @@ import {
 import { cmdGuard, cmdGuardObserve } from "./commands/guard.js";
 import { cmdCi } from "./commands/ci.js";
 import { cmdSentinel } from "./commands/sentinel.js";
+import { cmdWatch } from "./commands/watch.js";
 import { cmdStandards, cmdBaseline } from "./commands/standards.js";
 import { cmdCheck } from "./commands/check.js";
 import { cmdDesign } from "./commands/design.js";
@@ -595,6 +596,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdSentinel,
     stability: "stable",
     help: "Autonomous redline watcher — propose/apply guarded remediations (run|install|status)",
+  },
+  watch: {
+    handler: cmdWatch,
+    stability: "stable",
+    help: "Daily watch: rank open security PRs by advisory severity and CI state, cache them for the status line (run|install|status)",
   },
   scan: {
     handler: cmdScan,

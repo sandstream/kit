@@ -57,6 +57,7 @@ export const HELP_CATEGORIES: [string, string[]][] = [
       "verify-provenance",
       "ingest",
       "sentinel",
+      "watch",
       "slopsquat",
       "airgap",
       "broker",

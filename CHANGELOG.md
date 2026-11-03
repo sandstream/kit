@@ -68,6 +68,12 @@
 
 ### Added
 
+- **`kit watch` ranks open security PRs and schedules itself (Z4 part 3).** `kit watch run` reads
+  open PRs and Dependabot alerts through `gh`, keeps the PRs that fix an open advisory, orders them
+  by the advisory's severity (oldest first on a tie) and caches the result for the status line as
+  `sec-prs:2 critical #3 ci:failing`. It opens one action item per critical or high PR. A missing
+  alert source gives `unverified`, a cache older than 48 hours gives `stale`, never an empty list.
+  `kit watch install` writes a launchd entry or a read-only workflow, or prints a cron line.
 - **Dependency findings are tagged `deployed` or `branch only` (Z4 part 2).** With a
   `[deploy.health.<env>]` table, `kit check --category security --online` reads the deployed commit,
   reads `package-lock.json` as it was at that commit with `git show`, and tags each osv-scanner
@@ -76,7 +82,6 @@
   npm `package-lock.json` (lockfileVersion 2 or 3) only, and not yet together with `[projects]`.
   Checked against a live deployment: every vulnerable package was in the deployed lockfile. The
   `branch only` case is covered by tests, not by that run.
-
 - **`[deploy.health.<env>]` reads the deployed commit.** `kit check --category deploy --online`
   makes one GET to the configured URL and prints the commit the service reports. Without `--online`,
   or when the project's `[air_gap]` is enabled, nothing is requested. The URL comes from the

@@ -201,6 +201,7 @@ export const MUTATING_COMMANDS: readonly CommandCase[] = [
   mutation("security policy add", "security-policy-update", "security", "policy", "add", "pkg"),
   mutation("security policy init", "security-policy-update", "security", "policy", "init"),
   mutation("sentinel install", "sentinel-install", "sentinel", "install"),
+  mutation("watch install", "watch-install", "watch", "install"),
   mutation("setup", "setup", "setup"),
   mutation(
     "skill snapshot",
@@ -374,6 +375,8 @@ export const READ_INVOCATIONS: readonly string[][] = [
   ["security", "verify-pull"],
   ["sentinel", "run"],
   ["sentinel", "status"],
+  ["watch", "run"],
+  ["watch", "status"],
   ["services"],
   ["services", "ls"],
   ["services", "ls", "--json"],
