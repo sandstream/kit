@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { triageNpmSandbox, type SandboxResult } from "./triage-sandbox.js";
+import { applyCooling } from "./triage-cooling.js";
 import { exec } from "./utils/exec.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -373,7 +374,8 @@ export async function runTriage(
     const output = stdout + (stderr ? `\n${stderr}` : "");
     const passed = verdictPassed(output);
 
-    return { target, type, passed, output };
+    // The cooling period (Z6) runs here, not in the frozen triage.py, for every caller alike.
+    return { target, type, ...(await applyCooling(cwd, type, target, { passed, output })) };
   } catch (error: unknown) {
     const err = error as { stdout?: string; stderr?: string; message?: string };
     const output = (err.stdout || "") + (err.stderr || "") + (err.message || "");

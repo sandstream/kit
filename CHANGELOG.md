@@ -2,6 +2,17 @@
 
 ### Security
 
+- **`kit triage npm` warns about a release younger than 14 days, and a security patch does not wait.**
+  A compromised release is usually caught within days, so a version younger than
+  `[supply_chain].min_release_age_days` (default 14, 0 turns it off) gets a cooling warning that names
+  the newest version public for at least that long. The warning is waived only when OSV says the
+  release is the first published one that fixes an advisory for the version your lockfile pins
+  (`cooling: waived, 1.0.1 fixes GHSA-...`). A newer release than the first fixed one is not waived,
+  and neither is a release that only calls itself a security fix. Without a lockfile version, when OSV
+  cannot be reached, or when air-gap is on and no `KIT_OSV_API` mirror is named, the warning stays and
+  says why. `min_release_age_enforce = true` makes the cooling period hold back the pass instead of
+  only warning. The default is a warning, because no other triage warning holds back a pass. The check
+  runs in kit, after the bundled `triage.py`, and does not change its health score.
 - **`kit check` lists the tables that anonymous users can read.** The new "anonymous database access"
   row reads `CREATE POLICY`, `GRANT` and `REVOKE` in the SQL files of the project, in file name order.
   A policy such as `FOR SELECT USING (true)` for anon or public opens a table. A table with a phone,
