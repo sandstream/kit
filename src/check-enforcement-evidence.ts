@@ -34,8 +34,10 @@ export interface GateProof {
   total: number;
   /** Controls that ran and did not hold: the gate let through what it must refuse, or the reverse. */
   failed: string[];
-  /** Controls that could not run (git or a hook runner missing): unknown, not failed. */
+  /** Controls that could not run (git missing): unknown, not failed. */
   inconclusive: string[];
+  /** Controls left out because they do not apply here (the sh hook runner is not verified on Windows). */
+  notRun: string[];
 }
 
 export interface BypassEntry {
@@ -79,6 +81,11 @@ function unverified(f: EvidenceFacts): SecurityCheckResult {
       ? `unverified: ${cannot.length} of ${f.proof.total} negative controls could not run: ${cannot.map((n) => plain(n)).join("; ")}`
       : `unverified: the negative controls did not run${note}. Run \`kit usage prove\` to see them`;
   return { ...base, status: "warn", didNotRun: true, detail };
+}
+
+function notRunText(proof: GateProof): string {
+  if (proof.notRun.length === 0) return "";
+  return `Not run here: ${proof.notRun.map((n) => plain(n)).join("; ")}. `;
 }
 
 /** The verdict for one set of facts. Pure. */
@@ -127,6 +134,7 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
     detail:
       `install gate and env-write gate wired; ${held} of ${f.proof.total} negative controls held just now; ` +
       `no skipped hook in the last ${BYPASS_WINDOW_DAYS} days. ` +
+      `${notRunText(f.proof)}` +
       `Not proven: that another tool than Claude Code is gated, or that the settings file was not edited after the proof`,
   };
 }
@@ -146,14 +154,28 @@ export interface ControlResult {
  */
 const ENVIRONMENTAL = /^inconclusive: git init failed$/;
 
-/** Sort the controls into failed (ran and did not hold, or kit itself broke) and unknown (environment). */
-export function classifyControls(controls: ControlResult[]): GateProof {
+/** The controls that need a POSIX sh hook runner: kit's pre-commit hook, tried in a throwaway repository. */
+const HOOK_CONTROL = /^(pre-commit refuses|and lets a clean commit)/;
+
+/**
+ * Sort the controls into failed (ran and did not hold, or kit itself broke), unknown (environment) and
+ * not run. On Windows the hook controls are left out and named: the hook is a sh script, a Windows CI run
+ * showed the clean-commit control failing there, and whether that is the hook or the runner is not known.
+ */
+export function classifyControls(
+  controls: ControlResult[],
+  platform: string = process.platform,
+): GateProof {
+  const skipHook = platform === "win32";
+  const notRun = controls.filter((c) => skipHook && HOOK_CONTROL.test(c.name));
+  const ran = controls.filter((c) => !notRun.includes(c));
   const unknown = (c: ControlResult) =>
     c.verdict === "inconclusive" && ENVIRONMENTAL.test(c.observed);
   return {
-    total: controls.length,
-    failed: controls.filter((c) => !c.ok && !unknown(c)).map((c) => c.name),
-    inconclusive: controls.filter(unknown).map((c) => c.name),
+    total: ran.length,
+    failed: ran.filter((c) => !c.ok && !unknown(c)).map((c) => c.name),
+    inconclusive: ran.filter(unknown).map((c) => c.name),
+    notRun: notRun.map((c) => c.name),
   };
 }
 

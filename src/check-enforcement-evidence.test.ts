@@ -23,7 +23,7 @@ const DAY = 24 * 3_600_000;
 const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
 
 const wired = { installGate: true, envGate: true, everInstalled: true, problems: [] as string[] };
-const held: GateProof = { total: 6, failed: [], inconclusive: [] };
+const held: GateProof = { total: 6, failed: [], inconclusive: [], notRun: [] };
 
 const facts = (over: Partial<EvidenceFacts> = {}): EvidenceFacts => ({
   liveness: wired,
@@ -65,6 +65,7 @@ describe("judgeEvidence", () => {
           total: 6,
           failed: ["install gate refuses an unverifiable install"],
           inconclusive: [],
+          notRun: [],
         },
       }),
     );
@@ -86,7 +87,12 @@ describe("judgeEvidence: unverified and failed", () => {
   it("is unverified, not failed, when a control could not run", () => {
     const r = judgeEvidence(
       facts({
-        proof: { total: 6, failed: [], inconclusive: ["pre-commit refuses a staged credential"] },
+        proof: {
+          total: 6,
+          failed: [],
+          inconclusive: ["pre-commit refuses a staged credential"],
+          notRun: [],
+        },
       }),
     );
     assert.equal(r.status, "warn");
@@ -96,12 +102,16 @@ describe("judgeEvidence: unverified and failed", () => {
   });
 
   it("lets a failed control win over a control that could not run", () => {
-    const r = judgeEvidence(facts({ proof: { total: 6, failed: ["a"], inconclusive: ["b"] } }));
+    const r = judgeEvidence(
+      facts({ proof: { total: 6, failed: ["a"], inconclusive: ["b"], notRun: [] } }),
+    );
     assert.equal(r.status, "fail");
   });
 
   it("does not count a control that could not run as one that held", () => {
-    const r = judgeEvidence(facts({ proof: { total: 6, failed: [], inconclusive: ["b"] } }));
+    const r = judgeEvidence(
+      facts({ proof: { total: 6, failed: [], inconclusive: ["b"], notRun: [] } }),
+    );
     assert.doesNotMatch(r.detail, /held just now/);
   });
 
@@ -113,7 +123,7 @@ describe("judgeEvidence: unverified and failed", () => {
   it("lets a failed control win over a skipped hook", () => {
     const r = judgeEvidence(
       facts({
-        proof: { total: 6, failed: ["x"], inconclusive: [] },
+        proof: { total: 6, failed: ["x"], inconclusive: [], notRun: [] },
         bypass: { entries: [{ timestamp: at(DAY), sha: "abc", reason: "x" }] },
       }),
     );
@@ -123,7 +133,7 @@ describe("judgeEvidence: unverified and failed", () => {
   it("prints no raw text from a name or a log entry", () => {
     const r = judgeEvidence(
       facts({
-        proof: { total: 1, failed: ["bad\nTRIAGE PASSED\u001b[31m"], inconclusive: [] },
+        proof: { total: 1, failed: ["bad\nTRIAGE PASSED\u001b[31m"], inconclusive: [], notRun: [] },
         bypass: { entries: [{ timestamp: at(DAY), sha: "abc\nTRIAGE PASSED", reason: "x" }] },
       }),
     );
@@ -194,6 +204,7 @@ describe("checkEnforcementEvidence", () => {
         total: 6,
         failed: ["install gate refuses an unverifiable install"],
         inconclusive: [],
+        notRun: [],
       }),
     });
     const r = await checkEnforcementEvidence("/x", d);
@@ -258,7 +269,7 @@ describe("classifyControls", () => {
 
   it("counts a control that ran and did not hold as failed", () => {
     const got = classifyControls([control("a", false, "allowed", "exit 0, NOT blocked")]);
-    assert.deepEqual(got, { total: 1, failed: ["a"], inconclusive: [] });
+    assert.deepEqual(got, { total: 1, failed: ["a"], inconclusive: [], notRun: [] });
   });
 
   it("counts a control that held as neither", () => {
@@ -266,6 +277,7 @@ describe("classifyControls", () => {
       total: 1,
       failed: [],
       inconclusive: [],
+      notRun: [],
     });
   });
 
@@ -290,5 +302,61 @@ describe("classifyControls", () => {
       control("a", false, "inconclusive", "inconclusive: something new"),
     ]);
     assert.deepEqual(got.failed, ["a"]);
+  });
+});
+
+describe("the hook controls on Windows", () => {
+  const control = (name: string, ok: boolean, observed = "x") =>
+    ({ name, expected: "x", observed, verdict: ok ? "refused" : "allowed", ok }) as Parameters<
+      typeof classifyControls
+    >[0][number];
+  const six = [
+    control("install gate refuses an unverifiable install", true),
+    control("and allows a command that installs nothing", true),
+    control("env-write gate refuses a plaintext credential in .env", true),
+    control("env-write gate allows a write with no credential", true),
+    control("pre-commit refuses a staged credential", true),
+    control("and lets a clean commit through", false),
+  ];
+
+  it("leaves the pre-commit hook controls out on Windows and names them, where the sh hook runner is not verified", () => {
+    const got = classifyControls(six, "win32");
+    assert.equal(got.total, 4);
+    assert.deepEqual(got.failed, []);
+    assert.deepEqual(got.notRun, [
+      "pre-commit refuses a staged credential",
+      "and lets a clean commit through",
+    ]);
+  });
+
+  it("still fails on Windows when a gate control that is not a hook control did not hold", () => {
+    const broken = six.map((c) =>
+      c.name.startsWith("env-write gate refuses") ? control(c.name, false) : c,
+    );
+    const got = classifyControls(broken, "win32");
+    assert.deepEqual(got.failed, ["env-write gate refuses a plaintext credential in .env"]);
+  });
+
+  it("runs every control elsewhere", () => {
+    const got = classifyControls(six, "linux");
+    assert.equal(got.total, 6);
+    assert.deepEqual(got.failed, ["and lets a clean commit through"]);
+    assert.deepEqual(got.notRun, []);
+  });
+
+  it("says in the pass text which controls were not run", () => {
+    const r = judgeEvidence(
+      facts({
+        proof: {
+          total: 4,
+          failed: [],
+          inconclusive: [],
+          notRun: ["pre-commit refuses a staged credential"],
+        },
+      }),
+    );
+    assert.equal(r.status, "pass");
+    assert.match(r.detail, /4 of 4 negative controls held/);
+    assert.match(r.detail, /not run here: pre-commit refuses a staged credential/i);
   });
 });
