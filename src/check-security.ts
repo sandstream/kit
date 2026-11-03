@@ -21,6 +21,7 @@ import {
   PROVIDER_GLOB,
 } from "./scanners.js";
 import { findIac } from "./check-iac-detect.js";
+import { checkApkFloors } from "./check-apk-floors.js";
 import { checkMavenSbomCoverage } from "./maven-sbom.js";
 import type { SecurityLevel } from "./check-projects.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
@@ -2639,6 +2640,7 @@ async function runPrimarySecurityChecks(
           checkPipAudit(root),
           checkPinnedVersions(root),
           checkTrivy(root),
+          checkApkFloors(root),
           checkLicenses(root),
           checkTrivyConfig(root),
           checkOsvScanner(root),
