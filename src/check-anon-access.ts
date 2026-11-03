@@ -107,10 +107,11 @@ function skipQuoted(text: string, i: number, quote: string): Skip | null {
   return closed ? { end, keep } : { end, keep, unterminated: true };
 }
 
+/** Identifier characters as Postgres reads them: ASCII letters and underscore, digits after the first, and any character above 0x7f. */
 function isTagChar(ch: string | undefined, first: boolean): boolean {
   if (ch === undefined) return false;
   const letter = (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_";
-  return letter || (!first && ch >= "0" && ch <= "9");
+  return letter || ch.charCodeAt(0) > 0x7f || (!first && ch >= "0" && ch <= "9");
 }
 
 /** The opening tag at i, such as the two dollar signs or a named tag, or null when none starts here. */
@@ -515,13 +516,18 @@ function resultFor(readable: ReadableTable[], count: string): SecurityCheckResul
   };
 }
 
-/** A file the lexer could not finish may hide statements: a pass becomes an incomplete scan, a finding keeps its status. */
+/**
+ * A file the lexer could not finish may hide statements. A pass becomes an incomplete scan. A warning
+ * becomes did-not-run, so the gate does not take it for a finding-level warning. A failure stays a
+ * failure and is marked incomplete.
+ */
 function withIncompleteNote(
   result: SecurityCheckResult,
   incomplete: string[],
 ): SecurityCheckResult {
   if (incomplete.length === 0) return result;
   const note = `scan incomplete: unterminated quote, comment or dollar quote in ${incomplete.join(", ")}`;
-  if (result.status !== "pass") return { ...result, detail: `${result.detail}; ${note}` };
-  return { ...result, status: "warn", didNotRun: true, scanIncomplete: true, detail: note };
+  const detail = result.status === "pass" ? note : `${result.detail}; ${note}`;
+  if (result.status === "fail") return { ...result, detail, scanIncomplete: true };
+  return { ...result, status: "warn", didNotRun: true, scanIncomplete: true, detail };
 }

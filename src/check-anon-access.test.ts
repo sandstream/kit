@@ -272,6 +272,21 @@ describe("analyzeAnonAccess: lexer edge cases", () => {
     assert.equal(open(text), 1);
   });
 
+  it("treats a non-ASCII letter as part of an identifier, so a dollar sign after it opens nothing", () => {
+    const text = ["CREATE TABLE t\u00e5$x$y (id int);", POLICY, "SELECT $x$;"].join("\n");
+    assert.equal(open(text), 1);
+  });
+
+  it("reads a column name with a non-ASCII letter whole", () => {
+    const r = analyzeAnonAccess(
+      sql(
+        "CREATE TABLE people (id int, f\u00f6rnamn text, first_name text);",
+        "CREATE POLICY p ON people FOR SELECT USING (true);",
+      ),
+    );
+    assert.deepEqual(r.readable[0].personalColumns, ["first_name"]);
+  });
+
   it("marks a file with an unterminated block comment, string or dollar quote as incomplete", () => {
     for (const tail of ["/* never closed", "SELECT 'never closed", "SELECT $$ never closed"]) {
       const r = analyzeAnonAccess([{ file: "bad.sql", text: `${POLICY}\n${tail}` }]);
@@ -298,6 +313,21 @@ describe("checkAnonAccess: incomplete SQL", () => {
     }
   });
 
+  it("makes a warning finding count as did-not-run when the scan is incomplete", async () => {
+    const dir = tree({
+      "db/a.sql":
+        "CREATE TABLE posts (id int);\nCREATE POLICY p ON posts FOR SELECT USING (true);\n/* never closed",
+    });
+    try {
+      const r = await checkAnonAccess(dir);
+      assert.equal(r.status, "warn");
+      assert.equal(r.didNotRun, true);
+      assert.equal(r.scanIncomplete, true);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
   it("keeps a finding and adds the incomplete note", async () => {
     const dir = tree({
       "db/a.sql": `${CONTENT_TABLE}\nCREATE POLICY p ON content FOR SELECT USING (true);\n/* never closed`,
@@ -307,6 +337,7 @@ describe("checkAnonAccess: incomplete SQL", () => {
       assert.equal(r.status, "fail");
       assert.match(r.detail, /phone/);
       assert.match(r.detail, /incomplete/i);
+      assert.equal(r.scanIncomplete, true);
     } finally {
       rmTemp(dir);
     }
