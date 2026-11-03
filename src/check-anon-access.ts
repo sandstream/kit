@@ -123,6 +123,8 @@ interface State {
   rls: Set<string>;
   policies: Map<string, { table: string; open: boolean }>;
   grants: Map<string, true>;
+  /** Tables where REVOKE SELECT left anon only the columns granted afterwards. */
+  columnLimit: Map<string, Set<string>>;
   wildcard: boolean;
 }
 
@@ -165,6 +167,19 @@ function anonGrantTargets(stmt: string, revoke: boolean): string | null {
   return rolesOf(m[3]).some((r) => ANON_ROLES.has(r)) ? m[2] : null;
 }
 
+const COLUMN_GRANT_RE =
+  /^grant\s+select\s*\(([^)]*)\)\s+on\s+(?:table\s+)?(\S+)\s+to\s+([\w\x22,\s]+)/i;
+
+/** GRANT SELECT (columns) ON t TO anon: adds columns to a table that REVOKE already limited. */
+function applyColumnGrant(state: State, stmt: string): boolean {
+  const m = stmt.match(COLUMN_GRANT_RE);
+  if (!m) return false;
+  if (!rolesOf(m[3]).some((r) => ANON_ROLES.has(r))) return true;
+  const limit = state.columnLimit.get(normTable(m[2]));
+  if (limit) for (const c of columnsOf(m[1])) limit.add(c);
+  return true;
+}
+
 function applyGrant(state: State, stmt: string, revoke: boolean): void {
   const targets = anonGrantTargets(stmt, revoke);
   if (targets === null) return;
@@ -175,8 +190,13 @@ function applyGrant(state: State, stmt: string, revoke: boolean): void {
   }
   for (const t of targets.split(",")) {
     const table = normTable(t);
-    if (revoke) state.grants.delete(table);
-    else state.grants.set(table, true);
+    if (revoke) {
+      state.grants.delete(table);
+      state.columnLimit.set(table, new Set());
+    } else {
+      state.grants.set(table, true);
+      state.columnLimit.delete(table);
+    }
   }
 }
 
@@ -211,12 +231,16 @@ function applyStatement(state: State, raw: string): void {
     return;
   }
   if (/^create\s+policy\b/i.test(stmt)) return applyPolicy(state, stmt);
+  if (/^grant\b/i.test(stmt) && applyColumnGrant(state, stmt)) return;
   if (/^grant\b/i.test(stmt)) return applyGrant(state, stmt, false);
   if (/^revoke\b/i.test(stmt)) applyGrant(state, stmt, true);
 }
 
 function personalOf(state: State, table: string): string[] {
-  return [...(state.tables.get(table) ?? [])].filter((c) => PERSONAL_COLUMN.test(c)).sort();
+  const limit = state.columnLimit.get(table);
+  return [...(state.tables.get(table) ?? [])]
+    .filter((c) => (limit === undefined || limit.has(c)) && PERSONAL_COLUMN.test(c))
+    .sort();
 }
 
 function summarise(state: State): AnonAnalysis {
@@ -246,6 +270,7 @@ export function analyzeAnonAccess(sources: SqlSource[]): AnonAnalysis {
     rls: new Set(),
     policies: new Map(),
     grants: new Map(),
+    columnLimit: new Map(),
     wildcard: false,
   };
   for (const source of sources) {

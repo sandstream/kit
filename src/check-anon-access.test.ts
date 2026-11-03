@@ -159,6 +159,51 @@ describe("analyzeAnonAccess: grants", () => {
   });
 });
 
+describe("analyzeAnonAccess: column grants", () => {
+  const TEAMS = [
+    "CREATE TABLE public.teams (id uuid, name text, contact_phone_1 text, contact_email_1 text);",
+    "CREATE POLICY public_view_teams ON teams FOR SELECT USING (true);",
+  ];
+
+  it("counts only the granted columns after REVOKE SELECT and a column GRANT", () => {
+    const r = analyzeAnonAccess(
+      sql(
+        ...TEAMS,
+        "REVOKE SELECT ON public.teams FROM anon;",
+        "GRANT SELECT (id, name) ON public.teams TO anon;",
+      ),
+    );
+    assert.deepEqual(
+      r.readable.map((t) => t.table),
+      ["teams"],
+    );
+    assert.deepEqual(r.readable[0].personalColumns, []);
+  });
+
+  it("still reports a personal column that the column GRANT includes", () => {
+    const r = analyzeAnonAccess(
+      sql(
+        ...TEAMS,
+        "REVOKE SELECT ON teams FROM anon;",
+        "GRANT SELECT (id, contact_phone_1) ON teams TO anon;",
+      ),
+    );
+    assert.deepEqual(r.readable[0].personalColumns, ["contact_phone_1"]);
+  });
+
+  it("lifts the column limit when a later table-level GRANT SELECT follows", () => {
+    const r = analyzeAnonAccess(
+      sql(
+        ...TEAMS,
+        "REVOKE SELECT ON teams FROM anon;",
+        "GRANT SELECT (id) ON teams TO anon;",
+        "GRANT SELECT ON teams TO anon;",
+      ),
+    );
+    assert.deepEqual(r.readable[0].personalColumns, ["contact_email_1", "contact_phone_1"]);
+  });
+});
+
 describe("analyzeAnonAccess: personal columns", () => {
   it("finds phone, email, person names and national ids, from CREATE TABLE and ALTER TABLE", () => {
     const r = analyzeAnonAccess(
