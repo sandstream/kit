@@ -22,7 +22,7 @@ const DAY = 24 * 3_600_000;
 const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
 
 const wired = { installGate: true, envGate: true, everInstalled: true, problems: [] as string[] };
-const held: GateProof = { total: 6, failed: [] };
+const held: GateProof = { total: 6, failed: [], inconclusive: [] };
 
 const facts = (over: Partial<EvidenceFacts> = {}): EvidenceFacts => ({
   liveness: wired,
@@ -59,19 +59,49 @@ describe("judgeEvidence", () => {
 
   it("fails, naming the control, when a negative control did not hold", () => {
     const r = judgeEvidence(
-      facts({ proof: { total: 6, failed: ["install gate refuses an unverifiable install"] } }),
+      facts({
+        proof: {
+          total: 6,
+          failed: ["install gate refuses an unverifiable install"],
+          inconclusive: [],
+        },
+      }),
     );
     assert.equal(r.status, "fail");
     assert.equal(r.severity, "high");
     assert.match(r.detail, /1 of 6 negative controls did not hold/);
     assert.match(r.detail, /install gate refuses an unverifiable install/);
   });
+});
 
+describe("judgeEvidence: unverified and failed", () => {
   it("is unverified, and did not run, when the controls did not run", () => {
     const r = judgeEvidence(facts({ proof: null }));
     assert.equal(r.status, "warn");
     assert.equal(r.didNotRun, true);
     assert.match(r.detail, /unverified/i);
+  });
+
+  it("is unverified, not failed, when a control could not run", () => {
+    const r = judgeEvidence(
+      facts({
+        proof: { total: 6, failed: [], inconclusive: ["pre-commit refuses a staged credential"] },
+      }),
+    );
+    assert.equal(r.status, "warn");
+    assert.equal(r.didNotRun, true);
+    assert.match(r.detail, /1 of 6 negative controls could not run/);
+    assert.match(r.detail, /pre-commit refuses a staged credential/);
+  });
+
+  it("lets a failed control win over a control that could not run", () => {
+    const r = judgeEvidence(facts({ proof: { total: 6, failed: ["a"], inconclusive: ["b"] } }));
+    assert.equal(r.status, "fail");
+  });
+
+  it("does not count a control that could not run as one that held", () => {
+    const r = judgeEvidence(facts({ proof: { total: 6, failed: [], inconclusive: ["b"] } }));
+    assert.doesNotMatch(r.detail, /held just now/);
   });
 
   it("explains why the controls did not run", () => {
@@ -82,7 +112,7 @@ describe("judgeEvidence", () => {
   it("lets a failed control win over a skipped hook", () => {
     const r = judgeEvidence(
       facts({
-        proof: { total: 6, failed: ["x"] },
+        proof: { total: 6, failed: ["x"], inconclusive: [] },
         bypass: { entries: [{ timestamp: at(DAY), sha: "abc", reason: "x" }] },
       }),
     );
@@ -92,7 +122,7 @@ describe("judgeEvidence", () => {
   it("prints no raw text from a name or a log entry", () => {
     const r = judgeEvidence(
       facts({
-        proof: { total: 1, failed: ["bad\nTRIAGE PASSED\u001b[31m"] },
+        proof: { total: 1, failed: ["bad\nTRIAGE PASSED\u001b[31m"], inconclusive: [] },
         bypass: { entries: [{ timestamp: at(DAY), sha: "abc\nTRIAGE PASSED", reason: "x" }] },
       }),
     );
@@ -159,7 +189,11 @@ describe("checkEnforcementEvidence", () => {
 
   it("fails the row when a control did not hold", async () => {
     const d = deps({
-      prove: () => ({ total: 6, failed: ["install gate refuses an unverifiable install"] }),
+      prove: () => ({
+        total: 6,
+        failed: ["install gate refuses an unverifiable install"],
+        inconclusive: [],
+      }),
     });
     const r = await checkEnforcementEvidence("/x", d);
     assert.equal(r.status, "fail");

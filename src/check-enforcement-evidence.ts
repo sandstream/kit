@@ -32,7 +32,10 @@ export const BYPASS_WINDOW_DAYS = 14;
 /** The result of one run of the negative controls: counts and names, nothing else. */
 export interface GateProof {
   total: number;
+  /** Controls that ran and did not hold: the gate let through what it must refuse, or the reverse. */
   failed: string[];
+  /** Controls that could not run (git or a hook runner missing): unknown, not failed. */
+  inconclusive: string[];
 }
 
 export interface BypassEntry {
@@ -69,13 +72,13 @@ function recentBypass(entries: BypassEntry[], now: number): BypassEntry[] {
 }
 
 function unverified(f: EvidenceFacts): SecurityCheckResult {
+  const cannot = f.proof?.inconclusive ?? [];
   const note = f.refreshNote ? ` (${plain(f.refreshNote, 120)})` : "";
-  return {
-    ...base,
-    status: "warn",
-    didNotRun: true,
-    detail: `unverified: the negative controls did not run${note}. Run \`kit usage prove\` to see them`,
-  };
+  const detail =
+    cannot.length > 0 && f.proof
+      ? `unverified: ${cannot.length} of ${f.proof.total} negative controls could not run: ${cannot.map((n) => plain(n)).join("; ")}`
+      : `unverified: the negative controls did not run${note}. Run \`kit usage prove\` to see them`;
+  return { ...base, status: "warn", didNotRun: true, detail };
 }
 
 /** The verdict for one set of facts. Pure. */
@@ -101,7 +104,7 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
         "Run `kit usage prove` to see what each control did, and fix the gate before relying on it.",
     };
   }
-  if (!f.proof) return unverified(f);
+  if (!f.proof || f.proof.inconclusive.length > 0) return unverified(f);
   const skipped = recentBypass(f.bypass.entries, f.now);
   if (skipped.length > 0) {
     const last = skipped[skipped.length - 1];
@@ -147,9 +150,12 @@ async function defaultDeps(): Promise<EvidenceDeps> {
     liveness: (root) => gateLiveness(root),
     prove: (root) => {
       const r = proveFloor(root);
+      const names = (keep: (c: (typeof r.controls)[number]) => boolean) =>
+        r.controls.filter(keep).map((c) => c.name);
       return {
         total: r.controls.length,
-        failed: r.controls.filter((c) => !c.ok).map((c) => c.name),
+        failed: names((c) => !c.ok && c.verdict !== "inconclusive"),
+        inconclusive: names((c) => c.verdict === "inconclusive"),
       };
     },
     canRun: () => !isReadOnlyMode(),
