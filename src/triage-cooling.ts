@@ -15,6 +15,7 @@
  * warning stays and says why. This runs after triage.py: the bundled script is a frozen, verified
  * asset and reads no project files. The warning does not change its health score.
  */
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { resolveInstalledVersion } from "./upstream-installed.js";
 
@@ -77,22 +78,32 @@ function plain(value: unknown): string {
     .slice(0, 80);
 }
 
-/** The smallest fixed version above `current` in a range that covers `current`, or null. */
+/** The smallest fixed version above `current` among the events of one range that covers `current`. */
+function fixedInRange(events: Record<string, string>[], current: Triple): Triple | null {
+  let best: Triple | null = null;
+  let introduced: Triple = [0, 0, 0];
+  for (const event of events) {
+    if (event.introduced !== undefined) introduced = triple(event.introduced) ?? [0, 0, 0];
+    const fixed = event.fixed === undefined ? null : triple(event.fixed);
+    const applies =
+      fixed !== null && compare(introduced, current) <= 0 && compare(fixed, current) > 0;
+    if (fixed && applies && (!best || compare(fixed, best) < 0)) best = fixed;
+  }
+  return best;
+}
+
+function earlier(a: Triple | null, b: Triple | null): Triple | null {
+  if (!a || !b) return a ?? b;
+  return compare(a, b) <= 0 ? a : b;
+}
+
+/** The smallest fixed version above `current` in any SEMVER range of the advisory for this package. */
 function firstFixed(vuln: OsvVuln, pkg: string, current: Triple): Triple | null {
   let best: Triple | null = null;
   for (const affected of vuln.affected ?? []) {
     if (affected.package?.name !== pkg) continue;
     for (const range of affected.ranges ?? []) {
-      if (range.type !== "SEMVER") continue;
-      let introduced: Triple = [0, 0, 0];
-      for (const event of range.events ?? []) {
-        if (event.introduced !== undefined) introduced = triple(event.introduced) ?? [0, 0, 0];
-        const fixed = event.fixed === undefined ? null : triple(event.fixed);
-        const covers = compare(introduced, current) <= 0;
-        if (fixed && covers && compare(fixed, current) > 0 && (!best || compare(fixed, best) < 0)) {
-          best = fixed;
-        }
-      }
+      if (range.type === "SEMVER") best = earlier(best, fixedInRange(range.events ?? [], current));
     }
   }
   return best;
@@ -144,6 +155,12 @@ export interface CoolingInput {
   osv: OsvLookup | { skipped: string };
 }
 
+/** What could not be established. Under enforcement doubt holds the pass back, as an unverified check must. */
+export function unverified(why: string, enforce: boolean): CoolingResult {
+  const line = enforce ? `  x CRITICAL: cooling: ${why}` : `  ~ NOT CHECKED: cooling -- ${why}`;
+  return { lines: [line], held: enforce };
+}
+
 export interface CoolingResult {
   /** Lines in triage.py's own format, for the report. */
   lines: string[];
@@ -182,8 +199,7 @@ export async function coolingCheck(input: CoolingInput): Promise<CoolingResult> 
   if (limitDays <= 0 || input.current === version) return { lines: [], held: false };
   const age = ageDays(input.times[version], now);
   if (age === undefined) {
-    const why = `the registry gives no publish time for ${plain(version)}`;
-    return { lines: [`  ~ NOT CHECKED: release age -- ${why}`], held: false };
+    return unverified(`the registry gives no publish time for ${plain(version)}`, input.enforce);
   }
   if (age >= limitDays) return { lines: [], held: false };
   const result = await waiver(input);
@@ -209,6 +225,13 @@ async function supplyChainConfig(cwd: string): Promise<SupplyChainConfig> {
   }
 }
 
+/** Air-gap as the project declares it: on or off, the mirrors it names, and whether that was unreadable. */
+export interface AirGapView {
+  enabled: boolean;
+  mirrors: Record<string, string>;
+  unreadable?: true;
+}
+
 export interface CoolingDeps {
   env: NodeJS.ProcessEnv;
   now: () => number;
@@ -216,7 +239,7 @@ export interface CoolingDeps {
   getJson: (url: string) => Promise<unknown>;
   /** POST a JSON body and read a JSON answer, or null on any failure. */
   postJson: (url: string, body: unknown) => Promise<unknown>;
-  airGap: (cwd: string) => Promise<boolean>;
+  airGap: (cwd: string) => Promise<AirGapView>;
 }
 
 async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
@@ -232,14 +255,20 @@ async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
   }
 }
 
-async function airGapOn(cwd: string): Promise<boolean> {
+async function airGapView(cwd: string): Promise<AirGapView> {
+  const { resolveAirGap, airGapTriageEnv } = await import("./airgap/config.js");
+  const file = join(cwd, ".kit.toml");
+  const view = (cfg: Parameters<typeof resolveAirGap>[0]): AirGapView => {
+    const settings = resolveAirGap(cfg, process.env);
+    return { enabled: settings.enabled, mirrors: airGapTriageEnv(settings) };
+  };
+  if (!existsSync(file)) return view(undefined);
   try {
     const { loadConfig } = await import("./config.js");
-    const { resolveAirGap } = await import("./airgap/config.js");
-    const cfg = await loadConfig(join(cwd, ".kit.toml"));
-    return resolveAirGap(cfg.air_gap, process.env).enabled;
+    return view((await loadConfig(file)).air_gap);
   } catch {
-    return false;
+    // A config that exists but cannot be read might declare air-gap: doubt means on.
+    return { enabled: true, mirrors: {}, unreadable: true };
   }
 }
 
@@ -248,7 +277,7 @@ export const defaultCoolingDeps: CoolingDeps = {
   now: () => Date.now(),
   getJson: (url) => fetchJson(url),
   postJson: (url, body) => fetchJson(url, { method: "POST", body: JSON.stringify(body) }),
-  airGap: airGapOn,
+  airGap: airGapView,
 };
 
 const TRIAGED_LINE = /^\s*\. triaged ([0-9A-Za-z.+-]+)/m;
@@ -310,14 +339,26 @@ export async function applyCooling(
   const cfg = await supplyChainConfig(cwd);
   const limitDays = limitFrom(cfg, deps.env);
   if (limitDays === 0) return result;
-  const base = deps.env.KIT_NPM_REGISTRY?.trim() || "https://registry.npmjs.org";
-  const doc = (await deps.getJson(registryUrl(base, pkg))) as {
+  const enforce = cfg.min_release_age_enforce === true || deps.env.KIT_COOLING_ENFORCE === "1";
+  const fold = (r: CoolingResult) => ({
+    passed: r.held ? false : result.passed,
+    output: withCoolingLines(result.output, r),
+  });
+  const air = await deps.airGap(cwd);
+  // The same mirror triage.py was given: the environment first, then the one .kit.toml declares.
+  const registry = deps.env.KIT_NPM_REGISTRY?.trim() || air.mirrors.KIT_NPM_REGISTRY;
+  if (air.enabled && !registry) {
+    const why = air.unreadable
+      ? "the .kit.toml could not be read, so air-gap cannot be ruled out and the registry is not queried"
+      : "air-gap is on and no npm registry mirror is named";
+    return fold(unverified(why, enforce));
+  }
+  const doc = (await deps.getJson(registryUrl(registry || "https://registry.npmjs.org", pkg))) as {
     versions?: Record<string, unknown>;
     time?: Record<string, string>;
   } | null;
   if (!doc?.versions || !doc.time) {
-    const line = "  ~ NOT CHECKED: cooling -- the registry could not be read again";
-    return { ...result, output: withCoolingLines(result.output, { lines: [line], held: false }) };
+    return fold(unverified("the registry could not be read again", enforce));
   }
   const verdict = await coolingCheck({
     pkg,
@@ -325,11 +366,10 @@ export async function applyCooling(
     versions: Object.keys(doc.versions),
     times: doc.time,
     limitDays,
-    enforce: cfg.min_release_age_enforce === true || deps.env.KIT_COOLING_ENFORCE === "1",
+    enforce,
     current: lockedVersion(cwd, target),
     now: deps.now(),
-    osv: osvFor(deps, await deps.airGap(cwd)),
+    osv: osvFor(deps, air.enabled),
   });
-  const output = withCoolingLines(result.output, verdict);
-  return { passed: verdict.held ? false : result.passed, output };
+  return fold(verdict);
 }

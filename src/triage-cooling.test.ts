@@ -9,12 +9,8 @@
  * HTTP and the assertions are on the report text kit prints.
  */
 
-import { describe, it, before, after, beforeEach } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
 
 import {
   applyCooling,
@@ -25,55 +21,10 @@ import {
   triagedVersion,
   withCoolingLines,
   type CoolingDeps,
-  type OsvVuln,
 } from "./triage-cooling.js";
 import { verdictPassed } from "./triage.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
-
-const iso = (daysAgo: number): string => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
-
-function tree(spec: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), "kit-cooling-"));
-  for (const [rel, content] of Object.entries(spec)) {
-    mkdirSync(dirname(join(dir, rel)), { recursive: true });
-    writeFileSync(join(dir, rel), content);
-  }
-  return dir;
-}
-
-const lock = (version: string) =>
-  JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/fixture": { version } } });
-
-/** An OSV record: an advisory that affects versions below `fixed`. */
-const vuln = (id: string, fixed?: string): OsvVuln => ({
-  id,
-  affected: [
-    {
-      package: { name: "fixture" },
-      ranges: [
-        {
-          type: "SEMVER",
-          events: [{ introduced: "0" }, ...(fixed ? [{ fixed }] : [])],
-        },
-      ],
-    },
-  ],
-});
-
-/** triage.py's report for a version, as runTriage hands it to applyCooling. */
-const report = (version: string) =>
-  [
-    "Triage: npm fixture",
-    "--------------------------------------------------",
-    `  . triaged ${version}, 3 versions, 2 maintainer(s)`,
-    "",
-    "Health score: 100/100",
-    "Critical issues: 0",
-    "Warnings: 0",
-    "Probes declared unavailable: 0",
-    "TRIAGE PASSED",
-    "",
-  ].join("\n");
+import { iso, localServices, lock, report, tree, vuln } from "./triage-cooling.test-support.js";
 
 describe("npmName and lockedVersion", () => {
   it("strips a version spec and keeps a scope", () => {
@@ -149,7 +100,7 @@ describe("coolingCheck (pure, with an injected advisory lookup)", () => {
 
   it("reports an unknown publish time as not checked, never as fine", async () => {
     const r = await coolingCheck({ ...base, times: {} });
-    assert.match(r.lines[0], /NOT CHECKED: release age/);
+    assert.match(r.lines[0], /NOT CHECKED: cooling -- the registry gives no publish time/);
   });
 
   it("does not print a newline or escape sequence from a version string", async () => {
@@ -165,78 +116,8 @@ describe("coolingCheck (pure, with an injected advisory lookup)", () => {
   });
 });
 
-describe("applyCooling (local registry and OSV)", () => {
-  let server: Server;
-  let base = "";
-  const registry = new Map<string, unknown>();
-  /** OSV answers by `name@version`. */
-  const osv = new Map<string, OsvVuln[]>();
-  let osvDown = false;
-  let osvCalls = 0;
-  const dirs: string[] = [];
-
-  before(async () => {
-    server = createServer((req, res) => {
-      if (req.method === "POST" && req.url === "/v1/query") {
-        osvCalls++;
-        if (osvDown) {
-          res.writeHead(503).end("down");
-          return;
-        }
-        let raw = "";
-        req.on("data", (c) => (raw += c));
-        req.on("end", () => {
-          const q = JSON.parse(raw) as { package: { name: string }; version: string };
-          const vulns = osv.get(`${q.package.name}@${q.version}`) ?? [];
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify(vulns.length ? { vulns } : {}));
-        });
-        return;
-      }
-      const body = registry.get(req.url ?? "");
-      res.writeHead(body === undefined ? 404 : 200, { "content-type": "application/json" });
-      res.end(JSON.stringify(body ?? {}));
-    });
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    const addr = server.address();
-    if (addr === null || typeof addr === "string") throw new Error("no fixture port");
-    base = `http://127.0.0.1:${addr.port}`;
-  });
-
-  after(async () => {
-    await new Promise<void>((r) => server.close(() => r()));
-    for (const d of dirs) rmTemp(d);
-  });
-
-  beforeEach(() => {
-    registry.clear();
-    osv.clear();
-    osvDown = false;
-    osvCalls = 0;
-  });
-
-  /** The packument: `published` maps a version to the days ago it was published. */
-  const publish = (published: Record<string, number>, latest: string) =>
-    registry.set("/fixture", {
-      "dist-tags": { latest },
-      versions: Object.fromEntries(Object.keys(published).map((v) => [v, { version: v }])),
-      time: Object.fromEntries(Object.entries(published).map(([v, d]) => [v, iso(d)])),
-    });
-
-  const project = (files: Record<string, string>): string => {
-    const dir = tree(files);
-    dirs.push(dir);
-    return dir;
-  };
-
-  const run = (cwd: string, version: string, env: Record<string, string> = {}, airGap = false) => {
-    const deps: CoolingDeps = {
-      ...defaultCoolingDeps,
-      env: { KIT_NPM_REGISTRY: base, KIT_OSV_API: base, ...env },
-      airGap: async () => airGap,
-    };
-    return applyCooling(cwd, "npm", "fixture", { passed: true, output: report(version) }, deps);
-  };
+describe("applyCooling: the warning and its limits", () => {
+  const { publish, project, run } = localServices();
 
   it("warns about a young release, names the newest older version, and still passes", async () => {
     publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
@@ -278,6 +159,10 @@ describe("applyCooling (local registry and OSV)", () => {
     assert.equal(r.passed, false);
     assert.equal(verdictPassed(r.output), false);
   });
+});
+
+describe("applyCooling: the waiver and what it must not allow", () => {
+  const { osv, publish, project, run } = localServices();
 
   it("waives the release that is the first to fix an advisory for the locked version", async () => {
     publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
@@ -311,6 +196,10 @@ describe("applyCooling (local registry and OSV)", () => {
     assert.match(r.output, /was published 2 days ago/);
     assert.doesNotMatch(r.output, /waived/);
   });
+});
+
+describe("applyCooling: what the waiver must not allow", () => {
+  const { osv, state, publish, project, run, url } = localServices();
 
   it("does not waive when the same advisory still affects the new release", async () => {
     publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
@@ -334,12 +223,12 @@ describe("applyCooling (local registry and OSV)", () => {
     osv.set("fixture@1.0.0", [vuln("GHSA-aaaa-bbbb-cccc", "1.0.1")]);
     const r = await run(project({ "package.json": "{}" }), "1.0.1");
     assert.match(r.output, /no current version known/);
-    assert.equal(osvCalls, 0);
+    assert.equal(state.calls, 0);
   });
 
   it("keeps the warning and says the advisories could not be checked when OSV is down", async () => {
     publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
-    osvDown = true;
+    state.down = true;
     const cwd = project({ "package.json": "{}", "package-lock.json": lock("1.0.0") });
     const r = await run(cwd, "1.0.1");
     assert.match(r.output, /was published 2 days ago/);
@@ -352,8 +241,8 @@ describe("applyCooling (local registry and OSV)", () => {
     const cwd = project({ "package.json": "{}", "package-lock.json": lock("1.0.0") });
     const deps: CoolingDeps = {
       ...defaultCoolingDeps,
-      env: { KIT_NPM_REGISTRY: base },
-      airGap: async () => true,
+      env: { KIT_NPM_REGISTRY: url() },
+      airGap: async () => ({ enabled: true, mirrors: {} }),
     };
     const r = await applyCooling(
       cwd,
@@ -363,7 +252,7 @@ describe("applyCooling (local registry and OSV)", () => {
       deps,
     );
     assert.match(r.output, /advisories not queried: air-gap is on/);
-    assert.equal(osvCalls, 0);
+    assert.equal(state.calls, 0);
   });
 
   it("queries a named OSV mirror even when air-gap is on", async () => {
@@ -372,7 +261,7 @@ describe("applyCooling (local registry and OSV)", () => {
     const cwd = project({ "package.json": "{}", "package-lock.json": lock("1.0.0") });
     const r = await run(cwd, "1.0.1", {}, true);
     assert.match(r.output, /waived/);
-    assert.ok(osvCalls > 0);
+    assert.ok(state.calls > 0);
   });
 
   it("passes other ecosystems and unreadable reports through unchanged", async () => {
@@ -387,5 +276,111 @@ describe("applyCooling (local registry and OSV)", () => {
     const r = await run(project({ "package.json": "{}" }), "1.0.1");
     assert.match(r.output, /NOT CHECKED: cooling/);
     assert.equal(r.passed, true);
+  });
+});
+
+describe("applyCooling: enforcement and air-gap fail closed", () => {
+  const { publish, project, run, registry, state, url } = localServices();
+  const enforce = ".kit.toml";
+  const enforcing = "[supply_chain]\nmin_release_age_enforce = true\n";
+
+  it("holds back the pass under enforcement when the registry cannot be read again", async () => {
+    const r = await run(project({ [enforce]: enforcing, "package.json": "{}" }), "1.0.1");
+    assert.match(r.output, /CRITICAL: cooling: the registry could not be read again/);
+    assert.equal(r.passed, false);
+    assert.equal(verdictPassed(r.output), false);
+  });
+
+  it("holds back the pass under enforcement when the registry gives no publish time", async () => {
+    registry.set("/fixture", {
+      "dist-tags": { latest: "1.0.1" },
+      versions: { "1.0.1": {} },
+      time: {},
+    });
+    const r = await run(project({ [enforce]: enforcing, "package.json": "{}" }), "1.0.1");
+    assert.match(r.output, /CRITICAL: cooling: the registry gives no publish time for 1\.0\.1/);
+    assert.equal(r.passed, false);
+  });
+
+  it("uses the registry mirror that .kit.toml declares, not the public one", async () => {
+    publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
+    const deps: CoolingDeps = {
+      ...defaultCoolingDeps,
+      env: { KIT_OSV_API: url() },
+      airGap: async () => ({ enabled: true, mirrors: { KIT_NPM_REGISTRY: url() } }),
+    };
+    const cwd = project({ "package.json": "{}" });
+    const r = await applyCooling(
+      cwd,
+      "npm",
+      "fixture",
+      { passed: true, output: report("1.0.1") },
+      deps,
+    );
+    assert.match(r.output, /WARNING: cooling: 1\.0\.1 was published 2 days ago/);
+  });
+
+  it("makes no request at all when air-gap is on and no registry mirror is named", async () => {
+    publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
+    const deps: CoolingDeps = {
+      ...defaultCoolingDeps,
+      env: {},
+      airGap: async () => ({ enabled: true, mirrors: {} }),
+    };
+    const cwd = project({ [enforce]: enforcing, "package.json": "{}" });
+    const r = await applyCooling(
+      cwd,
+      "npm",
+      "fixture",
+      { passed: true, output: report("1.0.1") },
+      deps,
+    );
+    assert.match(r.output, /CRITICAL: cooling: air-gap is on and no npm registry mirror is named/);
+    assert.equal(r.passed, false);
+    assert.equal(state.calls, 0);
+  });
+
+  it("without enforcement an unreadable registry is reported as not checked, and the pass stays", async () => {
+    const r = await run(project({ "package.json": "{}" }), "1.0.1");
+    assert.match(r.output, /NOT CHECKED: cooling/);
+    assert.equal(r.passed, true);
+  });
+});
+
+describe("air-gap state is read so that doubt means on", () => {
+  const view = (cwd: string) => defaultCoolingDeps.airGap(cwd);
+
+  it("is off for a project with no .kit.toml and no KIT_AIRGAP", async () => {
+    const dir = tree({ "package.json": "{}" });
+    const saved = process.env.KIT_AIRGAP;
+    delete process.env.KIT_AIRGAP;
+    try {
+      assert.equal((await view(dir)).enabled, false);
+    } finally {
+      if (saved !== undefined) process.env.KIT_AIRGAP = saved;
+      rmTemp(dir);
+    }
+  });
+
+  it("is on when .kit.toml declares it, and carries the declared mirror", async () => {
+    const dir = tree({
+      ".kit.toml": '[air_gap]\nenabled = true\nnpm_registry = "http://mirror.invalid"\n',
+    });
+    try {
+      const v = await view(dir);
+      assert.equal(v.enabled, true);
+      assert.equal(v.mirrors.KIT_NPM_REGISTRY, "http://mirror.invalid");
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("is on when .kit.toml exists but cannot be read, because it might declare air-gap", async () => {
+    const dir = tree({ ".kit.toml": "[air_gap\nthis is not toml" });
+    try {
+      assert.equal((await view(dir)).enabled, true);
+    } finally {
+      rmTemp(dir);
+    }
   });
 });

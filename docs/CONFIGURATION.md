@@ -327,7 +327,7 @@ Set up with `kit standards`. Fuller treatment: [`docs/STANDARDS.md`](STANDARDS.m
 
 Install-time triage settings: which package scopes count as internal, and the cooling period for new releases.
 
-**What it buys.** A first-party scope is not triaged as an unknown third-party package, so the gate stops crying wolf on your own code. A release younger than min_release_age_days (default 14, 0 turns it off) gets a cooling warning in kit triage. A security patch does not wait: the warning is waived when OSV says the release is the first one that fixes an advisory for a version in your lockfile. With min_release_age_enforce = true a release inside the cooling period holds back the pass instead of only warning.
+**What it buys.** A first-party scope is not triaged as an unknown third-party package, so the gate stops crying wolf on your own code. A release younger than min_release_age_days (default 14, 0 turns it off) gets a cooling warning in kit triage. A security patch does not wait: the warning is waived when OSV says the release is the first one that fixes an advisory for a version in your lockfile. With min_release_age_enforce = true a release inside the cooling period holds back the pass instead of only warning, and so does a release whose age cannot be established.
 
 ```toml
 [supply_chain]

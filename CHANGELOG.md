@@ -11,7 +11,9 @@
   and neither is a release that only calls itself a security fix. Without a lockfile version, when OSV
   cannot be reached, or when air-gap is on and no `KIT_OSV_API` mirror is named, the warning stays and
   says why. `min_release_age_enforce = true` makes the cooling period hold back the pass instead of
-  only warning. The default is a warning, because no other triage warning holds back a pass. The check
+  only warning, and also when the release age cannot be established (registry unreadable, no publish
+  time, air-gap with no registry mirror): doubt is not a pass under enforcement. The check uses the
+  registry mirror that `[air_gap]` declares, like triage.py does. The default is a warning, because no other triage warning holds back a pass. The check
   runs in kit, after the bundled `triage.py`, and does not change its health score.
 - **`kit check` lists the tables that anonymous users can read.** The new "anonymous database access"
   row reads `CREATE POLICY`, `GRANT` and `REVOKE` in the SQL files of the project, in file name order.
