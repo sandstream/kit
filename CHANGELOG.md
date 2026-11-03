@@ -2,6 +2,13 @@
 
 ### Security
 
+- **Agent review gate, step B: an optional model veto.** With `CLAUDE_CODE_OAUTH_TOKEN`, from a
+  subscription via `claude setup-token`, a model reads the diff of every pull request the
+  deterministic gate would approve and may veto it, naming the file and the defect. It can never
+  approve on its own, so prompt injection cannot add an approval. It runs the pinned Claude Code
+  CLI with no tools, an empty directory and HOME, and only its own token in its environment. Each
+  commit is decided once: the review is keyed to the deterministic decision, not to the model's
+  wording.
 - **Agent review gate (step A, deterministic, no model).** When every check on a pull request's
   head commit has finished, the reviewer GitHub App approves that exact commit if every check
   passed, no file is in a protected class (`.github/kit-protected-paths.json`, read from the
