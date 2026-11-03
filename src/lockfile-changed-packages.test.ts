@@ -17,7 +17,7 @@ function changed(diff: string): string[] {
 const resolved = (sign: string, path: string) =>
   `${sign}      "resolved": "https://registry.npmjs.org/${path}",`;
 
-// grep -P and bash are what the Linux CI job runs; the Windows shards have neither reliably.
+// bash and POSIX sed are what the Linux and macOS jobs run; the Windows shards have neither reliably.
 const posixOnly = { skip: process.platform === "win32" };
 
 describe("lockfile-changed-packages.sh: what triage-deps triages", () => {
