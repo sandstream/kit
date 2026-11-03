@@ -2,6 +2,27 @@
 
 ### Security
 
+- **`kit check` compares Dockerfile `apk add` floors with Alpine's security database.** `trivy fs`
+  and `trivy config` read the repository, not a built image, so they never saw the OS packages an
+  `apk add` installs. The libexpat CVEs above reached `main` that way, and only the image scan
+  found them. The new `alpine apk floors` check reads each lower-bound floor (`'libexpat>=2.8.5-r0'`)
+  with its stage's Alpine branch. It maps a subpackage to its origin through the APKINDEX
+  (`libexpat` → `expat`) and warns when Alpine's secdb lists a CVE fixed above the floor, naming
+  the version to raise it to. A base tag that names no branch (`node:22-alpine`) is checked
+  against the newest stable branch, and the result says so. Air-gap mode skips the check and
+  calls the floors unverified; an unreachable secdb is a check that did not run, never a pass.
+
+- **Docker image: libexpat 2.10.0.** The image scan failed on `main` with CVE-2026-117610 and
+  CVE-2026-118370 (libexpat through 2.9.0). Alpine ships the fix in 2.10.0-r0, but the build reused
+  a cached `apk` layer that still met the old `>=2.8.5-r0` floor. The floor is now `>=2.10.0-r0`,
+  which also invalidates that layer.
+- **Agent review gate, step B: an optional model veto.** With `CLAUDE_CODE_OAUTH_TOKEN`, from a
+  subscription via `claude setup-token`, a model reads the diff of every pull request the
+  deterministic gate would approve and may veto it, naming the file and the defect. It can never
+  approve on its own, so prompt injection cannot add an approval. It runs the pinned Claude Code
+  CLI with no tools, an empty directory and HOME, and only its own token in its environment. Each
+  commit is decided once: the review is keyed to the deterministic decision, not to the model's
+  wording.
 - **Agent review gate (step A, deterministic, no model).** When every check on a pull request's
   head commit has finished, the reviewer GitHub App approves that exact commit if every check
   passed, no file is in a protected class (`.github/kit-protected-paths.json`, read from the
@@ -53,6 +74,14 @@
   `sec-prs:2 critical #3 ci:failing`. It opens one action item per critical or high PR. A missing
   alert source gives `unverified`, a cache older than 48 hours gives `stale`, never an empty list.
   `kit watch install` writes a launchd entry or a read-only workflow, or prints a cron line.
+- **Dependency findings are tagged `deployed` or `branch only` (Z4 part 2).** With a
+  `[deploy.health.<env>]` table, `kit check --category security --online` reads the deployed commit,
+  reads `package-lock.json` as it was at that commit with `git show`, and tags each osv-scanner
+  finding. When the commit is not in the clone, the lockfile is missing or the commit could not be
+  read, the row says `deployed: unverified` with the reason. A tag never changes status or severity.
+  npm `package-lock.json` (lockfileVersion 2 or 3) only, and not yet together with `[projects]`.
+  Checked against a live deployment: every vulnerable package was in the deployed lockfile. The
+  `branch only` case is covered by tests, not by that run.
 - **`[deploy.health.<env>]` reads the deployed commit.** `kit check --category deploy --online`
   makes one GET to the configured URL and prints the commit the service reports. Without `--online`,
   or when the project's `[air_gap]` is enabled, nothing is requested. The URL comes from the

@@ -73,6 +73,11 @@ export const SECURITY_RULES: Record<string, RuleRef> = {
     "A06_2021-Vulnerable_and_Outdated_Components",
     "A06:2021 Vulnerable and Outdated Components",
   ),
+  "alpine apk floors": owasp(
+    "A06",
+    "A06_2021-Vulnerable_and_Outdated_Components",
+    "A06:2021 Vulnerable and Outdated Components",
+  ),
   "pinned versions": cwe(1104, "Use of Unmaintained Third Party Components"),
   // npm v12's `allowScripts` records which dependencies may run install scripts; an
   // unreviewed or outlived grant is exactly functionality pulled in from a sphere the

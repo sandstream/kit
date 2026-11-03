@@ -12,6 +12,7 @@ import {
 } from "./check-deploy-vercel-safety.js";
 import { execFileNoThrow } from "./utils/exec.js";
 import { failedDetail, type ExecResult } from "./utils/execFileNoThrow.js";
+import type { DeployHealthRow } from "./deploy-health.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 
 export type DeployCheckStatus = "pass" | "fail" | "warn" | "skip";
@@ -479,11 +480,23 @@ async function airGapFor(cwd: string): Promise<boolean> {
   }
 }
 
+/** The commit a service reports through [deploy.health]: production first, else the first that answered. */
+export async function deployedCommit(
+  config: DeployConfig | undefined,
+  cwd: string,
+  opts: DeployCheckOptions,
+): Promise<string | null> {
+  if (!config) return null;
+  const rows = await readDeployedCommits(config, cwd, opts);
+  const answered = rows.filter((r) => r.commit);
+  return (answered.find((r) => r.environment === "production") ?? answered[0])?.commit ?? null;
+}
+
 async function readDeployedCommits(
   config: DeployConfig,
   cwd: string,
   opts: DeployCheckOptions,
-): Promise<DeployCheckResult[]> {
+): Promise<DeployHealthRow[]> {
   if (!(config as { health?: unknown }).health) return [];
   const { checkDeployHealth } = await import("./deploy-health.js");
   return checkDeployHealth(config, {
