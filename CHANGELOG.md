@@ -58,6 +58,15 @@
 
 ### Added
 
+- **Dependency findings are tagged `deployed` or `branch only` (Z4 part 2).** With a
+  `[deploy.health.<env>]` table, `kit check --category security --online` reads the deployed commit,
+  reads `package-lock.json` as it was at that commit with `git show`, and tags each osv-scanner
+  finding. When the commit is not in the clone, the lockfile is missing or the commit could not be
+  read, the row says `deployed: unverified` with the reason. A tag never changes status or severity.
+  npm `package-lock.json` (lockfileVersion 2 or 3) only, and not yet together with `[projects]`.
+  Checked against a live deployment: every vulnerable package was in the deployed lockfile. The
+  `branch only` case is covered by tests, not by that run.
+
 - **`[deploy.health.<env>]` reads the deployed commit.** `kit check --category deploy --online`
   makes one GET to the configured URL and prints the commit the service reports. Without `--online`,
   or when the project's `[air_gap]` is enabled, nothing is requested. The URL comes from the

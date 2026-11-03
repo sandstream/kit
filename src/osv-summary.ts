@@ -17,6 +17,8 @@ export function osvSeverity(score: number): Level {
 }
 
 const LISTED = 10;
+/** Cap on the structured list, so a huge lockfile cannot grow a row without bound. */
+const MAX_AFFECTED = 500;
 /** Names and versions come from a lockfile the scanner read, so they are untrusted text. */
 const SAFE_NAME = /^[@\w.:/~+-]{1,214}$/;
 const SAFE_VERSION = /^[\w.+~-]{1,64}$/;
@@ -101,6 +103,10 @@ export function osvFinding(name: string, stdout: string): SecurityCheckResult {
       `${notes.join(", ")}: ${names.slice(0, LISTED).join(", ")}${more} -run: osv-scanner -r .`,
     severity,
   };
+  result.affected = vulnerable.slice(0, MAX_AFFECTED).map((p) => ({
+    name: safeName(p.package?.name),
+    version: safeVersion(p.package?.version),
+  }));
   const update = npmUpdateCommand(vulnerable);
   if (update) {
     result.suggestion = `${update}, then re-run kit check (a transitive package moves only if its parent's range allows the fixed version)`;
