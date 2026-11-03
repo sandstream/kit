@@ -21,6 +21,10 @@ interface Lib {
   parseArgs(argv: string[]): { allow: string[]; strict: boolean; skip: string[] };
   sessionUrlIn(text: string): boolean;
   parseReviewJson(text: string): { stages?: unknown[] } | undefined;
+  pinnedSemgrepVersion(workflow: string): string | undefined;
+  semgrepPacks(workflow: string): string[];
+  semgrepVersionFrom(output: string): string | undefined;
+  untestedFiles(output: string): string[];
 }
 
 async function lib(): Promise<Lib> {
@@ -162,5 +166,61 @@ describe("parseReviewJson", () => {
     const { parseReviewJson } = await lib();
     assert.equal(parseReviewJson("no json here"), undefined);
     assert.equal(parseReviewJson("{ broken"), undefined);
+  });
+});
+
+const WORKFLOW = `
+      - run: pipx install semgrep==1.183.0
+      - name: Semgrep (application code only)
+        run: |
+          set -e
+          for config in p/security-audit p/owasp-top-ten p/typescript p/nodejs; do
+            python3 scripts/run-semgrep.py --config "$config" .
+          done
+`;
+
+describe("the Semgrep step follows the workflow", () => {
+  it("reads the pinned version from the workflow", async () => {
+    const { pinnedSemgrepVersion } = await lib();
+    assert.equal(pinnedSemgrepVersion(WORKFLOW), "1.183.0");
+    assert.equal(pinnedSemgrepVersion("no pin here"), undefined);
+  });
+
+  it("reads the rule packs from the loop in the workflow", async () => {
+    const { semgrepPacks } = await lib();
+    assert.deepEqual(semgrepPacks(WORKFLOW), [
+      "p/security-audit",
+      "p/owasp-top-ten",
+      "p/typescript",
+      "p/nodejs",
+    ]);
+    assert.deepEqual(semgrepPacks("nothing"), []);
+  });
+
+  it("takes the version from the last version line, after an update banner", async () => {
+    const { semgrepVersionFrom } = await lib();
+    const out =
+      "A new version of Semgrep is available. See https://semgrep.dev/docs/upgrading\n1.167.0\n";
+    assert.equal(semgrepVersionFrom(out), "1.167.0");
+    assert.equal(semgrepVersionFrom("command not found"), undefined);
+  });
+});
+
+describe("untestedFiles", () => {
+  it("lists the files under the unit-test coverage row, ignoring colour codes", async () => {
+    const { untestedFiles } = await lib();
+    const out = [
+      "Tests",
+      "  \u001b[31m✗\u001b[0m unit-test coverage  \u001b[2m1 new untested file(s) (76 total)\u001b[0m",
+      "      \u001b[2m- src/check-exposure-set.ts\u001b[0m",
+      "      \u001b[2m- src/other.ts\u001b[0m",
+      "no checks applied here",
+    ].join("\n");
+    assert.deepEqual(untestedFiles(out), ["src/check-exposure-set.ts", "src/other.ts"]);
+  });
+
+  it("returns nothing when the row passes", async () => {
+    const { untestedFiles } = await lib();
+    assert.deepEqual(untestedFiles("  ! unit-test coverage  75 pre-existing untested file(s)"), []);
   });
 });

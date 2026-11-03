@@ -49,8 +49,10 @@ node scripts/prepush.mjs
 
 It checks, in one pass: that the installed tools match `package-lock.json` (a stale `prettier` gave a
 false green format check), that the branch is current with `origin/main` (CI tests the merge), build,
-format, lint, `kit review --enforce` over **all** stages, the tests of the changed files, and that
-the PR text holds no session URL. It lists every problem, then exits non-zero if there is one.
+format, lint, `kit review --enforce` over **all** stages, the tests of the changed files, that every
+new source file has a test (CI's coverage gate, which `kit review` does not run), Semgrep at the
+version and with the rule packs `.github/workflows/security.yml` names, and that the PR text holds no
+session URL. A Semgrep of another version does not run: the line shows `!` and `--strict` fails it. It lists every problem, then exits non-zero if there is one.
 
 `--allow "<check name>"` names a `kit review` check that fails for a reason outside your change, for
 example `enforcement gate liveness` in a worktree. It must be the exact name, and it is printed.

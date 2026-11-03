@@ -69,3 +69,39 @@ export function parseReviewJson(text) {
     return undefined;
   }
 }
+
+/** The Semgrep version CI installs, read from the workflow so the local run cannot drift from it. */
+export function pinnedSemgrepVersion(workflow) {
+  return /semgrep==(\d+\.\d+\.\d+)/.exec(workflow)?.[1];
+}
+
+/** The rule packs CI scans with, read from the `for config in ...; do` loop of the workflow. */
+export function semgrepPacks(workflow) {
+  const m = /for config in ([^;]+); do/.exec(workflow);
+  return m ? m[1].trim().split(/\s+/) : [];
+}
+
+/** The version in `semgrep --version` output, which may carry an update banner before it. */
+export function semgrepVersionFrom(output) {
+  const lines = output.split("\n").map((l) => l.trim());
+  return lines.reverse().find((l) => /^\d+\.\d+\.\d+$/.test(l));
+}
+
+const ANSI = /\u001b\[[0-9;]*m/g;
+
+/** The files listed under the unit-test coverage row of `kit check --category tests` output. */
+export function untestedFiles(output) {
+  const out = [];
+  let inRow = false;
+  for (const line of output.replace(ANSI, "").split("\n")) {
+    if (line.includes("unit-test coverage")) {
+      inRow = true;
+      continue;
+    }
+    if (!inRow) continue;
+    const m = /^\s*-\s+(\S+)\s*$/.exec(line);
+    if (m) out.push(m[1]);
+    else inRow = false;
+  }
+  return out;
+}
