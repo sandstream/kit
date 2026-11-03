@@ -9,7 +9,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -483,4 +483,26 @@ describe("checkAnonAccess: results", () => {
       rmTemp(dir);
     }
   });
+});
+
+describe("checkAnonAccess: unreadable files", () => {
+  const canTest = process.platform !== "win32" && process.getuid?.() !== 0;
+
+  it(
+    "reports a file it cannot open as an incomplete scan, not a pass",
+    { skip: canTest ? false : "chmod 000 does not stop root or Windows" },
+    async () => {
+      const dir = tree({ "db/a.sql": "SELECT 1;", "db/b.sql": "SELECT 2;" });
+      try {
+        chmodSync(join(dir, "db/b.sql"), 0o000);
+        const r = await checkAnonAccess(dir);
+        assert.equal(r.status, "warn");
+        assert.equal(r.didNotRun, true);
+        assert.match(r.detail, /b\.sql could not be read/);
+      } finally {
+        chmodSync(join(dir, "db/b.sql"), 0o600);
+        rmTemp(dir);
+      }
+    },
+  );
 });

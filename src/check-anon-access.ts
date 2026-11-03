@@ -11,7 +11,8 @@
  * anon and public, and policies created outside the SQL files in the repository.
  */
 
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 import type { SecurityCheckResult } from "./check-security.js";
@@ -274,8 +275,9 @@ function opensRowsToAnon(rest: string): boolean {
   const cmd = (rest.match(POLICY_CMD_RE)?.[1] ?? "all").toLowerCase();
   if (cmd !== "all" && cmd !== "select") return false;
   if (!rolesOf(rest.match(POLICY_TO_RE)?.[1]).some((r) => ANON_ROLES.has(r))) return false;
-  const using = usingExpression(rest);
-  return using !== undefined && isOpenExpression(using);
+  // Not named `using`: a contextual keyword that some parsers read as a declaration.
+  const condition = usingExpression(rest);
+  return condition !== undefined && isOpenExpression(condition);
 }
 
 function applyPolicy(state: State, stmt: string): void {
@@ -414,7 +416,28 @@ export function analyzeAnonAccess(sources: SqlSource[]): AnonAnalysis {
 interface Collected {
   sources: SqlSource[];
   oversize: string[];
+  /** Files that could not be opened or read, for example one replaced by a symlink after it was listed. */
+  unreadable: string[];
   truncated: boolean;
+}
+
+/**
+ * Open once and check the size and read through the same handle, so the file cannot change between
+ * the check and the read. A link is refused where the platform supports it.
+ */
+async function readSqlFile(full: string): Promise<string | "oversize" | "unreadable"> {
+  let handle;
+  try {
+    handle = await open(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const info = await handle.stat();
+    if (!info.isFile()) return "unreadable";
+    if (info.size > MAX_SQL_BYTES) return "oversize";
+    return await handle.readFile("utf8");
+  } catch {
+    return "unreadable";
+  } finally {
+    await handle?.close();
+  }
 }
 
 async function collectSql(root: string): Promise<Collected> {
@@ -441,16 +464,15 @@ async function collectSql(root: string): Promise<Collected> {
   }
   await walk(root);
   const sources: SqlSource[] = [];
+  const unreadable: string[] = [];
   for (const full of found.sort()) {
     const rel = relative(root, full);
-    const info = await lstat(full);
-    if (info.size > MAX_SQL_BYTES) {
-      oversize.push(rel);
-      continue;
-    }
-    sources.push({ file: rel, text: await readFile(full, "utf8") });
+    const read = await readSqlFile(full);
+    if (read === "oversize") oversize.push(rel);
+    else if (read === "unreadable") unreadable.push(rel);
+    else sources.push({ file: rel, text: read });
   }
-  return { sources, oversize, truncated };
+  return { sources, oversize, unreadable, truncated };
 }
 
 function describe(t: ReadableTable): string {
@@ -460,13 +482,21 @@ function describe(t: ReadableTable): string {
   return `${t.table}${cols}`;
 }
 
+function notReadReason(c: Pick<Collected, "oversize" | "unreadable" | "truncated">): string | null {
+  const parts: string[] = [];
+  if (c.oversize.length) {
+    parts.push(`${c.oversize.join(", ")} is larger than ${MAX_SQL_BYTES} bytes and was not read`);
+  }
+  if (c.unreadable.length) parts.push(`${c.unreadable.join(", ")} could not be read`);
+  if (c.truncated) parts.push(`more than ${MAX_SQL_FILES} SQL files, the rest were not read`);
+  return parts.length ? parts.join("; ") : null;
+}
+
 export async function checkAnonAccess(root: string): Promise<SecurityCheckResult> {
   const base = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
-  const { sources, oversize, truncated } = await collectSql(root);
-  if (oversize.length > 0 || truncated) {
-    const why = oversize.length
-      ? `${oversize.join(", ")} is larger than ${MAX_SQL_BYTES} bytes and was not read`
-      : `more than ${MAX_SQL_FILES} SQL files, the rest were not read`;
+  const { sources, oversize, unreadable, truncated } = await collectSql(root);
+  const why = notReadReason({ oversize, unreadable, truncated });
+  if (why) {
     return {
       ...base,
       status: "warn",
