@@ -292,7 +292,7 @@ function registryUrl(base: string, pkg: string): string {
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/");
-  return `${base.replace(/\/+$/, "")}/${path.replace("%40", "@")}`;
+  return `${base.replace(/\/+$/, "")}/${path.replace(/%40/g, "@")}`;
 }
 
 function limitFrom(cfg: SupplyChainConfig, env: NodeJS.ProcessEnv): number {

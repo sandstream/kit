@@ -117,7 +117,7 @@ describe("coolingCheck (pure, with an injected advisory lookup)", () => {
 });
 
 describe("applyCooling: the warning and its limits", () => {
-  const { publish, project, run } = localServices();
+  const { publish, project, run, registry, url } = localServices();
 
   it("warns about a young release, names the newest older version, and still passes", async () => {
     publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
@@ -126,6 +126,23 @@ describe("applyCooling: the warning and its limits", () => {
     assert.match(r.output, /fixture@1\.0\.0/);
     assert.equal(r.passed, true);
     assert.equal(verdictPassed(r.output), true);
+  });
+
+  it("asks the registry for a scoped package under its own path", async () => {
+    const meta = { "1.0.0": {}, "1.0.1": {} };
+    registry.set("/@scope/fixture", {
+      versions: meta,
+      time: { "1.0.0": iso(300), "1.0.1": iso(2) },
+    });
+    const deps: CoolingDeps = {
+      ...defaultCoolingDeps,
+      env: { KIT_NPM_REGISTRY: url() },
+      airGap: async () => ({ enabled: false, mirrors: {} }),
+    };
+    const cwd = project({ "package.json": "{}" });
+    const input = { passed: true, output: report("1.0.1") };
+    const r = await applyCooling(cwd, "npm", "@scope/fixture@1", input, deps);
+    assert.match(r.output, /WARNING: cooling: 1\.0\.1 was published 2 days ago/);
   });
 
   it("does not warn about a release older than the limit", async () => {
