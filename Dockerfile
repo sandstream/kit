@@ -56,12 +56,14 @@ WORKDIR /app
 # The apk packages use a FLOOR (>=), not an exact pin: Alpine replaces a package in its
 # index when a fix lands (libexpat 2.8.5 became 2.9.0), and an exact pin then fails the
 # whole image build with "unable to select packages". The floor keeps the security
-# minimum and still builds when the index moves on.
+# minimum and still builds when the index moves on. Raise the floor when a fix matters: a floor that
+# still matches the cached layer lets the build keep the vulnerable version (libexpat 2.9.0,
+# CVE-2026-117610 and CVE-2026-118370, fixed in 2.10.0-r0).
 RUN apk add --no-cache --upgrade \
         'bash>=5.3.9-r1' \
         'dumb-init>=1.2.5-r4' \
         'libcrypto3>=3.5.9-r0' \
-        'libexpat>=2.8.5-r0' \
+        'libexpat>=2.10.0-r0' \
         'libssl3>=3.5.9-r0' \
         'python3>=3.14.10-r1' \
     && npm install -g npm@11.21.1 --ignore-scripts \

@@ -31,11 +31,14 @@ jobs:
     name: agent review gate
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: read
       checks: read
       pull-requests: read
+    env:
+      # Only whether the secret exists; the token itself reaches the decide step alone.
+      HAS_MODEL_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,6 +55,15 @@ jobs:
       - name: Build the protected-path classifier from the default branch
         if: steps.ready.outputs.ready == 'true'
         run: npm ci --ignore-scripts && npm run build
+      # Step B (optional): with the owner's subscription token set, a model reads the diff and may
+      # veto an approval. It can never approve on its own. Pinned and triaged (kit triage npm,
+      # 2.1.316: passed); install.cjs only copies the platform binary already installed, no network.
+      - name: Install the Claude Code CLI for the model review
+        if: steps.ready.outputs.ready == 'true' && env.HAS_MODEL_TOKEN == 'true'
+        run: |
+          npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.316
+          node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
+          claude --version
       - name: Approve or explain
         if: steps.ready.outputs.ready == 'true'
         run: node scripts/agent-review-gate.mjs decide "$HEAD_SHA"
@@ -60,3 +72,5 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_APP_ID: ${{ vars.REVIEWER_APP_ID }}
           REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          REVIEWER_MODEL: ${{ vars.REVIEWER_MODEL }}

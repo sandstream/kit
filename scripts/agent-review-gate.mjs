@@ -15,9 +15,11 @@
  * Reads use GITHUB_TOKEN (the workflow's own, read-only); writes use the App's narrowed token.
  * Every failure to read or decide throws, and a throw approves nothing (fail-closed).
  */
+import { createHash } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { installationToken } from "./github-app-token.mjs";
+import { runModelReview, withModelVerdict } from "./agent-model-review.mjs";
 
 const API = "https://api.github.com";
 export const MAX_CHANGED_LINES = 1500;
@@ -93,6 +95,20 @@ async function get(path, token, accept = "application/vnd.github+json") {
   return response.json();
 }
 
+async function getText(path, token) {
+  const response = await fetch(`${API}${path}`, {
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+    headers: {
+      Accept: "application/vnd.github.diff",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (!response.ok) throw new Error(`GET ${path} (diff): HTTP ${response.status}`);
+  return response.text();
+}
+
 async function paged(path, token, key, max = 30) {
   const all = [];
   for (let page = 1; page <= max; page++) {
@@ -124,12 +140,40 @@ async function ready(sha) {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `ready=${isReady}\n`);
 }
 
-/** The same decision already posted at this commit (a re-run that changes the outcome posts again). */
-async function alreadyPosted(repo, pr, sha, decision, token) {
+/** Identifies one deterministic decision; the model's wording varies, so it is not part of it. */
+export function decisionKey(decision) {
+  const digest = createHash("sha256").update(`${decision.event}\n${decision.body}`).digest("hex");
+  return `<!-- kit-review-key:${digest.slice(0, 16)} -->`;
+}
+
+/** This decision was already posted at this commit (a changed outcome gets a new key). */
+async function alreadyPosted(repo, pr, sha, key, token) {
   const { items } = await paged(`/repos/${repo}/pulls/${pr}/reviews`, token);
-  return items.some(
-    (r) => r.commit_id === sha && String(r.body ?? "").trim() === decision.body.trim(),
-  );
+  return items.some((r) => r.commit_id === sha && String(r.body ?? "").includes(key));
+}
+
+/** Step B, only on what step A would approve. Any failure is a refusal, never an approval. */
+async function withModel(repo, pull, decision, token) {
+  const oauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (decision.event !== "APPROVE" || !oauth) return decision;
+  try {
+    const diff = await getText(`/repos/${repo}/pulls/${pull.number}`, token);
+    const model = process.env.REVIEWER_MODEL || undefined;
+    const review = runModelReview({
+      title: pull.title,
+      body: pull.body,
+      diff,
+      token: oauth,
+      model,
+    });
+    return withModelVerdict(decision, review);
+  } catch (err) {
+    const head = decision.body.split(":")[0];
+    return {
+      event: "COMMENT",
+      body: `${head}: **not approved**. The gates passed, but the model review did not complete: ${err.message}.`,
+    };
+  }
 }
 
 async function post(repo, pr, sha, decision, appToken) {
@@ -170,13 +214,15 @@ async function decideAll(sha) {
       fileCount: files.items.length,
       truncated: files.truncated,
     });
-    if (await alreadyPosted(repo, pull.number, sha, decision, token)) {
-      console.log(`#${pull.number}: ${decision.event} already posted at this commit`);
+    const key = decisionKey(decision);
+    if (await alreadyPosted(repo, pull.number, sha, key, token)) {
+      console.log(`#${pull.number}: ${decision.event} already decided at this commit`);
       continue;
     }
+    const final = await withModel(repo, pull, decision, token);
     appToken ??= await installationToken();
-    await post(repo, pull.number, sha, decision, appToken);
-    console.log(`#${pull.number}: ${decision.event}`);
+    await post(repo, pull.number, sha, { ...final, body: `${final.body}\n${key}` }, appToken);
+    console.log(`#${pull.number}: ${final.event}`);
   }
 }
 
