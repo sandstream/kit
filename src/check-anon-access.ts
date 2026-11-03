@@ -46,24 +46,106 @@ const ANON_ROLES = new Set(["anon", "public"]);
 
 const BLOCK_OPEN = String.fromCharCode(47, 42);
 const BLOCK_CLOSE = String.fromCharCode(42, 47);
+const LINE_COMMENT = String.fromCharCode(45, 45);
+const SQ = String.fromCharCode(39);
+const DQ = String.fromCharCode(34);
 
-function stripBlockComments(text: string): string {
-  let out = "";
-  let at = 0;
-  for (;;) {
-    const open = text.indexOf(BLOCK_OPEN, at);
-    if (open === -1) return out + text.slice(at);
-    out += text.slice(at, open) + " ";
-    const close = text.indexOf(BLOCK_CLOSE, open + 2);
-    if (close === -1) return out;
-    at = close + 2;
-  }
+/** What a lexer step consumed: the index after it and the text it leaves behind. */
+type Skip = { end: number; keep: string };
+
+function skipLineComment(text: string, i: number): Skip | null {
+  if (!text.startsWith(LINE_COMMENT, i)) return null;
+  const nl = text.indexOf("\n", i);
+  return { end: nl === -1 ? text.length : nl, keep: " " };
 }
 
-/** Remove dollar-quoted bodies and comments, so neither can pass for a statement. */
-function stripSql(text: string): string {
-  const withoutBodies = text.replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, " ");
-  return stripBlockComments(withoutBodies).replace(/--[^\n]*/g, " ");
+function skipBlockComment(text: string, i: number): Skip | null {
+  if (!text.startsWith(BLOCK_OPEN, i)) return null;
+  let depth = 0;
+  let at = i;
+  while (at < text.length) {
+    if (text.startsWith(BLOCK_OPEN, at)) {
+      depth++;
+      at += 2;
+    } else if (text.startsWith(BLOCK_CLOSE, at)) {
+      depth--;
+      at += 2;
+      if (depth === 0) return { end: at, keep: " " };
+    } else {
+      at++;
+    }
+  }
+  return { end: text.length, keep: " " };
+}
+
+/** A quoted run, with a doubled quote as the escape. A string loses its content, an identifier keeps it. */
+function skipQuoted(text: string, i: number, quote: string): Skip | null {
+  if (text[i] !== quote) return null;
+  let at = i + 1;
+  while (at < text.length) {
+    if (text[at] === quote && text[at + 1] === quote) at += 2;
+    else if (text[at] === quote) break;
+    else at++;
+  }
+  const end = Math.min(at + 1, text.length);
+  return { end, keep: quote === SQ ? SQ + SQ : text.slice(i, end) };
+}
+
+function isTagChar(ch: string | undefined, first: boolean): boolean {
+  if (ch === undefined) return false;
+  const letter = (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_";
+  return letter || (!first && ch >= "0" && ch <= "9");
+}
+
+/** The opening tag at i, such as the two dollar signs or a named tag, or null when none starts here. */
+function dollarTagAt(text: string, i: number): string | null {
+  let at = i + 1;
+  while (isTagChar(text[at], at === i + 1)) at++;
+  return text[at] === "$" ? text.slice(i, at + 1) : null;
+}
+
+function skipDollarQuote(text: string, i: number): Skip | null {
+  if (text[i] !== "$") return null;
+  const tag = dollarTagAt(text, i);
+  if (!tag) return null;
+  const close = text.indexOf(tag, i + tag.length);
+  return { end: close === -1 ? text.length : close + tag.length, keep: " " };
+}
+
+function skipSpecial(text: string, i: number): Skip | null {
+  return (
+    skipLineComment(text, i) ??
+    skipBlockComment(text, i) ??
+    skipQuoted(text, i, SQ) ??
+    skipQuoted(text, i, DQ) ??
+    skipDollarQuote(text, i)
+  );
+}
+
+/**
+ * Split SQL into statements in one pass. Comments, string contents and dollar-quoted bodies are
+ * recognised only where they can start, so a dollar sign or comment opener inside another
+ * construct cannot hide the statements that follow it.
+ */
+export function splitStatements(text: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let i = 0;
+  while (i < text.length) {
+    const skip = skipSpecial(text, i);
+    if (skip) {
+      current += skip.keep;
+      i = skip.end;
+    } else if (text[i] === ";") {
+      out.push(current);
+      current = "";
+      i++;
+    } else {
+      current += text[i++];
+    }
+  }
+  out.push(current);
+  return out;
 }
 
 function normTable(raw: string): string {
@@ -94,13 +176,21 @@ function splitTopLevel(body: string): string[] {
 
 const CONSTRAINT_START = /^(constraint|primary|foreign|unique|check|like|exclude)\b/i;
 
+/** The identifier a column definition starts with, with an optional double quote in front, or "". */
+function leadingIdentifier(part: string): string {
+  const start = part[0] === DQ ? 1 : 0;
+  let end = start;
+  while (isTagChar(part[end], end === start)) end++;
+  return part.slice(start, end);
+}
+
 function columnsOf(body: string): string[] {
   const names: string[] = [];
   for (const item of splitTopLevel(body)) {
     const part = item.trim();
     if (!part || CONSTRAINT_START.test(part)) continue;
-    const name = part.match(/^\x22?([A-Za-z_]\w*)\x22?/);
-    if (name) names.push(name[1].toLowerCase());
+    const name = leadingIdentifier(part);
+    if (name) names.push(name.toLowerCase());
   }
   return names;
 }
@@ -110,11 +200,17 @@ function isOpenExpression(expr: string): boolean {
   return flat === "true" || flat === "1=1";
 }
 
+/** The first word of a role entry: WITH GRANT OPTION and CASCADE follow the role name after one space. */
+function firstWord(entry: string): string {
+  const space = entry.indexOf(" ");
+  return space === -1 ? entry : entry.slice(0, space);
+}
+
 function rolesOf(clause: string | undefined): string[] {
   if (!clause) return ["public"];
   return clause
     .split(",")
-    .map((r) => r.replace(/\x22/g, "").trim().toLowerCase())
+    .map((r) => firstWord(r.replace(/\x22/g, "").trim().toLowerCase()))
     .filter(Boolean);
 }
 
@@ -137,7 +233,20 @@ function addColumns(state: State, table: string, cols: string[]): void {
 const POLICY_HEAD_RE = /^create\s+policy\s+(\x22[^\x22]+\x22|\S+)\s+on\s+(\S+)([\s\S]*)$/i;
 const POLICY_CMD_RE = /\bfor\s+(all|select|insert|update|delete)\b/i;
 const POLICY_TO_RE = /\bto\s+([\w\x22,\s]+?)(?=\s+(using|with\s+check)\b|$)/i;
-const POLICY_USING_RE = /\busing\s*(\([\s\S]*\))\s*(?:with\s+check|$)/i;
+const POLICY_USING_RE = /\busing\s*\(/i;
+
+/** The text inside the parentheses after USING, found by counting depth, or undefined. */
+function usingExpression(rest: string): string | undefined {
+  const m = POLICY_USING_RE.exec(rest);
+  if (!m) return undefined;
+  const start = m.index + m[0].length;
+  let depth = 1;
+  for (let i = start; i < rest.length; i++) {
+    if (rest[i] === "(") depth++;
+    if (rest[i] === ")" && --depth === 0) return rest.slice(start, i);
+  }
+  return undefined;
+}
 
 /** True when the clauses after ON <table> let anon or public select every row. */
 function opensRowsToAnon(rest: string): boolean {
@@ -145,7 +254,7 @@ function opensRowsToAnon(rest: string): boolean {
   const cmd = (rest.match(POLICY_CMD_RE)?.[1] ?? "all").toLowerCase();
   if (cmd !== "all" && cmd !== "select") return false;
   if (!rolesOf(rest.match(POLICY_TO_RE)?.[1]).some((r) => ANON_ROLES.has(r))) return false;
-  const using = rest.match(POLICY_USING_RE)?.[1];
+  const using = usingExpression(rest);
   return using !== undefined && isOpenExpression(using);
 }
 
@@ -274,7 +383,7 @@ export function analyzeAnonAccess(sources: SqlSource[]): AnonAnalysis {
     wildcard: false,
   };
   for (const source of sources) {
-    for (const stmt of stripSql(source.text).split(";")) applyStatement(state, stmt);
+    for (const stmt of splitStatements(source.text)) applyStatement(state, stmt);
   }
   return summarise(state);
 }

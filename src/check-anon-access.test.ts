@@ -204,6 +204,60 @@ describe("analyzeAnonAccess: column grants", () => {
   });
 });
 
+describe("analyzeAnonAccess: parsing that must not hide an open table", () => {
+  const open = (text: string) => analyzeAnonAccess(sql(CONTENT_TABLE, text)).readable.length;
+
+  it("reads USING (true) when WITH CHECK follows", () => {
+    assert.equal(open("CREATE POLICY p ON content FOR ALL USING (true) WITH CHECK (true);"), 1);
+    assert.equal(open("CREATE POLICY p ON content FOR ALL USING (true) WITH CHECK (false);"), 1);
+  });
+
+  it("does not call a nested row condition open", () => {
+    assert.equal(
+      open("CREATE POLICY p ON content FOR SELECT USING (owner = (SELECT id FROM t LIMIT 1));"),
+      0,
+    );
+  });
+
+  it("is not blinded by a dollar sign inside a line comment", () => {
+    const text = [
+      "-- see $$ note",
+      "CREATE POLICY p ON content FOR SELECT USING (true);",
+      "-- end $$",
+    ].join("\n");
+    assert.equal(open(text), 1);
+  });
+
+  it("is not blinded by a block comment opener inside a line comment", () => {
+    const text = [
+      "-- remember /*",
+      "CREATE POLICY p ON content FOR SELECT USING (true);",
+      "/* closed */",
+    ].join("\n");
+    assert.equal(open(text), 1);
+  });
+
+  it("is not confused by a semicolon or dashes inside a string", () => {
+    const text = [
+      "COMMENT ON TABLE content IS 'a -- b; $$ c';",
+      "CREATE POLICY p ON content FOR SELECT USING (true);",
+    ].join("\n");
+    assert.equal(open(text), 1);
+  });
+
+  it("reads the role when WITH GRANT OPTION follows", () => {
+    assert.equal(open("GRANT SELECT ON content TO anon WITH GRANT OPTION;"), 1);
+    assert.equal(open("GRANT SELECT ON content TO authenticated, anon WITH GRANT OPTION;"), 1);
+  });
+
+  it("lets REVOKE ... CASCADE cancel a grant", () => {
+    assert.equal(
+      open("GRANT SELECT ON content TO anon;\nREVOKE SELECT ON content FROM anon CASCADE;"),
+      0,
+    );
+  });
+});
+
 describe("analyzeAnonAccess: personal columns", () => {
   it("finds phone, email, person names and national ids, from CREATE TABLE and ALTER TABLE", () => {
     const r = analyzeAnonAccess(
