@@ -2690,13 +2690,9 @@ async function appendProjectSecurityChecks(
   results.push(await checkScanScope(root, scope));
   const { checkAdvisoryBaseline } = await import("./check-advisory-baseline.js");
   results.push(await checkAdvisoryBaseline(root));
-  const { checkClientExposedNames, checkBuiltBundleSecrets } =
-    await import("./check-client-exposure.js");
   const governed = await loadGovernedConfig(root);
-  const clientAllow: Record<string, string> = governed?.scan?.client_exposed_allow ?? {};
-  const declaredKeyNames: string[] = Object.keys(governed?.secrets?.keys ?? {});
-  results.push(await checkClientExposedNames(root, clientAllow, declaredKeyNames));
-  results.push(await checkBuiltBundleSecrets(root));
+  const { checkExposureSet } = await import("./check-exposure-set.js");
+  results.push(...(await checkExposureSet(root, governed)));
   const { checkDecisionLedger } = await import("./check-decision-ledger.js");
   results.push(await checkDecisionLedger(root, governed?.decisions?.require === true));
   const { checkExternalFindings } = await import("./external-findings.js");

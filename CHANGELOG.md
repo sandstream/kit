@@ -2,6 +2,12 @@
 
 ### Security
 
+- **`kit check` lists the tables that anonymous users can read.** The new "anonymous database access"
+  row reads `CREATE POLICY`, `GRANT` and `REVOKE` in the SQL files of the project, in file name order.
+  A policy such as `FOR SELECT USING (true)` for anon or public opens a table. A table with a phone,
+  email, person name or national id column fails; other open tables warn. It reads files only: no
+  database is contacted, and `ALTER DEFAULT PRIVILEGES` and live policies are not read. A
+  `REVOKE SELECT` followed by `GRANT SELECT (columns)` limits the columns that count.
 - **The review gate re-reads the pull request before it decides and before it posts.** It read the
   file list, the diff and the model review at the head of that moment but posted the review for the
   commit it was started on, so a push in between could give the decision for one commit on the
