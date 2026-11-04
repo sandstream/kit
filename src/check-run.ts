@@ -31,6 +31,7 @@ import { checkTests, type TestCheckResult } from "./check-tests.js";
 import { checkDeploy, type DeployCheckResult } from "./check-deploy.js";
 import { tagWithDeployed } from "./deployed-exposure.js";
 import { checkRuntimes } from "./check-runtimes.js";
+import { checkRuntimeInstalls } from "./check-installs.js";
 import { checkUpstream, upstreamToJsonChecks, type UpstreamCheckRow } from "./check-upstream.js";
 import { loadBaselineForGate, baselineGet, BASELINE_FILE } from "./baseline.js";
 import { computeCheckVerdict, type CheckVerdict } from "./check-verdict.js";
@@ -169,7 +170,8 @@ async function securityRows(cwd: string, online: boolean | undefined, config: ki
     clientExposureExtras(config),
   );
   const tagged = await tagWithDeployed(rows, config, cwd, online);
-  return [...tagged, ...(await checkRuntimes(cwd, { online }))];
+  const runtimes = await checkRuntimes(cwd, { online });
+  return [...tagged, ...runtimes, ...(await checkRuntimeInstalls(cwd, { online }))];
 }
 
 export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRunResult> {
