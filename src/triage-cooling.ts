@@ -277,7 +277,7 @@ async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
   }
 }
 
-async function airGapView(cwd: string): Promise<AirGapView> {
+export async function airGapView(cwd: string): Promise<AirGapView> {
   const { resolveAirGap, airGapTriageEnv } = await import("./airgap/config.js");
   const file = join(cwd, ".kit.toml");
   const view = (cfg: Parameters<typeof resolveAirGap>[0]): AirGapView => {

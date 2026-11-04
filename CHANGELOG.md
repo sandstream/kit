@@ -17,6 +17,15 @@
   `.claude/skills/<name>`. Existing deep entries no longer satisfy the gate: triage each staged
   skill again.
 
+- **`kit check` scans the packages installed globally, which no lockfile names.** The new
+  `global npm packages` row reads `lib/node_modules` of every Node install that mise, Homebrew, nvm, fnm
+  and a plain `/usr/local` keep, and the npm prefix (`NPM_CONFIG_PREFIX` or `prefix=` in `~/.npmrc`), so
+  finding the packages executes nothing. It asks osv-scanner about them through a synthetic lockfile in a
+  private temporary folder, with the same severity rules as the dependency row, and names where each
+  vulnerable package lives. The global update (`npm install -g <name>@latest`) is printed as text and
+  never run. A package linked from elsewhere is skipped, a folder whose name does not match its
+  `package.json` is skipped, and with air-gap on or no osv-scanner the row is unverified, never green.
+  Node only, not read on Windows, and Volta's layout and kit's own scanners are not covered yet.
 - **`kit check` judges every Node install on the machine, not only the one that answers.** The new
   `runtime installs: node` row lists the installs that mise, Homebrew, nvm, fnm, Volta and a plain
   `/usr/local` keep, says which one PATH runs, and judges each with the end-of-life and security data
