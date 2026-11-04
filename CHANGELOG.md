@@ -2,6 +2,16 @@
 
 ### Security
 
+- **`kit check` judges every Node install on the machine, not only the one that answers.** The new
+  `runtime installs: node` row lists the installs that mise, Homebrew, nvm, fnm, Volta and a plain
+  `/usr/local` keep, says which one PATH runs, and judges each with the end-of-life and security data
+  the `runtime: node` row already reads. A winner that is end of life or lacks a security release is a
+  failure, and the row names a newer install that sits lower in PATH. Unused installs that are end of
+  life or lack a security release are a warning with the removal command for their manager
+  (`mise uninstall node@25.9.0`, `brew uninstall node@20`); nothing is ever removed. The release line
+  this project declares is left out of the proposals. Versions are read from folder names and node
+  headers, so finding them executes nothing; a shim (mise, Volta) is asked in a neutral folder. Not
+  known: which versions other projects on the machine pin. Node only, and not read on Windows.
 - **`kit check` shows evidence that the gates were exercised, not only that they are configured.** The new
   `enforcement evidence` row joins three facts and never reads pass from configuration alone: the install
   gate and the env-write gate are wired; the negative controls of `kit usage prove` held just now; and no
