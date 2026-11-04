@@ -252,7 +252,6 @@ function unverified(why: string): SecurityCheckResult {
     ...base,
     status: "warn",
     severity: "medium",
-    didNotRun: true,
     detail: `unverified: ${plain(why, 160)}`,
     suggestion: "kit upstream check  (fills the release cache), or kit check --online",
   };

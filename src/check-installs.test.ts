@@ -304,14 +304,18 @@ describe("judgeInstalls: passing and unverified", () => {
   it("is unverified when the winner is a shim whose version is not known", () => {
     const r = judgeInstalls(facts({ winner: { manager: "mise", version: null, shim: true } }));
     assert.equal(r.status, "warn");
-    assert.equal(r.didNotRun, true);
+    assert.notEqual(
+      r.didNotRun,
+      true,
+      "like the runtime row, a warning that --strict counts as did-not-run",
+    );
     assert.match(r.detail, /unverified/i);
   });
 
   it("is unverified, never green, when the release data says unknown", () => {
     const r = judgeInstalls(facts({ assess: () => bad("unknown") }));
     assert.equal(r.status, "warn");
-    assert.equal(r.didNotRun, true);
+    assert.match(r.detail, /unverified/i);
   });
 
   it("prints nothing a folder name could use to forge a line", () => {
