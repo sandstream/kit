@@ -3048,12 +3048,10 @@
       "kind": "group",
       "summary": "Security evaluation before installing packages, images, or skills",
       "x-kit-accepted-flags": [
-        "--cached",
         "--deep",
         "--env",
         "--help",
         "--json",
-        "--name-only",
         "--non-interactive",
         "--pin",
         "--read-only",
