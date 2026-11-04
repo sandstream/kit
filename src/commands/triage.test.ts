@@ -47,14 +47,24 @@ describe("kit triage plugin (no plugins declared → honest skip)", () => {
 });
 
 // A triage-log entry shaped like the ones recordTriageRun writes.
-const logEntry = (o: { target: string; deep?: boolean; type?: string; timestamp?: string }) => ({
+const logEntry = (o: {
+  target: string;
+  deep?: boolean;
+  type?: string;
+  timestamp?: string;
+  contentDigest?: string | null;
+}) => ({
   timestamp: o.timestamp ?? "2026-07-10T12:00:00Z",
   type: o.type ?? "skill",
   target: o.target,
   sandbox: false,
   deep: o.deep,
   granter: "tester",
+  ...(o.contentDigest === null ? {} : { contentDigest: o.contentDigest ?? STAGED }),
 });
+// The digest of the staged content of every skill in these tests.
+const STAGED = "sha256:staged";
+const DIGESTS = new Map(["searxng", "triage", "a", "b", "new"].map((n) => [n, STAGED]));
 
 describe("check-skills gate — parseStagedSkillNames", () => {
   it("extracts unique skill names from staged files inside .claude/skills/<name>/", () => {
@@ -99,6 +109,7 @@ describe("check-skills gate — latestDeepSkillTriage", () => {
         ["searxng"],
         [logEntry({ target: "searxng", deep: true, timestamp: "not-a-date" })],
         NOW,
+        DIGESTS,
       ),
       ["searxng"],
     );
@@ -112,25 +123,48 @@ describe("check-skills gate — missingDeepSkillTriage (fail-closed)", () => {
     const entries = [
       logEntry({ target: ".claude/skills/searxng", deep: true, timestamp: "2026-07-10T00:00:00Z" }),
     ];
-    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW), []);
+    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW, DIGESTS), []);
   });
 
   it("a shallow-only entry does NOT satisfy the deep gate", () => {
     const entries = [
       logEntry({ target: "searxng", deep: false, timestamp: "2026-07-10T00:00:00Z" }),
     ];
-    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW), ["searxng"]);
+    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW, DIGESTS), ["searxng"]);
   });
 
   it("a stale deep entry (older than the max age) does NOT satisfy the gate", () => {
     const entries = [
       logEntry({ target: "searxng", deep: true, timestamp: "2026-06-01T00:00:00Z" }),
     ];
-    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW), ["searxng"]);
+    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW, DIGESTS), ["searxng"]);
   });
 
   it("no triage log at all ⇒ every staged skill is missing", () => {
-    assert.deepEqual(missingDeepSkillTriage(["a", "b"], [], NOW).sort(), ["a", "b"]);
+    assert.deepEqual(missingDeepSkillTriage(["a", "b"], [], NOW, DIGESTS).sort(), ["a", "b"]);
+  });
+
+  it("a deep entry for other content under the same name does NOT satisfy the gate", () => {
+    // An earlier version of the skill, or an unrelated directory that is also called searxng.
+    const entries = [
+      logEntry({ target: "/tmp/elsewhere/searxng", deep: true, contentDigest: "sha256:other" }),
+    ];
+    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW, DIGESTS), ["searxng"]);
+  });
+
+  it("an entry written before kit recorded digests does NOT satisfy the gate", () => {
+    const entries = [logEntry({ target: "searxng", deep: true, contentDigest: null })];
+    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW, DIGESTS), ["searxng"]);
+  });
+
+  it("a staged skill whose index could not be read (no digest) is missing", () => {
+    const entries = [logEntry({ target: "searxng", deep: true })];
+    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW, new Map()), ["searxng"]);
+  });
+
+  it("a Windows path target matches its skill name", () => {
+    const entries = [logEntry({ target: ".claude\\skills\\searxng", deep: true })];
+    assert.deepEqual(missingDeepSkillTriage(["searxng"], entries, NOW, DIGESTS), []);
   });
 
   it("mixes satisfied and missing skills correctly", () => {
@@ -138,10 +172,10 @@ describe("check-skills gate — missingDeepSkillTriage (fail-closed)", () => {
       logEntry({ target: "searxng", deep: true, timestamp: "2026-07-10T00:00:00Z" }), // fresh deep
       logEntry({ target: "triage", deep: false, timestamp: "2026-07-10T00:00:00Z" }), // shallow
     ];
-    assert.deepEqual(missingDeepSkillTriage(["searxng", "triage", "new"], entries, NOW).sort(), [
-      "new",
-      "triage",
-    ]);
+    assert.deepEqual(
+      missingDeepSkillTriage(["searxng", "triage", "new"], entries, NOW, DIGESTS).sort(),
+      ["new", "triage"],
+    );
   });
 });
 

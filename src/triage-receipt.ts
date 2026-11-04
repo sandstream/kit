@@ -12,6 +12,8 @@ export interface TriageLogEntry {
   granter: string;
   /** Exact npm spec evaluated by a kit-driven install, when more specific than target. */
   triagedSpec?: string;
+  /** For a local skill: the digest of the files triaged (src/skill-triage-binding.ts). */
+  contentDigest?: string;
 }
 
 export interface TriagePassInput {
@@ -21,6 +23,7 @@ export interface TriagePassInput {
   deep?: boolean;
   cwd?: string;
   triagedSpec?: string;
+  contentDigest?: string;
 }
 
 /** Append one PASS receipt. Callers decide whether a write failure blocks their operation. */
@@ -33,6 +36,7 @@ export async function appendTriagePass(input: TriagePassInput): Promise<void> {
     deep: input.deep ?? false,
     granter: process.env.USER ?? "unknown",
     ...(input.triagedSpec ? { triagedSpec: input.triagedSpec } : {}),
+    ...(input.contentDigest ? { contentDigest: input.contentDigest } : {}),
   };
   await appendFile(
     resolve(input.cwd ?? process.cwd(), TRIAGE_LOG_FILE),
