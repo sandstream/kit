@@ -1,5 +1,47 @@
 ## [Unreleased]
 
+## [7.2.0] - 2026-11-04
+
+### Added
+
+- **`kit watch` ranks the open security pull requests and schedules the check (#735).** `kit watch run`
+  reads the open pull requests and Dependabot alerts through `gh`, keeps the pull requests that fix an open
+  advisory (Dependabot's own only), ranks them by the advisory's severity, oldest first on a tie, caches
+  the result in `.kit/watch.json` and opens one action item per critical or high one. The status line shows
+  `sec-prs:2 critical #3 ci:failing`; a missing alert source reads `unverified` and a cache older than 48
+  hours reads `stale`, never an empty green list. `kit watch install` writes a launchd entry, prints a cron
+  line or writes a read-only workflow; kit loads nothing and does not edit the crontab.
+- **`[deploy.health.<env>]` reads the deployed commit (#729), and dependency findings are tagged `deployed`
+  or `branch only` (#730).** With a `url` that returns the running commit as JSON,
+  `kit check --category deploy --online` prints `deployed commit <hash>`, and
+  `kit check --category security --online` reads the lockfile at that commit and tags each finding by
+  whether the vulnerable package is in the deployed build. The URL comes from the repository, so nothing
+  is requested without `--online`, air-gap in the project config is honoured and private hosts are refused.
+- **`kit services` keeps leases for the local services agents start (#695).** Agent sessions started
+  containers and Supabase stacks and ended without stopping them. `kit services add|ls|renew|stop|prune|
+ask|keep` keeps a per-user registry with an owner and a lease, merges it with live probes, lists running
+  Docker workloads nobody registered, and refuses to stop another session's service while its lease runs
+  unless forced.
+- **`[[scan.allow]]` marks a reviewed match of `kit security scan-staged` as harmless (#713).** An entry
+  silences one finding label in one file, needs a reason, refuses a directory or a pattern, names the entry
+  that applied, and is reported as stale when it matches nothing. Kit reads it from the staged or committed
+  `.kit.toml`, never the working copy, so review sees it.
+- **`kit scan` runs Snyk once per `[projects]` path (#707).** With two projects one level down and no
+  manifest in the root, Snyk could never run; each run is named `snyk:<path>`.
+- **`node scripts/prepush.mjs` runs the whole local gate before a push (#714, #738).** It checks that the
+  installed tools match the lockfile, that the branch is current with main, build, format, lint,
+  `kit review --enforce`, the tests of the changed files, that every new source file has a test, Semgrep at
+  the CI version and rule packs, and that the PR text holds no session URL. A step that could not run shows
+  `!` and counts in the summary.
+- **CI fails a pull request whose title or body holds a session URL (#710, #725).**
+
+### Changed
+
+- **Bumblebee catalogs over 180 days old warn instead of pass (#719), and the row says why they are old
+  and what a pass covers (#709).** The catalogs ship inside the pinned release, so a pass over 180 days old
+  says nothing about newer compromises.
+- **The upstream watch reads the Semgrep pin in `security.yml` (#700).**
+
 ### Security
 
 - **`kit check` judges every Node install on the machine, not only the one that answers.** The new
@@ -114,6 +156,58 @@
   hook over `Read`/`Bash`/`Edit`/`Write`, a `SessionStart`/`UserPromptSubmit` hook (its output
   enters the agent's context), an unpinned `npx`/`bunx`/`uvx`/`dlx`/`pipx run` package, and a
   `curl`/`wget` file upload. A hooks path that leaves the plugin directory is refused.
+- **Review receipts and the protected-path rules (#657, #693, #699).** A pull request could weaken its own
+  protected-path rules; kit now combines the rules from the base, the default and the proposed branch, and
+  checks both paths when a file is renamed. A review receipt binds the pull request and branch identity,
+  the gate result is signed before the report is printed, a transaction lock protects the failure history
+  and recovery keeps signed evidence after an interrupted process. The secrets and policy command surfaces
+  are protected paths, and the built-in defaults match the rule file.
+- **The Semgrep SAST gate fails closed (#691), now on Semgrep 1.183.0 (#702).** The job could report green
+  when Semgrep failed internally. It now runs a pinned Semgrep through `scripts/run-semgrep.py`, once per
+  registry pack, and fails on findings, scanner errors, partial parses, unexpected skips, empty rule sets
+  and tracked files it did not scan.
+- **`kit security scan-build` reports every gap in its coverage (#696).** An oversized or unreadable file
+  that is not a source map, a directory it could not read and the depth limit were skipped silently. Each is
+  an incomplete scan now, and a read stops at 5 MiB. A build that contains a script over 5 MiB is reported
+  as incomplete.
+- **Two CodeQL findings were real (#697).** The npm registry match was not anchored, so a lockfile URL that
+  merely contained `registry.npmjs.org/` counted as the public registry. A backslash was not escaped in the
+  CI step summary.
+- **`minimatch` is overridden to 11.0.1 (#687, GHSA-g3hv-75wg-m249).** Dev-only, reached through eslint.
+- **The Docker image keeps its Node base updated (#688).** Every stage inherits one pinned base, and
+  Dependabot updates its digest weekly. Major updates of Node, TypeScript and `@types/node` stay explicit.
+- **Cloud scanner evidence is ingested read-only (ADR-0009, #727, #728).** A test pins that `kit ingest`
+  makes no network call.
+
+### Fixed
+
+- **The basic secret scan skips a quoted multi-word key that labels a command (#690).** It matched the
+  `mcp set-token` entry of the help table and gave a false warning in the Windows smoke job.
+- **`kit init` writes Semgrep with a backend prefix, and `kit check` says why a tool is blocked (#715).** The
+  bare name was refused by the install gate, so Semgrep never got installed.
+- **`kit agent-config` writes the PreToolUse gates to `settings.local.json` when `settings.json` is
+  committed (#711).** A gate command holds a path that exists on one machine only, so on another clone or
+  in CI `enforcement gate liveness` failed.
+- **Scanners no longer lose a long report or a long run without saying so (#704, #705, #706, #708, #712).**
+  The output limit is 64 MiB instead of Node's 1 MiB, a cut-off report is named, an exit-gated scanner says
+  why it failed instead of "policy issues found", `osv-scanner` gets ten minutes, and a tool stopped by the
+  time limit says so in every failure message.
+- **`scripts/lockfile-changed-packages.sh` runs on macOS (#734).** It used `grep -P`, which BSD grep lacks.
+
+### Known limitations
+
+- **Windows is not verified for the `post-checkout` hook.** Its tests skip on Windows. The two pre-commit
+  hook controls of `enforcement evidence` are left out on Windows and named in the row text, because the
+  existing control `and lets a clean commit through` failed there and the cause is not known yet.
+- **The cooling period only warns by default.** `min_release_age_enforce = true` makes it hold back the
+  pass. The waiver for a security patch needs a lockfile version (`package-lock.json`, `bun.lock`,
+  `pnpm-lock.yaml` or `yarn.lock`).
+- **`enforcement evidence` has no record of what the gates allowed and blocked in real sessions.** It proves
+  kit's own gate code with negative controls, not that a given settings file calls it.
+- **Worktrees created before this release have no gates.** Run `kit worktree-gates` in each one. Until a
+  release has the command, the committed hook prints "unknown command" once per new worktree.
+- **`runtime installs: node` is Node only, is not read on Windows, and does not know which versions other
+  projects pin.**
 
 ## [7.1.0] - 2026-11-01
 

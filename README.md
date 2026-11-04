@@ -77,6 +77,16 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.2.0: proof that the gates work, a cooling period for new releases, and every Node install.**
+  `kit check` gets an `enforcement evidence` row that runs negative controls against the gates on every
+  check and counts commits that skipped the hook, `runtime installs: node` that judges every Node install
+  and the one PATH runs, and `anonymous database access` that lists the tables anon can read. `kit triage
+  npm` warns about a release younger than 14 days and waives a security patch that OSV lists as the first
+  fix. A new worktree gets the PreToolUse gates from a `post-checkout` hook. `kit watch` ranks open
+  security pull requests, `[deploy.health]` tags findings `deployed` or `branch only`, `kit services`
+  keeps leases for the local services agents start, and `[[scan.allow]]` records reviewed exceptions. The
+  Semgrep gate fails closed. No breaking change. Windows is not verified for the new hook. Full list in
+  the [CHANGELOG](CHANGELOG.md).
 - **7.1.0: several projects in one repository, failure feeds, and a stricter agent audit.**
   `[projects] paths` in `.kit.toml` lets `kit check` run the repo level once in the root and the
   project level once per directory, so a root without a manifest no longer reports "looked in the
