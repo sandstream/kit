@@ -796,7 +796,7 @@ function register_kit_triage(server: McpServer): void {
       try {
         const result = await runTriage(type as TriageType, target, { cwd });
         if (result.passed && target) {
-          await recordTriageRun(type, target, false, false, cwd);
+          await recordTriageRun(type, target, false, false, { cwd });
         }
         return {
           content: [

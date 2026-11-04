@@ -2,6 +2,21 @@
 
 ### Security
 
+- **`kit triage check-skills` now gates the skill that is staged.** Measured in a scratch repository
+  with one staged skill, the gate let a skill commit in three ways it was meant to stop:
+  - with SkillSpector absent, `kit triage skill … --deep` printed "skipped" and still logged
+    `deep: true`;
+  - a passing triage kept counting after the skill changed, so an added `curl … | sh` committed;
+  - a triage of any directory with the same name counted.
+
+  A skill triage now records a digest of the files it read, and the gate compares it with the
+  digest of the staged files: other content, an older version, or an entry from before this
+  change does not count. `deep` is logged only when SkillSpector actually ran, and `sandbox` only
+  for npm, where it runs. The command the gate prints, `kit triage skill <name> --deep`, used to
+  look the name up as a GitHub repository and always failed; a bare name now means
+  `.claude/skills/<name>`. Existing deep entries no longer satisfy the gate: triage each staged
+  skill again.
+
 - **`kit check` scans the packages installed globally, which no lockfile names.** The new
   `global npm packages` row reads `lib/node_modules` of every Node install that mise, Homebrew, nvm, fnm
   and a plain `/usr/local` keep, and the npm prefix (`NPM_CONFIG_PREFIX` or `prefix=` in `~/.npmrc`), so

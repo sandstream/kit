@@ -10,7 +10,19 @@ import { triageVaultConfig } from "../vault-triage.js";
 import { triageModelArtifact } from "../model-artifact-triage.js";
 import { existsSync, statSync } from "node:fs";
 import { redactSecrets } from "../utils/redactSecrets.js";
-import { appendTriagePass, TRIAGE_LOG_FILE, type TriageLogEntry } from "../triage-receipt.js";
+import {
+  appendTriagePass,
+  TRIAGE_LOG_FILE,
+  TRIAGE_MAX_AGE_DAYS,
+  type TriageLogEntry,
+} from "../triage-receipt.js";
+import { readSkillDir, resolveSkillTarget, skillDigest } from "../skill-triage-binding.js";
+import { cmdTriageCheckSkills } from "../skill-triage-gate.js";
+export {
+  latestDeepSkillTriage,
+  missingDeepSkillTriage,
+  parseStagedSkillNames,
+} from "../skill-triage-gate.js";
 
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
@@ -39,7 +51,7 @@ export async function cmdTriage(): Promise<boolean> {
     return cmdTriageModel(filtered.slice(1));
   }
   const type = typeArg as TriageType;
-  const target = filtered[1];
+  const target = skillTargetFor(type, filtered[1]);
 
   if (!typeArg || typeArg === "--help" || typeArg === "-h") {
     console.log(`${c.bold}kit triage${c.reset} — Security evaluation before installing packages\n`);
@@ -152,8 +164,9 @@ export async function cmdTriage(): Promise<boolean> {
 
   // --deep on a skill: delegate to SkillSpector's STATIC Stage 1 (no LLM, no egress). Fail-closed.
   let deepClean = true;
+  let deepRan = false;
   if (deep && type === "skill") {
-    deepClean = await deepSkillScan(target);
+    ({ clean: deepClean, ran: deepRan } = await deepSkillScan(target));
   } else if (deep && type !== "skill") {
     console.log(
       `\n${c.dim}(--deep currently only applies to skill; ignored for ${type})${c.reset}`,
@@ -169,20 +182,45 @@ export async function cmdTriage(): Promise<boolean> {
   // that every newly added dep was evaluated. Failed runs aren't logged —
   // a failed triage means the user explicitly chose not to install, so it
   // shouldn't unblock the commit.
-  if (overall && target) {
-    await recordTriageRun(type, target, sandbox, deep);
-  }
+  if (overall && target) await recordWhatRan(type, target, sandbox, deepRan);
 
   return overall;
 }
 
+/** For `skill`, a bare name means the local `.claude/skills/<name>`; other types are unchanged. */
+function skillTargetFor(type: string, target: string | undefined): string | undefined {
+  return type === "skill" && target ? resolveSkillTarget(target, process.cwd()) : target;
+}
+
+/**
+ * Log a PASS with what ran, not what was asked for: `--sandbox` runs for npm only, and `--deep`
+ * counts only when SkillSpector ran (`deepRan`). A skill entry carries the digest of the files it
+ * read, so the check-skills gate can tell it from a triage of other content under the same name.
+ */
+async function recordWhatRan(
+  type: string,
+  target: string,
+  sandbox: boolean,
+  deepRan: boolean,
+): Promise<void> {
+  let files = null;
+  try {
+    files = type === "skill" ? readSkillDir(target) : null;
+  } catch {
+    /* unreadable or oversized skill: no digest, so the check-skills gate cannot count it */
+  }
+  await recordTriageRun(type, target, sandbox && type === "npm", deepRan, {
+    contentDigest: files ? skillDigest(files) : undefined,
+  });
+}
+
 /**
  * `kit triage skill … --deep` helper: run SkillSpector's static Stage 1 (no LLM, no egress) and fold
- * its normalized findings into the verdict. Returns `false` only on a real high/critical finding or a
- * scan error; an ABSENT delegate is surfaced honestly and returns `true` (deep didn't run — the base
- * triage verdict still governs; kit never claims a deep-clean it didn't perform).
+ * its normalized findings into the verdict. `clean` is false only on a real high/critical finding or
+ * a scan error. An ABSENT delegate is surfaced honestly with `ran: false`: the base triage verdict
+ * still governs, and the triage log records no deep scan, so the check-skills gate stays closed.
  */
-async function deepSkillScan(target: string): Promise<boolean> {
+async function deepSkillScan(target: string): Promise<{ clean: boolean; ran: boolean }> {
   const { runSkillspectorStage1, SKILLSPECTOR_SOURCE } =
     await import("../skillspector-delegate.js");
   console.log(
@@ -191,15 +229,18 @@ async function deepSkillScan(target: string): Promise<boolean> {
   const deepRes = await runSkillspectorStage1(target);
   if (deepRes.status === "unavailable") {
     console.log(`  ${c.yellow}! ${deepRes.detail}${c.reset}`);
-    return true;
+    console.log(
+      `  ${c.yellow}  not recorded as a deep triage: the check-skills gate still needs one${c.reset}`,
+    );
+    return { clean: true, ran: false };
   }
   if (deepRes.status === "error") {
     console.log(`  ${c.red}✗ deep scan errored: ${deepRes.detail}${c.reset}`);
-    return false;
+    return { clean: false, ran: false };
   }
   if (deepRes.findings.length === 0) {
     console.log(`  ${c.green}✓ no findings from the deep static scan${c.reset}`);
-    return true;
+    return { clean: true, ran: true };
   }
   for (const f of deepRes.findings) {
     const sev = f.severity ?? "info";
@@ -209,7 +250,7 @@ async function deepSkillScan(target: string): Promise<boolean> {
         : `${c.yellow}[${sev}]${c.reset}`;
     console.log(`  ${tag} ${f.detail}`);
   }
-  return !(deepRes.worst === "critical" || deepRes.worst === "high");
+  return { clean: !(deepRes.worst === "critical" || deepRes.worst === "high"), ran: true };
 }
 
 /**
@@ -426,11 +467,7 @@ async function readMcpPins(
   }
 }
 
-/** A triage PASS counts as current for this long. Exported so every consumer reads ONE
- *  number: `check-deps` gates new manifest entries on it, and the "install-script grants"
- *  security check asks the same freshness question about a package granted install scripts.
- *  Two copies of a policy window drift, and the drift is silent. */
-export const TRIAGE_MAX_AGE_DAYS = 7;
+export { TRIAGE_MAX_AGE_DAYS } from "../triage-receipt.js";
 
 /**
  * Append a PASS entry to the triage log. Exported so the MCP `kit_triage` tool
@@ -444,10 +481,11 @@ export async function recordTriageRun(
   target: string,
   sandbox: boolean,
   deep = false,
-  cwd?: string,
+  opts: { cwd?: string; contentDigest?: string } = {},
 ): Promise<void> {
+  const { cwd, contentDigest } = opts;
   try {
-    await appendTriagePass({ type, target, sandbox, deep, cwd });
+    await appendTriagePass({ type, target, sandbox, deep, cwd, contentDigest });
   } catch (err) {
     console.error(
       `${c.dim}(triage-log append failed: ${err instanceof Error ? err.message : err})${c.reset}`,
@@ -576,127 +614,6 @@ async function cmdTriageCheckDeps(): Promise<boolean> {
   console.error(
     `then re-stage and commit. Bypass with --no-verify is recorded to ${SKIPPED_COMMITS_LOG}.${c.reset}`,
   );
-  return false;
-}
-
-/** A staged path inside a skill directory: `.claude/skills/<name>/…`. Group 1 = skill name. */
-const SKILL_PATH_RE = /^\.claude\/skills\/([^/]+)\/.+/;
-
-/**
- * Parse `git diff --cached --name-only` output into the unique set of agent-skill names touched.
- * Only files *inside* a skill dir count; the bare `.claude/skills/<name>` dir entry never appears in
- * a name-only diff, so a skill is "staged" exactly when one of its files is.
- */
-export function parseStagedSkillNames(files: string[]): string[] {
-  const names = new Set<string>();
-  for (const f of files) {
-    const m = SKILL_PATH_RE.exec(f.trim());
-    if (m) names.add(m[1]!);
-  }
-  return [...names];
-}
-
-/** Normalize a triage-log skill target (a path or a bare name) to its skill name (last segment). */
-function skillTargetName(target: string): string {
-  const trimmed = target.replace(/\/+$/, "");
-  return trimmed.split("/").pop() || trimmed;
-}
-
-/**
- * Most-recent DEEP skill-triage timestamp (ms) per skill name, from the triage log. Only
- * `type:"skill"` entries with `deep === true` count — a shallow skill triage never satisfies the
- * deep gate. A forged/unparseable timestamp is dropped (it can't count as fresh). Pure.
- */
-export function latestDeepSkillTriage(entries: TriageLogEntry[]): Map<string, number> {
-  const latest = new Map<string, number>();
-  for (const e of entries) {
-    if (e.type !== "skill" || e.deep !== true) continue;
-    const ts = Date.parse(e.timestamp);
-    if (!Number.isFinite(ts)) continue; // fail-closed: garbage ts is never "fresh"
-    const name = skillTargetName(e.target);
-    const prev = latest.get(name);
-    if (prev === undefined || ts > prev) latest.set(name, ts);
-  }
-  return latest;
-}
-
-/**
- * Pure gate core: which staged skills lack a fresh (≤ `maxAgeDays`) deep triage entry. A missing
- * entry, a shallow-only entry, or a stale/forged timestamp all count as "missing" (fail-closed).
- */
-export function missingDeepSkillTriage(
-  stagedSkillNames: string[],
-  entries: TriageLogEntry[],
-  nowMs: number,
-  maxAgeDays = TRIAGE_MAX_AGE_DAYS,
-): string[] {
-  const latest = latestDeepSkillTriage(entries);
-  const cutoff = nowMs - maxAgeDays * 24 * 3600 * 1000;
-  const missing: string[] = [];
-  for (const name of stagedSkillNames) {
-    const ts = latest.get(name);
-    if (ts === undefined || ts < cutoff) missing.push(name);
-  }
-  return missing;
-}
-
-/**
- * `kit triage check-skills` — pre-commit gate (increment 2b). Any agent skill with staged changes
- * under `.claude/skills/<name>/…` must have a `kit triage skill <name> --deep` entry in the triage
- * log within the last `TRIAGE_MAX_AGE_DAYS` days. A shallow triage does NOT satisfy the gate: agent
- * skills ship executable scripts, so the deep STATIC pass (SkillSpector Stage 1 — no LLM, no egress)
- * is required before they enter history. Fail-CLOSED: no log, a stale entry, or a shallow-only entry
- * all block the commit. Exits non-zero on any missing skill so the pre-commit hook fails.
- */
-async function cmdTriageCheckSkills(): Promise<boolean> {
-  const { execFileSync } = await import("node:child_process");
-  const { readFile } = await import("node:fs/promises");
-  const { resolve } = await import("node:path");
-
-  let staged: string[];
-  try {
-    const out = execFileSync("git", ["diff", "--cached", "--name-only", "--diff-filter=ACMR"], {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "ignore"],
-    });
-    staged = out.split("\n");
-  } catch {
-    return true; // not a git repo / nothing staged — nothing to gate
-  }
-
-  const skillNames = parseStagedSkillNames(staged);
-  if (skillNames.length === 0) return true;
-
-  const entries: TriageLogEntry[] = [];
-  try {
-    const text = await readFile(resolve(process.cwd(), TRIAGE_LOG_FILE), "utf-8");
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        entries.push(JSON.parse(line) as TriageLogEntry);
-      } catch {
-        /* skip malformed line */
-      }
-    }
-  } catch {
-    /* no triage log yet — every staged skill is missing */
-  }
-
-  const missing = missingDeepSkillTriage(skillNames, entries, Date.now());
-  if (missing.length === 0) return true;
-
-  console.error(`${c.red}✗ Deep triage missing for ${missing.length} staged skill(s):${c.reset}`);
-  for (const name of missing) {
-    console.error(`  - ${name}  (run: kit triage skill ${name} --deep)`);
-  }
-  console.error("");
-  console.error(
-    `${c.dim}Agent skills ship executable scripts — the deep static scan (no LLM, no egress) is`,
-  );
-  console.error(
-    `required before they enter history. Run the command(s) above, then re-stage and commit.`,
-  );
-  console.error(`Bypass with --no-verify is recorded to ${SKIPPED_COMMITS_LOG}.${c.reset}`);
   return false;
 }
 
