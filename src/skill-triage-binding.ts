@@ -12,7 +12,16 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+} from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export interface SkillFile {
@@ -53,6 +62,20 @@ export function resolveSkillTarget(target: string, cwd: string): string {
   return existsSync(join(local, "SKILL.md")) ? join(...SKILLS_DIR, target) : target;
 }
 
+/**
+ * A regular file's bytes, read from one descriptor: opened without following a symlink and checked
+ * with fstat on that descriptor, so a swap between listing and reading cannot redirect the read.
+ */
+function readRegularFile(path: string): Buffer {
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error(`${path} is no longer a regular file`);
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Files of a skill directory on disk; null when the target is not a local skill. */
 export function readSkillDir(dir: string): SkillFile[] | null {
   if (!existsSync(join(dir, "SKILL.md"))) return null;
@@ -63,10 +86,9 @@ export function readSkillDir(dir: string): SkillFile[] | null {
       if (entry.name === ".git") continue;
       const path = join(abs, entry.name);
       const rel = relative(root, path).split(sep).join("/");
-      const stat = lstatSync(path);
-      if (stat.isSymbolicLink()) files.push({ path: rel, bytes: Buffer.from(readlinkSync(path)) });
-      else if (stat.isDirectory()) walk(path);
-      else if (stat.isFile()) files.push({ path: rel, bytes: readFileSync(path) });
+      if (entry.isSymbolicLink()) files.push({ path: rel, bytes: Buffer.from(readlinkSync(path)) });
+      else if (entry.isDirectory()) walk(path);
+      else if (entry.isFile()) files.push({ path: rel, bytes: readRegularFile(path) });
       if (files.length > MAX_FILES) throw new Error(`skill has over ${MAX_FILES} files`);
     }
   };
