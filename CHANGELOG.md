@@ -2,6 +2,19 @@
 
 ### Security
 
+- **`kit check` shows evidence that the gates were exercised, not only that they are configured.** The new
+  `enforcement evidence` row joins three facts and never reads pass from configuration alone: the install
+  gate and the env-write gate are wired; the negative controls of `kit usage prove` held just now; and no
+  commit skipped the pre-commit hook in the last 14 days (the same count as the banner). The controls run
+  on every check, about two seconds, and their result is not stored: a stored result would be a claim in a
+  file that the agent being checked can write. A failed control is a failure, controls that could not run
+  are unverified (counts as did-not-run), a skipped hook is a warning. `kit usage prove` now also tries
+  the env-write gate: a plaintext credential written to `.env` must be refused and a harmless write
+  allowed. On Windows the two pre-commit hook controls are not run and the row names them: a Windows CI run
+  showed the clean-commit control failing, and whether that is the hook or its `sh` runner is not known
+  yet. The row says what stays unproven: another tool than Claude Code, and a settings file edited
+  after the check. It does not run the commands a settings file names, because that file is repository
+  content. Not built yet: a record of what the gates allowed and blocked in real sessions.
 - **A new worktree gets the PreToolUse gates when git creates it.** The install gate and the env-write
   gate live in the ignored `.claude/` of each checkout, so every new worktree started without them and
   `enforcement gate liveness` failed in it: the agent there ran ungated, and a gate added during a

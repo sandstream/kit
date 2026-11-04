@@ -26,6 +26,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { controlEnvWriteGate } from "./usage-prove-env.js";
 
 export interface Control {
   name: string;
@@ -247,15 +248,15 @@ export function proveFloor(
   const controls: Control[] = [
     controlUnverifiableInstall(),
     controlHarmlessCommandAllowed(),
+    ...controlEnvWriteGate(run),
     ...controlSecretScanBlocksCommit(),
   ];
   if (opts.deep) controls.push(controlDeterminism(cwd));
 
-  const wrapper = join(process.env.HOME ?? "", ".kit", "bin", "kit");
   return {
     controls,
     ok: controls.every((c) => c.ok),
-    note: existsSync(wrapper)
+    note: existsSync(join(process.env.HOME ?? "", ".kit", "bin", "kit"))
       ? undefined
       : "no ~/.kit/bin/kit wrapper — hooks on this machine resolve differently than these controls",
   };
