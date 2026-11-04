@@ -187,6 +187,18 @@ describe("classifyBinary", () => {
     });
   });
 
+  it("reads a path written with backslashes the same way, so the platform separator does not matter", () => {
+    assert.deepEqual(
+      classifyBinary("\\home\\u\\.local\\share\\mise\\installs\\node\\25.8.0\\bin\\node", roots),
+      { manager: "mise", version: "25.8.0", shim: false },
+    );
+    assert.deepEqual(classifyBinary("\\opt\\homebrew\\Cellar\\node\\26.7.0_1\\bin\\node", roots), {
+      manager: "homebrew",
+      version: "26.7.0",
+      shim: false,
+    });
+  });
+
   it("calls anything else other, with no version known from the path", () => {
     assert.deepEqual(classifyBinary("/somewhere/else/bin/node", roots), {
       manager: "other",

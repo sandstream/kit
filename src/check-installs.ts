@@ -177,6 +177,8 @@ export function inventoryNodeInstalls(roots: InstallRoots): InstallEntry[] {
   return all.sort((a, b) => compareVersions(b.version, a.version));
 }
 
+/** Both sides with forward slashes, so the comparison does not depend on the platform's separator. */
+const posix = (path: string) => path.split("\\").join("/");
 const inside = (path: string, dir: string) => path === dir || path.startsWith(`${dir}/`);
 
 function versionAfter(
@@ -190,21 +192,28 @@ function versionAfter(
 }
 
 /** Which manager a binary belongs to, from where it lives. A shim is named, not resolved. */
-export function classifyBinary(path: string, roots: InstallRoots): Winner {
-  const d = managerDirs(roots);
-  if (inside(path, join(d.mise, "shims"))) return { manager: "mise", version: null, shim: true };
-  if (inside(path, join(d.volta, "bin"))) return { manager: "volta", version: null, shim: true };
+export function classifyBinary(rawPath: string, roots: InstallRoots): Winner {
+  const path = posix(rawPath);
+  const raw = managerDirs(roots);
+  const d = {
+    mise: posix(raw.mise),
+    nvm: posix(raw.nvm),
+    fnm: posix(raw.fnm),
+    volta: posix(raw.volta),
+  };
+  if (inside(path, `${d.mise}/shims`)) return { manager: "mise", version: null, shim: true };
+  if (inside(path, `${d.volta}/bin`)) return { manager: "volta", version: null, shim: true };
   const rules: [Manager, string, (n: string) => string | null][] = [
-    ["mise", join(d.mise, "installs", "node"), exact],
-    ["nvm", join(d.nvm, "versions", "node"), dropV],
-    ["fnm", join(d.fnm, "node-versions"), dropV],
-    ["volta", join(d.volta, "tools", "image", "node"), exact],
+    ["mise", `${d.mise}/installs/node`, exact],
+    ["nvm", `${d.nvm}/versions/node`, dropV],
+    ["fnm", `${d.fnm}/node-versions`, dropV],
+    ["volta", `${d.volta}/tools/image/node`, exact],
   ];
   for (const [manager, dir, strip] of rules) {
     if (inside(path, dir)) return { manager, version: versionAfter(path, dir, strip), shim: false };
   }
   for (const prefix of roots.brewPrefixes) {
-    const cellar = join(prefix, "Cellar");
+    const cellar = `${posix(prefix)}/Cellar`;
     if (!inside(path, cellar)) continue;
     const rest = path.slice(cellar.length + 1).split("/");
     const version = BREW_VERSION.exec(rest[1] ?? "")?.[1] ?? null;
