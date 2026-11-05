@@ -79,6 +79,29 @@ Without an external signer, kit is
 excellent proof of what **you** did under enforcement — not forensic proof against an attacker
 who already owns your user account.
 
+## Evidence that the gates work, not only that they are wired
+
+`enforcement gate liveness` answers whether the PreToolUse gates are in the settings. That is a
+belief about a file. The `enforcement evidence` row of `kit check` adds what kit can show:
+
+- **wired**: the install gate and the env-write gate are configured.
+- **refuses**: the negative controls of `kit usage prove` held just now. They run on every check
+  (about two seconds) against kit's own gate code, in throwaway directories. An install kit cannot
+  verify is refused, a harmless command is allowed, a plaintext credential written to `.env` is
+  refused, a harmless write is allowed, and kit's pre-commit hook refuses a staged credential and
+  lets a clean commit through. Nothing is stored between runs: a stored result would be a claim in a
+  file that the checked agent can write.
+- **bypassed**: no commit skipped the pre-commit hook in the last 14 days (the same count as the
+  banner).
+
+A control that ran and did not hold is a failure. A control that could not run is unverified. A
+skipped hook is a warning. The row never runs the commands a settings file names, because that file
+is repository content.
+
+It does not prove that another tool than Claude Code is gated, that the settings file was not edited
+after the check, or what the gates allowed and blocked in real sessions (allowed calls are not
+logged). On Windows the two pre-commit hook controls are not run, and the row names them.
+
 ## The formula
 
 > **kit = a deterministic grinder that forces the secure way of building — and prints a signed

@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-sentrux",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Sentrux architecture-scan ingestion for kit (read-only).",
   "keywords": [
     "kit-plugin",
