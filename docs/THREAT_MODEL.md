@@ -357,6 +357,16 @@ sandbox contains what happens _below_ the tool boundary. `kit doctor` will warn
 scope-bound egress gate — the exact gap that became the escape hatch — but a green
 kit is a governed tool boundary, never a guarantee of containment.
 
+Which sandbox matters too. A container or a seccomp filter **shares the host's kernel**, so a local
+kernel privilege escalation inside it reaches the host. OpenAI's "A thousand fewer paths to root"
+(2026-11) reported 948 working Linux kernel LPE exploits from one automated run against a stock
+distribution kernel, and advised treating a low-privilege account on an unpatched system as root. A
+**separate kernel** (gVisor, a microVM such as Firecracker) is the stronger boundary, though not an
+absolute one: the same work found bugs in QEMU, Kata, Docker and gVisor. `kit doctor` reports which
+kind it found (`kernel: shared-kernel | separate-kernel`), and a VM guest seen only through the x86
+`hypervisor` CPU flag is reported but not counted as containment, because a dedicated sandbox VM and
+a developer's workstation VM look the same from inside.
+
 ## The lethal trifecta in the agent setup
 
 An agent is open to prompt injection when one context holds three things at once: it reads input an

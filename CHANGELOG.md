@@ -2,6 +2,19 @@
 
 ### Security
 
+- **`kit doctor` says whether a sandbox shares the host kernel, and sees a VM.** A local kernel
+  privilege escalation crosses a container or a seccomp filter and lands on the host; OpenAI's "A
+  thousand fewer paths to root" (2026-11) reported 948 working Linux kernel LPE exploits from one
+  automated run. The containment verdict ranked a container with seccomp `high` and gVisor or
+  Firecracker `heuristic`, because confidence measured the detection, not the boundary. Inside a
+  Firecracker microVM with no DMI and a `-fc-` kernel name it reported `none`, not contained, with
+  `high` confidence. The verdict now carries `kernel: shared-kernel | separate-kernel | none |
+unknown`, and the pass message for a container names the shared kernel. The x86 `hypervisor` CPU
+  flag is read: a VM guest is reported as `vm` with a separate kernel, but not counted as
+  containment, since a sandbox VM and a workstation VM look the same from inside, so a required
+  containment policy still fails there, now with that reason. `none` is `high` confidence only when
+  a flags line was read without the flag; on ARM it is `heuristic`.
+
 - **`kit triage check-skills` now gates the skill that is staged.** Measured in a scratch repository
   with one staged skill, the gate let a skill commit in three ways it was meant to stop:
   - with SkillSpector absent, `kit triage skill … --deep` printed "skipped" and still logged

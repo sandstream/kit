@@ -498,21 +498,33 @@ describe("agentEgressExposureStatus (OpenAI eval-escape gap)", () => {
 describe("containmentPostureStatus (sandbox below the tool boundary)", () => {
   it("skips (not a verdict) when containment is unknown", () => {
     const r = containmentPostureStatus(
-      { mechanism: "unknown", contained: false, confidence: "none", details: [] },
+      {
+        mechanism: "unknown",
+        contained: false,
+        confidence: "none",
+        kernel: "unknown",
+        details: [],
+      },
       true,
     );
     assert.equal(r.status, "skip");
   });
   it("passes when contained", () => {
     const r = containmentPostureStatus(
-      { mechanism: "container", contained: true, confidence: "high", details: ["/.dockerenv"] },
+      {
+        mechanism: "container",
+        contained: true,
+        confidence: "high",
+        kernel: "shared-kernel",
+        details: ["/.dockerenv"],
+      },
       true,
     );
     assert.equal(r.status, "pass");
   });
   it("WARNS when an install/exec gate is wired but there is no OS containment", () => {
     const r = containmentPostureStatus(
-      { mechanism: "none", contained: false, confidence: "high", details: [] },
+      { mechanism: "none", contained: false, confidence: "high", kernel: "none", details: [] },
       true,
     );
     assert.equal(r.status, "warn");
@@ -520,7 +532,7 @@ describe("containmentPostureStatus (sandbox below the tool boundary)", () => {
   });
   it("skips when no containment AND no install/exec capability wired", () => {
     const r = containmentPostureStatus(
-      { mechanism: "none", contained: false, confidence: "high", details: [] },
+      { mechanism: "none", contained: false, confidence: "high", kernel: "none", details: [] },
       false,
     );
     assert.equal(r.status, "skip");
