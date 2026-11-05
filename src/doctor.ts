@@ -654,6 +654,8 @@ export function containmentPostureStatus(
       detail: "no OS containment detected, and no install/exec capability wired here to contain",
     };
   }
+  if (v.mechanism === "vm")
+    return { status: "warn", detail: `install/exec capability wired; ${v.details.join("; ")}` };
   return {
     status: "warn",
     detail:
@@ -719,6 +721,7 @@ async function auditContainmentVerdict(
         mechanism: verdict.mechanism,
         contained: verdict.contained,
         confidence: verdict.confidence,
+        kernel: verdict.kernel,
         status,
       },
     });
