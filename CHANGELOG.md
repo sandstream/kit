@@ -21,6 +21,14 @@
   followed, as an agent would follow them; `node_modules`, build output and unrelated
   dot-directories are skipped. Excerpts are printed without hidden characters or secrets.
 
+### Fixed
+
+- **The SBOMs attached to a release list the dependencies.** The 7.2.0 `sbom.cyclonedx.json` and
+  `sbom.spdx.json` held one component, the root, because syft scanned an unpacked tarball that has no
+  `node_modules`. The publish job now installs the tarball the way a consumer does and scans that tree,
+  and a new step (`scripts/verify-sbom.mjs`) fails the job when an SBOM lists fewer than 10 dependencies.
+  The 7.2.0 files stay as published; they are replaced in the next release.
+
 ## [7.2.0] - 2026-11-04
 
 ### Added
