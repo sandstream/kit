@@ -5,7 +5,7 @@
  *
  * Measured before building (kit-research `instruction-file-scan-experiment`): on 43 real
  * instruction files from five repositories these rules gave no false positive, and they caught
- * 10 of 10 planted attacks (self-written, so recall on other people's attacks is not measured).
+ * 10 of 10 planted attacks (self-written).
  * On every markdown file of those repositories they were noisy: security docs and README
  * install lines (`curl https://mise.run | sh`) read like attacks. So this reads instruction
  * files only, and README files are left out on purpose.
@@ -15,12 +15,16 @@
  * no false positive. High precision, low recall: a finding is worth reading, and no finding
  * does not mean the files are safe. The output says so.
  *
+ * src/instruction-rules.ts was written after that, against 8 of the 20 attack lines: 11 of 20
+ * are now caught, which is not a recall figure. A blind figure needs a set nobody has seen.
+ *
  * Deterministic and explainable: each finding names its rule and line, and the output says
  * what was read, never that a repository is safe.
  */
 import { closeSync, constants, fstatSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { findInjection, stripUnsafeChars } from "./memory/injection.js";
+import { extraInstructionRules } from "./instruction-rules.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 
 export type InstructionRule =
@@ -86,12 +90,16 @@ export function scanInstructionText(file: string, text: string): InstructionFind
   const out: InstructionFinding[] = [];
   text.split("\n").forEach((raw, i) => {
     const line = raw.replace(/\r$/, "");
-    const add = (rule: InstructionRule) =>
+    const seen = new Set<InstructionRule>();
+    const add = (rule: InstructionRule) => {
+      seen.add(rule);
       out.push({ file, line: i + 1, rule, excerpt: excerpt(line) });
+    };
     for (const f of findInjection(line)) if (f.confidence === "high") add(`injection:${f.label}`);
     if (SECRET.test(line) && OUTBOUND.test(line)) add("secret-to-outbound");
     if (EXEC_DOWNLOAD.test(line)) add("exec-after-download");
     if (CONCEAL.test(line)) add("conceal-from-user");
+    for (const rule of extraInstructionRules(line)) if (!seen.has(rule)) add(rule);
   });
   return out;
 }
