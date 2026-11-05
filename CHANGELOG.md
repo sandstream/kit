@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [7.2.1] - 2026-11-05
+
 ### Security
 
 - **`kit triage instructions [path]` reads agent instruction files before an agent does.** A
