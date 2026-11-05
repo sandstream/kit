@@ -441,12 +441,16 @@ describe("publish.yml — release evidence describes the shipped package", () =>
     );
     assert.match(pack, /tar -xzf "\$TARBALL" -C \.release-package/);
     // The tarball holds no node_modules, so scanning it lists no dependency. Install it first.
+    // The directory name becomes the package name in `npm init`, so it must not start with a dot
+    // (`.sbom-scan` failed the 7.2.1 job with "Invalid name").
+    assert.match(pack, /mkdir sbom-scan\b/);
+    assert.doesNotMatch(pack, /mkdir \./);
     assert.match(pack, /npm i "\.\.\/\$TARBALL" --omit=dev --ignore-scripts/);
     for (const name of ["Generate SBOM (CycloneDX)", "Generate SBOM (SPDX)"]) {
       const start = EXECUTED.indexOf(name);
       const end = EXECUTED.indexOf("\n      - name:", start + name.length);
       const step = EXECUTED.slice(start, end < 0 ? undefined : end);
-      assert.match(step, /path:\s*\.sbom-scan/);
+      assert.match(step, /path:\s*sbom-scan\s*$/m);
       assert.doesNotMatch(step, /path:\s*\.\s*$/m);
     }
   });

@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+### Fixed
+
+- **The publish job no longer fails while it prepares the SBOM scan.** The 7.2.1 job published the
+  package, then stopped at the step that installs it for the scan: the scan directory was named
+  `.sbom-scan`, and `npm init` refuses a package name that starts with a dot. The directory is now
+  `sbom-scan`. The 7.2.1 release therefore has no SBOM files and no GitHub attestation; npm
+  provenance is unaffected.
+
 ## [7.2.1] - 2026-11-05
 
 ### Security
