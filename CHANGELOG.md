@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [7.2.2] - 2026-11-05
+
 ### Added
 
 - **`kit triage pkg <file.pkg>` checks a macOS installer before it is opened.** Three checks, each
@@ -44,6 +46,15 @@
   `.sbom-scan`, and `npm init` refuses a package name that starts with a dot. The directory is now
   `sbom-scan`. The 7.2.1 release therefore has no SBOM files and no GitHub attestation; npm
   provenance is unaffected.
+
+### Known limitations
+
+- `kit triage pkg` was run on one Mac. No CI job runs macOS, so the macOS path is unverified in CI; the
+  test that runs the real `pkgutil` and `spctl` skips elsewhere. Only the Node.js Foundation is built in.
+- The rules added to `kit triage instructions` were written against 8 of the 20 probe lines. No blind
+  recall figure exists for them yet.
+- The SBOM scan of the installed package (`sbom-scan`) runs for the first time in this release's
+  publish job. The 7.2.1 SBOM files were made with `npm sbom` and uploaded by hand.
 
 ## [7.2.1] - 2026-11-05
 

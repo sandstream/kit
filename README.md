@@ -77,6 +77,13 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.2.2: `kit triage pkg`, and more of what `kit triage instructions` finds.** `kit triage pkg
+  <file.pkg>` checks a macOS installer before it is opened: its SHA-256 against the publisher's list,
+  the signing Team ID against the publisher you expect (the Node.js Foundation is built in), and
+  Apple's notarization. A package with no expected publisher never passes. `kit triage instructions`
+  gets rules for secrets sent to a URL, requests for the system prompt and hidden activity, and says
+  how little a pattern scan finds: a floor, not a guard. No breaking change. macOS is unverified in
+  CI. Full list in the [CHANGELOG](CHANGELOG.md).
 - **7.2.1: the release SBOMs list the dependencies, and `kit triage instructions`.** The SBOMs attached
   to the 7.2.0 release held only the root component, because the scan ran on a tarball without
   `node_modules`. The publish job now scans the installed package and fails when an SBOM lists fewer
