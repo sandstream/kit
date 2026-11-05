@@ -10,9 +10,13 @@
  * install lines (`curl https://mise.run | sh`) read like attacks. So this reads instruction
  * files only, and README files are left out on purpose.
  *
- * Deterministic and explainable: each finding names its rule and line. It finds the blatant
- * and the common shapes; a plausible-looking instruction phrased around these rules is not
- * caught, and the output says what was read, never that a repository is safe.
+ * Then measured blind (2026-11-05): 20 attack lines written by a separate model that had not
+ * seen these rules were caught 3 times; 20 benign lines written to sit close to the line gave
+ * no false positive. High precision, low recall: a finding is worth reading, and no finding
+ * does not mean the files are safe. The output says so.
+ *
+ * Deterministic and explainable: each finding names its rule and line, and the output says
+ * what was read, never that a repository is safe.
  */
 import { closeSync, constants, fstatSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
