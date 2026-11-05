@@ -3026,6 +3026,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "pkg": {
+          "kind": "command",
+          "summary": "Check a macOS installer package: checksum, publisher Team ID, notarization. Does not install it",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "repo": {
           "kind": "command",
           "summary": "GitHub repo evaluation",
@@ -3057,6 +3066,7 @@
       "kind": "group",
       "summary": "Security evaluation before installing packages, images, or skills",
       "x-kit-accepted-flags": [
+        "--checksum",
         "--deep",
         "--env",
         "--help",
@@ -3067,6 +3077,7 @@
         "--readonly",
         "--sandbox",
         "--scan-bytes",
+        "--team-id",
         "--tools",
         "--version"
       ],

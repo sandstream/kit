@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit triage pkg <file.pkg>` checks a macOS installer before it is opened.** Three checks, each
+  `pass`, `fail` or `unverified`: the file's SHA-256 against the publisher's own list (for
+  `node-vX.Y.Z.pkg`, `https://nodejs.org/dist/vX.Y.Z/SHASUMS256.txt`; `--checksum HEX|FILE` for
+  another), the signing certificate's Team ID against the publisher you expect, and Apple's
+  notarization (`spctl`, `source=Notarized Developer ID`). kit knows one publisher, the Node.js
+  Foundation (`HX7739G8FX`); any other takes `--team-id`, and a renamed file needs it too. A Team ID that is found but not expected
+  fails, and a package with no expected publisher never passes. The three checks are separate on
+  purpose: a package with one byte added at the end kept a valid signature and notarization and failed
+  only the checksum. `pkgutil` and `spctl` exist only on macOS; elsewhere the checksum runs and the rest
+  is `unverified`. The command does not install or open the package, and a pass does not say the
+  software is safe. Not done yet: `.dmg` and `.app`, `codesign` on the installed files, and a line in
+  the triage log. No CI job runs macOS, so the macOS path is tested here, on one machine.
+
 ### Security
 
 - **`kit triage instructions` now states how much it misses.** Measured blind after 7.2.1: 20

@@ -179,6 +179,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "triage check-skills": "Pre-commit gate: fail if staged skills lack a --deep triage entry",
   "triage instructions":
     "Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks, before an agent does",
+  "triage pkg":
+    "Check a macOS installer package: checksum, publisher Team ID, notarization. Does not install it",
   "plugin search": "Search plugin marketplace",
   "plugin install": "Install an official plugin",
   "plugin uninstall": "Remove an official package and adapter registration",
