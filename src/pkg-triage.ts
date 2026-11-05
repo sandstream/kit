@@ -71,19 +71,42 @@ export interface PkgSignature {
   signer: string | null;
 }
 
-/** Signer and Team ID from `pkgutil --check-signature`. The first certificate is the signer. */
+/**
+ * Signer and Team ID from `pkgutil --check-signature`. The output starts with a `Package "…":`
+ * line that holds the file's path, so the signer is read only from the lines after it, and a
+ * header that does not close on its own line (a path with a line break in it) is "not signed".
+ * The signer is the first certificate listed under `Certificate Chain:`.
+ */
 export function parsePkgSignature(out: string): PkgSignature {
-  if (!/^\s*Status:\s*signed\b/m.test(out)) return { signed: false, teamId: null, signer: null };
-  const m = /^\s*1\.\s+(.+?)\s*$/m.exec(out);
-  const signer = m ? m[1] : null;
+  const none: PkgSignature = { signed: false, teamId: null, signer: null };
+  const lines = out.split("\n");
+  if (!/^Package ".*":\s*$/.test(lines[0] ?? "")) return none;
+  const body = lines.slice(1);
+  const statuses = body.filter((l) => /^\s+Status:/.test(l));
+  if (statuses.length !== 1 || !/^\s+Status:\s+signed\b/.test(statuses[0])) return none;
+  const chain = body.findIndex((l) => /^\s+Certificate Chain:\s*$/.test(l));
+  if (chain < 0) return { signed: true, teamId: null, signer: null };
+  const first = body
+    .slice(chain + 1)
+    .map((l) => /^\s+1\.\s+(.+?)\s*$/.exec(l))
+    .find((m) => m);
+  const signer = first ? first[1] : null;
   const id = signer ? /\(([A-Z0-9]{10})\)$/.exec(signer) : null;
   return { signed: true, teamId: id ? id[1] : null, signer };
 }
 
-/** True when `spctl --assess` accepted the package as a notarized Developer ID package. */
-export function parseSpctlNotarized(out: string, code: number): boolean {
+/**
+ * True when `spctl --assess` accepted `file` as a notarized Developer ID package. The whole
+ * output must be the two lines spctl prints for it, with the path it was given, so text planted
+ * in a file name cannot add a line of its own.
+ */
+export function parseSpctlNotarized(out: string, code: number, file: string): boolean {
+  if (code !== 0) return false;
+  const lines = out.trim().split("\n");
   return (
-    code === 0 && /^source=Notarized Developer ID\s*$/m.test(out) && /: accepted\s*$/m.test(out)
+    lines.length === 2 &&
+    lines[0] === `${file}: accepted` &&
+    lines[1] === "source=Notarized Developer ID"
   );
 }
 
@@ -110,8 +133,9 @@ function checksumCheck(actual: string, expected: string | null, source: string):
   };
 }
 
-function signatureCheck(sig: PkgSignature, expected: string | null): PkgCheck {
+function signatureCheck(sig: PkgSignature, expected: string | null, code: number): PkgCheck {
   const name = "signature";
+  if (code !== 0) return { name, status: "fail", detail: `pkgutil exited with status ${code}` };
   if (!sig.signed) return { name, status: "fail", detail: "the package is not signed" };
   if (!sig.teamId) return { name, status: "fail", detail: `no Team ID in signer "${sig.signer}"` };
   if (expected === null) {
@@ -142,8 +166,22 @@ async function expectedChecksum(
   return { hash: text === null ? null : parseShasums(text, file), source: url };
 }
 
+/** Line breaks and other control characters: the tools print the path, so these let a name plant lines. */
+export const UNSAFE_PATH = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+function refused(file: string): PkgReport {
+  const detail = "the path contains a line break or control character; rename the file";
+  const checks = (["checksum", "signature", "notarization"] as const).map((name) => ({
+    name,
+    status: "fail" as const,
+    detail,
+  }));
+  return { file: JSON.stringify(file), sha256: "", publisher: null, checks, passed: false };
+}
+
 /** Run the three checks. Never throws on a failed tool: that becomes "unverified". */
 export async function triagePkg(file: string, opts: PkgOptions, deps: PkgDeps): Promise<PkgReport> {
+  if (UNSAFE_PATH.test(file)) return refused(file);
   const pub = pickPublisher(file);
   const teamId = opts.teamId ?? pub?.teamId ?? null;
   const sha256 = await deps.sha256(file);
@@ -155,9 +193,9 @@ export async function triagePkg(file: string, opts: PkgOptions, deps: PkgDeps): 
     }
   } else {
     const sig = await deps.run("/usr/sbin/pkgutil", ["--check-signature", file]);
-    checks.push(signatureCheck(parsePkgSignature(sig.out), teamId));
+    checks.push(signatureCheck(parsePkgSignature(sig.out), teamId, sig.code));
     const spctl = await deps.run("/usr/sbin/spctl", ["--assess", "--type", "install", "-v", file]);
-    const ok = parseSpctlNotarized(spctl.out, spctl.code);
+    const ok = parseSpctlNotarized(spctl.out, spctl.code, file);
     checks.push({
       name: "notarization",
       status: ok ? "pass" : "fail",

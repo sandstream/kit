@@ -11,8 +11,10 @@
   fails, and a package with no expected publisher never passes. The three checks are separate on
   purpose: a package with one byte added at the end kept a valid signature and notarization and failed
   only the checksum. `pkgutil` and `spctl` exist only on macOS; elsewhere the checksum runs and the rest
-  is `unverified`. The command does not install or open the package, and a pass does not say the
-  software is safe. Not done yet: `.dmg` and `.app`, `codesign` on the installed files, and a line in
+  is `unverified`. `pkgutil` and `spctl` print the file's path, so a path with a line break or control
+  character is refused before any tool runs (a name with planted lines made an unsigned package read as
+  signed by the Node.js Foundation), and a tool that exits non-zero fails its check. The command does not
+  install or open the package, and a pass does not say the software is safe. Not done yet: `.dmg` and `.app`, `codesign` on the installed files, and a line in
   the triage log. No CI job runs macOS, so the macOS path is tested here, on one machine.
 
 ### Security
