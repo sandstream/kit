@@ -434,17 +434,19 @@ describe("publish.yml — published versions bind to the source tree", () => {
 });
 
 describe("publish.yml — release evidence describes the shipped package", () => {
-  it("scans the unpacked npm tarball for both SBOM formats", () => {
+  it("scans the packed tarball, installed as a consumer gets it, for both SBOM formats", () => {
     const pack = EXECUTED.slice(
       EXECUTED.indexOf("Pack the tarball to attest"),
       EXECUTED.indexOf("Generate GitHub artifact attestation"),
     );
     assert.match(pack, /tar -xzf "\$TARBALL" -C \.release-package/);
+    // The tarball holds no node_modules, so scanning it lists no dependency. Install it first.
+    assert.match(pack, /npm i "\.\.\/\$TARBALL" --omit=dev --ignore-scripts/);
     for (const name of ["Generate SBOM (CycloneDX)", "Generate SBOM (SPDX)"]) {
       const start = EXECUTED.indexOf(name);
       const end = EXECUTED.indexOf("\n      - name:", start + name.length);
       const step = EXECUTED.slice(start, end < 0 ? undefined : end);
-      assert.match(step, /path:\s*\.release-package\/package/);
+      assert.match(step, /path:\s*\.sbom-scan/);
       assert.doesNotMatch(step, /path:\s*\.\s*$/m);
     }
   });
