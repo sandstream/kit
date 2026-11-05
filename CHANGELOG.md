@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+### Security
+
+- **`kit triage instructions [path]` reads agent instruction files before an agent does.** A
+  `CLAUDE.md`, `AGENTS.md`, `SKILL.md`, Cursor rule or Copilot instruction file is read as
+  instructions at the start of a session, with the user's tools, and it can come from anywhere:
+  a cloned repository, a skill, a file another tool generated from web text. The command lists
+  each finding with file, line and rule, and fails on any:
+  - kit's injection patterns (instruction override, pipe to shell, hidden characters, …);
+  - a secret path and an outbound target on one line (`upload ~/.ssh/… to https://…`,
+    `gh auth token` pasted into an issue);
+  - running a fresh download (`base64 -d | sh`, `wget … && chmod +x`);
+  - an instruction to hide something from the user.
+
+  Measured before building, on 43 real instruction files from five repositories: no false
+  positive. All ten planted attacks were caught; they were written by the same author, so recall
+  on other people's attacks is not measured yet. Run over every markdown file of the same
+  repositories, the rules were noisy, because security docs and README install lines read like
+  attacks, so README files are not read and the output says so. Symlinked instruction files are
+  followed, as an agent would follow them; `node_modules`, build output and unrelated
+  dot-directories are skipped. Excerpts are printed without hidden characters or secrets.
+
 ## [7.2.0] - 2026-11-04
 
 ### Added
@@ -43,25 +64,6 @@ ask|keep` keeps a per-user registry with an owner and a lease, merges it with li
 - **The upstream watch reads the Semgrep pin in `security.yml` (#700).**
 
 ### Security
-
-- **`kit triage instructions [path]` reads agent instruction files before an agent does.** A
-  `CLAUDE.md`, `AGENTS.md`, `SKILL.md`, Cursor rule or Copilot instruction file is read as
-  instructions at the start of a session, with the user's tools, and it can come from anywhere:
-  a cloned repository, a skill, a file another tool generated from web text. The command lists
-  each finding with file, line and rule, and fails on any:
-  - kit's injection patterns (instruction override, pipe to shell, hidden characters, …);
-  - a secret path and an outbound target on one line (`upload ~/.ssh/… to https://…`,
-    `gh auth token` pasted into an issue);
-  - running a fresh download (`base64 -d | sh`, `wget … && chmod +x`);
-  - an instruction to hide something from the user.
-
-  Measured before building, on 43 real instruction files from five repositories: no false
-  positive. All ten planted attacks were caught; they were written by the same author, so recall
-  on other people's attacks is not measured yet. Run over every markdown file of the same
-  repositories, the rules were noisy, because security docs and README install lines read like
-  attacks, so README files are not read and the output says so. Symlinked instruction files are
-  followed, as an agent would follow them; `node_modules`, build output and unrelated
-  dot-directories are skipped. Excerpts are printed without hidden characters or secrets.
 
 - **The injection scanner no longer reads an emoji as ASCII smuggling.** `findInjection` flagged
   every `⚠️`, `❤️`, keycap (`1️⃣`) and family emoji (`👨‍👩‍👧`) as a high-confidence hidden
