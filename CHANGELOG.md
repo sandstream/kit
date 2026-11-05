@@ -13,7 +13,7 @@
   only the checksum. `pkgutil` and `spctl` exist only on macOS; elsewhere the checksum runs and the rest
   is `unverified`. `pkgutil` and `spctl` print the file's path, so a path with a line break or control
   character is refused before any tool runs (a name with planted lines made an unsigned package read as
-  signed by the Node.js Foundation), and a tool that exits non-zero fails its check. The command does not
+  signed by the Node.js Foundation), a tool that exits non-zero fails its check, and the file is hashed again after the tools run, because `pkgutil` and `spctl` take a path: a file that changed in between fails every check. The command does not
   install or open the package, and a pass does not say the software is safe. Not done yet: `.dmg` and `.app`, `codesign` on the installed files, and a line in
   the triage log. No CI job runs macOS, so the macOS path is tested here, on one machine.
 

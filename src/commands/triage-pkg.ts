@@ -1,5 +1,5 @@
 // `kit triage pkg <file.pkg>`: check a macOS installer package before it is opened.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
 import { flagValue, hasFlag } from "../utils/flags.js";
@@ -41,17 +41,33 @@ function render(r: PkgReport): void {
   console.log(`\n  ${verdict}. ${c.dim}${NOTE}${c.reset}`);
 }
 
+/** A checksum list through one descriptor (checked with fstat on it), or null when unusable. */
+function readChecksumList(path: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY);
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    return st.isFile() && st.size <= MAX_SHASUMS ? readFileSync(fd, "utf8") : null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function options(args: string[]): PkgOptions | string {
   const team = flagValue(args, "--team-id");
   if (team !== undefined && !isTeamId(team)) return "--team-id needs ten capitals or digits";
   const given = flagValue(args, "--checksum");
   if (given === undefined) return { teamId: team };
   if (/^[0-9a-fA-F]{64}$/.test(given)) return { teamId: team, sha256: given };
-  const path = resolve(given);
-  if (!existsSync(path) || statSync(path).size > MAX_SHASUMS) {
-    return `--checksum needs 64 hex digits or a readable checksum list, not ${given}`;
+  const text = readChecksumList(resolve(given));
+  if (text === null) {
+    return `--checksum needs 64 hex digits or a readable checksum list, not ${JSON.stringify(given)}`;
   }
-  return { teamId: team, shasumsText: readFileSync(path, "utf8") };
+  return { teamId: team, shasumsText: text };
 }
 
 /** Exit status: true only when every check passed. */
@@ -62,16 +78,19 @@ export async function cmdTriagePkg(args: string[]): Promise<boolean> {
     return false;
   }
   const file = resolve(given);
-  if (!existsSync(file) || !statSync(file).isFile()) {
-    console.error(`kit triage pkg: ${file} is not a file`);
-    return false;
-  }
   const opts = options(args);
   if (typeof opts === "string") {
     console.error(`kit triage pkg: ${opts}`);
     return false;
   }
-  const report = await triagePkg(file, opts, defaultPkgDeps);
+  let report: PkgReport;
+  try {
+    report = await triagePkg(file, opts, defaultPkgDeps);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? "error";
+    console.error(`kit triage pkg: cannot read ${JSON.stringify(file)} (${code})`);
+    return false;
+  }
   if (hasFlag(args, "--json")) console.log(JSON.stringify({ ...report, note: NOTE }, null, 2));
   else render(report);
   return report.passed;

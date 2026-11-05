@@ -204,6 +204,11 @@ export async function triagePkg(file: string, opts: PkgOptions, deps: PkgDeps): 
         : "spctl did not accept it as notarized",
     });
   }
+  if (deps.platform === "darwin" && (await deps.sha256(file)) !== sha256) {
+    // pkgutil and spctl take a path, so the file could change between the hash and the tools.
+    const detail = "the file changed while it was checked";
+    for (const c of checks) Object.assign(c, { status: "fail", detail });
+  }
   const passed = checks.every((c) => c.status === "pass");
   return { file, sha256, publisher: pub?.name ?? null, checks, passed };
 }

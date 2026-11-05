@@ -174,6 +174,13 @@ describe("triagePkg", () => {
     assert.equal(r.passed, false);
   });
 
+  it("fails every check when the file changes between the hash and the tools", async () => {
+    const hashes = [HASH, "c".repeat(64)];
+    const r = await triagePkg(FILE, {}, deps({ sha256: async () => hashes.shift() ?? HASH }));
+    assert.equal(r.passed, false);
+    assert.ok(r.checks.every((c) => c.status === "fail" && /changed while/.test(c.detail)));
+  });
+
   it("runs only the checksum off macOS", async () => {
     const r = await triagePkg(FILE, {}, deps({ platform: "linux" }));
     assert.deepEqual(
