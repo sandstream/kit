@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Security
+
+- **`kit triage instructions` now states how much it misses.** Measured blind after 7.2.1: 20
+  attack lines written by a separate model that had not seen the rules were caught 3 times (15%),
+  and 20 benign lines written to sit close to the line gave no false positive. The 7.2.1 notes
+  said only that recall on other people's attacks was not measured yet. The command's footer,
+  `docs/FEATURES.md` and the module now say it is a floor, not a guard: a finding is worth reading,
+  and no finding does not mean the files are safe. It stays out of the session-start gate.
+
 ### Fixed
 
 - **The publish job no longer fails while it prepares the SBOM scan.** The 7.2.1 job published the
