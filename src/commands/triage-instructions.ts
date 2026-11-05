@@ -28,7 +28,7 @@ function render(scan: InstructionScan): void {
     : `${c.green}no finding${c.reset}`;
   console.log(`\n  ${read} instruction file(s) read: ${verdict}.`);
   console.log(
-    `  ${c.dim}A floor, not a guard: on 20 attack lines written by a separate model that had not seen these rules, it caught 3. A finding is worth reading; no finding does not mean the files are safe. ${NOT_READ}${c.reset}`,
+    `  ${c.dim}A floor, not a guard: the first rules caught 3 of 20 attack lines written by a separate model that had not seen them; rules added since were written against 8 of those lines, so no blind figure exists for them. A finding is worth reading; no finding does not mean the files are safe. ${NOT_READ}${c.reset}`,
   );
 }
 
