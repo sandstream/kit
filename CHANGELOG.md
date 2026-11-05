@@ -2,6 +2,17 @@
 
 ### Security
 
+- **The injection scanner no longer reads an emoji as ASCII smuggling.** `findInjection` flagged
+  every `⚠️`, `❤️`, keycap (`1️⃣`) and family emoji (`👨‍👩‍👧`) as a high-confidence hidden
+  character, because its class covers every variation selector and zero width joiner. Measured:
+  the one line `⚠️ Run the tests before committing.` was a finding, and so were four skill files
+  in an outside repository. The memory scanner and `kit check`'s `memory injection` row read
+  these as live injections. The invisible parts of an ordinary emoji sequence are now set aside
+  before that test: one VS16 after a pictograph or in a keycap, and a joiner between two
+  pictographs. A selector after a letter, a run of selectors (byte smuggling) and a joiner
+  outside an emoji sequence are still findings, and so is any other hidden character next to an
+  emoji.
+
 - **`kit doctor` says whether a sandbox shares the host kernel, and sees a VM.** A local kernel
   privilege escalation crosses a container or a seccomp filter and lands on the host; OpenAI's "A
   thousand fewer paths to root" (2026-11) reported 948 working Linux kernel LPE exploits from one

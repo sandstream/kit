@@ -48,6 +48,26 @@ const UNSAFE_CHAR_RE = new RegExp(UNSAFE_CHAR_SOURCE, "u"); // test (non-global)
 // eslint-disable-next-line no-misleading-character-class
 const UNSAFE_CHAR_RE_G = new RegExp(UNSAFE_CHAR_SOURCE, "gu"); // strip (global)
 
+/**
+ * The invisible code points an ordinary emoji is made of, which are not smuggling:
+ *   - a single VARIATION SELECTOR-16 right after a pictograph (`⚠️`, `❤️`) or in a keycap (`1️⃣`);
+ *   - a ZERO WIDTH JOINER between two pictographs (`👨‍👩‍👧`), optionally after a skin tone or VS16.
+ * Each is removed before the hidden-character tests only; anything else stays a finding, including
+ * a selector after a letter (`re\uFE0Fview`), a run of selectors (byte smuggling), and a joiner
+ * outside an emoji sequence. Measured before: every `⚠️` in four of Liza's skill files read as
+ * high-confidence ASCII smuggling.
+ */
+const EMOJI_VS16 =
+  /(\p{Extended_Pictographic})\u{FE0F}(?![\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}])/gu;
+const KEYCAP_VS16 = /([0-9#*])\u{FE0F}(?=\u{20E3})/gu;
+const EMOJI_ZWJ =
+  /(\p{Extended_Pictographic}(?:[\u{1F3FB}-\u{1F3FF}]|\u{FE0F})?)\u{200D}(?=\p{Extended_Pictographic})/gu;
+
+/** `text` with the invisible parts of ordinary emoji sequences removed. Pure. */
+export function withoutEmojiJoiners(text: string): string {
+  return text.replace(EMOJI_ZWJ, "$1").replace(EMOJI_VS16, "$1").replace(KEYCAP_VS16, "$1");
+}
+
 function hasCodepoint(text: string, codes: Set<number>): boolean {
   for (const ch of text) {
     const cp = ch.codePointAt(0);
@@ -342,8 +362,9 @@ export function sanitizeForPrompt(text: string): SanitizedText {
 export function findInjection(text: string): InjectionFinding[] {
   if (!text) return [];
   const out: InjectionFinding[] = [];
-  const seenZeroWidth = hasCodepoint(text, ZERO_WIDTH_CODES);
-  const seenBidi = hasCodepoint(text, BIDI_CONTROL_CODES);
+  const visible = withoutEmojiJoiners(text);
+  const seenZeroWidth = hasCodepoint(visible, ZERO_WIDTH_CODES);
+  const seenBidi = hasCodepoint(visible, BIDI_CONTROL_CODES);
   if (seenZeroWidth) {
     out.push({
       label: "zero-width-char",
@@ -362,7 +383,7 @@ export function findInjection(text: string): InjectionFinding[] {
   // TAGS block used for ASCII smuggling, soft hyphen, …) that the two named
   // families above didn't already attribute. These never belong in transcript
   // text — presence alone is a high-confidence smuggling signal.
-  if (!seenZeroWidth && !seenBidi && UNSAFE_CHAR_RE.test(text)) {
+  if (!seenZeroWidth && !seenBidi && UNSAFE_CHAR_RE.test(visible)) {
     out.push({
       label: "hidden-format-char",
       preview: "hidden format/invisible char(s) (ASCII smuggling)",
