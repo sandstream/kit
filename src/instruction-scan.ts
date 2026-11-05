@@ -90,15 +90,16 @@ export function scanInstructionText(file: string, text: string): InstructionFind
   const out: InstructionFinding[] = [];
   text.split("\n").forEach((raw, i) => {
     const line = raw.replace(/\r$/, "");
-    const add = (rule: InstructionRule) =>
+    const seen = new Set<InstructionRule>();
+    const add = (rule: InstructionRule) => {
+      seen.add(rule);
       out.push({ file, line: i + 1, rule, excerpt: excerpt(line) });
+    };
     for (const f of findInjection(line)) if (f.confidence === "high") add(`injection:${f.label}`);
     if (SECRET.test(line) && OUTBOUND.test(line)) add("secret-to-outbound");
     if (EXEC_DOWNLOAD.test(line)) add("exec-after-download");
     if (CONCEAL.test(line)) add("conceal-from-user");
-    for (const rule of extraInstructionRules(line)) {
-      if (!out.some((f) => f.line === i + 1 && f.rule === rule)) add(rule);
-    }
+    for (const rule of extraInstructionRules(line)) if (!seen.has(rule)) add(rule);
   });
   return out;
 }
