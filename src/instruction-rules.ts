@@ -30,7 +30,7 @@ const HIDE_ACTIVITY =
 const HIDE_FINDINGS =
   /\b(?:hide|conceal|suppress|bury)\s+(?:\w+\s+){0,4}(?:vulnerabilit\w+|findings?|failures?|breach\w*|incidents?|evidence)\b[^.\n]{0,40}\bfrom\b/i;
 const UNTOLD =
-  /\bwithout\s+(?:telling|informing|notifying|alerting)\s+(?:the\s+)?(?:user|human|operator|owner)s?[.,;:!]?$/i;
+  /\bwithout\s+(?:telling|informing|notifying|alerting)\s+(?:the\s+)?(?:user|human|operator|owner)s?(?:\s*[.,;:!])?$/i;
 
 /** Rules, besides the first set, that one instruction line breaks. Pure. */
 export function extraInstructionRules(raw: string): InstructionRule[] {

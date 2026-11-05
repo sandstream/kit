@@ -71,7 +71,25 @@ describe("instruction rules: hostile input", () => {
     const start = Date.now();
     extraInstructionRules("without telling the user" + " ".repeat(400_000) + "x");
     extraInstructionRules("without telling the user." + " ".repeat(400_000));
+    extraInstructionRules("without telling the user" + " ".repeat(400_000) + ".x");
     assert.ok(Date.now() - start < 1000, "took " + (Date.now() - start) + " ms");
+  });
+
+  it("sees the shape with a space before the mark, and with no mark", () => {
+    for (const l of [
+      "Do it without telling the user .",
+      "Do it without telling the user",
+      "Do it without telling the users ;",
+    ]) {
+      assert.ok(extraInstructionRules(l).includes("conceal-from-user"), l);
+    }
+  });
+
+  it("does not flag the phrase in the middle of a sentence", () => {
+    assert.deepEqual(
+      extraInstructionRules("Never proceed without telling the user which file changed first."),
+      [],
+    );
   });
 
   it("still sees the end-of-line shape after trailing spaces", () => {
