@@ -424,6 +424,12 @@ jobs:
           mkdir -p .release-package
           tar -xzf "$TARBALL" -C .release-package
           test -f .release-package/package/package.json
+          # The tarball holds no node_modules, so syft finds no dependency in it (the 7.2.0
+          # SBOMs listed only the root). Install the tarball the way a consumer does and
+          # scan that tree.
+          mkdir .sbom-scan
+          (cd .sbom-scan && npm init -y >/dev/null \
+            && npm i "../$TARBALL" --omit=dev --ignore-scripts --no-audit --no-fund)
 
       - name: Generate GitHub artifact attestation
         # Independent of npm provenance — attaches a signed provenance statement for the published
@@ -462,7 +468,7 @@ jobs:
         # Scanning the checkout would include dev tools absent from the tarball.
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          path: .release-package/package
+          path: .sbom-scan
           config: .syft.yaml # names the root component (see the step above)
           format: cyclonedx-json
           artifact-name: sbom.cyclonedx.json
@@ -472,11 +478,18 @@ jobs:
         # Some consumers (e.g. RHEL, federal) require SPDX format.
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          path: .release-package/package
+          path: .sbom-scan
           config: .syft.yaml # names the root component (see the step above)
           format: spdx-json
           artifact-name: sbom.spdx.json
           output-file: sbom.spdx.json
+
+      - name: Check the SBOMs list the dependencies
+        # An SBOM with only a root component passes every format check and says nothing.
+        run: |
+          node scripts/verify-sbom.mjs sbom.cyclonedx.json sbom.spdx.json \
+            "$(node -p "require('./package.json').name")" \
+            "$(node -p "require('./package.json').version")"
 
       - name: Attach SBOMs to GitHub release
         # The release is created earlier in this job, so a failure here is a real
