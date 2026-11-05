@@ -2999,6 +2999,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "instructions": {
+          "kind": "command",
+          "summary": "Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks, before an agent does",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "npm": {
           "kind": "command",
           "summary": "Evaluate npm package: registry + GitHub health",

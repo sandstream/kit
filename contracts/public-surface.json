@@ -343,6 +343,7 @@
     "triage check-deps",
     "triage check-skills",
     "triage docker",
+    "triage instructions",
     "triage npm",
     "triage pip",
     "triage repo",

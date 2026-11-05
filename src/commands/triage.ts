@@ -24,6 +24,16 @@ export {
   parseStagedSkillNames,
 } from "../skill-triage-gate.js";
 
+/** `kit triage <name> …` subcommands that are not a package type. */
+const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> = {
+  mcp: (args) => cmdTriageMcp(args),
+  plugin: (args) => cmdTriagePlugin(args),
+  "vault-config": () => cmdTriageVaultConfig(),
+  model: (args) => cmdTriageModel(args),
+  instructions: async (args) =>
+    (await import("./triage-instructions.js")).cmdTriageInstructions(args),
+};
+
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
   const sandbox = hasFlag(args, "--sandbox");
@@ -38,18 +48,8 @@ export async function cmdTriage(): Promise<boolean> {
   if (typeArg === "check-skills") {
     return cmdTriageCheckSkills();
   }
-  if (typeArg === "mcp") {
-    return cmdTriageMcp(filtered.slice(1));
-  }
-  if (typeArg === "plugin") {
-    return cmdTriagePlugin(filtered.slice(1));
-  }
-  if (typeArg === "vault-config") {
-    return cmdTriageVaultConfig();
-  }
-  if (typeArg === "model") {
-    return cmdTriageModel(filtered.slice(1));
-  }
+  const subcommand = typeArg ? TRIAGE_SUBCOMMANDS[typeArg] : undefined;
+  if (subcommand) return subcommand(filtered.slice(1));
   const type = typeArg as TriageType;
   const target = skillTargetFor(type, filtered[1]);
 
@@ -92,6 +92,9 @@ export async function cmdTriage(): Promise<boolean> {
     );
     console.log(
       "  kit triage check-skills              Pre-commit gate: fail if staged skills lack a --deep triage entry",
+    );
+    console.log(
+      "  kit triage instructions [path]       Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks",
     );
     console.log("");
     console.log("Examples:");
