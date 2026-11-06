@@ -12,6 +12,9 @@ node = "22"
 # lizard stays on 1.24.0: 1.24.2 crashes on this repo (IndexError in its JS/TS parser), and
 # 1.24.3 runs but misplaces TypeScript function ends (memoryScopeOptions, 17 lines, measured
 # as 865), so it moves 181 functions across the CCN/length limits. Measured 2026-10-26.
+# 1.25.0 runs but still moves the counts: `lizard src -l typescript -C 15 -L 100 -w` gives 307
+# warnings against 229 on 1.24.0, and `src/context-lock.test.ts` shows an anonymous function of
+# 259 lines. Measured 2026-11-06 (thresholds are a probe, not the repo limits).
 # Strict `kit review --enforce` delegates to these scanners. Exact pins keep
 # local and CI findings stable; `kit install` triages each backend ref before
 # mise installs it, and `resolveToolBin` finds the resulting binary mise-first.
