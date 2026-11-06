@@ -80,6 +80,28 @@ can tell them from real ones (phase 4).
 of a real secret file). A cloud session is not representative; the owner's local transcripts are
 the measurement that counts.
 
+**Owner's run, local (2026-11-06, macOS arm64, Claude Code and Codex transcripts):**
+
+| Measure        | Count   | Share of calls | By tool                                  |
+| -------------- | ------- | -------------- | ---------------------------------------- |
+| transcripts    | 1,194   |                |                                          |
+| tool calls     | 118,163 |                |                                          |
+| `decoy-named`  | **0**   | 0%             | none                                     |
+| `sweep`        | 212     | 0.18%          | Bash 207, Codex `exec_command` 3, Glob 2 |
+| `secret-class` | 306     | 0.26%          | Bash 300, Codex `exec_command` 6         |
+
+- [x] **Step 1 result: the build signal holds.** Across 118,163 real calls, nothing named a planned
+      decoy, so the explicit rule raises no false alarm on its own. That says no _name clash_; it
+      does not say agents never reach decoy-shaped files.
+- **Sweeps, 1 call in 557,** are the blind spot: a command that would read a decoy beside real
+  secrets without naming it. They are frequent enough that a broad rule that tripped on them would
+  be noise, which confirms the design choice of the explicit rule.
+- **Secret-class, 1 call in 386,** is legitimate work already in the neighbourhood a decoy would sit
+  in. A decoy name must therefore never be a name tools look for (`.env`, `.env.local`), which the
+  planned names are not.
+- Steps 2 and 3 (coverage gaps, conflicts) remain, and are part of phase 1's review rather than a
+  separate run.
+
 ### Phase 1: read gate (not protected)
 
 - [ ] `src/tripwire.ts`: `decideTripwire`, decoy list read and write in the state directory.
