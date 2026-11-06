@@ -40,7 +40,7 @@ often). Written content (the body of a Write, a PR description) is never a touch
 
 **Three layers:**
 
-1. **Read gate** `kit gate-tripwire`: a PreToolUse hook for Read, Grep, Glob and Bash. A pure
+1. **Read gate** `gate-tripwire` (a new kit verb): a PreToolUse hook for Read, Grep, Glob and Bash. A pure
    `decideTripwire(toolName, input, decoys)` returns `allow` or `trip`; `trip` exits 2 (deny),
    in the shape `kit gate-env` uses.
 2. **Broker decoys:** a canary env name (`KIT_CANARY_TOKEN`), a canary egress host and canary
@@ -49,7 +49,7 @@ often). Written content (the body of a Write, a PR description) is never a touch
 3. **Evidence:** every trip is a `tripwire` event through `appendAuditEventDirect` (hash-chained)
    with session, tool, decoy and time, and a `kit doctor` row: `tripwire: N touches since <date>`.
 
-**Decoy management:** `kit tripwire add <path>`, `list`, `remove`. The list lives in kit's state
+**Decoy management:** `tripwire add <path>` (a new kit verb), `list`, `remove`. The list lives in kit's state
 directory, outside the project, so an agent reading the repository cannot learn which files are
 decoys. Decoy content is generated fake keys of the right shape, marked so `kit check`'s secret scan
 can tell them from real ones (phase 4).
@@ -105,7 +105,7 @@ the measurement that counts.
 ### Phase 1: read gate (not protected)
 
 - [ ] `src/tripwire.ts`: `decideTripwire`, decoy list read and write in the state directory.
-- [ ] `src/commands/tripwire.ts`: `kit tripwire add|list|remove`, `kit gate-tripwire`.
+- [ ] `src/commands/tripwire.ts`: `tripwire add|list|remove`, `gate-tripwire`.
 - [ ] Audit event `tripwire`; `kit doctor` row.
 - [ ] Tests for each, including a Windows path (`C:\\...\\.env.canary`, case-insensitive).
 
@@ -116,7 +116,7 @@ the measurement that counts.
 
 ### Phase 3: hook wiring (protected, owner)
 
-- [ ] `src/agent-config.ts` adds the `kit gate-tripwire` PreToolUse group, only when a decoy list
+- [ ] `src/agent-config.ts` adds the `gate-tripwire` PreToolUse group, only when a decoy list
       exists.
 
 ### Phase 4: secret-scan exemption (protected, owner)
