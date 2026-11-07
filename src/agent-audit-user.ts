@@ -5,7 +5,7 @@
  * by a script, or rewritten by an agent. `runAgentAudit` reads the project's own `.claude/` only.
  *
  * Two passes, both read-only:
- *   - the project audit's malware, secret and inline-MCP rules (`scanAgentDirs`), on the user dirs;
+ *   - the project audit's secret, malware and inline-MCP analyzers, on every file in the user dirs;
  *   - `kit triage instructions`' rules (`scanInstructionText`) on every markdown file there, since
  *     each of those files is text the agent takes as an instruction. A hit is a warning: on the
  *     first real machine it ran on, its one hit was a vendor skill quoting an injection phrase in
@@ -14,10 +14,10 @@
  * Plugins (`~/.claude/plugins`) are left out: that directory holds marketplace caches of other
  * repositories, which `kit triage` covers when they are installed.
  */
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
-import { scanAgentDirs } from "./agent-audit.js";
+import { auditConfigSecrets, auditHookBody, auditMcpStdio } from "./agent-audit.js";
 import { readInstructionFile, scanInstructionText } from "./instruction-scan.js";
 
 export const USER_AGENT_DIRS = [
@@ -27,6 +27,23 @@ export const USER_AGENT_DIRS = [
 ];
 const MAX_DEPTH = 5;
 const MAX_FILES = 2000;
+const MAX_SCAN_BYTES = 512 * 1024;
+const SCAN_EXTS = new Set([
+  ".md",
+  ".json",
+  ".jsonc",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".py",
+  ".rb",
+  ".toml",
+  ".txt",
+]);
 
 /** `~/…` for a path under `home`, so output names the file without the user's home path. */
 export function shownUnderHome(home: string, abs: string): string {
@@ -41,8 +58,8 @@ function sameDir(a: string, b: string): boolean {
   }
 }
 
-/** Markdown files under one user dir, bounded in depth and count. Symlinked dirs are not walked. */
-function markdownFiles(dir: string, depth: number, acc: string[]): void {
+/** Files under one user dir whose extension is in `exts`, bounded. Symlinked dirs are not walked. */
+function filesUnder(dir: string, exts: Set<string>, depth: number, acc: string[]): void {
   if (depth < 0 || acc.length >= MAX_FILES) return;
   let entries;
   try {
@@ -52,19 +69,84 @@ function markdownFiles(dir: string, depth: number, acc: string[]): void {
   }
   for (const e of entries) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) markdownFiles(p, depth - 1, acc);
-    else if ((e.isFile() || e.isSymbolicLink()) && extname(e.name).toLowerCase() === ".md")
+    if (e.isDirectory()) filesUnder(p, exts, depth - 1, acc);
+    else if ((e.isFile() || e.isSymbolicLink()) && exts.has(extname(e.name).toLowerCase()))
       acc.push(p);
   }
 }
+
+const MD = new Set([".md"]);
 
 /** The user-level instruction files: `~/.claude/CLAUDE.md` and every `.md` in the user dirs. */
 export function userInstructionFiles(home: string): string[] {
   const files: string[] = [];
   const top = join(home, ".claude", "CLAUDE.md");
   if (existsSync(top)) files.push(top);
-  for (const { dir } of USER_AGENT_DIRS) markdownFiles(join(home, dir), MAX_DEPTH, files);
+  for (const { dir } of USER_AGENT_DIRS) filesUnder(join(home, dir), MD, MAX_DEPTH, files);
   return files;
+}
+
+function read(path: string): string | null {
+  try {
+    return statSync(path).size > MAX_SCAN_BYTES ? null : readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** One file's rows from the project audit's analyzers. Pure. */
+export function surfaceRows(shown: string, label: string, body: string): SecurityCheckResult[] {
+  const rows: SecurityCheckResult[] = [];
+  const secrets = auditConfigSecrets(body);
+  if (secrets.length > 0) {
+    const kinds = [...new Set(secrets.map((x) => x.label))].join(", ");
+    rows.push({
+      category: "secrets",
+      name: `secret in ${label} ${shown}`,
+      status: "fail",
+      severity: "critical",
+      detail: `${secrets.length} plaintext secret(s) (${kinds}) in a ${label} — e.g. ${secrets[0].preview}`,
+      suggestion: `move it to a vault or env; a ${label} is loaded into every session`,
+    });
+  }
+  if (/\.jsonc?$/i.test(shown))
+    for (const m of auditMcpStdio(body))
+      rows.push({
+        category: "exposure",
+        name: `risky MCP server "${m.server}" in ${label} ${shown}`,
+        status: "fail",
+        severity: m.severity,
+        detail: `a ${label} declares a stdio MCP server that ${m.why} — it executes when the ${label} loads`,
+        suggestion:
+          "verify this MCP server's command; an inline or obfuscated command is a backdoor shape",
+      });
+  const reasons = auditHookBody(body);
+  if (reasons.length > 0)
+    rows.push({
+      category: "exposure",
+      name: `malware-shaped ${label} ${shown}`,
+      status: "warn",
+      severity: "medium",
+      detail: `a ${label} contains a command that ${reasons.join("; ")} — verify it is intentional`,
+      suggestion: `review ${shown}; a ${label} can run shell when invoked`,
+    });
+  return rows;
+}
+
+function surfaces(home: string): { rows: SecurityCheckResult[]; scanned: number } {
+  const rows: SecurityCheckResult[] = [];
+  let scanned = 0;
+  for (const { dir, label } of USER_AGENT_DIRS) {
+    const files: string[] = [];
+    filesUnder(join(home, dir), SCAN_EXTS, MAX_DEPTH, files);
+    for (const f of files) {
+      const body = read(f);
+      if (body === null) continue;
+      scanned++;
+      rows.push(...surfaceRows(shownUnderHome(home, f), label, body));
+    }
+  }
+  return { rows, scanned };
 }
 
 function instructionRows(home: string): { rows: SecurityCheckResult[]; read: number } {
@@ -97,18 +179,15 @@ function instructionRows(home: string): { rows: SecurityCheckResult[]; read: num
  */
 export function runUserAgentAudit(root: string, home: string): SecurityCheckResult[] {
   if (sameDir(root, home)) return [];
-  const surfaces = scanAgentDirs(home, {
-    dirs: USER_AGENT_DIRS,
-    shown: (abs) => shownUnderHome(home, abs),
-  });
+  const s = surfaces(home);
   const instructions = instructionRows(home);
-  const rows = [...surfaces.results, ...instructions.rows];
-  if (rows.length === 0 && (surfaces.scanned > 0 || instructions.read > 0)) {
+  const rows = [...s.rows, ...instructions.rows];
+  if (rows.length === 0 && (s.scanned > 0 || instructions.read > 0)) {
     rows.push({
       category: "exposure",
       name: "user-level agent surfaces",
       status: "pass",
-      detail: `no issues in ${surfaces.scanned} file(s) under ~/.claude/{skills,commands,agents}, ${instructions.read} read as instructions`,
+      detail: `no issues in ${s.scanned} file(s) under ~/.claude/{skills,commands,agents}, ${instructions.read} read as instructions`,
     });
   }
   return rows;
