@@ -14,7 +14,7 @@
  * Plugins (`~/.claude/plugins`) are left out: that directory holds marketplace caches of other
  * repositories, which `kit triage` covers when they are installed.
  */
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { auditConfigSecrets, auditHookBody, auditMcpStdio } from "./agent-audit.js";
@@ -27,7 +27,6 @@ export const USER_AGENT_DIRS = [
 ];
 const MAX_DEPTH = 5;
 const MAX_FILES = 2000;
-const MAX_SCAN_BYTES = 512 * 1024;
 const SCAN_EXTS = new Set([
   ".md",
   ".json",
@@ -86,14 +85,6 @@ export function userInstructionFiles(home: string): string[] {
   return files;
 }
 
-function read(path: string): string | null {
-  try {
-    return statSync(path).size > MAX_SCAN_BYTES ? null : readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-}
-
 /** One file's rows from the project audit's analyzers. Pure. */
 export function surfaceRows(shown: string, label: string, body: string): SecurityCheckResult[] {
   const rows: SecurityCheckResult[] = [];
@@ -140,7 +131,8 @@ function surfaces(home: string): { rows: SecurityCheckResult[]; scanned: number 
     const files: string[] = [];
     filesUnder(join(home, dir), SCAN_EXTS, MAX_DEPTH, files);
     for (const f of files) {
-      const body = read(f);
+      // One descriptor for the check and the read (fstat on it), so the file cannot be swapped.
+      const body = readInstructionFile(f);
       if (body === null) continue;
       scanned++;
       rows.push(...surfaceRows(shownUnderHome(home, f), label, body));
