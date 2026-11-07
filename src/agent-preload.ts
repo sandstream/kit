@@ -91,24 +91,37 @@ function sameDir(a: string, b: string): boolean {
   }
 }
 
+/**
+ * The environments an agent started from `root` sees: the process environment and the `env`
+ * block of each Claude Code settings file. Run from the home directory, the user file is the
+ * project file, and it is listed once.
+ */
+export function claudeEnvSources(
+  root: string,
+  home: string,
+  env: Record<string, unknown>,
+): { where: string; env: Record<string, unknown> | null }[] {
+  return [
+    { where: "process environment", env },
+    { where: ".claude/settings.json", env: settingsEnv(join(root, ".claude", "settings.json")) },
+    {
+      where: ".claude/settings.local.json",
+      env: settingsEnv(join(root, ".claude", "settings.local.json")),
+    },
+    {
+      where: "~/.claude/settings.json",
+      env: sameDir(root, home) ? null : settingsEnv(join(home, ".claude", "settings.json")),
+    },
+  ];
+}
+
 /** One warn row per code-loading variable, from the process environment and Claude settings. */
 export function runAgentPreload(
   root: string,
   home: string,
   env: Record<string, unknown>,
 ): SecurityCheckResult[] {
-  const project = join(root, ".claude", "settings.json");
-  const user = join(home, ".claude", "settings.json");
-  const sources: { where: string; env: Record<string, unknown> | null }[] = [
-    { where: "process environment", env },
-    { where: ".claude/settings.json", env: settingsEnv(project) },
-    {
-      where: ".claude/settings.local.json",
-      env: settingsEnv(join(root, ".claude", "settings.local.json")),
-    },
-    // Run from the home directory, the user file is the project file: report it once.
-    { where: "~/.claude/settings.json", env: sameDir(root, home) ? null : settingsEnv(user) },
-  ];
+  const sources = claudeEnvSources(root, home, env);
   const rows: SecurityCheckResult[] = [];
   for (const s of sources) {
     if (!s.env) continue;
