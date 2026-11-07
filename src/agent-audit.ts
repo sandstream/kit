@@ -339,11 +339,20 @@ function collectFiles(dir: string, maxDepth: number, acc: string[]): void {
   }
 }
 
-/** Scan Claude's command/agent/skill/plugin dirs for secrets, inline MCP, and malware shapes. */
-function scanAgentDirs(cwd: string): { results: SecurityCheckResult[]; scanned: number } {
+/**
+ * Scan Claude's command/agent/skill/plugin dirs under `cwd` for secrets, inline MCP, and malware
+ * shapes. `scope` names the dirs and how a path is shown; the default is the project's.
+ */
+export function scanAgentDirs(
+  cwd: string,
+  scope: { dirs: { dir: string; label: string }[]; shown: (abs: string) => string } = {
+    dirs: AGENT_DIRS,
+    shown: (abs) => relative(cwd, abs),
+  },
+): { results: SecurityCheckResult[]; scanned: number } {
   const out: SecurityCheckResult[] = [];
   let scanned = 0;
-  for (const { dir, label } of AGENT_DIRS) {
+  for (const { dir, label } of scope.dirs) {
     const dpath = resolve(cwd, dir);
     if (!existsSync(dpath)) continue;
     const files: string[] = [];
@@ -357,7 +366,7 @@ function scanAgentDirs(cwd: string): { results: SecurityCheckResult[]; scanned: 
         continue;
       }
       scanned++;
-      const rel = relative(cwd, fpath);
+      const rel = scope.shown(fpath);
       const secrets = auditConfigSecrets(body);
       if (secrets.length > 0) {
         const kinds = [...new Set(secrets.map((s) => s.label))].join(", ");

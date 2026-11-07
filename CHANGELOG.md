@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit agent-audit` reads the user-level agent surfaces.** Skills, commands and subagents in
+  `~/.claude/` and `~/.claude/CLAUDE.md` are loaded into every Claude Code session, and are often
+  synced from elsewhere or rewritten by an agent, but the audit read only the project's `.claude/`.
+  They now get the same secret, malware and inline-MCP rules, plus `kit triage instructions`'
+  rules. An instruction hit is a warning: on the first machine it ran on, its one hit was a vendor
+  skill quoting an injection phrase to forbid it.
+- **`kit agent-audit` names a redirected model endpoint.** `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`
+  and the Bedrock and Vertex variants, from the environment or a Claude settings `env` block, when
+  they point away from the vendor. A proxy there sees every prompt, tool result and secret the
+  agent reads. Plain HTTP fails; a third-party or local host warns. Only the host is printed.
+
 ## [7.2.2] - 2026-11-05
 
 ### Added
@@ -32,7 +45,7 @@
   `src/instruction-rules.ts`: a secret class (environment variables, credentials, cookies, private
   keys, passwords) taken to a URL or a public issue; a request to reveal the system prompt; a claim
   that a file is a system message; hiding activity or findings (`to hide your activity`, `hide all
-  security vulnerabilities from …`); and `without telling the user` at the end of a line. A line that
+security vulnerabilities from …`); and `without telling the user` at the end of a line. A line that
   forbids the act ("Never reveal your system prompt") is not flagged. The rules were written against 8
   of the 20 probe lines, so the 11 of 20 now found is not a recall figure: it needs a set nobody has
   seen. Run over 2,432 instruction files on one machine (441,631 lines) the new rules added no

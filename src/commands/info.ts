@@ -180,11 +180,15 @@ export async function cmdAgentAudit(): Promise<boolean> {
   const { runAgentAudit } = await import("../agent-audit.js");
   const { runAgentTrifecta } = await import("../agent-trifecta.js");
   const { runAgentPreload } = await import("../agent-preload.js");
+  const { runAgentEndpoint } = await import("../agent-endpoint.js");
+  const { runUserAgentAudit } = await import("../agent-audit-user.js");
   const { homedir } = await import("node:os");
   const results = [
     ...runAgentAudit(process.cwd()),
+    ...runUserAgentAudit(process.cwd(), homedir()),
     ...runAgentTrifecta(process.cwd(), homedir()),
     ...runAgentPreload(process.cwd(), homedir(), process.env),
+    ...runAgentEndpoint(process.cwd(), homedir(), process.env),
   ];
   const fails = results.filter((r) => r.status === "fail").length;
 
