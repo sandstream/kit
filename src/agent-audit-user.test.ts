@@ -109,7 +109,7 @@ describe("userInstructionFiles for Codex", () => {
   });
 });
 
-describe("runUserAgentAudit", () => {
+describe("runUserAgentAudit for Codex", () => {
   it("warns on a planted line in Codex's global AGENTS.md", () => {
     const home = homeWith({
       ".codex/AGENTS.md":
@@ -146,7 +146,9 @@ describe("runUserAgentAudit", () => {
       rmTemp(home);
     }
   });
+});
 
+describe("runUserAgentAudit", () => {
   it("reports a planted instruction line in a user skill, named from ~", () => {
     const home = homeWith({
       ".claude/skills/sync/SKILL.md":
