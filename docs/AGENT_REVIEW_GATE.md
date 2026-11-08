@@ -19,7 +19,12 @@ pull-request workflow finishes. Once every check on the head commit has finished
 - no changed file, including a rename's old path, is in a protected class of
   `.github/kit-protected-paths.json` (release, `.github/`, secrets, permissions). The rules come
   from the default branch, never from the pull request;
-- the file list is complete, and the change is under 1,500 lines.
+- the file list is complete, and the change is under 1,500 lines;
+- the default branch is not red: the newest `build-and-test` result on its head commit did not
+  fail. A merge onto a broken main stacks on the breakage, so while main is red a person approves.
+  A main CI that is still running does not hold. Measured before building (kit-research
+  `theo-t3-ten-videos-vs-kit`): over 90 days this would have sent about 4 of 187 merges to a person,
+  two of them merged onto a broken main.
 
 Otherwise it comments once with the reason and approves nothing.
 
@@ -41,9 +46,9 @@ The fix is a machine account for the agent:
 
 Then, for a pull request the agent opens:
 
-| Change | Who approves | Who can merge |
-|---|---|---|
-| no protected path, every check passes | the reviewer App | the agent |
+| Change                                                       | Who approves                  | Who can merge                               |
+| ------------------------------------------------------------ | ----------------------------- | ------------------------------------------- |
+| no protected path, every check passes                        | the reviewer App              | the agent                                   |
 | a protected path (release, `.github/`, secrets, permissions) | the owner, as a normal review | the owner or the agent, after that approval |
 
 The agent never approves its own pull request: it is the author. The owner's admin bypass stays

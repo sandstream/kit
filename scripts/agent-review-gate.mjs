@@ -7,6 +7,9 @@
  *     (.github/kit-protected-paths.json, read from the default branch), and the change is
  *     under MAX_CHANGED_LINES;
  *   - otherwise comments once on that commit with the reason, and approves nothing.
+ *   It also approves nothing while the default branch's own CI has failed: a change merged onto a
+ *   broken main stacks on the breakage (kit-research theo-t3-ten-videos-vs-kit, replay of 90 days:
+ *   about 4 of 187 merges would have needed a person, two of them landed on a broken main).
  * The approval says what it is: the gates passed. It is not a review of the code's intent.
  *
  *   node scripts/agent-review-gate.mjs ready <sha>   → prints ready=true|false (no App token)
@@ -50,8 +53,32 @@ export function checksState(runs) {
   return { state: failed.length ? "failed" : "green", failed, total: latest.length };
 }
 
+/** The checks on the default branch's head that the hold reads: the CI workflow's job. */
+export const MAIN_CHECKS = ["build-and-test"];
+
+/**
+ * Whether the default branch is red: the newest result of each named check on its head commit.
+ * Pending or absent checks are not red, so a fresh merge does not hold every pull request while its
+ * own CI runs. Pure.
+ */
+export function mainRed(runs, names = MAIN_CHECKS) {
+  const latest = latestChecks(runs.filter((r) => names.includes(r.name)));
+  return latest
+    .filter((r) => r.status === "completed" && !OK.has(r.conclusion))
+    .map((r) => r.name)
+    .sort();
+}
+
 /** What the App does for one pull request at one commit. Pure. */
-export function decide({ sha, checks, protectedPaths, changedLines, fileCount, truncated }) {
+export function decide({
+  sha,
+  checks,
+  protectedPaths,
+  changedLines,
+  fileCount,
+  truncated,
+  main = null,
+}) {
   const head = `${MARK}\nkit review gate at \`${sha.slice(0, 12)}\``;
   const reasons = [];
   if (checks.state === "failed") reasons.push(`checks did not pass: ${checks.failed.join(", ")}`);
@@ -65,6 +92,11 @@ export function decide({ sha, checks, protectedPaths, changedLines, fileCount, t
   }
   if (truncated)
     reasons.push("the file list was truncated by the API, so not every path was classified");
+  if (main && main.red.length)
+    reasons.push(
+      `the default branch is red at \`${main.sha.slice(0, 12)}\` (${main.red.join(", ")} failed): ` +
+        "a merge now would stack on the breakage, so a person approves until main is green again",
+    );
   if (changedLines > MAX_CHANGED_LINES)
     reasons.push(
       `${changedLines} changed lines, over the ${MAX_CHANGED_LINES}-line limit for a gate-only approval`,
@@ -207,6 +239,16 @@ async function post(repo, pr, sha, decision, appToken) {
   if (!response.ok) throw new Error(`POST review on #${pr}: HTTP ${response.status}`);
 }
 
+/** The default branch's head and its red checks. A read failure throws, so nothing is approved. */
+async function defaultBranchState(repo, token) {
+  const { default_branch: branch } = await get(`/repos/${repo}`, token);
+  const head = await get(`/repos/${repo}/commits/${encodeURIComponent(branch)}`, token);
+  const runs = (
+    await paged(`/repos/${repo}/commits/${sha40(head.sha)}/check-runs`, token, "check_runs")
+  ).items;
+  return { sha: head.sha, red: mainRed(runs) };
+}
+
 async function decideAll(sha) {
   const { GITHUB_REPOSITORY: repo, GITHUB_TOKEN: token } = process.env;
   const { loadProtectedPathRules, classifyProtectedPaths } = await import(
@@ -217,6 +259,7 @@ async function decideAll(sha) {
     .items;
   const checks = checksState(runs);
   if (checks.state === "pending") return console.log("checks still running; nothing to decide");
+  const main = await defaultBranchState(repo, token);
   let appToken = null;
   for (const pull of await openPullsAt(repo, sha, token)) {
     const files = await paged(`/repos/${repo}/pulls/${pull.number}/files`, token);
@@ -234,6 +277,7 @@ async function decideAll(sha) {
       changedLines: files.items.reduce((n, f) => n + (f.additions ?? 0) + (f.deletions ?? 0), 0),
       fileCount: files.items.length,
       truncated: files.truncated,
+      main,
     });
     const key = decisionKey(decision);
     if (await alreadyPosted(repo, pull.number, sha, key, token)) {
