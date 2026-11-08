@@ -330,15 +330,20 @@ export async function propagate(
         valueInArgv: false,
       });
     }
-    // The adapter ran, so the key may have reached the platform: record it either way.
-    const r = results[results.length - 1];
-    await recordSecretWrite(
-      SECRET_WRITE_OPS.propagate,
-      { keys: [name], target: t, ok: r.ok },
-      { cwd: opts.cwd },
-    );
+    await recordAdapterRun(name, t, results, opts.cwd); // the key may have reached the platform
   }
   return results;
+}
+
+/** Record the adapter that just ran (the last result), whatever its outcome. */
+async function recordAdapterRun(
+  name: string,
+  target: PropagationTarget,
+  results: PropagationResult[],
+  cwd?: string,
+): Promise<void> {
+  const ok = results[results.length - 1]?.ok ?? false;
+  await recordSecretWrite(SECRET_WRITE_OPS.propagate, { keys: [name], target, ok }, { cwd });
 }
 
 export function parseTargets(spec: string): PropagationTarget[] {

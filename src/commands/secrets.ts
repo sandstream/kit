@@ -18,14 +18,13 @@ import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
 import { validateSecrets, summarizeValidation } from "../secrets-validate.js";
-import {
-  planMigration,
-  writeSecretToBackend,
-  commentOutInFile,
-  type PostMigrateMode,
-} from "../secrets-migrate.js";
+import { planMigration, commentOutInFile, type PostMigrateMode } from "../secrets-migrate.js";
 import { cmdSecretsRotate, pickBackendOpts } from "../secrets-rotate-cli.js";
-import { recordSecretWrite, SECRET_WRITE_OPS } from "../secrets-write-record.js";
+import {
+  recordSecretWrite,
+  SECRET_WRITE_OPS,
+  writeSecretRecorded,
+} from "../secrets-write-record.js";
 import { setSecretValue, type SetValueOptions } from "../secrets-set.js";
 import {
   detectTools as detectPurgeTools,
@@ -877,12 +876,7 @@ async function cmdSecretsMigrate(): Promise<boolean> {
 
   console.log();
   for (const [key, { value, source }] of plan.keyValues) {
-    const result = await writeSecretToBackend(store, key, value, backendOpts);
-    await recordSecretWrite(SECRET_WRITE_OPS.migrate, {
-      keys: [key],
-      target: store,
-      ok: result.ok,
-    });
+    const result = await writeSecretRecorded("secrets.migrate", store, key, value, backendOpts);
     if (result.ok) {
       console.log(`  ${c.green}✓${c.reset} ${key}  ${c.dim}${result.detail}${c.reset}`);
       fixed++;

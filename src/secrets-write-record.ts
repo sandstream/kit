@@ -13,6 +13,7 @@
  * The operation names are the view's, so writer and reader share one constant.
  */
 import { appendAuditEventDirect, type AuditEvent } from "./audit.js";
+import { writeSecretToBackend } from "./secrets-migrate.js";
 
 export const SECRET_WRITE_OPS = {
   propagate: "secrets.propagate",
@@ -65,4 +66,15 @@ export async function recordSecretWrite(
 ): Promise<void> {
   if (write.keys.length === 0) return;
   await appendAuditEventDirect(secretWriteEvent(op, write), { cwd: opts.cwd });
+}
+
+/** `writeSecretToBackend`, then a record of the write under `op`, with the vault store as target. */
+export async function writeSecretRecorded(
+  op: SecretWriteOp,
+  ...args: Parameters<typeof writeSecretToBackend>
+): ReturnType<typeof writeSecretToBackend> {
+  const [store, key] = args;
+  const result = await writeSecretToBackend(...args);
+  await recordSecretWrite(op, { keys: [key], target: String(store), ok: result.ok });
+  return result;
 }
