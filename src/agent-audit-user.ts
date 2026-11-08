@@ -1,8 +1,12 @@
 /**
- * User-level agent surfaces: `~/.claude/skills`, `~/.claude/commands`, `~/.claude/agents` and
- * `~/.claude/CLAUDE.md`. Claude Code loads them into every session in every project, and nothing
- * in a project's history records a change to them: they are often synced from another repository
- * by a script, or rewritten by an agent. `runAgentAudit` reads the project's own `.claude/` only.
+ * User-level agent surfaces, loaded into every session in every project, where nothing in a
+ * project's history records a change: they are often synced from another repository by a script,
+ * or rewritten by an agent. `runAgentAudit` reads the project's own `.claude/` only.
+ *   - Claude Code: `~/.claude/skills`, `commands`, `agents` and `~/.claude/CLAUDE.md`.
+ *   - Codex (developers.openai.com/codex, 2026-11-08): global instructions in the Codex home
+ *     (`$CODEX_HOME`, default `~/.codex`) as `AGENTS.override.md` or else `AGENTS.md`; user skills in
+ *     `~/.agents/skills`, and in `<codex home>/skills` where older Codex versions installed them.
+ *     Both instruction files are read: the one Codex skips today loads once the other is removed.
  *
  * Two passes, both read-only:
  *   - the project audit's secret, malware and inline-MCP analyzers, on every file in the user dirs;
@@ -25,6 +29,58 @@ export const USER_AGENT_DIRS = [
   { dir: join(".claude", "commands"), label: "user command" },
   { dir: join(".claude", "agents"), label: "user subagent" },
 ];
+
+/** One user-level directory: where it is, what it holds, and how a path in it is shown. */
+export interface UserSurface {
+  dir: string;
+  label: string;
+  /** Display prefix for the directory: `~/…` or `$CODEX_HOME/…`, never the home path. */
+  shown: string;
+  /** A Claude dir, which the project audit already reads when run from the home directory. */
+  claude: boolean;
+}
+
+/** The Codex home and how it is shown. Pure. */
+export function codexHome(
+  home: string,
+  env: Record<string, unknown>,
+): { dir: string; shown: string } {
+  const set = typeof env.CODEX_HOME === "string" && env.CODEX_HOME.trim() !== "";
+  return set
+    ? { dir: String(env.CODEX_HOME), shown: "$CODEX_HOME" }
+    : { dir: join(home, ".codex"), shown: "~/.codex" };
+}
+
+/** Every user-level agent directory kit reads, for Claude Code and Codex. Pure. */
+export function userSurfaces(home: string, env: Record<string, unknown>): UserSurface[] {
+  const codex = codexHome(home, env);
+  return [
+    ...USER_AGENT_DIRS.map(({ dir, label }) => ({
+      dir: join(home, dir),
+      label,
+      shown: `~/${dir.split(sep).join("/")}`,
+      claude: true,
+    })),
+    {
+      dir: join(home, ".agents", "skills"),
+      label: "Codex user skill",
+      shown: "~/.agents/skills",
+      claude: false,
+    },
+    {
+      dir: join(codex.dir, "skills"),
+      label: "Codex user skill",
+      shown: `${codex.shown}/skills`,
+      claude: false,
+    },
+  ];
+}
+
+/** The path `abs` inside `surface`, shown from its prefix with forward slashes. Pure. */
+export function shownIn(prefix: string, base: string, abs: string): string {
+  const rel = relative(base, abs).split(sep).join("/");
+  return rel ? `${prefix}/${rel}` : prefix;
+}
 const MAX_DEPTH = 5;
 const MAX_FILES = 2000;
 const SCAN_EXTS = new Set([
@@ -43,11 +99,6 @@ const SCAN_EXTS = new Set([
   ".toml",
   ".txt",
 ]);
-
-/** `~/…` for a path under `home`, so output names the file without the user's home path. */
-export function shownUnderHome(home: string, abs: string): string {
-  return `~/${relative(home, abs).split(sep).join("/")}`;
-}
 
 function sameDir(a: string, b: string): boolean {
   try {
@@ -76,12 +127,30 @@ function filesUnder(dir: string, exts: Set<string>, depth: number, acc: string[]
 
 const MD = new Set([".md"]);
 
-/** The user-level instruction files: `~/.claude/CLAUDE.md` and every `.md` in the user dirs. */
-export function userInstructionFiles(home: string): string[] {
-  const files: string[] = [];
-  const top = join(home, ".claude", "CLAUDE.md");
-  if (existsSync(top)) files.push(top);
-  for (const { dir } of USER_AGENT_DIRS) filesUnder(join(home, dir), MD, MAX_DEPTH, files);
+/**
+ * The user-level instruction files, each with how it is shown: `~/.claude/CLAUDE.md`, Codex's
+ * `AGENTS.override.md` and `AGENTS.md`, and every `.md` in the user dirs.
+ */
+export function userInstructionFiles(
+  home: string,
+  env: Record<string, unknown> = {},
+  claude = true,
+): { abs: string; shown: string }[] {
+  const codex = codexHome(home, env);
+  const tops = [
+    ...(claude ? [{ abs: join(home, ".claude", "CLAUDE.md"), shown: "~/.claude/CLAUDE.md" }] : []),
+    ...["AGENTS.override.md", "AGENTS.md"].map((n) => ({
+      abs: join(codex.dir, n),
+      shown: `${codex.shown}/${n}`,
+    })),
+  ];
+  const files = tops.filter((t) => existsSync(t.abs));
+  for (const surface of userSurfaces(home, env)) {
+    if (surface.claude && !claude) continue;
+    const found: string[] = [];
+    filesUnder(surface.dir, MD, MAX_DEPTH, found);
+    files.push(...found.map((abs) => ({ abs, shown: shownIn(surface.shown, surface.dir, abs) })));
+  }
   return files;
 }
 
@@ -124,31 +193,39 @@ export function surfaceRows(shown: string, label: string, body: string): Securit
   return rows;
 }
 
-function surfaces(home: string): { rows: SecurityCheckResult[]; scanned: number } {
+function surfaces(
+  home: string,
+  env: Record<string, unknown>,
+  claude: boolean,
+): { rows: SecurityCheckResult[]; scanned: number } {
   const rows: SecurityCheckResult[] = [];
   let scanned = 0;
-  for (const { dir, label } of USER_AGENT_DIRS) {
+  for (const surface of userSurfaces(home, env)) {
+    if (surface.claude && !claude) continue;
     const files: string[] = [];
-    filesUnder(join(home, dir), SCAN_EXTS, MAX_DEPTH, files);
+    filesUnder(surface.dir, SCAN_EXTS, MAX_DEPTH, files);
     for (const f of files) {
       // One descriptor for the check and the read (fstat on it), so the file cannot be swapped.
       const body = readInstructionFile(f);
       if (body === null) continue;
       scanned++;
-      rows.push(...surfaceRows(shownUnderHome(home, f), label, body));
+      rows.push(...surfaceRows(shownIn(surface.shown, surface.dir, f), surface.label, body));
     }
   }
   return { rows, scanned };
 }
 
-function instructionRows(home: string): { rows: SecurityCheckResult[]; read: number } {
+function instructionRows(
+  home: string,
+  env: Record<string, unknown>,
+  claude: boolean,
+): { rows: SecurityCheckResult[]; read: number } {
   const rows: SecurityCheckResult[] = [];
   let read = 0;
-  for (const file of userInstructionFiles(home)) {
-    const text = readInstructionFile(file);
+  for (const { abs, shown } of userInstructionFiles(home, env, claude)) {
+    const text = readInstructionFile(abs);
     if (text === null) continue;
     read++;
-    const shown = shownUnderHome(home, file);
     for (const f of scanInstructionText(shown, text)) {
       rows.push({
         category: "exposure",
@@ -157,7 +234,7 @@ function instructionRows(home: string): { rows: SecurityCheckResult[]; read: num
         // to warn against it from the attack (Anthropic's own import-memory skill trips one).
         status: "warn",
         severity: "medium",
-        detail: `[${f.rule}] ${f.excerpt} — loaded into every Claude Code session on this machine`,
+        detail: `[${f.rule}] ${f.excerpt} — loaded into every agent session on this machine`,
         suggestion: `read ${shown}; if you did not write this line, find what synced or edited the file`,
       });
     }
@@ -167,19 +244,23 @@ function instructionRows(home: string): { rows: SecurityCheckResult[]; read: num
 
 /**
  * Audit the user-level agent surfaces under `home`. When `root` is `home`, the project audit has
- * already read these dirs, so this reports nothing rather than reporting them twice.
+ * already read the Claude dirs, so only the Codex ones are read rather than reporting twice.
  */
-export function runUserAgentAudit(root: string, home: string): SecurityCheckResult[] {
-  if (sameDir(root, home)) return [];
-  const s = surfaces(home);
-  const instructions = instructionRows(home);
+export function runUserAgentAudit(
+  root: string,
+  home: string,
+  env: Record<string, unknown> = {},
+): SecurityCheckResult[] {
+  const claude = !sameDir(root, home);
+  const s = surfaces(home, env, claude);
+  const instructions = instructionRows(home, env, claude);
   const rows = [...s.rows, ...instructions.rows];
   if (rows.length === 0 && (s.scanned > 0 || instructions.read > 0)) {
     rows.push({
       category: "exposure",
       name: "user-level agent surfaces",
       status: "pass",
-      detail: `no issues in ${s.scanned} file(s) under ~/.claude/{skills,commands,agents}, ${instructions.read} read as instructions`,
+      detail: `no issues in ${s.scanned} file(s) in the Claude Code and Codex user dirs, ${instructions.read} read as instructions`,
     });
   }
   return rows;

@@ -2,6 +2,12 @@
 
 ### Added
 
+- **The user-level agent audit reads Codex too.** `kit agent-audit` now also reads Codex's global
+  instructions (`AGENTS.override.md` and `AGENTS.md` in `$CODEX_HOME`, default `~/.codex`) and its
+  user skills (`~/.agents/skills`, and `<codex home>/skills` where older versions put them), with the
+  same rules as the Claude Code dirs. Run from the home directory, the Codex dirs are still read,
+  since the project audit covers `.claude` only. `kit triage instructions` now walks a repository's
+  `.agents/` too, where Codex keeps repository skills. Paths per OpenAI's Codex docs (2026-11-08).
 - **The agent review gate holds approval while the default branch is red.** When the newest
   `build-and-test` result on main's head failed, the gate comments instead of approving, naming the
   commit and the check, until main is green again. A replay of 90 days of kit's own history: about

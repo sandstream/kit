@@ -185,7 +185,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   const { homedir } = await import("node:os");
   const results = [
     ...runAgentAudit(process.cwd()),
-    ...runUserAgentAudit(process.cwd(), homedir()),
+    ...runUserAgentAudit(process.cwd(), homedir(), process.env),
     ...runAgentTrifecta(process.cwd(), homedir()),
     ...runAgentPreload(process.cwd(), homedir(), process.env),
     ...runAgentEndpoint(process.cwd(), homedir(), process.env),

@@ -50,7 +50,15 @@ const INSTRUCTION_NAMES = new Set([
   "copilot-instructions.md",
 ]);
 /** Dot-directories that hold instruction files; every other dot-directory is skipped. */
-const INSTRUCTION_DOT_DIRS = new Set([".claude", ".cursor", ".github", ".codex", ".gemini"]);
+/** `.agents` holds Codex repository skills (`.agents/skills/<name>/SKILL.md`). */
+const INSTRUCTION_DOT_DIRS = new Set([
+  ".claude",
+  ".cursor",
+  ".github",
+  ".codex",
+  ".gemini",
+  ".agents",
+]);
 const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "vendor", "target", "coverage"]);
 const MAX_DEPTH = 8;
 const MAX_ENTRIES = 20_000;
