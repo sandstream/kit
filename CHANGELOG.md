@@ -2,6 +2,11 @@
 
 ### Added
 
+- **The agent review gate holds approval while the default branch is red.** When the newest
+  `build-and-test` result on main's head failed, the gate comments instead of approving, naming the
+  commit and the check, until main is green again. A replay of 90 days of kit's own history: about
+  4 of 187 merges would have needed a person, two of them landed on a broken main. A history-based
+  breaker on follow-up fixes was measured too and not built: its marks were right 1 time in 4.
 - **`kit agent-audit` reads the user-level agent surfaces.** Skills, commands and subagents in
   `~/.claude/` and `~/.claude/CLAUDE.md` are loaded into every Claude Code session, and are often
   synced from elsewhere or rewritten by an agent, but the audit read only the project's `.claude/`.
