@@ -96,7 +96,7 @@ jobs:
         run: |
           python3 -m pip install --user pipx==1.17.2
           pipx install guarddog==3.2.0
-          pipx install semgrep==1.183.0
+          pipx install semgrep==1.184.0
       - name: GuardDog verify (direct deps, no cache, long budget)
         env:
           KIT_GUARDDOG: "1"
@@ -130,7 +130,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install Semgrep
-        run: python3 -m pip install semgrep==1.183.0
+        run: python3 -m pip install semgrep==1.184.0
       - name: Test Semgrep gate
         run: python3 scripts/test-semgrep-gate.py
       - name: Semgrep (application code only)
