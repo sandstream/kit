@@ -107,7 +107,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Multi-repo baseline sweep (secrets, gitignore, branch-protect; --deep adds CVE/workflow-drift/bumblebee; --format=json + --vs-baseline=<path> for CI drift)",
   "security prescan-diff":
     "Diff two prescan reports — surface new regressions + fixed findings since baseline",
-  "audit secrets": "Forensics: who/what touched each key + when (reads audit log)",
+  "audit secrets":
+    "Forensics: who/what touched each key + when (reads audit log); --target <platform> lists the keys kit pushed there",
   "audit verify":
     "Verify the audit log's keyless hash chain + HMAC anchor (--require-external demands a TSA receipt; exit 1 on break/forge/truncation)",
   "audit anchor":

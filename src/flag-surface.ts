@@ -93,6 +93,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--require-external",
     "--since-days",
     "--strict",
+    "--target",
   ],
   auth: [
     "--account",

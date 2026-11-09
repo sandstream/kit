@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readSecretAuditEvents, groupBySecret, summarize } from "./audit-secrets.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readSecretAuditEvents, groupBySecret, summarize, exposureAt } from "./audit-secrets.js";
+import type { AuditEvent } from "./audit.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function makeRepo(events: object[]): string {
@@ -168,5 +173,84 @@ describe("summarize", () => {
     assert.equal(s.totalEvents, 0);
     assert.equal(s.keyCount, 0);
     assert.equal(s.topKey, undefined);
+  });
+});
+
+const ev = (
+  operation: string,
+  timestamp: string,
+  success: boolean,
+  metadata: Record<string, unknown>,
+): AuditEvent => ({ operation, timestamp, success, environment: "test", metadata });
+
+describe("exposureAt", () => {
+  const events = [
+    ev("secrets.propagate", "2026-11-01T10:00:00Z", true, { name: "DB_URL", target: "railway" }),
+    ev("secrets.rotate", "2026-11-05T10:00:00Z", true, { name: "DB_URL", target: "railway" }),
+    ev("secrets.sync", "2026-11-02T10:00:00Z", true, { names: ["A", "B"], target: "railway" }),
+    ev("secrets.propagate", "2026-11-03T10:00:00Z", false, { name: "C", target: "railway" }),
+    ev("secrets.propagate", "2026-11-04T10:00:00Z", false, { name: "A", target: "railway" }),
+    ev("secrets.propagate", "2026-11-04T10:00:00Z", true, { name: "FLY_ONLY", target: "fly" }),
+  ];
+
+  it("lists each key pushed to the target once, with its last write and every operation", () => {
+    const x = exposureAt(events, "railway");
+    assert.deepEqual(x.pushed, [
+      { key: "A", lastPushed: "2026-11-02T10:00:00Z", operations: ["secrets.sync"] },
+      { key: "B", lastPushed: "2026-11-02T10:00:00Z", operations: ["secrets.sync"] },
+      {
+        key: "DB_URL",
+        lastPushed: "2026-11-05T10:00:00Z",
+        operations: ["secrets.propagate", "secrets.rotate"],
+      },
+    ]);
+  });
+
+  it("keeps a key whose every write failed apart, and never lists another target's keys", () => {
+    const x = exposureAt(events, "railway");
+    assert.deepEqual(x.attempted, [{ key: "C", lastAttempt: "2026-11-03T10:00:00Z" }]);
+    assert.ok(![...x.pushed, ...x.attempted].some((k) => k.key === "FLY_ONLY"));
+  });
+
+  it("names declared keys with no recorded write, and only those", () => {
+    const x = exposureAt(events, "railway", ["DB_URL", "C", "STRIPE_SECRET", "STRIPE_SECRET"]);
+    assert.deepEqual(x.declaredOnly, ["STRIPE_SECRET"]);
+  });
+
+  it("is empty for a target nothing was written to", () => {
+    assert.deepEqual(exposureAt(events, "vercel"), {
+      target: "vercel",
+      pushed: [],
+      attempted: [],
+      declaredOnly: [],
+    });
+  });
+});
+
+describe("kit audit secrets --target (compiled CLI)", () => {
+  const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
+  it("prints the target's exposure as JSON from the project audit log and kit.toml", async (t) => {
+    const dir = makeRepo([
+      ev("secrets.propagate", new Date().toISOString(), true, {
+        name: "DB_URL",
+        target: "railway",
+      }),
+    ]);
+    t.after(() => rmTemp(dir));
+    writeFileSync(
+      join(dir, ".kit.toml"),
+      '[project]\nname = "x"\n\n[deploy.railway.environments.production]\nrequired = ["DB_URL", "SESSION_SECRET"]\n',
+    );
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [CLI, "audit", "secrets", "--target", "railway", "--json"],
+      { cwd: dir, env: { ...process.env, KIT_HIDE_HOOK_SKIP_BANNER: "1" }, timeout: 60_000 },
+    );
+    const x = JSON.parse(stdout) as ReturnType<typeof exposureAt>;
+    assert.deepEqual(
+      x.pushed.map((p) => p.key),
+      ["DB_URL"],
+    );
+    assert.deepEqual(x.declaredOnly, ["SESSION_SECRET"]);
   });
 });

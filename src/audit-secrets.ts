@@ -152,3 +152,52 @@ export function summarize(reports: SecretAuditReport[], windowDays: number): Aud
     windowDays,
   };
 }
+
+export interface TargetExposure {
+  target: string;
+  /** Keys with at least one recorded successful write to the target: rotate these. */
+  pushed: { key: string; lastPushed: string; operations: string[] }[];
+  /** Keys whose every recorded write to the target failed: the value may still have reached it. */
+  attempted: { key: string; lastAttempt: string }[];
+  /** Key names `[deploy.<target>]` declares that no recorded write covers: set there some other way. */
+  declaredOnly: string[];
+}
+
+/**
+ * The keys kit is known to have put on one target, for the question after a provider breach:
+ * "which of my keys were stored there?". Built from the writes `src/secrets-write-record.ts`
+ * records (key name and target, never a value) plus the names the project declares for that
+ * platform. Writes made before those records existed are not in the log. Pure.
+ */
+export function exposureAt(
+  events: AuditEvent[],
+  target: string,
+  declared: string[] = [],
+): TargetExposure {
+  const ok = new Map<string, { last: string; ops: Set<string> }>();
+  const failed = new Map<string, string>();
+  for (const e of events) {
+    const meta = (e.metadata ?? {}) as Record<string, unknown>;
+    if (meta.target !== target) continue;
+    for (const key of collectKeyNames(meta)) {
+      if (e.success) {
+        const seen = ok.get(key) ?? { last: "", ops: new Set<string>() };
+        if (e.timestamp > seen.last) seen.last = e.timestamp;
+        seen.ops.add(e.operation);
+        ok.set(key, seen);
+      } else if ((failed.get(key) ?? "") < e.timestamp) failed.set(key, e.timestamp);
+    }
+  }
+  const byKey = <T extends { key: string }>(a: T, b: T) => a.key.localeCompare(b.key);
+  return {
+    target,
+    pushed: [...ok]
+      .map(([key, s]) => ({ key, lastPushed: s.last, operations: [...s.ops].sort() }))
+      .sort(byKey),
+    attempted: [...failed]
+      .filter(([key]) => !ok.has(key))
+      .map(([key, lastAttempt]) => ({ key, lastAttempt }))
+      .sort(byKey),
+    declaredOnly: [...new Set(declared)].filter((k) => !ok.has(k) && !failed.has(k)).sort(),
+  };
+}
