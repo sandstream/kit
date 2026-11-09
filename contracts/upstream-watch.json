@@ -282,15 +282,15 @@
     {
       "id": "scanner/lizard",
       "owner": ".kit.toml",
-      "pinned": "1.24.0",
+      "pinned": "1.25.1",
       "track": "minor",
       "source": {
         "kind": "pypi",
         "package": "lizard"
       },
       "baseline": {
-        "version": "1.25.0",
-        "observedAt": "2026-11-06"
+        "version": "1.25.1",
+        "observedAt": "2026-11-09"
       }
     },
     {
