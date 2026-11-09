@@ -6,6 +6,30 @@ import { join } from "node:path";
 import { checkLicenses } from "./check-security.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
+it("reports the scanner error after a warning without asking to reinstall the scanner", async () => {
+  const root = mkdtempSync(join(tmpdir(), "kit-license-error-"));
+  try {
+    writeFileSync(join(root, "package.json"), '{"name":"fixture","version":"1.0.0"}');
+    const result = await checkLicenses(root, {
+      resolveToolBin: async () => "synthetic-license-checker",
+      execFileNoThrow: async () => ({
+        ok: false,
+        stdout: "",
+        stderr:
+          "npm WARN deprecated a transitive package\nEACCES: permission denied, open '/work/warning/package.json'\n",
+        exitCode: 1,
+      }),
+    });
+    assert.equal(result.status, "warn");
+    assert.equal(result.didNotRun, true);
+    assert.match(result.detail, /EACCES: permission denied/);
+    assert.doesNotMatch(result.detail, /not installed|npm WARN/);
+    assert.doesNotMatch(result.suggestion ?? "", /install/i);
+  } finally {
+    rmTemp(root);
+  }
+});
+
 it("uses JSON scan even when --version would fail", async () => {
   const root = mkdtempSync(join(tmpdir(), "kit-license-version-"));
   try {

@@ -109,15 +109,16 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Diff two prescan reports — surface new regressions + fixed findings since baseline",
   "audit secrets": "Forensics: who/what touched each key + when (reads audit log)",
   "audit verify":
-    "Verify the audit log's keyless hash chain + HMAC anchor (--require-external demands a TSA receipt; exit 1 on break/forge/truncation)",
+    "Verify the audit chain and HMAC seal. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
   "audit anchor":
-    "Seal the audit log with the machine-local HMAC key (--external also gets a receipt from KIT_EXTERNAL_ANCHOR_CMD — closes the same-UID gap)",
+    "Seal the audit log with the machine-local HMAC key. --external requires KIT_EXTERNAL_ANCHOR_CMD and KIT_EXTERNAL_ANCHOR_VERIFY_CMD before publication.",
   "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",
   "auth elevate":
-    "Mint elevation marker for destructive secret ops (TOTP/yes-prompt); --list-scopes to see what each scope unlocks first (--json)",
-  "auth status": "Show active elevation",
-  "auth revoke": "Drop the elevation marker",
-  "auth setup-totp": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
+    "Confirm project approval in a terminal (--scope <name>, --ttl-minutes <1..240>); --list-scopes [--json] lists scope definitions without approval",
+  "auth status": "Show this project's local approval marker (--json for structured output)",
+  "auth revoke": "Remove this project's approval marker; a failed removal returns an error",
+  "auth setup-totp":
+    "Enroll a TOTP secret (--issuer <name>, --account <name>, --overwrite); writes ~/.kit/totp-secret with owner-only access",
   "hooks add": "Install a built-in hook (secret-scan, post-pull-audit, context-check)",
   "hooks uninstall": "Remove the configured git hooks (enforcement off until re-installed)",
   "setup --recommended":
@@ -185,7 +186,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "plugin list": "Show project packages and stale adapter registrations",
   "plugin info": "Plugin metadata",
   "plugin scaffold": "Generate a new plugin skeleton",
-  "governance status": "Budget + revocation + agent info",
+  "governance status": "Inspect access configuration, budget usage, revocation, and agent identity",
   "rig plan":
     "Validate rig.toml, print its input id and what to run outside kit for every defect and control",
   "rig ingest":

@@ -1,11 +1,7 @@
 // `kit config` commands — config-file inspection + schema migration.
 //
-// Migration is a one-way door done safely: --dry-run (the inspection default for
-// a stale config) writes nothing; a real run backs the original up to
-// .kit.toml.backup (refusing to clobber an existing backup without --force),
-// writes the migrated file, then RE-PARSES + VALIDATES it under the Zod schema
-// and restores the original if validation fails. A corrupt config is never left
-// on disk.
+// Migration writes a backup before an update and restores it after validation failure.
+// Explicit --dry-run previews the migration without changes.
 import { readFile, writeFile, access } from "node:fs/promises";
 import { parse, stringify } from "smol-toml";
 import { patchConfigText, countCommentLines } from "../config-migrate.js";

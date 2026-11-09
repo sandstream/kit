@@ -28,10 +28,9 @@ const FETCH_TOOLS = new Set(["curl", "wget"]);
 
 /** curl/wget flags that CONSUME the next token as a NON-host value, so it is never read as a
  *  network target (e.g. `curl -o out.txt host` must not extract `out.txt`). */
-const VALUE_FLAGS = new Set([
+const CURL_VALUE_FLAGS = new Set([
   "-o",
   "--output",
-  "-O",
   "-T",
   "--upload-file",
   "-d",
@@ -65,18 +64,68 @@ const VALUE_FLAGS = new Set([
   "--max-time",
   "--connect-timeout",
   "--retry",
-  // wget
+]);
+
+const WGET_VALUE_FLAGS = new Set([
   "-a",
   "--append-output",
+  "-o",
+  "--output-file",
+  "-O",
+  "--output-document",
   "-P",
   "--directory-prefix",
-  "--output-document",
+  "-U",
+  "--user-agent",
+  "-T",
+  "--timeout",
+  "-t",
+  "--tries",
+  "-w",
+  "--wait",
+  "-Q",
+  "--quota",
+  "-e",
+  "--execute",
+  "-i",
+  "--input-file",
+  "-l",
+  "--level",
+  "-D",
+  "--domains",
+  "-A",
+  "--accept",
+  "-R",
+  "--reject",
+  "-I",
+  "--include-directories",
+  "-X",
+  "--exclude-directories",
+  "--user",
   "--password",
+  "--header",
+  "--referer",
+  "--post-data",
+  "--post-file",
+  "--body-data",
+  "--body-file",
+  "--method",
+  "--certificate",
+  "--private-key",
+  "--ca-certificate",
+  "--ca-directory",
+  "--load-cookies",
+  "--save-cookies",
 ]);
 
 /** Strict domain shape: ≥2 dot-separated labels + an alpha TLD, optional :port and /path. A
  *  scheme (`x://…`) never matches — those are handled by URL_RE. */
 const HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:\/\S*)?$/i;
+
+function takesValue(tool: string, flag: string): boolean {
+  // curl -O selects the remote name. wget -O consumes an output filename.
+  return (tool === "wget" ? WGET_VALUE_FLAGS : CURL_VALUE_FLAGS).has(flag);
+}
 
 /** basename of a command token (`/usr/bin/curl` → `curl`). */
 function basename(tok: string): string {
@@ -100,11 +149,11 @@ function extractFetchHosts(command: string, hosts: Set<string>): void {
   // Split into command segments on shell separators so `curl a.com;echo` doesn't bleed.
   for (const segment of command.split(/&&|\|\||[;\n|&]/)) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
-    let inFetch = false;
+    let fetchTool: string | undefined;
     let skipNext = false;
     for (const tok of tokens) {
-      if (!inFetch) {
-        if (FETCH_TOOLS.has(basename(tok))) inFetch = true;
+      if (!fetchTool) {
+        if (FETCH_TOOLS.has(basename(tok))) fetchTool = basename(tok);
         continue; // the tool token itself is never a host
       }
       if (skipNext) {
@@ -113,7 +162,7 @@ function extractFetchHosts(command: string, hosts: Set<string>): void {
       }
       if (tok.startsWith("-")) {
         // `--flag=value` carries its value inline (one token) — nothing to skip after it.
-        if (VALUE_FLAGS.has(tok)) skipNext = true;
+        if (takesValue(fetchTool, tok)) skipNext = true;
         continue;
       }
       const h = hostOf(tok);
@@ -134,5 +183,50 @@ export function extractHostsFromCommand(command: string): string[] {
     }
   }
   extractFetchHosts(command, hosts);
+  return [...hosts].sort();
+}
+
+/** Parse complete argument URLs before the fallback for embedded text. */
+function extractArgumentUrls(arg: string, hosts: Set<string>): void {
+  const start = arg.search(/https?:\/\//i);
+  if (start < 0) return;
+  try {
+    // Complete argv values are URLs, not shell text. Keep IPv6 and userinfo intact.
+    const host = new URL(arg.slice(start)).hostname;
+    if (host) hosts.add(host.toLowerCase());
+    return;
+  } catch {
+    // Embedded code or prose can contain URLs without being a URL itself.
+  }
+  for (const match of arg.match(URL_RE) ?? []) {
+    try {
+      const host = new URL(match).hostname;
+      if (host) hosts.add(host.toLowerCase());
+    } catch {
+      // Ignore text that is not a URL.
+    }
+  }
+}
+
+/** Inspect the arguments that execute, independently of their display or shell quoting. */
+export function extractHostsFromArgs(args: readonly string[]): string[] {
+  const hosts = new Set<string>();
+  for (const arg of args) extractArgumentUrls(arg, hosts);
+  const tool = basename((args[0] ?? "").replaceAll("\\", "/")).replace(/\.exe$/i, "");
+  if (FETCH_TOOLS.has(tool)) {
+    let skipNext = false;
+    for (const arg of args.slice(1)) {
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
+      if (arg.startsWith("-")) {
+        skipNext = takesValue(tool, arg);
+        continue;
+      }
+      const host = hostOf(arg);
+      if (host) hosts.add(host);
+    }
+  }
   return [...hosts].sort();
 }

@@ -1,11 +1,12 @@
+import { resolve } from "node:path";
 import type { kitConfig } from "./config.js";
 import {
   mergeGovernanceConfigAsync,
   checkOperationAllowed,
   type OperationType,
 } from "./governance.js";
-import { checkRevocationStatus, handleRevocation } from "./revocation.js";
-import { checkBudgetLimits, recordUsage } from "./budget.js";
+import { checkRevocationAccess } from "./revocation.js";
+import { BudgetRefundError, checkBudgetLimits, withBudget } from "./budget.js";
 import { logAuditEvent } from "./audit.js";
 import { requestApproval } from "./approval.js";
 import {
@@ -38,6 +39,87 @@ export interface GovernanceResult {
   warnings?: string[];
 }
 
+export interface GovernanceOptions<T> {
+  cwd?: string;
+  /**
+   * Interpret a returned result for the audit. Without this callback, any normal return means success.
+   * withGovernance preserves the result. runGoverned returns ok:false with the result when assessment fails.
+   * Allowance is charged before execution. Returned failures keep it; thrown errors refund when storage permits.
+   */
+  assessResult?: (result: T) => { success: boolean; error?: string };
+}
+
+function assessResult<T>(result: T, opts: GovernanceOptions<T>): GovernedOutcome<T> {
+  const outcome = opts.assessResult?.(result);
+  return outcome && !outcome.success
+    ? { ok: false, result, reason: outcome.error ?? "Operation reported failure" }
+    : { ok: true, result };
+}
+
+function failureMetadata(
+  context: OperationContext,
+  error: unknown,
+): Record<string, unknown> | undefined {
+  if (!(error instanceof BudgetRefundError)) return context.metadata;
+  return {
+    ...context.metadata,
+    phase: "budget-refund-failed",
+    operation_success: false,
+    operation_error:
+      error.operationError instanceof Error
+        ? error.operationError.message
+        : String(error.operationError),
+  };
+}
+
+type MergedGovernance = Awaited<ReturnType<typeof mergeGovernanceConfigAsync>>;
+
+/** Audit a thrown operation error and return its message. */
+async function auditThrown(
+  governanceConfig: MergedGovernance,
+  context: OperationContext,
+  err: unknown,
+  startTime: number,
+  cwd: string | undefined,
+): Promise<string> {
+  const error = err instanceof Error ? err.message : String(err);
+  await logAuditEvent(
+    governanceConfig,
+    {
+      operation: context.operation,
+      environment: governanceConfig.environment,
+      success: false,
+      duration_ms: Date.now() - startTime,
+      error,
+      metadata: failureMetadata(context, err),
+    },
+    { cwd },
+  );
+  return error;
+}
+
+/** Audit an operation that returned, with the outcome its result was assessed to. */
+async function auditAssessed<T>(
+  governanceConfig: MergedGovernance,
+  context: OperationContext,
+  outcome: GovernedOutcome<T>,
+  startTime: number,
+  cwd: string | undefined,
+): Promise<void> {
+  await logAuditEvent(
+    governanceConfig,
+    {
+      operation: context.operation,
+      environment: governanceConfig.environment,
+      success: outcome.ok,
+      error: outcome.reason,
+      duration_ms: Date.now() - startTime,
+      metadata: context.metadata,
+    },
+    { cwd },
+  );
+}
+
 /**
  * Execute an operation with full governance checks
  */
@@ -45,10 +127,11 @@ export async function withGovernance<T>(
   config: kitConfig,
   context: OperationContext,
   operation: () => Promise<T>,
-  opts: { cwd?: string } = {},
+  opts: GovernanceOptions<T> = {},
 ): Promise<T> {
+  opts = { ...opts, cwd: resolve(opts.cwd ?? process.cwd()) };
   const startTime = Date.now();
-  const governanceConfig = await mergeGovernanceConfigAsync(config.governance);
+  const governanceConfig = await mergeGovernanceConfigAsync(config.governance, opts.cwd);
 
   // Skip governance if disabled
   if (!governanceConfig.enabled) {
@@ -71,15 +154,18 @@ export async function withGovernance<T>(
     );
 
   // 1. Check revocation status
-  const revoked = await checkRevocationStatus(config.governance);
-  if (revoked) {
-    await handleRevocation(config.governance);
-    await auditDeny("Access revoked");
-    throw new Error("Access revoked");
+  const revocation = await checkRevocationAccess(config.governance, opts);
+  if (!revocation.allowed) {
+    await auditDeny(revocation.reason);
+    throw new Error(revocation.reason);
   }
 
   // 2. Check budget limits
-  const budgetCheck = await checkBudgetLimits(config.governance, context.estimatedTokens || 0);
+  const budgetCheck = await checkBudgetLimits(
+    config.governance,
+    context.estimatedTokens || 0,
+    opts,
+  );
   if (!budgetCheck.allowed) {
     await auditDeny(budgetCheck.reason || "Budget limit exceeded");
     throw new Error(budgetCheck.reason || "Budget limit exceeded");
@@ -188,51 +274,30 @@ export async function withGovernance<T>(
   }
 
   // Execute the operation
-  let error: string | undefined;
-  let result: T;
+  let execution: { value: T; outcome: GovernedOutcome<T> };
 
   try {
-    result = await operation();
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
-
-    // Log failure
-    await logAuditEvent(
-      governanceConfig,
-      {
-        operation: context.operation,
-        environment: governanceConfig.environment,
-        success: false,
-        duration_ms: Date.now() - startTime,
-        error,
-        metadata: context.metadata,
+    execution = await withBudget(
+      config.governance,
+      context.estimatedTokens ?? 0,
+      async () => {
+        const value = await operation();
+        return { value, outcome: assessResult(value, opts) };
       },
-      { cwd: opts.cwd },
+      opts,
     );
-
+  } catch (err) {
+    await auditThrown(governanceConfig, context, err, startTime, opts.cwd);
     throw err;
   }
 
-  // 6. Record usage and log success
-  await recordUsage(config.governance, context.estimatedTokens || 0);
-
-  await logAuditEvent(
-    governanceConfig,
-    {
-      operation: context.operation,
-      environment: governanceConfig.environment,
-      success: true,
-      duration_ms: Date.now() - startTime,
-      metadata: context.metadata,
-    },
-    { cwd: opts.cwd },
-  );
-
-  return result;
+  // Admission was charged before execution. Record the actual assessed outcome.
+  await auditAssessed(governanceConfig, context, execution.outcome, startTime, opts.cwd);
+  return execution.value;
 }
 
 export interface GovernedOutcome<T> {
-  /** True → the op ran; result is set. False → denied or the op threw; reason is set. */
+  /** False means denial, a thrown error, or an assessed failure. Assessed failures retain result. */
   ok: boolean;
   result?: T;
   reason?: string;
@@ -254,15 +319,16 @@ export async function runGoverned<T>(
   config: kitConfig,
   context: OperationContext,
   operation: () => Promise<T>,
-  opts: { cwd?: string } = {},
+  opts: GovernanceOptions<T> = {},
 ): Promise<GovernedOutcome<T>> {
+  opts = { ...opts, cwd: resolve(opts.cwd ?? process.cwd()) };
   const startTime = Date.now();
-  const governanceConfig = await mergeGovernanceConfigAsync(config.governance);
+  const governanceConfig = await mergeGovernanceConfigAsync(config.governance, opts.cwd);
 
   // Governance disabled → run, no audit (nothing is being governed).
   if (!governanceConfig.enabled) {
     try {
-      return { ok: true, result: await operation() };
+      return assessResult(await operation(), opts);
     } catch (err) {
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
@@ -282,13 +348,18 @@ export async function runGoverned<T>(
     );
 
   // 1. Revocation
-  if (await checkRevocationStatus(config.governance)) {
-    await auditDeny("Access revoked");
-    return { ok: false, reason: "Access revoked" };
+  const revocation = await checkRevocationAccess(config.governance, opts);
+  if (!revocation.allowed) {
+    await auditDeny(revocation.reason);
+    return { ok: false, reason: revocation.reason };
   }
 
   // 2. Budget
-  const budgetCheck = await checkBudgetLimits(config.governance, context.estimatedTokens || 0);
+  const budgetCheck = await checkBudgetLimits(
+    config.governance,
+    context.estimatedTokens || 0,
+    opts,
+  );
   if (!budgetCheck.allowed) {
     const reason = budgetCheck.reason || "Budget limit exceeded";
     await auditDeny(reason);
@@ -327,35 +398,19 @@ export async function runGoverned<T>(
 
   // Execute + audit success/failure.
   try {
-    const result = await operation();
-    await recordUsage(config.governance, context.estimatedTokens || 0);
-    await logAuditEvent(
-      governanceConfig,
-      {
-        operation: context.operation,
-        environment: governanceConfig.environment,
-        success: true,
-        duration_ms: Date.now() - startTime,
-        metadata: context.metadata,
-      },
-      { cwd: opts.cwd },
+    const outcome = await withBudget(
+      config.governance,
+      context.estimatedTokens ?? 0,
+      async () => assessResult(await operation(), opts),
+      opts,
     );
-    return { ok: true, result };
+    await auditAssessed(governanceConfig, context, outcome, startTime, opts.cwd);
+    return outcome;
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    await logAuditEvent(
-      governanceConfig,
-      {
-        operation: context.operation,
-        environment: governanceConfig.environment,
-        success: false,
-        duration_ms: Date.now() - startTime,
-        error,
-        metadata: context.metadata,
-      },
-      { cwd: opts.cwd },
-    );
-    return { ok: false, reason: error };
+    return {
+      ok: false,
+      reason: await auditThrown(governanceConfig, context, err, startTime, opts.cwd),
+    };
   }
 }
 
@@ -378,20 +433,25 @@ export async function runGovernedBrokered<T>(
   config: kitConfig,
   context: BrokerContext,
   operation: () => Promise<T>,
-  opts: { cwd?: string } = {},
+  opts: GovernanceOptions<T> = {},
 ): Promise<GovernedOutcome<T>> {
+  opts = { ...opts, cwd: resolve(opts.cwd ?? process.cwd()) };
   const { runBrokered } = await import("./exec-broker/index.js");
+  let assessedFailure: GovernedOutcome<T> | undefined;
   const outcome = await runBrokered(
     context,
     async () => {
-      const gov = await runGoverned(config, context, operation, { cwd: opts.cwd });
-      // Signal a governance denial (or op error) as a throw so the broker layer
-      // surfaces it as a not-ok outcome with the same reason.
-      if (!gov.ok) throw new Error(gov.reason ?? "denied");
+      const gov = await runGoverned(config, context, operation, opts);
+      // Let the broker audit failure while preserving a returned action result for the caller.
+      if (!gov.ok) {
+        if ("result" in gov) assessedFailure = gov;
+        throw new Error(gov.reason ?? "denied");
+      }
       return gov.result as T;
     },
     { cwd: opts.cwd },
   );
+  if (!outcome.ok && assessedFailure) return assessedFailure;
   return outcome.ok ? { ok: true, result: outcome.result } : { ok: false, reason: outcome.reason };
 }
 
@@ -401,8 +461,10 @@ export async function runGovernedBrokered<T>(
 export async function checkGovernance(
   config: kitConfig,
   context: OperationContext,
+  opts: { cwd?: string } = {},
 ): Promise<GovernanceResult> {
-  const governanceConfig = await mergeGovernanceConfigAsync(config.governance);
+  opts = { ...opts, cwd: resolve(opts.cwd ?? process.cwd()) };
+  const governanceConfig = await mergeGovernanceConfigAsync(config.governance, opts.cwd);
   const warnings: string[] = [];
 
   // Skip governance if disabled
@@ -411,16 +473,15 @@ export async function checkGovernance(
   }
 
   // 1. Check revocation status
-  const revoked = await checkRevocationStatus(config.governance);
-  if (revoked) {
-    return {
-      allowed: false,
-      reason: "Access has been revoked",
-    };
-  }
+  const revocation = await checkRevocationAccess(config.governance, opts);
+  if (!revocation.allowed) return revocation;
 
   // 2. Check budget limits
-  const budgetCheck = await checkBudgetLimits(config.governance, context.estimatedTokens || 0);
+  const budgetCheck = await checkBudgetLimits(
+    config.governance,
+    context.estimatedTokens || 0,
+    opts,
+  );
   if (!budgetCheck.allowed) {
     return {
       allowed: false,

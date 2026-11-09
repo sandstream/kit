@@ -4,8 +4,7 @@
  * `agent-audit`, `whoami`, `version` — all independent leaves (no cross-cluster
  * cmd* calls), each returning a boolean verdict for the COMMANDS dispatch table.
  */
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { loadConfig, type kitConfig } from "../config.js";
@@ -14,7 +13,6 @@ import { resolveMode, modeScore } from "../setup-modes.js";
 import { quickSubsystems } from "../statusline.js";
 import { gatherStatus } from "../status.js";
 import { withGovernance } from "../governance-middleware.js";
-import { getBudgetStatus } from "../budget.js";
 import { KIT_VERSION } from "../cli-checks-shared.js";
 
 export async function cmdStatus(): Promise<boolean> {
@@ -91,55 +89,7 @@ export async function cmdHealth(): Promise<boolean> {
   );
 }
 
-export async function cmdIngest(): Promise<boolean> {
-  const jsonMode = hasFlag(process.argv, "--json");
-  const args = process.argv.slice(3).filter((a) => !a.startsWith("-"));
-  const format = args[0];
-  const file = args[1];
-  if (format !== "sarif" && format !== "osv") {
-    console.error(`${c.red}usage: kit ingest <sarif|osv> <file>${c.reset}`);
-    process.exitCode = 1;
-    return false;
-  }
-  if (!file) {
-    console.error(`${c.red}usage: kit ingest ${format} <file>${c.reset}`);
-    process.exitCode = 1;
-    return false;
-  }
-  let json: string;
-  try {
-    json = readFileSync(resolve(process.cwd(), file), "utf8");
-  } catch {
-    console.error(`${c.red}could not read ${file}${c.reset}`);
-    process.exitCode = 1;
-    return false;
-  }
-
-  const { ingest } = await import("../adapters/ingest.js");
-  const findings = ingest(format, json);
-
-  if (jsonMode) {
-    console.log(JSON.stringify({ count: findings.length, findings }, null, 2));
-    return true;
-  }
-
-  console.log(
-    `${c.bold}kit ingest${c.reset}  ${c.dim}${format} · ${findings.length} finding(s)${c.reset}`,
-  );
-  const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-  const sorted = [...findings].sort(
-    (a, b) => (order[a.severity ?? "low"] ?? 9) - (order[b.severity ?? "low"] ?? 9),
-  );
-  for (const f of sorted) {
-    const sev = f.severity ?? "low";
-    const color =
-      sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
-    const cite = f.rule ? ` ${c.dim}[${f.rule.id}]${c.reset}` : "";
-    console.log(`  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${f.name}${cite}`);
-    console.log(`    ${c.dim}${f.detail}${c.reset}`);
-  }
-  return true;
-}
+export { cmdIngest } from "./ingest.js";
 
 export async function cmdSupplyChain(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
@@ -210,82 +160,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   return fails === 0;
 }
 
-export async function cmdWhoami(): Promise<boolean> {
-  const jsonMode = hasFlag(process.argv, "--json");
-
-  let config: ReturnType<typeof Object.create> = {};
-  try {
-    config = await loadConfig(resolveConfigPath());
-  } catch {
-    // Works without .kit.toml
-  }
-
-  const { detectEnvironment } = await import("../environment.js");
-  const envInfo = detectEnvironment(config.governance);
-
-  const agent = config.governance?.agent;
-  const budgetEnabled =
-    config.governance?.enabled && (agent?.max_tokens_per_day || agent?.max_operations_per_hour);
-
-  let budget: Awaited<ReturnType<typeof getBudgetStatus>> | null = null;
-  if (budgetEnabled) {
-    budget = await getBudgetStatus(config.governance);
-  }
-
-  if (jsonMode) {
-    console.log(
-      JSON.stringify(
-        {
-          agent: agent ? { id: agent.id, name: agent.name } : null,
-          environment: envInfo.environment,
-          environment_source: envInfo.source,
-          budget: budget
-            ? {
-                tokens_used: budget.tokens_used,
-                tokens_limit: budget.tokens_limit,
-                operations_used: budget.operations_used,
-                operations_limit: budget.operations_limit,
-              }
-            : null,
-        },
-        null,
-        2,
-      ),
-    );
-    return true;
-  }
-
-  console.log(`${c.bold}${c.cyan}kit whoami${c.reset}`);
-  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
-
-  if (agent?.id || agent?.name) {
-    if (agent.name) console.log(`  ${c.bold}Agent:${c.reset}  ${agent.name}`);
-    if (agent.id) console.log(`  ${c.bold}ID:${c.reset}     ${c.dim}${agent.id}${c.reset}`);
-  } else {
-    console.log(`  ${c.dim}No agent configured in [governance.agent]${c.reset}`);
-  }
-
-  const envColor =
-    envInfo.environment === "prod" ? c.red : envInfo.environment === "staging" ? c.yellow : c.green;
-  console.log(
-    `  ${c.bold}Env:${c.reset}    ${envColor}${envInfo.environment}${c.reset}  ${c.dim}(via ${envInfo.source})${c.reset}`,
-  );
-
-  if (budget) {
-    console.log();
-    const tokensLine = budget.tokens_limit
-      ? `${budget.tokens_used.toLocaleString()} / ${budget.tokens_limit.toLocaleString()} tokens today`
-      : `${budget.tokens_used.toLocaleString()} tokens today`;
-    const opsLine = budget.operations_limit
-      ? `${budget.operations_used} / ${budget.operations_limit} operations this hour`
-      : `${budget.operations_used} operations this hour`;
-    console.log(`  ${c.bold}Budget:${c.reset} ${c.dim}${tokensLine}${c.reset}`);
-    console.log(`          ${c.dim}${opsLine}${c.reset}`);
-  }
-
-  console.log();
-  return true;
-}
+export { cmdWhoami } from "./whoami.js";
 
 export function cmdVersion(): boolean {
   console.log(KIT_VERSION);

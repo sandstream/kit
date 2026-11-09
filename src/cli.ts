@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.js";
-import { hasFlag, splitLeadingGlobalFlags, GLOBAL_FLAGS, readOnlyFlag } from "./utils/flags.js";
+import { hasFlag, readOnlyFlag } from "./utils/flags.js";
 import { envTruthy } from "./utils/flags.js";
 import { generateCompletions } from "./completions.js";
 import { checkForUpdate, postCommandNoticesAllowed, printUpdateNotice } from "./update-check.js";
@@ -12,6 +12,11 @@ import { SKIPPED_COMMITS_LOG } from "./hooks.js";
 import { cmdFix } from "./fix.js";
 import { c } from "./utils/colors.js";
 import { SUBCOMMAND_HELP } from "./subcommand-help.js";
+import {
+  commandUsageError,
+  normalizeCommandArgs,
+  rejectCommandFlags,
+} from "./command-validation.js";
 import { didYouMean } from "./utils/didYouMean.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
 import { reportUnexpectedCliError } from "./cli-error.js";
@@ -291,28 +296,68 @@ async function showSkippedCommitBanner(): Promise<void> {
  * zero-LLM: it stores raw transcripts and searches them; it never calls a model.
  */
 
+/**
+ * Answer help, version, usage errors and invalid flags. Return true when the request is answered.
+ * These answers come before read-only and policy activation, which write audit events.
+ */
+function answeredBeforePolicy(
+  command: string | undefined,
+  ownArgs: string[],
+  args: string[],
+): boolean {
+  // Render only registry data, never dispatch a handler.
+  if (command === "help" || hasFlag(ownArgs, "--help", "-h")) {
+    process.exitCode = runHelp(command === "help" ? ownArgs.slice(1) : ownArgs);
+    return true;
+  }
+  // Version output must not validate unrelated flags.
+  if (command === "version" || command === "-v" || hasFlag(ownArgs, "--version")) {
+    process.exitCode = cmdVersion() ? 0 : 1;
+    return true;
+  }
+  const usageError = commandUsageError(ownArgs, args);
+  if (usageError) {
+    if (hasFlag(ownArgs, "--json")) console.log(JSON.stringify({ ok: false, error: usageError }));
+    console.error(usageError);
+    process.exitCode = 2;
+    return true;
+  }
+  const flagCommand = command ?? "check";
+  if (Object.hasOwn(COMMANDS, flagCommand) && rejectCommandFlags(flagCommand)) {
+    process.exitCode = GATE_VERBS.has(flagCommand) ? 2 : 1;
+    return true;
+  }
+  return false;
+}
+
+/** Refuse before a handler runs. A gate verb exits 2, so the refusal blocks the guarded operation. */
+function refuseBeforeDispatch(message: string, ownArgs: string[], flagCommand: string): void {
+  if (hasFlag(ownArgs, "--json")) console.log(JSON.stringify({ ok: false, error: message }));
+  console.error(message);
+  process.exitCode = GATE_VERBS.has(flagCommand) ? 2 : 1;
+}
+
+/** A missing configuration file gives no config. An unreadable or invalid file is reported as invalid. */
+async function loadPolicyConfig(): Promise<{
+  invalid: boolean;
+  config?: Awaited<ReturnType<typeof loadConfig>>;
+}> {
+  try {
+    return { invalid: false, config: await loadConfig(resolveConfigPath()) };
+  } catch (error) {
+    const absent = error instanceof Error && "code" in error && error.code === "ENOENT";
+    return { invalid: !absent };
+  }
+}
+
 export async function main(): Promise<void> {
-  // Global flags may precede the command word (`kit --read-only check`, the form
-  // README.md:299 and docs/THREAT_MODEL.md:98 document). Move them behind the
-  // positionals — and rewrite process.argv to match — so command modules that
-  // read subcommands off raw indices (`process.argv[3]`) see the same shape they
-  // would for `kit check ...`. Without this the flag WAS the command and kit
-  // answered "Unknown command: --read-only".
-  const rawArgs = process.argv.slice(2);
-  const { leading: leadingGlobals, rest: positional } = splitLeadingGlobalFlags(rawArgs);
-  const args = leadingGlobals.length > 0 ? [...positional, ...leadingGlobals] : rawArgs;
-  if (leadingGlobals.length > 0) {
-    process.argv = [...process.argv.slice(0, 2), ...args];
-  }
-  const command = positional[0];
-  // Help must precede policy/read-only initialization too: activating read-only
-  // mode writes an audit event. Render only registry data, never dispatch a handler.
-  if (command === "help" || hasFlag(args, "--help", "-h")) {
-    process.exitCode = runHelp(command === "help" ? positional.slice(1) : positional);
-    return;
-  }
+  // Normalize leading Kit flags without moving them into the child's arguments.
+  const { args, ownArgs, command } = normalizeCommandArgs(process.argv.slice(2));
+  process.argv = [...process.argv.slice(0, 2), ...args];
+  if (answeredBeforePolicy(command, ownArgs, args)) return;
+  const flagCommand = command ?? "check";
   const nonInteractive =
-    hasFlag(args, "--non-interactive") ||
+    hasFlag(ownArgs, "--non-interactive") ||
     process.env.CI === "true" ||
     process.env.GITHUB_ACTIONS === "true";
 
@@ -320,14 +365,28 @@ export async function main(): Promise<void> {
   // Honored gates: writeSecretToBackend, grantElevation, installHooks, and
   // every kit-plugin write surface (vercel env-set, github secret-put,
   // stripe webhook-create, etc).
-  const readOnly = readOnlyFlag(args);
+  const readOnly = readOnlyFlag(ownArgs);
   if (readOnly.kind === "invalid") {
     console.error(
       `${c.red}invalid value for ${readOnly.flag}: "${readOnly.value}" (expected no value, or a truthy value: 1, true, yes, on)${c.reset}`,
     );
     process.exitCode = 2;
     return;
-  } else if (readOnly.kind === "active") {
+  }
+
+  // Invalid configuration must not disable policy for handlers that do not reload it.
+  const loaded = await loadPolicyConfig();
+  if (loaded.invalid) {
+    refuseBeforeDispatch(
+      "Could not read or validate project configuration. Check .kit.toml.",
+      ownArgs,
+      flagCommand,
+    );
+    return;
+  }
+  const cfgForPolicy = loaded.config;
+
+  if (readOnly.kind === "active") {
     const { activateReadOnlyMode } = await import("./read-only-mode.js");
     activateReadOnlyMode("flag");
   } else if (envTruthy(process.env.KIT_READ_ONLY)) {
@@ -340,7 +399,6 @@ export async function main(): Promise<void> {
   // `[policy].default_mode = "read-only"` as a third source for the
   // read-only gate above (after flag + env-var).
   try {
-    const cfgForPolicy = await loadConfig(resolveConfigPath()).catch(() => null);
     if (cfgForPolicy?.policy) {
       // Both policy env vars in one call: the hash (which policy is in force) and the resolved deny
       // list the `kit-plugin-*` packages read, since they are standalone zero-dep packages kit-core
@@ -357,7 +415,12 @@ export async function main(): Promise<void> {
       }
     }
   } catch {
-    /* config not loadable at boot — non-fatal; subcommands re-load as needed */
+    refuseBeforeDispatch(
+      "Could not initialize project policy. No command was run.",
+      ownArgs,
+      flagCommand,
+    );
+    return;
   }
 
   await showSkippedCommitBanner();
@@ -365,18 +428,9 @@ export async function main(): Promise<void> {
   try {
     let ok: boolean;
 
-    // --version anywhere (it is global), before dispatch: `kit upgrade --version` must not upgrade.
-    if (positional[0] === "-v" || hasFlag(args, "--version")) {
-      ok = cmdVersion();
-      process.exitCode = ok ? 0 : 1;
-      return;
-    }
-    // version/completions need bespoke handling; everything else is a flat
-    // command->fn dispatch (was a ~40-case switch — the main complexity driver).
-    if (command === "version") {
-      ok = cmdVersion();
-    } else if (command === "completions") {
-      const shell = positional[1];
+    // Completions use a shell argument. Other commands dispatch through the registry.
+    if (command === "completions") {
+      const shell = ownArgs[1];
       const script = generateCompletions(shell);
       if (!script) {
         console.error(`Unknown shell: ${shell}. Use: bash, zsh, fish`);
@@ -390,7 +444,7 @@ export async function main(): Promise<void> {
       // COMMANDS is the module-scope dispatch table (single source of truth for the
       // command surface; help coverage is verified against it in command-surface.test.ts).
       const resolved = command ?? "check";
-      const handler = COMMANDS[resolved];
+      const handler = Object.hasOwn(COMMANDS, resolved) ? COMMANDS[resolved] : undefined;
       if (handler) {
         emitDeprecationWarning(resolved);
         // READ-ONLY FLOOR. The 11 in-module guards are honest but were not exhaustive: a sweep
@@ -411,26 +465,6 @@ export async function main(): Promise<void> {
             return;
           }
         }
-        // FLAG FLOOR. Two command modules validated their flags and 43 did not, and a flag that
-        // silently does nothing is indistinguishable from a working one: `kit check --category
-        // security` ran the FULL check for six majors, and `kit upgrade --self.` rewrote every
-        // lock-file timestamp while installing nothing and printing success. Sweeping 43 handlers
-        // would fix today and rot tomorrow — the defect is that nothing enumerated which flags a
-        // command accepts, so this refuses once, here, from the declared table (flag-surface.ts),
-        // exactly as the read-only floor above does for the write surface. A verb missing from the
-        // table is UNVALIDATED, not unrestricted: it is skipped here and reported by self-audit.
-        const { flagsForCommand } = await import("./flag-surface.js");
-        const allowedFlags = flagsForCommand(resolved);
-        if (allowedFlags !== null) {
-          const { rejectUnknownFlags } = await import("./utils/flags.js");
-          if (
-            rejectUnknownFlags(`kit ${resolved}`, [...allowedFlags, ...GLOBAL_FLAGS], process.argv)
-          ) {
-            process.exitCode = 1;
-            return;
-          }
-        }
-
         // PreToolUse gates must fail CLOSED: an internal fault has to DENY (exit 2), never fall
         // through to the generic catch below (exit 1 = non-blocking = the op would proceed).
         ok = GATE_VERBS.has(resolved)
@@ -455,11 +489,11 @@ export async function main(): Promise<void> {
       }
     }
 
-    process.exitCode = ok ? 0 : 1;
+    process.exitCode = ok ? 0 : process.exitCode || 1;
 
     // Non-interactive / CI / --json / local-only commands: no update check.
     // See postCommandNoticesAllowed.
-    if (postCommandNoticesAllowed(command, hasFlag(args, "--json"), nonInteractive)) {
+    if (postCommandNoticesAllowed(command, hasFlag(ownArgs, "--json"), nonInteractive)) {
       checkForUpdate(KIT_VERSION)
         .then((info) => {
           if (info) printUpdateNotice(info);
@@ -481,7 +515,7 @@ export async function main(): Promise<void> {
   } catch (err: unknown) {
     const code =
       err instanceof Error && "code" in err ? (err as { code?: string }).code : undefined;
-    const jsonMode = hasFlag(args, "--json");
+    const jsonMode = hasFlag(ownArgs, "--json");
     if (code === "KIT_USAGE_ERROR") {
       const message = err instanceof Error ? err.message : String(err);
       if (jsonMode) console.log(JSON.stringify({ ok: false, error: message }));
@@ -505,7 +539,7 @@ export async function main(): Promise<void> {
       console.error(`${c.red}${msg}${c.reset}`);
       process.exitCode = 1;
     } else {
-      reportUnexpectedCliError(err, args);
+      reportUnexpectedCliError(err, ownArgs);
     }
   }
 }
@@ -559,7 +593,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "stable",
     help: "Compact one-line status (mode score · update · open PAL) for Claude Code statusLine / a shell PS1; Codex gets it via SessionStart context",
   },
-  whoami: { handler: cmdWhoami, stability: "stable", help: "Show current agent / user identity" },
+  whoami: {
+    handler: cmdWhoami,
+    stability: "stable",
+    help: "Show configured agent, access environment, and budget usage",
+  },
   usage: {
     handler: cmdUsage,
     stability: "stable",
@@ -581,7 +619,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   ingest: {
     handler: cmdIngest,
     stability: "stable",
-    help: "Ingest external SARIF / OSV reports into kit's consolidated verdict (kit ingest <sarif|osv> <file>)",
+    help: "Validate a local SARIF / OSV report and print normalized findings (kit ingest <sarif|osv> <file>)",
   },
   "supply-chain": {
     handler: cmdSupplyChain,
@@ -914,7 +952,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   "guard-observe": {
     handler: cmdGuardObserve,
     stability: "experimental",
-    help: "Shim protocol (invoked by ~/.kit/shims wrappers, not by you): record what the install gate would decide for a package-manager call",
+    help: "Shim protocol: guard-observe [Kit options] [--] <tool> [args...]. Record the install gate decision without executing or blocking the observed tool",
   },
   "gate-bash": {
     handler: cmdGateBash,

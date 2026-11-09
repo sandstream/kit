@@ -1,11 +1,13 @@
 /**
  * `kit guard` (human: install/status/uninstall) + `kit guard-observe` (shim
- * protocol — invoked by the ~/.kit/shims wrappers, never typed by a person).
+ * protocol invoked by the ~/.kit/shims wrappers).
  * See src/guard.ts for the design contract: v1 observes, never blocks.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { c } from "../utils/colors.js";
+import { isReadOnlyMode } from "../read-only-mode.js";
+import type { GateDeps } from "../triage-gate.js";
 import {
   GUARD_TOOLS,
   guardShimsDir,
@@ -25,32 +27,45 @@ import {
   gitCloneObservation,
 } from "../guard.js";
 
+// The default triage runner installs or refreshes its bundled scripts before evaluation.
+// Preserve the gate's parser decisions, but report triage targets as unverified in read-only mode.
+const readOnlyObservationDeps: GateDeps = {
+  runTriage: async (type, target) => ({
+    type,
+    target,
+    passed: false,
+    output: "read-only mode active; triage skipped to prevent tool provisioning",
+  }),
+};
+
 /** Shim protocol: reconstruct the command, ask the SAME gate the agents use what
  *  it would decide, log it, exit 0. Never blocks (v1 = observe), never throws. */
 export async function cmdGuardObserve(): Promise<boolean> {
   try {
-    const [tool, ...rest] = process.argv.slice(3);
+    const separator = process.argv.indexOf("--", 3);
+    const [tool, ...rest] = process.argv.slice(separator < 0 ? 3 : separator + 1);
     if (!tool) return true;
-    // Self-heal the shim that just called us. `kit guard install` is the only other
-    // path that rewrites shims, and nobody re-runs it after an upgrade — so a fixed
-    // kit would sit next to a broken shim forever (#461 hung silently for hours).
-    // Atomic by construction in writeShim; the caller keeps running the old inode.
-    if (staleShims(guardShimsDir()).includes(tool)) refreshShims([tool], guardShimsDir());
+    const readOnly = isReadOnlyMode();
+    // Refresh only when writes are allowed. Old shims can retain the #461 hang after kit upgrades.
+    // writeShim replaces atomically so the running caller keeps the old inode.
+    if (!readOnly && staleShims(guardShimsDir()).includes(tool)) {
+      refreshShims([tool], guardShimsDir());
+    }
     const command = [tool, ...rest].join(" ");
     const { parseInstallCommand, decideBashGate } = await import("../install-gate.js");
     const probe = parseInstallCommand(command);
     const clone = gitCloneObservation(tool, rest);
     if (!probe.isInstall && !clone) return true; // non-install invocation — no signal, no noise
     const verdict = probe.isInstall
-      ? await decideBashGate(command, undefined, process.cwd())
+      ? await decideBashGate(command, readOnly ? readOnlyObservationDeps : undefined, process.cwd())
       : { block: false, reason: clone!.reason };
     appendObservation({
       ts: new Date().toISOString(),
       cwd: process.cwd(),
       tool,
-      command: command.slice(0, 200),
+      command,
       wouldBlock: verdict.block,
-      reason: verdict.reason.slice(0, 300),
+      reason: verdict.reason,
       refs: clone ? [clone.ref] : probe.refs,
     });
   } catch {

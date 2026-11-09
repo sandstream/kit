@@ -102,7 +102,11 @@ it("refuses direct file operations and audits each refusal", async () => {
       "review-recovery-pending",
       "review-interruption-assessment",
     ]);
-    assert.deepEqual(readdirSync(root), [".kit-audit.jsonl"]);
+    // Expected: refusal evidence requires the audit log and its persistent coordination file.
+    assert.deepEqual(readdirSync(root).sort(), [
+      ".kit-audit.jsonl",
+      ".kit-audit.jsonl.lock.sqlite",
+    ]);
   } finally {
     if (previous === undefined) delete process.env.KIT_READ_ONLY;
     else process.env.KIT_READ_ONLY = previous;

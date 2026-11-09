@@ -141,6 +141,9 @@ describe("audit anchor - hasAnyAnchoredLogs", () => {
 
 const withCmd = async <T>(cmd: string | undefined, fn: () => T | Promise<T>): Promise<T> => {
   const prev = process.env.KIT_EXTERNAL_ANCHOR_CMD;
+  const previousVerifier = process.env.KIT_EXTERNAL_ANCHOR_VERIFY_CMD;
+  // These transport and refusal tests do not configure a trusted verifier.
+  delete process.env.KIT_EXTERNAL_ANCHOR_VERIFY_CMD;
   if (cmd === undefined) delete process.env.KIT_EXTERNAL_ANCHOR_CMD;
   else process.env.KIT_EXTERNAL_ANCHOR_CMD = cmd;
   try {
@@ -148,6 +151,8 @@ const withCmd = async <T>(cmd: string | undefined, fn: () => T | Promise<T>): Pr
   } finally {
     if (prev === undefined) delete process.env.KIT_EXTERNAL_ANCHOR_CMD;
     else process.env.KIT_EXTERNAL_ANCHOR_CMD = prev;
+    if (previousVerifier === undefined) delete process.env.KIT_EXTERNAL_ANCHOR_VERIFY_CMD;
+    else process.env.KIT_EXTERNAL_ANCHOR_VERIFY_CMD = previousVerifier;
   }
 };
 
@@ -185,19 +190,39 @@ describe("audit anchor - external command transport", () => {
 });
 
 describe("audit anchor - external receipt policy", () => {
-  it("anchorAuditLog --external stores the receipt; requested-but-unconfigured throws", async () => {
+  it("refuses failed external proof even when the verifier message is empty", () => {
+    for (const status of ["invalid", "unverified"] as const) {
+      const verdict = decideAnchorVerdict({
+        result: mk({
+          externalReceipt: { token: "untrusted", authority: "test", timestamp: "now" },
+          externalVerification: { status, message: "" },
+        }),
+        strict: false,
+        machineHasAnchors: true,
+        requireExternal: status === "unverified",
+      });
+      assert.equal(verdict.ok, false, status);
+      assert.equal(verdict.level, "error", status);
+    }
+  });
+
+  it("anchorAuditLog --external refuses an unverified receipt and preserves the existing seal", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "kit-ext-log-"));
     const dir = mkdtempSync(join(tmpdir(), "kit-ext-home-"));
     try {
       const content = await buildChain(cwd, 2);
       const logPath = join(cwd, ".kit-audit.jsonl");
-      // configured → receipt stored on the record
+      await anchorAuditLog(logPath, content, dir);
+      const before = readFileSync(join(dir, "audit-anchor.json"));
+      // Expected refusal: an issuer response alone does not authenticate a receipt.
       await withCmd(
         `"${process.execPath}" -e "process.stdout.write(JSON.stringify({token:'abc',authority:'acme-tsa'}))"`,
         async () => {
-          const rec = await anchorAuditLog(logPath, content, dir, { external: true });
-          assert.equal(rec.external?.token, "abc");
-          assert.equal(rec.external?.authority, "acme-tsa");
+          await assert.rejects(
+            anchorAuditLog(logPath, content, dir, { external: true }),
+            /verification is not configured/i,
+          );
+          assert.deepEqual(readFileSync(join(dir, "audit-anchor.json")), before);
         },
       );
       // requested but no command configured → fail-closed throw
@@ -206,6 +231,7 @@ describe("audit anchor - external receipt policy", () => {
           anchorAuditLog(logPath, content, dir, { external: true }),
           /none configured/,
         );
+        assert.deepEqual(readFileSync(join(dir, "audit-anchor.json")), before);
       });
     } finally {
       rmTemp(cwd);
@@ -213,7 +239,7 @@ describe("audit anchor - external receipt policy", () => {
     }
   });
 
-  it("decideAnchorVerdict --require-external fails an HMAC-only seal, passes one with a receipt", () => {
+  it("decideAnchorVerdict --require-external refuses both absent and unauthenticated receipts", () => {
     const base: AnchorVerifyResult = {
       status: "anchored-ok",
       entries: 2,
@@ -238,8 +264,8 @@ describe("audit anchor - external receipt policy", () => {
       machineHasAnchors: true,
       requireExternal: true,
     });
-    assert.equal(withExt.ok, true);
-    assert.match(withExt.message, /external anchor \(tsa\)/);
+    assert.equal(withExt.ok, false);
+    assert.match(withExt.message, /external anchor UNVERIFIED/);
   });
 });
 

@@ -1,22 +1,23 @@
 /**
- * Deterministic tool-usage scanner — the "used" signal for loaded-vs-used insight.
- *
- * Zero-LLM, pure counting: kit's memory index already normalizes every agent's
- * transcript into the `tool_uses` table (one row per tool call, cross-agent), so
- * "was this tool/MCP-server actually called?" is a GROUP BY, not a re-parse of
- * each agent's JSONL format. Given the same DB, output is identical — safe to
- * diff in CI. Detection lives here (core, deterministic); only the eventual
- * skill-*authoring* may be model-assisted, around the core (never in this path).
- *
- * This module is the scanner only — the loaded-vs-used correlation + the
- * `kit insight` surface land in later steps.
+ * Count references in the tool_uses table and inspect message capture coverage.
+ * Capture describes native records in retained indexed transcripts. It cannot certify all history or uncaptured subagents.
+ * No transcript parsing or model calls occur here. Equal database contents produce equal output.
  */
 import type { DatabaseSync } from "node:sqlite";
+
+/** Coverage of retained indexed messages, independent of whether any tool calls were recorded. */
+export interface ToolCaptureCoverage {
+  /** All observed messages have version 1, valid matching call counts, and no orphan calls. */
+  complete: boolean;
+  observedMessages: number;
+  incompleteMessages: number;
+  orphanToolCalls: number;
+}
 
 export interface ToolUsageEntry {
   /** The recorded tool name, e.g. "kit_check", "Bash", "mcp__github__create_issue". */
   tool: string;
-  /** How many times it was invoked across all indexed transcripts. */
+  /** Number of recorded calls, regardless of their execution outcome. */
   count: number;
   /** For an MCP tool (`mcp__<server>__<tool>`), the server slug; else null. */
   mcpServer: string | null;
@@ -54,8 +55,7 @@ export function tallyToolUsage(names: (string | null | undefined)[]): ToolUsageE
 
 /**
  * Scan the memory DB's `tool_uses` table for every recorded tool invocation.
- * Deterministic given the DB. Returns [] when nothing has been indexed — callers
- * MUST treat "no rows" as "can't judge usage" (skip), never as "all unused".
+ * Empty output does not establish absence. Check message capture before a negative verdict.
  */
 export function scanToolUsage(db: DatabaseSync): ToolUsageEntry[] {
   const rows = db.prepare("SELECT tool_name FROM tool_uses").all() as {
@@ -64,17 +64,59 @@ export function scanToolUsage(db: DatabaseSync): ToolUsageEntry[] {
   return tallyToolUsage(rows.map((r) => r.tool_name));
 }
 
-/** Fast "is anything indexed?" guard so callers can emit an honest skip. */
+/** Reports whether call rows exist. This is not evidence of complete capture. */
 export function hasIndexedToolUsage(db: DatabaseSync): boolean {
   const row = db.prepare("SELECT COUNT(*) AS n FROM tool_uses").get() as { n: number };
   return row.n > 0;
 }
 
+/** Version 1 and a matching expected call count certify native capture for a retained message. */
+export function scanToolCapture(db: DatabaseSync): ToolCaptureCoverage {
+  const columns = db.prepare("PRAGMA table_info(messages)").all();
+  const hasCaptureFields = ["tool_capture_version", "tool_capture_count"].every((name) =>
+    columns.some((column) => column.name === name),
+  );
+  const completeMessages = hasCaptureFields
+    ? `COUNT(CASE WHEN m.tool_capture_version = 1 AND typeof(m.tool_capture_version) = 'integer'
+        AND typeof(m.tool_capture_count) = 'integer' AND m.tool_capture_count >= 0
+        AND m.tool_capture_count = COALESCE(recorded.n, 0) THEN 1 END)`
+    : "0";
+  const row = db
+    .prepare(
+      `
+    WITH recorded_calls AS (
+      SELECT message_uuid, session_id, COUNT(*) AS n
+      FROM tool_uses GROUP BY message_uuid, session_id
+    )
+    SELECT COUNT(*) AS observedMessages,
+      COUNT(*) - ${completeMessages} AS incompleteMessages
+    FROM messages AS m LEFT JOIN recorded_calls AS recorded
+      ON recorded.message_uuid = m.uuid AND recorded.session_id = m.session_id
+  `,
+    )
+    .get() as { observedMessages: number; incompleteMessages: number };
+  const orphan = db
+    .prepare(
+      `
+    SELECT COUNT(*) AS n FROM tool_uses AS calls
+    WHERE NOT EXISTS (
+      SELECT 1 FROM messages
+      WHERE messages.uuid = calls.message_uuid AND messages.session_id = calls.session_id
+    )
+  `,
+    )
+    .get() as { n: number };
+  return {
+    complete: row.observedMessages > 0 && row.incompleteMessages === 0 && orphan.n === 0,
+    ...row,
+    orphanToolCalls: orphan.n,
+  };
+}
+
 /**
- * Pure skill-usage tally. A skill invocation is recorded as a `Skill` tool call
- * whose `tool_input` JSON carries `{ "skill": "<slug>", ... }`; count per slug,
- * skipping unparseable/blank inputs. Deterministic (Map insertion is not relied
- * on — callers look up by slug). Zero-LLM: pure JSON + counting.
+ * Count explicit Skill references from tool_input JSON containing {skill:<slug>}.
+ * Direct file reads and opaque dispatch code do not provide a complete skill-use signal.
+ * Skip malformed or blank inputs. This tally cannot establish skill absence.
  */
 export function tallySkillUsage(toolInputs: (string | null | undefined)[]): Map<string, number> {
   const counts = new Map<string, number>();
@@ -95,8 +137,8 @@ export function tallySkillUsage(toolInputs: (string | null | undefined)[]): Map<
 }
 
 /**
- * Scan the memory DB for skill invocations (`tool_name = 'Skill'`), returning a
- * slug → invocation-count map. Deterministic given the DB.
+ * Scan explicit Skill call records and return reference counts by slug.
+ * Positive records prove a reference regardless of outcome. Missing records do not prove skill absence.
  */
 export function scanSkillUsage(db: DatabaseSync): Map<string, number> {
   const rows = db.prepare("SELECT tool_input FROM tool_uses WHERE tool_name = 'Skill'").all() as {

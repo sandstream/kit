@@ -218,7 +218,9 @@ kit is a security tool, so it holds itself to the bar it sets. The receipts:
   receipt of which scanners actually ran plus the verdict, sealed with a machine-local anchor key; the
   `.kit-audit.jsonl` chain can be sealed with `kit audit anchor`. Honest scope: the anchor raises
   forgery from "anyone who can write the log" to "someone who can read the `0600` key", it is **not**
-  tamper-proof against a same-UID local principal (that needs the documented external TSA anchor).
+  tamper-proof against a same-UID local principal. External proof requires protected verifier code,
+  launch configuration, trust and current checkpoint state. A timestamp alone does not detect rollback.
+  See the [external receipt contract](docs/AUDIT_ATTESTATION.md).
 - **Local-first, zero LLM, no telemetry.** Your code never leaves the machine.
 
 > At-rest note: kit's local memory store (`~/.kit/memory.db`, `0600`) relies on OS full-disk

@@ -11,7 +11,7 @@ const usage = (rows: [string, number][]): ToolUsageEntry[] =>
   }));
 
 describe("computeUnused", () => {
-  it("marks a loaded MCP server used when any of its tools was called, else unused", () => {
+  it("marks referenced MCP servers used and missing references unknown without capture evidence", () => {
     const report = computeUnused(
       {
         skills: [],
@@ -27,9 +27,9 @@ describe("computeUnused", () => {
     const some = report.findings.find((f) => f.name === "some-server");
     assert.equal(github?.verdict, "used");
     assert.equal(github?.refs, 5); // summed across the server's tools
-    assert.equal(some?.verdict, "unused");
+    assert.equal(some?.verdict, "unknown");
     assert.equal(some?.refs, 0);
-    assert.deepEqual(report.pruneCandidates, ["some-server"]);
+    assert.deepEqual(report.pruneCandidates, []);
   });
 
   it("leaves skill verdict 'unknown' when no skill-usage map is provided (never 'unused')", () => {
@@ -43,7 +43,7 @@ describe("computeUnused", () => {
     assert.deepEqual(report.pruneCandidates, []);
   });
 
-  it("judges skills used/unused from the skill-usage map (exact slug), unused ⇒ prune candidate", () => {
+  it("keeps positive skill references but cannot recommend removal without capture evidence", () => {
     const report = computeUnused(
       { skills: [{ name: "doc-review" }, { name: "pdf-process" }], mcpServers: [] },
       [],
@@ -53,11 +53,13 @@ describe("computeUnused", () => {
     const pdf = report.findings.find((f) => f.name === "pdf-process");
     assert.equal(dr?.verdict, "used");
     assert.equal(dr?.refs, 4);
-    assert.equal(pdf?.verdict, "unused");
+    assert.equal(pdf?.verdict, "unknown");
     assert.equal(pdf?.refs, 0);
-    assert.deepEqual(report.pruneCandidates, ["pdf-process"]);
+    assert.deepEqual(report.pruneCandidates, []);
   });
+});
 
+describe("computeUnused ordering and coverage", () => {
   it("orders findings skills-first then mcp-servers, each by name asc (deterministic)", () => {
     const report = computeUnused(
       {
@@ -73,9 +75,37 @@ describe("computeUnused", () => {
     assert.deepEqual(report.loaded, { skills: 2, mcpServers: 2 });
   });
 
-  it("with no usage, every loaded MCP server is unused (caller decides whether to skip)", () => {
+  it("with no usage or capture evidence, loaded MCP servers remain unknown", () => {
     const report = computeUnused({ skills: [], mcpServers: [{ name: "github" }] }, []);
-    assert.equal(report.findings[0].verdict, "unused");
+    assert.equal(report.findings[0].verdict, "unknown");
+    assert.deepEqual(report.pruneCandidates, []);
+  });
+
+  it("a complete flag without observed messages cannot justify removal", () => {
+    const report = computeUnused(
+      { skills: [{ name: "review" }], mcpServers: [{ name: "github" }] },
+      [],
+      new Map(),
+      { complete: true, observedMessages: 0, incompleteMessages: 0, orphanToolCalls: 0 },
+    );
+    assert.ok(report.findings.every((finding) => finding.verdict === "unknown"));
+    assert.deepEqual(report.pruneCandidates, []);
+  });
+
+  it("complete native tool evidence supports MCP absence but cannot establish skill absence", () => {
+    const report = computeUnused(
+      { skills: [{ name: "review" }], mcpServers: [{ name: "github" }] },
+      [],
+      new Map(),
+      { complete: true, observedMessages: 1, incompleteMessages: 0, orphanToolCalls: 0 },
+    );
+    assert.equal(report.findings.find((finding) => finding.kind === "skill")?.verdict, "unknown");
+    assert.equal(
+      report.findings.find((finding) => finding.kind === "mcp-server")?.verdict,
+      "unused",
+    );
     assert.deepEqual(report.pruneCandidates, ["github"]);
+    assert.equal(report.scope, "retained-indexed-messages");
+    assert.equal(report.skillCoverage, "explicit-references-only");
   });
 });

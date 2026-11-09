@@ -39,6 +39,12 @@ type Row = Record<string, unknown>;
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 const nullableStr = (value: unknown): string | null => str(value) ?? null;
 
+function mergeHarness(incoming: unknown, existing: unknown): string {
+  const harness = str(incoming);
+  // Missing evidence cannot replace a known origin.
+  return harness && harness !== "unknown" ? harness : (str(existing) ?? "unknown");
+}
+
 /** Project keys are stored in the Claude-projects form: path with / → -. */
 export function projectKeyFor(projectRoot: string): string {
   return projectRoot.replace(/[\\/:]/g, "-");
@@ -170,13 +176,15 @@ export function mergeDb(
     mergeTombstones(target, src, out);
 
     // Sessions
+    const existingSession = target.prepare("SELECT harness FROM sessions WHERE session_id = ?");
     for (const s of src.prepare("SELECT * FROM sessions").all() as Row[]) {
       const sessionId = str(s.session_id);
       if (!sessionId) continue;
       const project = remapKey ?? str(s.project);
+      const harness = mergeHarness(s.harness, existingSession.get(sessionId)?.harness);
       upsertSession(target, {
         sessionId,
-        harness: str(s.harness) ?? "claude-code",
+        harness,
         project,
         firstMessageAt: str(s.first_message_at),
         lastMessageAt: str(s.last_message_at),

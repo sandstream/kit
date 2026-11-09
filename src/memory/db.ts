@@ -35,6 +35,7 @@ import { prepareActionChecks } from "./pal-check-storage.js";
 import { prepareRevisionHistory } from "./pal-revisions.js";
 import { withPalWrite } from "./pal-write-guard.js";
 import { SCHEMA_VERSION } from "./db-schema.js";
+import { prepareToolEvidence, storeToolUse, messageToolCapture } from "./tool-events.js";
 
 export { SCHEMA_VERSION } from "./db-schema.js";
 
@@ -297,6 +298,7 @@ function migrate(db: DatabaseSync, defaultClass: MemoryClass): void {
   prepareActionVersion(db);
   ensureColumn(db, "pending_actions", "state_conflict", "INTEGER NOT NULL DEFAULT 0");
   prepareRevisionHistory(db);
+  prepareToolEvidence(db);
   backfillMessageClass(db, defaultClass);
   db.exec("CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL)");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
@@ -363,10 +365,13 @@ export function isFileIndexed(
   path: string,
   mtimeMs: number,
   size: number,
+  parserVersion = 0,
 ): boolean {
   return !!db
-    .prepare("SELECT 1 FROM file_index WHERE path = ? AND mtime_ms = ? AND size = ?")
-    .get(path, mtimeMs, size);
+    .prepare(
+      "SELECT 1 FROM file_index WHERE path = ? AND mtime_ms = ? AND size = ? AND parser_version = ?",
+    )
+    .get(path, mtimeMs, size, parserVersion);
 }
 
 /** Record (or refresh) a file's mtime + size after indexing it. */
@@ -375,12 +380,13 @@ export function markFileIndexed(
   path: string,
   mtimeMs: number,
   size: number,
+  parserVersion = 0,
 ): void {
   db.prepare(
-    `INSERT INTO file_index (path, mtime_ms, size, indexed_at)
-     VALUES (?, ?, ?, datetime('now'))
-     ON CONFLICT(path) DO UPDATE SET mtime_ms = excluded.mtime_ms, size = excluded.size, indexed_at = datetime('now')`,
-  ).run(path, mtimeMs, size);
+    `INSERT INTO file_index (path, mtime_ms, size, indexed_at, parser_version)
+     VALUES (?, ?, ?, datetime('now'), ?)
+     ON CONFLICT(path) DO UPDATE SET mtime_ms = excluded.mtime_ms, size = excluded.size, indexed_at = datetime('now'), parser_version = excluded.parser_version`,
+  ).run(path, mtimeMs, size, parserVersion);
 }
 
 export function upsertSession(db: DatabaseSync, s: SessionInput): void {
@@ -407,12 +413,14 @@ export function upsertSession(db: DatabaseSync, s: SessionInput): void {
  *  Returns false when the row already exists, the uuid carries a forget tombstone, OR
  *  the capture-time write-gate (G1) rejects it (schema-invalid always; injection/oversize
  *  under KIT_MEMORY_WRITE_ENFORCE). */
+/*
+ * A forgotten uuid stays forgotten (MP-1-r1). mergeDb has always refused a tombstoned
+ * uuid; this path had not, so the next re-index of the still-present transcript line
+ * resurrected the row, with the same id, content and FTS terms. That made verified
+ * forget hold only until something re-read the source. Keyed on the uuid, not the
+ * content hash: an edited line under the same id is the same forgotten message.
+ */
 export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
-  // A forgotten uuid stays forgotten (MP-1-r1). mergeDb has always refused a tombstoned
-  // uuid; this path had not, so the next re-index of the still-present transcript line
-  // resurrected the row, with the same id, content and FTS terms. That made verified
-  // forget hold only until something re-read the source. Keyed on the uuid, not the
-  // content hash: an edited line under the same id is the same forgotten message.
   if (db.prepare("SELECT 1 FROM memory_tombstones WHERE uuid = ?").get(m.uuid)) return false;
   const content = captureText(m.content);
   // Capture-time WRITE-GATE (G1): authorize the row BEFORE it lands. Fail closed
@@ -431,11 +439,12 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
   }
   if (verdict.decision === "reject") return false;
   const quarantined = verdict.decision === "quarantine" ? 1 : 0;
+  const capture = messageToolCapture(m);
   const res = db
     .prepare(
       `INSERT OR IGNORE INTO messages
-       (uuid, session_id, parent_uuid, type, role, content, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, timestamp, cwd, git_branch, version, quarantined, class)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (uuid, session_id, parent_uuid, type, role, content, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, timestamp, cwd, git_branch, version, quarantined, class, tool_capture_version, tool_capture_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.uuid,
@@ -457,6 +466,8 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
       // Classify at capture time. An absent input class means the caller did not resolve one;
       // use the documented default rather than NULL so no row is born unclassifiable.
       m.memoryClass ?? DEFAULT_MEMORY_CLASS,
+      capture.version,
+      capture.count,
     );
   if (Number(res.changes) > 0) {
     registerProjectIdentity(db, m.cwd);
@@ -585,17 +596,8 @@ export function countTombstones(db: DatabaseSync): number {
   return (db.prepare("SELECT COUNT(*) c FROM memory_tombstones").get() as { c: number }).c;
 }
 
-export function insertToolUse(db: DatabaseSync, t: ToolUseInput): void {
-  db.prepare(
-    `INSERT INTO tool_uses (message_uuid, session_id, tool_name, tool_input, timestamp)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(
-    t.messageUuid ?? null,
-    t.sessionId ?? null,
-    t.toolName,
-    captureText(t.toolInput),
-    t.timestamp ?? null,
-  );
+export function insertToolUse(db: DatabaseSync, t: ToolUseInput): boolean {
+  return storeToolUse(db, { ...t, toolInput: captureText(t.toolInput) ?? undefined });
 }
 
 export interface SearchOptions {

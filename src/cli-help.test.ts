@@ -213,7 +213,7 @@ it("help stays read-only with global options, unknown flags, and pass-through ar
     ["--env=staging", "--non-interactive", "memory", "pal", "configure", "P1", "--manual", "-h"],
     ["fix", "--not-a-real-flag", "--help"],
     ["fix", "--read-only=false", "--help"],
-    ["run", "--", "touch", "should-not-exist", "--help"],
+    ["run", "--help", "--", "touch", "should-not-exist"],
   ]) {
     assert.match(run(args), /kit /);
   }

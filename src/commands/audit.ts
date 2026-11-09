@@ -7,6 +7,7 @@ import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue, flagInt } from "../utils/flags.js";
+import { sanitizeDisplayText } from "../display-text.js";
 
 async function cmdAuditSecrets(): Promise<boolean> {
   const args = process.argv.slice(4); // after "audit secrets"
@@ -98,14 +99,21 @@ async function resolveAuditLogPath(): Promise<string> {
  * paths on a dev machine are short-lived test temp dirs, and a report that alarms on
  * those is a report nobody reads.
  */
-async function cmdAuditVerifyAll(strict: boolean, jsonMode: boolean): Promise<boolean> {
+async function cmdAuditVerifyAll(
+  strict: boolean,
+  jsonMode: boolean,
+  requireExternal: boolean,
+): Promise<boolean> {
   const { listAnchoredLogs, tryReadAuditAnchorKey, anchorRecordPath } =
     await import("../audit-anchor.js");
   const { verifyAnchoredLogs, readLogForUnion } = await import("../audit-anchor-all.js");
 
   const inputs = await listAnchoredLogs();
   const key = await tryReadAuditAnchorKey();
-  const report = await verifyAnchoredLogs(inputs, key, readLogForUnion, { strict });
+  const report = await verifyAnchoredLogs(inputs, key, readLogForUnion, {
+    strict,
+    requireExternal,
+  });
 
   if (jsonMode) {
     console.log(JSON.stringify({ anchorRecord: anchorRecordPath(), ...report }, null, 2));
@@ -117,6 +125,12 @@ async function cmdAuditVerifyAll(strict: boolean, jsonMode: boolean): Promise<bo
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}`);
 
   if (inputs.length === 0) {
+    if (requireExternal) {
+      console.error(
+        `${c.red}External verification REQUIRED but no anchored logs are available.${c.reset}`,
+      );
+      return false;
+    }
     // Not a pass dressed up as one: an empty record means nothing has ever been
     // sealed here, so there is no evidence either way.
     console.warn(
@@ -147,13 +161,16 @@ async function cmdAuditVerifyAll(strict: boolean, jsonMode: boolean): Promise<bo
   const k = report.counts;
   const summary = `${inputs.length} anchored log(s): ${k.verified} verified · ${k.stalled} stalled · ${k.missing} missing · ${k.failed} failed`;
   console.log();
-  if (report.ok && k.stalled === 0) {
+  const unverifiedExternal = report.results.filter(
+    (row) => row.externalVerification?.status === "unverified",
+  ).length;
+  if (report.ok && k.stalled === 0 && unverifiedExternal === 0) {
     console.log(`${c.green}✓ ${summary}${c.reset}`);
   } else if (report.ok) {
     // Exits 0 by the same policy `decideAnchorVerdict` applies to one tree: an
     // unsealed tail warns, and fails under --strict / require_anchor.
     console.warn(
-      `${c.yellow}! ${summary}${c.reset}  ${c.dim}(stalled seals warn; --strict makes them fail)${c.reset}`,
+      `${c.yellow}! ${summary}${c.reset}  ${c.dim}(stalled seals: ${k.stalled}; unverified external receipts: ${unverifiedExternal})${c.reset}`,
     );
   } else {
     console.error(`${c.red}✗ ${summary}${c.reset}`);
@@ -161,11 +178,48 @@ async function cmdAuditVerifyAll(strict: boolean, jsonMode: boolean): Promise<bo
   return report.ok;
 }
 
+/** Verify the HMAC anchor and its external receipt, then print the verdict. */
+async function verifyAnchorStage(
+  logPath: string,
+  content: string,
+  opts: { strict: boolean; requireExternal: boolean },
+): Promise<boolean> {
+  const {
+    readAnchorRecord,
+    tryReadAuditAnchorKey,
+    verifyAgainstAnchor,
+    hasAnyAnchoredLogs,
+    decideAnchorVerdict,
+  } = await import("../audit-anchor.js");
+  const anchor = await readAnchorRecord(logPath);
+  const key = await tryReadAuditAnchorKey();
+  const a = verifyAgainstAnchor(content, anchor, key);
+  if (anchor?.external && a.status === "anchored-ok") {
+    const { verifyExternalAnchor } = await import("../audit-external.js");
+    a.externalVerification = await verifyExternalAnchor(logPath, anchor);
+  }
+  const machineHasAnchors = await hasAnyAnchoredLogs();
+  const verdict = decideAnchorVerdict({
+    result: a,
+    strict: opts.strict,
+    machineHasAnchors,
+    requireExternal: opts.requireExternal,
+  });
+  if (verdict.level === "ok") {
+    console.log(`${c.green}✓ ${verdict.message}${c.reset}`);
+  } else if (verdict.level === "warn") {
+    console.warn(`${c.yellow}! ${verdict.message}${c.reset}`);
+  } else {
+    console.error(`${c.red}✗ HMAC anchor FAILED: ${verdict.message}${c.reset}`);
+  }
+  return verdict.ok;
+}
+
 /**
  * `kit audit verify` - verify the keyless hash chain, then the external HMAC
  * anchor (key + sealed count) when one exists. See audit-anchor.ts for the
  * threat boundary (only a reader of the 0600 key can forge; a same-UID attacker
- * is NOT covered, which needs the external TSA anchor).
+ * requires independently protected verification, authority trust and a current checkpoint).
  *
  * Fail-closed mode (`--strict` or `[governance.audit].require_anchor = true`,
  * and implicitly once this machine has anchored ANY log) turns an unanchored
@@ -178,6 +232,7 @@ async function cmdAuditVerify(): Promise<boolean> {
   const { readFile } = await import("node:fs/promises");
   const args = process.argv.slice(3);
   const strictFlag = hasFlag(args, "--strict");
+  const requireExternal = hasFlag(args, "--require-external");
   let requireAnchor = false;
   try {
     const config = await loadConfig(resolveConfigPath());
@@ -188,7 +243,7 @@ async function cmdAuditVerify(): Promise<boolean> {
   // The union view answers for the machine, so it must run BEFORE this function
   // resolves a cwd-relative log — "no log here" is not an answer to "--all".
   if (hasFlag(args, "--all")) {
-    return cmdAuditVerifyAll(strictFlag || requireAnchor, hasFlag(args, "--json"));
+    return cmdAuditVerifyAll(strictFlag || requireAnchor, hasFlag(args, "--json"), requireExternal);
   }
   const logPath = await resolveAuditLogPath();
   let content: string;
@@ -200,7 +255,8 @@ async function cmdAuditVerify(): Promise<boolean> {
     // must catch. Fail closed when strict, require_anchor, or this machine has
     // anchored logs elsewhere (so an attacker can't erase the trail to pass green).
     const { hasAnyAnchoredLogs } = await import("../audit-anchor.js");
-    const failClosed = strictFlag || requireAnchor || (await hasAnyAnchoredLogs());
+    const failClosed =
+      strictFlag || requireAnchor || requireExternal || (await hasAnyAnchoredLogs());
     if (failClosed) {
       console.error(
         `${c.red}✗ no audit log at ${logPath} — refusing to report verified under strict / require_anchor / a machine that has anchored logs. An erased trail is a tamper signal, not a pass.${c.reset}`,
@@ -281,31 +337,10 @@ async function cmdAuditVerify(): Promise<boolean> {
     );
   }
 
-  const {
-    readAnchorRecord,
-    tryReadAuditAnchorKey,
-    verifyAgainstAnchor,
-    hasAnyAnchoredLogs,
-    decideAnchorVerdict,
-  } = await import("../audit-anchor.js");
-  const anchor = await readAnchorRecord(logPath);
-  const key = await tryReadAuditAnchorKey();
-  const a = verifyAgainstAnchor(content, anchor, key);
-  const machineHasAnchors = await hasAnyAnchoredLogs();
-  const verdict = decideAnchorVerdict({
-    result: a,
+  return verifyAnchorStage(logPath, content, {
     strict: strictFlag || requireAnchor,
-    machineHasAnchors,
-    requireExternal: hasFlag(args, "--require-external"),
+    requireExternal,
   });
-  if (verdict.level === "ok") {
-    console.log(`${c.green}✓ ${verdict.message}${c.reset}`);
-  } else if (verdict.level === "warn") {
-    console.warn(`${c.yellow}! ${verdict.message}${c.reset}`);
-  } else {
-    console.error(`${c.red}✗ HMAC anchor FAILED: ${verdict.message}${c.reset}`);
-  }
-  return verdict.ok;
 }
 
 /**
@@ -340,11 +375,11 @@ async function cmdAuditAnchor(): Promise<boolean> {
     );
     if (rec.external) {
       console.log(
-        `${c.green}✓ external anchor receipt${c.reset}  ${c.dim}${rec.external.authority} @ ${rec.external.timestamp}${c.reset}`,
+        `${c.green}✓ verified external anchor receipt${c.reset}  ${c.dim}${sanitizeDisplayText(rec.external.authority)} @ ${sanitizeDisplayText(rec.external.timestamp)}${c.reset}`,
       );
     } else {
       console.log(
-        `${c.dim}Note: HMAC-only seal resists a tamperer who cannot read the 0600 anchor key. A same-UID attacker who can read ~/.kit can still forge; close that with \`kit audit anchor --external\` (set KIT_EXTERNAL_ANCHOR_CMD).${c.reset}`,
+        `${c.dim}Note: a reader of the local HMAC key can forge this seal. External verification requires protected operator commands and an independent checkpoint. See docs/AUDIT_ATTESTATION.md.${c.reset}`,
       );
     }
     return true;

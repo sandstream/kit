@@ -17,6 +17,7 @@ node = "22"
 # mise installs it, and `resolveToolBin` finds the resulting binary mise-first.
 "npm:license-checker" = "25.0.1"
 "pipx:lizard" = "1.24.0"
+"npm:typescript" = "6.0.3"
 "npm:jscpd" = "5.4.2"
 "aqua:boyter/scc" = "4.1.0"
 "aqua:hadolint/hadolint" = "2.15.1"

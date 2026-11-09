@@ -10,7 +10,7 @@ import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { createPlugin } from "../create-plugin.js";
 import { cloneRepository } from "../clone.js";
-import { executeCommand } from "../run.js";
+import { executeGovernedCommand } from "../run-governance.js";
 import { listServices, openService } from "../open.js";
 import { cmdSetup } from "./setup.js";
 
@@ -154,22 +154,19 @@ export async function cmdRun(): Promise<boolean> {
     return false;
   }
 
-  // `--env <name>` before the `--` is documented in the usage text above and does NOT select an
-  // environment: the block that used to sit here computed the flag's index, compared it against
-  // the separator, and had an empty body — "reserved for future use". Removed rather than left
-  // looking like parsing, because a documented flag whose handler is empty is the same shape as a
-  // flag that silently does nothing. Wiring it means passing the name into `executeCommand`, which
-  // is a behaviour change with its own decision to make.
-  //
-  // Extract command and args after --
   const commandArgs = args.slice(doubleDashIndex + 1);
 
-  const result = await executeCommand({
+  const outcome = await executeGovernedCommand({
     commandArgs,
     cwd: process.cwd(),
     inheritEnv: true,
+    interactiveApproval: true,
   });
-
+  if (!outcome.result) {
+    console.error(`${c.red}${outcome.reason ?? "Command denied"}${c.reset}`);
+    return false;
+  }
+  const result = outcome.result;
   process.exitCode = result.exitCode;
   return result.exitCode === 0;
 }

@@ -86,7 +86,7 @@ export const myServiceAdapter: ServiceAdapter = {
   },
 
   // Return true if the service is already provisioned.
-  // Used by `kit check` to skip re-provisioning.
+  // Used by `kit add` to skip provisioning when the service already exists.
   async check(context: AdapterContext): Promise<boolean> {
     return !!context.existingEnv["MY_SERVICE_KEY"];
   },
@@ -110,7 +110,7 @@ export const myServiceAdapter: ServiceAdapter = {
       error: "Missing MY_SERVICE_KEY",
       message: [
         "Get your API key at https://my-service.com/dashboard/api-keys",
-        "Then add to .env.local: MY_SERVICE_KEY=your_key_here",
+        "Store MY_SERVICE_KEY in the project vault with kit secrets.",
       ].join("\n"),
     };
 

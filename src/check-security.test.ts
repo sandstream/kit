@@ -682,7 +682,7 @@ describe("license check tool boundary", () => {
 
       assert.equal(result.status, "warn");
       assert.equal(result.didNotRun, true);
-      assert.match(result.detail, /license-checker not installed/i);
+      assert.match(result.detail, /license check failed \(exit 127\)/i);
       assert.equal(
         existsSync(npxMarker),
         false,

@@ -1,28 +1,114 @@
 ## [Unreleased]
 
+### Fixed
+
+- Stop child process groups on limits and parent interrupts. Bound stream cleanup and preserve UTF-8 across output chunks.
+
+- Keep observed package-manager arguments separate from Kit flags. Mask URL credentials in guard logs before truncation and display.
+- Apply target read-only policy and branch detection to child command governance. Inspect parsed arguments for network targets.
+- Mask raw child arguments before audit and response encoding. Reject invalid environment configuration before execution.
+
+### Corrected command behavior
+
+- **External audit receipts require verification.** Single-log and union verification authenticate statement binding and require an independent current checkpoint.
+  Explicit external sealing verifies its receipt before local publication. Missing or failed verification cannot satisfy `--require-external`.
+  Operator commands and trust material must remain outside attacker control. A receipt label or timestamp alone does not establish trust.
+- **Concurrent audit writes preserve the chain.** Writers coordinate the previous hash read, append, and anchor update for each canonical log path.
+  Anchor updates retain other logs and publish a complete index. Stale snapshots cannot replace a current seal.
+  Invalid logs refuse further appends. Invalid anchor indexes fail verification and remain available for recovery.
+- **One-shot approval cannot be replayed.** Machine-local authority rejects restored, consumed, revoked, and superseded project markers.
+  Concurrent requests reserve one grant once. Old requests preserve replacement grants, and fresh approval works within the same process.
+  Audit entries report actual admission. The CI override also reserves before asynchronous checks.
+  Expiry is checked after lock acquisition. Fresh authority directories receive private permissions before verification.
+- **Authenticator enrollment preserves the successful credential.** Concurrent setup calls cannot overwrite an existing enrollment without explicit approval.
+  Complete secret files replace earlier enrollment only with `--overwrite`. Unrelated authority storage loads only when required.
+- **Revocation checks preserve their authority.** Cache entries distinguish project, endpoint, and agent. Failed refreshes invalidate earlier permission.
+  Older concurrent responses cannot restore permission after a newer denial. Zero intervals perform fresh checks, and clock changes cannot extend cached permission.
+  Inspection and enforcement share a bounded request parser. Governed denials reach the audit log and caller without terminating the process.
+  Unverified responses remain distinct from confirmed revocation.
+- **Governance inspection reports actual state.** Invalid configuration, unreadable budgets, and unverified revocation cannot produce a successful report.
+  The documented `kit governance status` alias remains available. Other positional arguments and unrelated flags are refused.
+  Unknown configuration names are sanitized before warning output.
+- **Temporary approval stays within its project.** Signed markers include the canonical project directory. Copied and legacy markers require fresh confirmation.
+  Verification never creates a machine key. Invalid keys and explicit invalid TTL values refuse new grants.
+- **Invalid configuration cannot disable policy.** Existing unreadable or invalid configuration stops CLI dispatch before activation or enrollment.
+  Hook gates return blocking exit 2. Other commands return exit 1 with a sanitized diagnostic.
+- **Authorization input fails closed.** Only affirmative answers approve. Empty answers, arbitrary text, input termination, and timeout refuse.
+  TOTP approval requires an interactive terminal. Missing values and unrelated flags fail before policy effects.
+- **Revocation failures remain visible.** A failed marker removal returns failure. Read-only mode refuses enrollment and marker mutation.
+  `auth status --json` reports local approval state. It does not establish provider access.
+
+- **Identity inspection uses the access gate's environment decision.** It distinguishes the selected configuration, reports default budgets, and refuses invalid state.
+  Profile output masks recognized credentials and terminal controls. Empty identity sections report `agent: null`.
+- **Report import refuses malformed evidence.** SARIF and OSV imports validate consumed structure and protect displayed findings.
+  Interactive imports suppress registry notices. Successful import confirms parsing, not a clean account.
+- **Budget errors fail closed.** Invalid state cannot become unused allowance. State links are refused, and daily reset compares the full date.
+  Invalid numeric limits are refused. Optional limits retain their defaults, including for direct API callers.
+  An explicit zero limit is enforced. Governed CLI and MCP operations charge allowance before execution under a shared local lock.
+- **Budget storage errors remain visible.** Failed admission prevents execution. Failed refunds preserve the original operation error in audit metadata.
+  Returned failures and process crashes remain charged. Refunds cannot subtract another ledger generation or period.
+- **Budget writes replace complete files.** Readers do not observe partial JSON. Failed replacement preserves the previous ledger.
+  The SQLite lock persists for waiting processes and releases on process exit. See [runtime limits](docs/INSPECTION_COMMANDS.md).
+- **Argument refusal precedes policy writes.** Unknown hook-gate flags return blocking exit 2. Identity inspection rejects unexpected positional arguments.
+- **CLI dispatch refuses inherited object names.** Only registered commands can run.
+- **Child arguments and exit codes remain intact.** Kit reads its flags before `--` and preserves the child program's exit code.
+- **Environment selections are validated before effects.** Both flag forms work before or after the command. Missing, empty, and repeated values fail.
+- **CLI and MCP command execution share project policy checks.** Invalid configuration cannot disable checks. Failed child commands produce failed audit outcomes.
+  Explicit URL hosts pass through active resource rules. Arbitrary child filesystem and environment effects remain outside that check.
+- **MCP child streams are separate from protocol traffic.** Output remains tool result data. Child input cannot read client requests.
+- **Command limits cannot report success.** Time and output limits return 124 even if the child exits before termination takes effect.
+  Output exactly at the byte limit remains valid.
+- **Config migration documentation states the actual default.** A normal migration writes the change and backup. Only `--dry-run` previews it.
+- **The scope adoption test examines parsed code.** Unrelated objects and quoted examples cannot supply a declaration.
+  Runtime permission checks remain separate from this structural test.
+
+### Added
+
+- **Memory preserves native tool requests and reported responses across Claude Code and Codex.**
+  Schema 18 records call identifiers, outcome evidence, and capture coverage.
+  Older rows remain unknown until supported transcripts supply evidence. See [tool evidence](docs/MEMORY_TOOL_EVIDENCE.md).
+
+- **`kit triage instructions [path]` scans selected agent instruction files.** Findings include file, line, and rule.
+  The result includes coverage status and named gaps. See [scope and limits](docs/INSTRUCTION_SCAN.md).
+
 ### Security
 
-- **`kit triage instructions [path]` reads agent instruction files before an agent does.** A
-  `CLAUDE.md`, `AGENTS.md`, `SKILL.md`, Cursor rule or Copilot instruction file is read as
-  instructions at the start of a session, with the user's tools, and it can come from anywhere:
-  a cloned repository, a skill, a file another tool generated from web text. The command lists
-  each finding with file, line and rule, and fails on any:
-  - kit's injection patterns (instruction override, pipe to shell, hidden characters, …);
-  - a secret path and an outbound target on one line (`upload ~/.ssh/… to https://…`,
-    `gh auth token` pasted into an issue);
-  - running a fresh download (`base64 -d | sh`, `wget … && chmod +x`);
-  - an instruction to hide something from the user.
+- **Unsupported preview flags fail before command dispatch.** `kit secrets --dry-run` can no longer create or overwrite `.env.local`.
+  The CLI rejects unsupported command forms and values such as `--dry-run=true`. Supported previews and child arguments retain their behavior.
+- **Runtime skill gates refuse incomplete evidence.** Unknown requests and generic error responses do not prove execution or a gate denial.
+  Memory imports scan tool metadata independently of archived inputs. Forget also removes linked tool requests.
+- **Git ignore checks distinguish missing rules from failed verification.** Closed input pipes and unreadable ignore files report unverified protection.
+- **MCP repair evidence uses the requested project and actual result.** Budget checks and usage share the target directory.
+  A returned repair failure produces a failed audit outcome and retains the action details.
 
-  Measured before building, on 43 real instruction files from five repositories: no false
-  positive. All ten planted attacks were caught; they were written by the same author, so recall
-  on other people's attacks is not measured yet. Run over every markdown file of the same
-  repositories, the rules were noisy, because security docs and README install lines read like
-  attacks, so README files are not read and the output says so. Symlinked instruction files are
-  followed, as an agent would follow them; `node_modules`, build output and unrelated
-  dot-directories are skipped. Excerpts are printed without hidden characters or secrets.
+- **Memory imports check session and message metadata before merge.** Quarantine does not exempt fields exposed through recall, lists, or statistics.
+  This also prevents quarantined imports from changing a live session's metadata through a shared identifier.
+  Scans include generated columns and tables without row identifiers. Unreadable fields stop the scan.
+  Memory and instruction diagnostics share secret masking before and after control removal.
+- **Instruction scans fail on incomplete coverage.** Discovery limits, unreadable directories, and the finding limit remain visible.
+  Reads are bounded and refuse special files. Full-text checks preserve detection across line breaks.
+  Diagnostic paths and excerpts mask known secrets before and after control removal. Repeated command words no longer cause repeated suffix searches.
+- **Triage dispatch accepts declared commands only.** Inherited object names cannot produce a successful triage result.
+- **Memory bookmark metadata is checked before import.** Injection checks include copied names, session identifiers, paths, and dates.
+  Stored identifiers cannot add shell syntax or options to printed resume commands. The original identifier remains in the archive.
+  Scanner locations redact credentials, and resume labels remove terminal controls.
+- **Encrypted Git memory retains its bytes.** Sync avoids checkout conversions and stores ciphertext directly in Git objects.
+  A commit hook that replaces the staged snapshot causes publication to stop.
+- **Quarantined messages stay out of `memory learn`.** Imported quarantined messages cannot reappear as recurring instructions or skill drafts.
+  Quarantined rows do not contribute to candidate counts.
+
+- **License scan failures retain the cause.** The check reports an error after preceding warnings.
+  It separates a missing scanner from a failed scan and redacts credentials in diagnostic text.
+  Invalid report structures, timeouts, and truncated output remain incomplete checks.
 
 ### Fixed
 
+- **Bookmarks select the current worktree and preserve the recorded origin.** Imported paths remain separate from local recall scope.
+  An explicit `--session` selects the requested session without adding its identifier to the bookmark name.
+  Missing session values are rejected before any bookmark changes.
+- **Memory imports preserve a known harness when incoming evidence is absent.** New sessions without a harness receive `unknown`.
+- **MCP `kit_fix` repairs Git ignore protection and creates configured secret templates.** It uses the CLI file helpers in the requested project.
+  Existing templates remain unchanged. Failed file repairs return `ok: false` with the cause.
 - **The SBOMs attached to a release list the dependencies.** The 7.2.0 `sbom.cyclonedx.json` and
   `sbom.spdx.json` held one component, the root, because syft scanned an unpacked tarball that has no
   `node_modules`. The publish job now installs the tarball the way a consumer does and scans that tree,
