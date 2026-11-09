@@ -26,6 +26,15 @@
 
 ### Fixed
 
+- **`kit triage pip` had no cooling period.** A release younger than `min_release_age_days` got a
+  warning from `kit triage npm` and none from `kit triage pip`, so a four-day-old semgrep passed
+  where a one-day-old jscpd was flagged. pip triage now applies the same period, dated by the
+  earliest PyPI upload (or the `KIT_PYPI_INDEX` mirror) and enforced the same way. With no Python
+  lockfile read, a pip warning is never waived as a security fix, and the output says why.
+- **`kit triage pip name@1.2.3` failed as unresolvable.** That is npm's spelling; pip's is
+  `name==1.2.3`, and the triage script read `@1.2.3` as a broken version spec. kit now reads the npm
+  form as the pip one and prints that it did. A PEP 508 direct reference (`name @ https://…`) is
+  left alone.
 - **`kit audit secrets` showed a history kit never recorded.** The secrets forensics view filtered
   the audit log for `secrets.sync`, `migrate`, `rotate`, `onecli.register` and `propagate`, but
   nothing wrote those operations: only `secrets.generate` was logged, and the view's tests passed on
