@@ -13,6 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { triageNpmSandbox, type SandboxResult } from "./triage-sandbox.js";
 import { applyCooling } from "./triage-cooling.js";
+import { pipSpecFromAt } from "./triage-cooling-pypi.js";
 import { exec } from "./utils/exec.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -363,19 +364,28 @@ export async function runTriage(
     };
   }
 
+  // npm's `name@1.2.3` means pip's `name==1.2.3`; triage.py would read `@1.2.3` as an unresolvable spec.
+  const pipSpec = type === "pip" ? pipSpecFromAt(target) : null;
+  const note = pipSpec
+    ? `  . read ${target} as ${pipSpec} (pip's spelling of an exact version)\n`
+    : "";
   try {
-    const { stdout, stderr } = await exec("python3", [TRIAGE_SCRIPT, type, target], {
+    const { stdout, stderr } = await exec("python3", [TRIAGE_SCRIPT, type, pipSpec ?? target], {
       timeout: 300_000, // 5 min for Docker pulls
       cwd,
       // config-declared mirrors, with real env taking precedence
       env: { ...(await airGapMirrorEnv(cwd)), ...process.env },
     });
 
-    const output = stdout + (stderr ? `\n${stderr}` : "");
+    const output = note + stdout + (stderr ? `\n${stderr}` : "");
     const passed = verdictPassed(output);
 
     // The cooling period (Z6) runs here, not in the frozen triage.py, for every caller alike.
-    return { target, type, ...(await applyCooling(cwd, type, target, { passed, output })) };
+    return {
+      target,
+      type,
+      ...(await applyCooling(cwd, type, pipSpec ?? target, { passed, output })),
+    };
   } catch (error: unknown) {
     const err = error as { stdout?: string; stderr?: string; message?: string };
     const output = (err.stdout || "") + (err.stderr || "") + (err.message || "");
