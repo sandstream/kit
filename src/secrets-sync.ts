@@ -6,6 +6,7 @@ import { generateSecrets } from "./secrets.js";
 import { exec } from "./utils/exec.js";
 import { secureFile } from "./utils/secure-perms.js";
 import { safeErrorMessage } from "./secrets-migrate.js";
+import { recordSecretWrite, SECRET_WRITE_OPS } from "./secrets-write-record.js";
 
 export interface SyncResult {
   target: string;
@@ -29,6 +30,35 @@ export interface SecretsSyncOptions {
  * requested target (GitHub Actions secrets, .env.ci, or stdout export lines).
  */
 export async function syncSecrets(
+  secrets: SecretsConfig,
+  options: SecretsSyncOptions,
+): Promise<SyncResult> {
+  const result = await syncSecretsTo(secrets, options);
+  if (!result.dryRun) {
+    const cwd = options.projectPath ?? process.cwd();
+    const target = result.target === "dotenv-ci" ? ".env.ci" : result.target;
+    await recordSecretWrite(
+      SECRET_WRITE_OPS.sync,
+      { keys: result.synced, target, ok: true },
+      { cwd },
+    );
+    await recordSecretWrite(
+      SECRET_WRITE_OPS.sync,
+      { keys: failedKeyNames(result.failed), target, ok: false },
+      { cwd },
+    );
+  }
+  return result;
+}
+
+/** Key names out of failure lines shaped `NAME: reason`; anything else (a bad target) is no key. Pure. */
+export function failedKeyNames(failed: string[]): string[] {
+  return failed
+    .map((f) => /^([A-Za-z_][A-Za-z0-9_]*):/.exec(f)?.[1])
+    .filter((k): k is string => k !== undefined);
+}
+
+async function syncSecretsTo(
   secrets: SecretsConfig,
   options: SecretsSyncOptions,
 ): Promise<SyncResult> {

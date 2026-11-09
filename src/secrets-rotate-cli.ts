@@ -134,6 +134,7 @@ import { enforcePolicy, supabaseRotationOp } from "./policy-gate.js";
 import { resolve } from "node:path";
 import { isNonInteractive } from "./environment.js";
 import { writeSecretToBackend } from "./secrets-migrate.js";
+import { recordSecretWrite, SECRET_WRITE_OPS } from "./secrets-write-record.js";
 import { planRotation } from "./secrets-rotate.js";
 import { requireElevation, consumeElevation } from "./elevation.js";
 import { scopeFor } from "./elevation-scopes.js";
@@ -399,6 +400,11 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
     newValue,
     pickBackendOpts(config.secrets, keyName),
   );
+  await recordSecretWrite(SECRET_WRITE_OPS.rotate, {
+    keys: [keyName],
+    target: config.secrets.store,
+    ok: writeResult.ok,
+  });
 
   if (!writeResult.ok) {
     console.error(`${c.red}✗ vault write failed: ${writeResult.detail}${c.reset}`);
@@ -527,6 +533,11 @@ export async function cmdSecretsRotate(): Promise<boolean> {
   const backendOpts = pickBackendOpts(config.secrets, keyName, { envFallback: true });
 
   const writeResult = await writeSecretToBackend(plan.store, plan.key, value, backendOpts);
+  await recordSecretWrite(SECRET_WRITE_OPS.rotate, {
+    keys: [plan.key],
+    target: plan.store ?? "vault",
+    ok: writeResult.ok,
+  });
 
   if (!writeResult.ok) {
     console.error(`${c.red}✗ ${writeResult.detail}${c.reset}`);

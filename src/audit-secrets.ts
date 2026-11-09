@@ -13,6 +13,7 @@
 import { readFile, access } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { AuditEvent } from "./audit.js";
+import { SECRET_WRITE_OPS } from "./secrets-write-record.js";
 
 export interface SecretAccessEntry {
   timestamp: string;
@@ -29,13 +30,10 @@ export interface SecretAuditReport {
 
 const AUDIT_FILE = ".kit-audit.jsonl";
 
-const SECRET_OPERATIONS = new Set([
+/** The writes are recorded by `src/secrets-write-record.ts`, under these same names. */
+const SECRET_OPERATIONS = new Set<string>([
   "secrets.generate",
-  "secrets.sync",
-  "secrets.migrate",
-  "secrets.rotate",
-  "secrets.onecli.register",
-  "secrets.propagate",
+  ...Object.values(SECRET_WRITE_OPS),
   "services.login",
   "fix",
 ]);
@@ -118,6 +116,11 @@ function collectKeyNames(meta: Record<string, unknown>): string[] {
     for (const k of meta.keys) if (typeof k === "string") names.push(k);
   }
   if (typeof meta.name === "string") names.push(meta.name);
+  // `names` is what src/secrets-write-record.ts writes for several keys; `keys` is redacted by the
+  // audit log's field-name rule, so it never survives to here.
+  if (Array.isArray(meta.names)) {
+    for (const k of meta.names) if (typeof k === "string") names.push(k);
+  }
   return [...new Set(names)];
 }
 

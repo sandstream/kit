@@ -24,6 +24,18 @@
   they point away from the vendor. A proxy there sees every prompt, tool result and secret the
   agent reads. Plain HTTP fails; a third-party or local host warns. Only the host is printed.
 
+### Fixed
+
+- **`kit audit secrets` showed a history kit never recorded.** The secrets forensics view filtered
+  the audit log for `secrets.sync`, `migrate`, `rotate`, `onecli.register` and `propagate`, but
+  nothing wrote those operations: only `secrets.generate` was logged, and the view's tests passed on
+  fixture lines they wrote themselves. `propagate` (each target tried), `sync`, `rotate`, `migrate`
+  and `onecli register` now append one event per write with the key name, the target and the
+  outcome, never the value. Key names go in `name`/`names`: the log redacts any metadata field whose
+  name contains "key", which would have grouped every write under `[REDACTED]`. A test writes
+  through the real writers and reads back through the view. Writes made before this release are
+  not in the log.
+
 ## [7.2.2] - 2026-11-05
 
 ### Added
