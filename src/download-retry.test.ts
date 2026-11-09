@@ -26,7 +26,7 @@ const noWait = {
   delayMs: () => 0,
 };
 
-describe("fetchWithRetry", () => {
+describe("fetchWithRetry: what is retried", () => {
   it("returns the body at once when the first answer is 200", async () => {
     const { state, fetchImpl } = script([reply(200, "abc")]);
     const buf = await fetchWithRetry(URL_OK, { timeoutMs: 1000, fetchImpl, ...noWait });
@@ -52,7 +52,9 @@ describe("fetchWithRetry", () => {
     await fetchWithRetry(URL_OK, { timeoutMs: 1000, fetchImpl, ...noWait });
     assert.equal(state.calls, 3);
   });
+});
 
+describe("fetchWithRetry: what is not retried, and when it stops", () => {
   it("does not retry an answer that will not change (404)", async () => {
     const { state, fetchImpl } = script([reply(404), reply(200)]);
     await assert.rejects(
