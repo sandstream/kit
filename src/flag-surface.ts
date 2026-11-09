@@ -4,9 +4,8 @@
  * Generate it with: node scripts/derive-command-flags.mjs --emit
  * flag-surface.test.ts checks the generated text and flags used in code.
  *
- * The generator scans each command and direct imports read by argv helpers.
+ * The generator scans each command and its direct imports, no deeper, for argv-helper reads.
  * It also includes documented flags and compatibility flags.
- * The scan deliberately stops after direct imports.
  * The table can include flags passed to subprocesses.
  * This over-acceptance keeps existing commands usable.
  * It must not omit a flag that a command reads.
