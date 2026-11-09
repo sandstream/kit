@@ -36,6 +36,7 @@ jobs:
           set -euo pipefail
           archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
           curl --fail --silent --show-error --location \
+            --retry 5 --retry-all-errors --retry-delay 5 \
             --output "/tmp/${archive}" \
             "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${archive}"
           printf '%s  %s\n' "$TRIVY_SHA256" "/tmp/${archive}" | sha256sum --check
