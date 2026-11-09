@@ -33,6 +33,7 @@ interface Gate {
   MAX_CHANGED_LINES: number;
   latestChecks(runs: Run[]): Run[];
   checksState(runs: Run[]): ChecksState;
+  mainRed(runs: Run[], names?: string[]): string[];
   decide(input: {
     sha: string;
     checks: ChecksState;
@@ -40,6 +41,7 @@ interface Gate {
     changedLines: number;
     fileCount: number;
     truncated: boolean;
+    main?: { sha: string; red: string[] } | null;
   }): { event: string; body: string };
 }
 
@@ -121,6 +123,45 @@ describe("agent review gate: decision", () => {
   it("marks every review so a repeat run can recognise its own decision", async () => {
     const { decide } = await load();
     assert.ok(decide({ ...base, checks: green }).body.startsWith("<!-- kit-review-gate -->"));
+  });
+});
+
+describe("agent review gate: a red default branch holds approval", () => {
+  const green = { state: "green", failed: [], total: 5 };
+  const MAIN = "c".repeat(40);
+
+  it("reads only the CI job, and its newest result", async () => {
+    const { mainRed } = await load();
+    assert.deepEqual(mainRed([run("build-and-test", "failure"), run("Scorecard", "failure")]), [
+      "build-and-test",
+    ]);
+    assert.deepEqual(
+      mainRed([
+        run("build-and-test", "failure", "completed", "1"),
+        run("build-and-test", "success", "completed", "2"),
+      ]),
+      [],
+    );
+  });
+
+  it("does not hold while main's CI is still running or has not started", async () => {
+    const { mainRed } = await load();
+    assert.deepEqual(mainRed([run("build-and-test", null, "in_progress")]), []);
+    assert.deepEqual(mainRed([]), []);
+  });
+
+  it("comments instead of approving when main is red, and names the commit and the check", async () => {
+    const { decide } = await load();
+    const d = decide({ ...base, checks: green, main: { sha: MAIN, red: ["build-and-test"] } });
+    assert.equal(d.event, "COMMENT");
+    assert.match(d.body, /default branch is red at `cccccccccccc` \(build-and-test failed\)/);
+  });
+
+  it("approves as before when main is green", async () => {
+    const { decide } = await load();
+    const before = decide({ ...base, checks: green });
+    const after = decide({ ...base, checks: green, main: { sha: MAIN, red: [] } });
+    assert.deepEqual(after, before);
   });
 });
 

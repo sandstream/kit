@@ -1,5 +1,6 @@
 /** Instruction text rules and display text. File discovery belongs to the caller. */
 import { findInjection } from "./memory/injection.js";
+import { extraInstructionRules } from "./instruction-rules.js";
 import { hasExecAfterDownload, hasSecretOutbound } from "./instruction-scan-patterns.js";
 import { sanitizeDisplayText as sanitizeInstructionDisplay } from "./display-text.js";
 export { sanitizeDisplayText as sanitizeInstructionDisplay } from "./display-text.js";
@@ -60,6 +61,16 @@ function multilineStart(text: string, starts: number[], label: string): number {
   return low;
 }
 
+/** Rules of one line, injection labels first. An added rule is not reported twice for the line. */
+function lineRules(raw: string, labels: string[]): InstructionRule[] {
+  const rules: InstructionRule[] = labels.map((label) => `injection:${label}` as const);
+  if (hasSecretOutbound(raw)) rules.push("secret-to-outbound");
+  if (hasExecAfterDownload(raw)) rules.push("exec-after-download");
+  if (CONCEAL.test(raw)) rules.push("conceal-from-user");
+  for (const rule of extraInstructionRules(raw)) if (!rules.includes(rule)) rules.push(rule);
+  return rules;
+}
+
 /**
  * Yield each per-line result, then full-text labels absent from those results.
  * The caller can stop at its finding budget. No complete result array is allocated.
@@ -73,14 +84,11 @@ export function* instructionFindings(file: string, text: string): Generator<Inst
     const newline = text.indexOf("\n", start);
     const raw = text.slice(start, newline < 0 ? text.length : newline).replace(/\r$/, "");
     const line = starts.length;
-    for (const f of findInjection(raw)) {
-      if (f.confidence !== "high") continue;
-      represented.add(f.label);
-      yield finding(file, line, `injection:${f.label}`, raw);
-    }
-    if (hasSecretOutbound(raw)) yield finding(file, line, "secret-to-outbound", raw);
-    if (hasExecAfterDownload(raw)) yield finding(file, line, "exec-after-download", raw);
-    if (CONCEAL.test(raw)) yield finding(file, line, "conceal-from-user", raw);
+    const labels = findInjection(raw)
+      .filter((f) => f.confidence === "high")
+      .map((f) => f.label);
+    for (const label of labels) represented.add(label);
+    for (const rule of lineRules(raw, labels)) yield finding(file, line, rule, raw);
     if (newline < 0) break;
     start = newline + 1;
   }

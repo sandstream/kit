@@ -296,7 +296,7 @@ describe("applyCooling: what the waiver must not allow", () => {
   it("passes other ecosystems and unreadable reports through unchanged", async () => {
     const cwd = project({ "package.json": "{}" });
     const input = { passed: true, output: report("1.0.1") };
-    assert.deepEqual(await applyCooling(cwd, "pip", "fixture", input), input);
+    assert.deepEqual(await applyCooling(cwd, "cargo", "fixture", input), input);
     const noVersion = { passed: true, output: "TRIAGE PASSED" };
     assert.deepEqual(await applyCooling(cwd, "npm", "fixture", noVersion), noVersion);
   });

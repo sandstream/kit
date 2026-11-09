@@ -1,6 +1,6 @@
 /**
  * The cooling period (Z6). A release younger than the limit is a supply-chain risk, because a
- * compromised release is usually caught within days. `kit triage npm` warns about one, and says
+ * compromised release is usually caught within days. `kit triage npm` and `kit triage pip` warn about one, and say
  * which version has been public long enough.
  *
  * A security patch must not wait. The warning is waived only when the advisory source (OSV) says the
@@ -19,6 +19,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { resolveInstalledVersion } from "./upstream-installed.js";
 import { readRegularFileIfPresent } from "./upstream-safe-read.js";
+import { pipName, pypiJsonUrl, pypiReleaseTimes } from "./triage-cooling-pypi.js";
 
 export interface SupplyChainConfig {
   internal_scopes?: string[];
@@ -175,6 +176,8 @@ export interface CoolingInput {
   now: number;
   /** A lookup, or the reason advisories must not be queried (air-gap). */
   osv: OsvLookup | { skipped: string };
+  /** How the suggested older version is spelled: npm's `pkg@1.2.3` (default) or pip's `pkg==1.2.3`. */
+  pin?: "@" | "==";
 }
 
 /** What could not be established. Under enforcement doubt holds the pass back, as an unverified check must. */
@@ -232,7 +235,7 @@ export async function coolingCheck(input: CoolingInput): Promise<CoolingResult> 
   let msg = `cooling: ${plain(version)} was published ${age} days ago, limit ${limitDays}`;
   const older = newestOlder(input.versions, input.times, limitDays, now);
   if (older)
-    msg += `; newest version public for ${limitDays} days or more: ${plain(input.pkg)}@${plain(older)}`;
+    msg += `; newest version public for ${limitDays} days or more: ${plain(input.pkg)}${input.pin ?? "@"}${plain(older)}`;
   if (result.note) msg += ` (${result.note})`;
   const line = input.enforce ? `  x CRITICAL: ${msg}` : `  ! WARNING: ${msg}`;
   return { lines: [line], held: input.enforce };
@@ -325,12 +328,16 @@ function limitFrom(cfg: SupplyChainConfig, env: NodeJS.ProcessEnv): number {
     : DEFAULT_COOLING_DAYS;
 }
 
-function osvFor(deps: CoolingDeps, airGap: boolean): OsvLookup | { skipped: string } {
+function osvFor(
+  deps: CoolingDeps,
+  airGap: boolean,
+  ecosystem: "npm" | "PyPI",
+): OsvLookup | { skipped: string } {
   const mirror = deps.env.KIT_OSV_API?.trim();
   if (airGap && !mirror) return { skipped: "air-gap is on and no KIT_OSV_API mirror is named" };
   const base = (mirror || "https://api.osv.dev").replace(/\/+$/, "");
   return async (pkg, version) => {
-    const body = { package: { name: pkg, ecosystem: "npm" }, version };
+    const body = { package: { name: pkg, ecosystem }, version };
     const answer = (await deps.postJson(`${base}/v1/query`, body)) as { vulns?: OsvVuln[] } | null;
     if (!answer || typeof answer !== "object") return null;
     return Array.isArray(answer.vulns) ? answer.vulns.filter((v) => typeof v?.id === "string") : [];
@@ -347,7 +354,43 @@ export function withCoolingLines(output: string, result: CoolingResult): string 
   return result.held ? merged.replace(/^TRIAGE PASSED$/m, "TRIAGE HELD: cooling period") : merged;
 }
 
-/** Run the cooling check for an npm triage and fold it into the result. Other ecosystems pass through. */
+/** The registry view the cooling check needs: published versions and their publish times. */
+interface RegistryView {
+  versions: string[];
+  times: Record<string, string>;
+}
+
+/** Where to read one package's release times, or why it must not be read. */
+function registrySource(
+  type: string,
+  pkg: string,
+  deps: CoolingDeps,
+  air: AirGapView,
+): { url: string; parse: (doc: unknown) => RegistryView | null } | { skip: string } {
+  const npm = type === "npm";
+  const name = npm ? "KIT_NPM_REGISTRY" : "KIT_PYPI_INDEX";
+  const mirror = deps.env[name]?.trim() || air.mirrors[name];
+  if (air.enabled && !mirror) {
+    return {
+      skip: air.unreadable
+        ? "the .kit.toml could not be read, so air-gap cannot be ruled out and the registry is not queried"
+        : `air-gap is on and no ${npm ? "npm registry" : "PyPI index"} mirror is named`,
+    };
+  }
+  if (!npm) return { url: pypiJsonUrl(mirror || "https://pypi.org", pkg), parse: pypiReleaseTimes };
+  return {
+    url: registryUrl(mirror || "https://registry.npmjs.org", pkg),
+    parse: (doc) => {
+      const d = doc as { versions?: Record<string, unknown>; time?: Record<string, string> } | null;
+      return d?.versions && d.time ? { versions: Object.keys(d.versions), times: d.time } : null;
+    },
+  };
+}
+
+/**
+ * Run the cooling check for an npm or pip triage and fold it into the result. Other ecosystems
+ * pass through. pip has no lockfile kit reads, so a pip warning is never waived as a security fix.
+ */
 export async function applyCooling(
   cwd: string,
   type: string,
@@ -355,7 +398,7 @@ export async function applyCooling(
   result: { passed: boolean; output: string },
   deps: CoolingDeps = defaultCoolingDeps,
 ): Promise<{ passed: boolean; output: string }> {
-  const pkg = type === "npm" ? npmName(target) : null;
+  const pkg = type === "npm" ? npmName(target) : type === "pip" ? pipName(target) : null;
   const version = triagedVersion(result.output);
   if (!pkg || !version) return result;
   const cfg = await supplyChainConfig(cwd);
@@ -368,30 +411,21 @@ export async function applyCooling(
   });
   const air = await deps.airGap(cwd);
   // The same mirror triage.py was given: the environment first, then the one .kit.toml declares.
-  const registry = deps.env.KIT_NPM_REGISTRY?.trim() || air.mirrors.KIT_NPM_REGISTRY;
-  if (air.enabled && !registry) {
-    const why = air.unreadable
-      ? "the .kit.toml could not be read, so air-gap cannot be ruled out and the registry is not queried"
-      : "air-gap is on and no npm registry mirror is named";
-    return fold(unverified(why, enforce));
-  }
-  const doc = (await deps.getJson(registryUrl(registry || "https://registry.npmjs.org", pkg))) as {
-    versions?: Record<string, unknown>;
-    time?: Record<string, string>;
-  } | null;
-  if (!doc?.versions || !doc.time) {
-    return fold(unverified("the registry could not be read again", enforce));
-  }
+  const source = registrySource(type, pkg, deps, air);
+  if ("skip" in source) return fold(unverified(source.skip, enforce));
+  const view = source.parse(await deps.getJson(source.url));
+  if (!view) return fold(unverified("the registry could not be read again", enforce));
   const verdict = await coolingCheck({
     pkg,
     version,
-    versions: Object.keys(doc.versions),
-    times: doc.time,
+    versions: view.versions,
+    times: view.times,
     limitDays,
     enforce,
-    current: lockedVersion(cwd, target),
+    current: type === "npm" ? lockedVersion(cwd, target) : undefined,
     now: deps.now(),
-    osv: osvFor(deps, air.enabled),
+    osv: osvFor(deps, air.enabled, type === "npm" ? "npm" : "PyPI"),
+    pin: type === "npm" ? "@" : "==",
   });
   return fold(verdict);
 }

@@ -128,8 +128,8 @@
         "repo": "superfly/flyctl"
       },
       "baseline": {
-        "version": "v0.4.121",
-        "observedAt": "2026-10-23"
+        "version": "v0.5.5",
+        "observedAt": "2026-11-06"
       }
     },
     {
@@ -241,15 +241,15 @@
     {
       "id": "scanner/jscpd",
       "owner": ".kit.toml",
-      "pinned": "5.4.2",
+      "pinned": "5.4.3",
       "track": "minor",
       "source": {
         "kind": "npm",
         "package": "jscpd"
       },
       "baseline": {
-        "version": "5.4.2",
-        "observedAt": "2026-10-24"
+        "version": "5.4.3",
+        "observedAt": "2026-11-09"
       }
     },
     {
@@ -289,22 +289,22 @@
         "package": "lizard"
       },
       "baseline": {
-        "version": "1.24.2",
-        "observedAt": "2026-10-24"
+        "version": "1.25.0",
+        "observedAt": "2026-11-06"
       }
     },
     {
       "id": "scanner/semgrep",
       "owner": ".github/workflows/security.yml",
-      "pinned": "1.183.0",
+      "pinned": "1.184.0",
       "track": "minor",
       "source": {
         "kind": "pypi",
         "package": "semgrep"
       },
       "baseline": {
-        "version": "1.183.0",
-        "observedAt": "2026-11-02"
+        "version": "1.184.0",
+        "observedAt": "2026-11-09"
       }
     },
     {

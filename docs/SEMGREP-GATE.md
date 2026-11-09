@@ -2,7 +2,7 @@
 
 How the required SAST job in `.github/workflows/security.yml` scans and what a green result does and does not prove.
 
-The required SAST job runs Semgrep 1.183.0 with `p/security-audit`,
+The required SAST job runs Semgrep 1.184.0 with `p/security-audit`,
 `p/owasp-top-ten`, `p/typescript`, and `p/nodejs`. Registry rule packs can
 change independently of the pinned scanner version. The job scans each pack
 separately. Each scan must report at least one rule and one scanned file.

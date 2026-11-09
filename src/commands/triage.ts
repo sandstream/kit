@@ -32,6 +32,7 @@ const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> =
   model: (args) => cmdTriageModel(args),
   instructions: async (args) =>
     (await import("./triage-instructions.js")).cmdTriageInstructions(args),
+  pkg: async (args) => (await import("./triage-pkg.js")).cmdTriagePkg(args),
 };
 
 function triageSubcommand(
@@ -101,6 +102,9 @@ export async function cmdTriage(): Promise<boolean> {
     );
     console.log(
       "  kit triage instructions [path]       Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks",
+    );
+    console.log(
+      "  kit triage pkg <file.pkg>            Check a macOS installer: checksum, publisher Team ID, notarization (macOS)",
     );
     console.log("");
     console.log("Examples:");

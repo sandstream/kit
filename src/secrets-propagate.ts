@@ -23,6 +23,7 @@
 
 import type { PolicyConfig } from "./config.js";
 import { enforcePolicy } from "./policy-gate.js";
+import { recordSecretWrite, SECRET_WRITE_OPS } from "./secrets-write-record.js";
 import { flagValue } from "./utils/flags.js";
 import { propagateSupabase } from "./secrets-propagate-supabase.js";
 import { propagateVercel } from "./secrets-propagate-vercel.js";
@@ -329,8 +330,20 @@ export async function propagate(
         valueInArgv: false,
       });
     }
+    await recordAdapterRun(name, t, results, opts.cwd); // the key may have reached the platform
   }
   return results;
+}
+
+/** Record the adapter that just ran (the last result), whatever its outcome. */
+async function recordAdapterRun(
+  name: string,
+  target: PropagationTarget,
+  results: PropagationResult[],
+  cwd?: string,
+): Promise<void> {
+  const ok = results[results.length - 1]?.ok ?? false;
+  await recordSecretWrite(SECRET_WRITE_OPS.propagate, { keys: [name], target, ok }, { cwd });
 }
 
 export function parseTargets(spec: string): PropagationTarget[] {
