@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### Fixed
+
+- **The install gate reads options before the subcommand, and a wrapper's own values.** Eleven
+  in-scope installs passed `kit gate-bash` with no output: `npm --prefix <dir> install x` (also
+  `npm -C`, `npm --loglevel silent`, `pnpm -C`/`--dir`, `yarn --cwd`, `bun --cwd`,
+  `uv --directory`), because the option's value read as the subcommand. The same happened with
+  `nice -n 5 npm i x` and `sudo -u root npm i x`, where the wrapper's value read as the command,
+  and with `timeout 600 npm i x`, because `timeout` was not on the wrapper list. Known options are
+  now read with their values. An unknown option before the subcommand that leaves no known verb in
+  its slot, with an install verb after it, blocks fail-closed (`global-option:`). `timeout`,
+  `ionice`, `chrt`, `taskset` and `flock` are stripped like `nice`. `env -i` and `sudo -i` are no
+  longer read as a registry option. A registry option placed before `--prefix` is now caught as
+  well. Found by kit-research's adversarial battery, tier 3 (rows G01 and G05).
+
 ## [7.4.0] - 2026-11-10
 
 A repo can now record two decisions that `kit check` used to warn about on every run: a copyleft
