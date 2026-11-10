@@ -315,15 +315,15 @@ describe("clearBudgetState", () => {
     await rm(elsewhere, { recursive: true, force: true });
   });
 
-  it("fails quietly when the state path cannot be unlinked", async () => {
-    const { mkdir } = await import("node:fs/promises");
+  it("reports a failed reset and preserves the state path", async () => {
+    const { mkdir, readFile } = await import("node:fs/promises");
     const statePath = join(process.cwd(), ".kit-budget.json");
-    // A directory at the state path makes unlink fail (EISDIR/EPERM). The
-    // function swallows every error, so callers get no signal that the state
-    // survived — pinning the silence so a future rethrow is a deliberate change.
+    // A directory at the state path must not look like a successful reset.
     await mkdir(statePath, { recursive: true });
+    await writeFile(join(statePath, "preserve"), "unchanged");
     try {
-      await assert.doesNotReject(() => clearBudgetState());
+      await assert.rejects(clearBudgetState(), /Could not clear budget usage/);
+      assert.equal(await readFile(join(statePath, "preserve"), "utf8"), "unchanged");
     } finally {
       await rm(statePath, { recursive: true, force: true });
     }

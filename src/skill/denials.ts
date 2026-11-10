@@ -2,8 +2,8 @@
  * `kit skill test --runtime` — gate-deny evidence from `.kit-audit.jsonl` (denial-based
  * negative controls).
  *
- * A forbidden action that a gate DENIED never runs, so it is not in the transcript's
- * `tool_uses` — it lands in the hash-chained audit log as a `gate-egress`/`gate-fs` deny.
+ * A gate can record a blocked request in the transcript, the audit log, or both.
+ * A native error result alone is not a denial. This reader requires structured gate evidence.
  * This module reads those denies and attributes each to the skill run that was active when it
  * fired, using the `session_id` the gate now stamps on the deny event + the skill's span time
  * windows. That makes the "negative control HELD" evidence session-bounded and precise (a deny

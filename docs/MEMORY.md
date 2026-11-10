@@ -1,10 +1,7 @@
 # kit memory
 
-Local-first, deterministic memory for AI agents. `kit memory` gives a (swappable)
-model a **verifiable second brain**: it stores your raw conversation history and
-lets the agent _search it before answering_ — so it pulls receipts instead of
-guessing. No vector database, no embeddings, no model calls. Just SQLite + FTS5
-and a few fail-open hooks.
+Kit stores local conversation history in SQLite and searches it with FTS5.
+Agents can retrieve recorded context across supported harnesses. No model call is required.
 
 > **Memory is not context.** Context is durable, curated rules (`.kit.toml`,
 > policy, `CLAUDE.md`). Memory is the experiential log of what happened. The bridge
@@ -77,6 +74,9 @@ surface.
 
 ## Personal memory
 
+Tool requests and reported responses have separate evidence states.
+See [tool evidence](MEMORY_TOOL_EVIDENCE.md) for supported formats, coverage, sync, and migration limits.
+
 ```bash
 kit memory index                      # build/refresh from ~/.claude transcripts
 kit memory search <query> [--global]  # FTS5; defaults to the current project, --global = across all
@@ -87,6 +87,8 @@ kit memory suggest | <your-llm>       # BYO-LLM review: kit emits a prompt, neve
 Search is **project-scoped by default** (the git repo you are in) for relevance
 and blast-radius containment; `--global` searches every project in your personal
 store. The store is a single `~/.kit/memory.db` at mode `0600`.
+
+See [memory trust boundaries](MEMORY_TRUST.md) for quarantine, authenticated imports, and safe session resume.
 
 ### Switching agents and worktrees
 
@@ -138,6 +140,7 @@ Recall identifies the producing harness, original working directory, branch when
 recorded, and timestamp. These are historical evidence, not proof that the current
 checkout passes the same checks. Saving a thread still selects the latest session
 in the current worktree; listing threads can show bookmarks from sibling worktrees.
+Use `kit memory save <name> --session <id>` to select another session explicitly. See [origin and recall scope](MEMORY_TRUST.md#native-session-resume).
 
 Continuity depends on capture and transport, not on either model remembering a
 previous conversation. Local transcript indexing is not a ChatGPT web connector.
@@ -318,6 +321,8 @@ kit memory resume <name|number>        # prints the Claude/Codex resume command
 kit memory forget <name>
 ```
 
+Some stored identifiers cannot produce a safe resume command. The original identifier remains available in saved history.
+
 ## Disaster recovery — a stolen laptop
 
 The personal store is local-only, so back it up. `kit memory backup` writes an
@@ -405,6 +410,9 @@ reachable snapshot before merging. History enumeration uses one streamed Git log
 a disk-backed deduplication index, and one ciphertext file at a time, so JavaScript
 memory and process count stay bounded even for long histories. Publication is
 verified by fetching the branch and proving the accepted commit reachable.
+Kit stores ciphertext directly as Git objects and reads snapshots without checkout conversions.
+Git text conversions and clean or smudge filters, including Git LFS filters, do not process these snapshots.
+The upload checkout retains configured hooks. Kit refuses publication if a hook changes the committed snapshot bytes.
 Command transports still carry only one latest blob and lack a verified receipt;
 Git history can also be rewritten by a remote administrator. Keep independent
 backups for disaster recovery.

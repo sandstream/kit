@@ -56,6 +56,27 @@ export function readOnlyFlag(argv: readonly string[]): ReadOnlyFlagResult {
   return { kind: "absent" };
 }
 
+export type EnvironmentFlagResult =
+  { kind: "absent" } | { kind: "selected"; value: string } | { kind: "invalid"; reason: string };
+
+/** Read one environment selection before the child-argument separator. */
+export function environmentFlag(argv: readonly string[]): EnvironmentFlagResult {
+  const separator = argv.indexOf("--");
+  const ownArgs = separator < 0 ? argv : argv.slice(0, separator);
+  let selected: string | undefined;
+  for (let index = 0; index < ownArgs.length; index++) {
+    const token = ownArgs[index];
+    if (token !== "--env" && !token.startsWith("--env=")) continue;
+    if (selected !== undefined) return { kind: "invalid", reason: "Specify --env only once." };
+    const value = token === "--env" ? ownArgs[++index] : token.slice("--env=".length);
+    if (!value?.trim() || value.startsWith("-")) {
+      return { kind: "invalid", reason: "--env requires a non-empty environment name." };
+    }
+    selected = value;
+  }
+  return selected === undefined ? { kind: "absent" } : { kind: "selected", value: selected };
+}
+
 /**
  * Flags present in argv that are not in `allowed`.
  *
@@ -145,6 +166,9 @@ export const GLOBAL_FLAGS = [
   "--version",
 ] as const;
 
+/** Global options that accept only the flag itself, without an inline value. */
+export const BARE_GLOBAL_FLAGS = ["--help", "--version", "--non-interactive"] as const;
+
 /**
  * The globals that may legally appear BEFORE the command word
  * (`kit --read-only check`, the form README.md and docs/THREAT_MODEL.md
@@ -154,10 +178,16 @@ export const GLOBAL_FLAGS = [
 const GLOBAL_PREFIX_FLAGS = ["--read-only", "--readonly", "--non-interactive"] as const;
 
 function isGlobalPrefixFlag(token: string): boolean {
+  // Keep malformed global values in Kit's segment until validation rejects them.
+  // Otherwise a protocol command can lose its boundary and expose the child's flags to Kit.
+  const equals = token.indexOf("=");
+  const malformedBare =
+    equals >= 0 && (BARE_GLOBAL_FLAGS as readonly string[]).includes(token.slice(0, equals));
   return (
     (GLOBAL_PREFIX_FLAGS as readonly string[]).includes(token) ||
     token.startsWith("--env=") ||
-    isReadOnlyToken(token)
+    isReadOnlyToken(token) ||
+    malformedBare
   );
 }
 
@@ -180,6 +210,14 @@ export function splitLeadingGlobalFlags(args: readonly string[]): {
   rest: string[];
 } {
   let i = 0;
-  while (i < args.length && isGlobalPrefixFlag(args[i])) i++;
+  while (i < args.length) {
+    if (args[i] === "--env") {
+      i += args[i + 1] !== undefined && !args[i + 1].startsWith("-") ? 2 : 1;
+    } else if (isGlobalPrefixFlag(args[i])) {
+      i++;
+    } else {
+      break;
+    }
+  }
   return { leading: args.slice(0, i), rest: args.slice(i) };
 }

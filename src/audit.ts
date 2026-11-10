@@ -117,34 +117,38 @@ function redactAuditEvent(event: AuditEvent): AuditEvent {
 // ── Tamper-evident hash chain ───────────────────────────────────────────────
 // Each appended line carries `prev` (the previous line's hash) and `hash`
 // (sha256 over the line's canonical pre-hash JSON). Any edit, insertion,
-// deletion, or reorder breaks the chain and is caught by verifyAuditChain —
-// the integrity property a regulated/air-gapped enclave needs from its audit
-// trail. (Note: cross-process concurrent appends can fork the chain; external
-// tampering is still detected.)
+// deletion, or reorder breaks the chain and is caught by verifyAuditChain.
+// A per-log lock serializes the tail read, append, and anchor advance.
 const GENESIS_HASH = "0".repeat(64);
 
 function hashLine(preHashJson: string): string {
   return createHash("sha256").update(preHashJson).digest("hex");
 }
 
-/** Read the last entry's hash to chain onto, or GENESIS for a fresh/legacy log. */
-async function lastChainHash(logPath: string): Promise<string> {
+/** Read a valid chain's last hash. Preserve invalid logs and refuse further appends. */
+async function readChainTail(logPath: string): Promise<{ hash: string; separator: string }> {
   try {
     const content = await readFile(logPath, "utf-8");
+    if (!verifyAuditChain(content).ok) {
+      throw new Error(
+        "The audit chain is invalid. Preserve the log and recover it before appending.",
+      );
+    }
     const lines = content.split("\n").filter((l) => l.trim().length > 0);
-    if (lines.length === 0) return GENESIS_HASH;
-    const last = JSON.parse(lines[lines.length - 1]) as { hash?: unknown };
-    return typeof last.hash === "string" ? last.hash : GENESIS_HASH;
-  } catch {
-    return GENESIS_HASH;
+    const separator = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
+    if (lines.length === 0) return { hash: GENESIS_HASH, separator };
+    const last = JSON.parse(lines[lines.length - 1]) as { hash: string };
+    return { hash: last.hash, separator };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { hash: GENESIS_HASH, separator: "" };
+    throw error;
   }
 }
 
-/** Append an event as a hash-chained line. Throws on write failure. Returns the
- *  chain hash of the line just written, so the anchor-advance path can bind its
- *  seal to THIS write (not to whatever tail happens to be on disk at read time). */
+/** Append one event and advance its anchor while the caller holds the log lock. */
 async function appendChained(logPath: string, event: AuditEvent): Promise<string> {
-  const prev = await lastChainHash(logPath);
+  const { hash: prev, separator } = await readChainTail(logPath);
   const preHash = JSON.stringify({ ...event, prev });
   const hash = hashLine(preHash);
   // Best-effort identity signing: if a local kit identity exists, sign the
@@ -158,8 +162,13 @@ async function appendChained(logPath: string, event: AuditEvent): Promise<string
   const line = signed
     ? { ...event, prev, hash, kid: signed.kid, sig: signed.sig }
     : { ...event, prev, hash };
-  await appendFile(logPath, JSON.stringify(line) + "\n", "utf-8");
+  await appendFile(logPath, separator + JSON.stringify(line) + "\n", "utf-8");
   return hash;
+}
+
+async function appendSerialized(logPath: string, event: AuditEvent): Promise<void> {
+  const { appendWithAuditAnchor } = await import("./audit-anchor.js");
+  await appendWithAuditAnchor(logPath, (canonical) => appendChained(canonical, event));
 }
 
 /**
@@ -406,14 +415,7 @@ export async function appendAuditEventDirect(
   const dir = opts.cwd ?? process.cwd();
   const logPath = resolve(dir, logFile);
   try {
-    const wroteHash = await appendChained(logPath, auditEvent);
-    // Best-effort external HMAC anchor advance. Fail-soft by contract: never
-    // blocks the (keyless) append, so a sandboxed agent still logs even when it
-    // cannot reach ~/.kit. `expectedTailHashes` binds the seal to the entry we
-    // just wrote, so a concurrent writer that substitutes the tail in the
-    // append→read window can't get its forgery sealed. See audit-anchor.ts.
-    const { tryAdvanceAnchorOnAppend } = await import("./audit-anchor.js");
-    await tryAdvanceAnchorOnAppend(logPath, undefined, { expectedTailHashes: [wroteHash] });
+    await appendSerialized(logPath, auditEvent);
     return true;
   } catch (error) {
     console.error(`[kit] audit-log append failed: ${error}`);
@@ -624,18 +626,8 @@ export async function logAuditEvent(
 
   let wroteLocal = false;
   try {
-    const wroteHash = await appendChained(logPath, auditEvent);
+    await appendSerialized(logPath, auditEvent);
     wroteLocal = true;
-    // Best-effort external HMAC anchor advance (see audit-anchor.ts). Fail-soft
-    // so it never converts a successful append into a failure. `expectedTailHashes`
-    // binds the seal to the entry we just wrote (TOCTOU-safe against a concurrent
-    // tail substitution in the append→read window).
-    try {
-      const { tryAdvanceAnchorOnAppend } = await import("./audit-anchor.js");
-      await tryAdvanceAnchorOnAppend(logPath, undefined, { expectedTailHashes: [wroteHash] });
-    } catch (anchorErr) {
-      console.error(`[kit] audit anchor advance skipped: ${anchorErr}`);
-    }
   } catch (error) {
     console.error(`Failed to write audit log: ${error}`);
   }

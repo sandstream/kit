@@ -11,7 +11,9 @@ export function cleanReviewWorktree(root: string, run: ReadCommand): void {
     REVIEW_RECEIPT_FILE,
     REVIEW_RECEIPT_HISTORY_FILE,
     ".kit-audit.jsonl",
+    ".kit-audit.jsonl.lock.sqlite",
     ".kit-budget.json",
+    ".kit-budget-lock.sqlite",
   ];
   const indexedPaths = outputFiles.map((file) => `:(icase,literal)${file}`);
   if (run("git", ["ls-files", "-z", "--", ...indexedPaths], root) !== "") {

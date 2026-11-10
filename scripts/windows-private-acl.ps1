@@ -51,4 +51,6 @@ if ($valid) {
     (($entry.FileSystemRights -band $full) -eq $full)
 }
 if (-not $valid) { exit 3 }
-Write-Output 'PRIVATE'
+# A .NET call needs no command lookup. A cmdlet here makes PowerShell search every
+# installed module when its module cache is unavailable, which can exceed the caller's timeout.
+[Console]::Out.WriteLine('PRIVATE')

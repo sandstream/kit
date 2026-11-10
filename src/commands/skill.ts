@@ -31,6 +31,7 @@ import {
   auditRuntime,
   type RuntimeCheckResult,
   type RuntimeEvidence,
+  type RuntimeEvidenceSummary,
   type ObservedAction,
 } from "../skill/adherence.js";
 import { readRunEvidence } from "../skill/attribute.js";
@@ -112,23 +113,27 @@ async function gatherDenialActions(db: DatabaseSync, skillName: string): Promise
 
 /**
  * Gather the two runtime checks (adherence, negative controls) from the transcript index.
- * Honest skips when the skill has no name to attribute by, or the index is unavailable —
- * never a silent pass. The pure `auditRuntime` decides; this only sources the evidence.
+ * Missing names or unavailable indexes produce skips. The runtime gate requires both checks to pass.
+ * The pure `auditRuntime` decides; this function reads evidence without migration.
  */
 async function gatherRuntime(
   skillName: string,
   allowedTools: string[] | undefined,
-): Promise<RuntimeCheckResult[]> {
-  const skipBoth = (reason: string): RuntimeCheckResult[] => [
-    { id: "adherence", status: "skip", detail: reason },
-    { id: "negative", status: "skip", detail: reason },
-  ];
+): Promise<{ checks: RuntimeCheckResult[]; summary: RuntimeEvidenceSummary | null }> {
+  const skipBoth = (reason: string): { checks: RuntimeCheckResult[]; summary: null } => ({
+    checks: [
+      { id: "adherence", status: "skip", detail: reason },
+      { id: "negative", status: "skip", detail: reason },
+    ],
+    summary: null,
+  });
   if (!skillName)
-    return skipBoth("no name in frontmatter — cannot attribute recorded runs to this skill");
+    return skipBoth("no name in frontmatter; cannot attribute recorded runs to this skill");
   let evidence: RuntimeEvidence;
+  let db: DatabaseSync | undefined;
   try {
-    const { openMemoryDb } = await import("../memory/db.js");
-    const db = openMemoryDb();
+    const { openMemoryDbReadOnly } = await import("../memory/db.js");
+    db = openMemoryDbReadOnly();
     // A signed broker scope enriches actions with egress/fs target-scope verdicts; absent one,
     // tool-scope adherence still applies. A missing/invalid policy must never break the audit.
     let policy = null;
@@ -136,17 +141,18 @@ async function gatherRuntime(
       const { profileBrokerPolicy } = await import("../exec-broker/profile-policy.js");
       policy = (await profileBrokerPolicy(process.cwd())).policy;
     } catch {
-      /* no verified scope — tool-scope adherence only */
+      /* No verified scope; check tool scope only. */
     }
     // Denial evidence: gate-deny records in .kit-audit.jsonl, attributed to this skill's run
-    // windows by the session_id join key the gates now stamp. This lets negative-controls report
-    // "control HELD" (a forbidden attempt was blocked), not just detect a violation that ran.
+    // windows by session_id. Only structured gate denials establish blocked requests.
     const denialActions = await gatherDenialActions(db, skillName);
     evidence = readRunEvidence(db, skillName, { policy, denialActions });
   } catch {
-    return skipBoth("transcript index unavailable — runtime audit skipped");
+    return skipBoth("transcript index unavailable; runtime audit skipped");
+  } finally {
+    db?.close();
   }
-  return auditRuntime(allowedTools, evidence).checks;
+  return auditRuntime(allowedTools, evidence);
 }
 
 interface SkillTestRender {
@@ -154,6 +160,7 @@ interface SkillTestRender {
   checks: CheckResult[];
   runtime: boolean;
   runtimeChecks: RuntimeCheckResult[];
+  runtimeEvidence: RuntimeEvidenceSummary | null;
   disclaimed: readonly DisclaimedItem[];
   overallOk: boolean;
   hasSkips: boolean;
@@ -168,7 +175,7 @@ function renderResult(r: SkillTestRender): void {
         {
           skill: r.name,
           checks: r.checks,
-          ...(r.runtime ? { runtime: r.runtimeChecks } : {}),
+          ...(r.runtime ? { runtime: r.runtimeChecks, runtimeEvidence: r.runtimeEvidence } : {}),
           disclaimed: r.disclaimed,
           ok: r.overallOk,
           hasSkips: r.hasSkips,
@@ -201,8 +208,13 @@ function renderResult(r: SkillTestRender): void {
       : "(engineered like a module; not a judgement of quality)";
     console.log(`\n${c.green}module discipline: ok${c.reset} ${c.dim}${note}${c.reset}`);
   } else {
+    const incomplete =
+      ![...r.checks, ...r.runtimeChecks].some((check) => check.status === "fail") &&
+      r.runtimeChecks.some((check) => check.status === "skip");
     console.log(
-      `\n${c.red}module discipline: fail${c.reset} ${c.dim}(a check failed — see above)${c.reset}`,
+      incomplete
+        ? `\n${c.yellow}module discipline: incomplete${c.reset} ${c.dim}(required runtime evidence is incomplete)${c.reset}`
+        : `\n${c.red}module discipline: fail${c.reset} ${c.dim}(a check failed; see above)${c.reset}`,
     );
   }
 }
@@ -251,6 +263,14 @@ export async function cmdSkill(): Promise<boolean> {
     return true;
   }
 
+  return runSkillTest(skillPath, manifest, json);
+}
+
+async function runSkillTest(
+  skillPath: string,
+  manifest: ReturnType<typeof parseSkillManifest>,
+  json: boolean,
+): Promise<boolean> {
   const report = testSkill(manifest, {
     siblings: discoverSiblings(skillPath),
     snapshot: loadSnapshot(skillPath),
@@ -259,13 +279,14 @@ export async function cmdSkill(): Promise<boolean> {
   // --runtime opts into the recorded-run audit; it upgrades the adherence + negative-control
   // rows from disclaimed-OUT to real verdicts. rubric stays OUT forever (LLM — delegated).
   const runtime = hasFlag(process.argv, "--runtime");
-  const runtimeChecks = runtime
+  const runtimeAudit = runtime
     ? await gatherRuntime(manifest.name ?? "", manifest.allowedTools)
-    : [];
+    : null;
+  const runtimeChecks = runtimeAudit?.checks ?? [];
   const disclaimed = runtime
     ? report.disclaimed.filter((d) => d.id === "rubric")
     : report.disclaimed;
-  const runtimeOk = runtimeChecks.every((r) => r.status !== "fail");
+  const runtimeOk = runtimeChecks.every((r) => r.status === "pass");
   const overallOk = report.ok && runtimeOk;
   const hasSkips = report.hasSkips || runtimeChecks.some((r) => r.status === "skip");
 
@@ -274,12 +295,13 @@ export async function cmdSkill(): Promise<boolean> {
     checks: report.checks,
     runtime,
     runtimeChecks,
+    runtimeEvidence: runtimeAudit?.summary ?? null,
     disclaimed,
     overallOk,
     hasSkips,
     json,
   });
 
-  // --gate makes any failure a non-zero exit for CI; without it, the report is advisory.
+  // Required runtime checks must pass. Skips keep the gate closed; advisory mode still exits zero.
   return hasFlag(process.argv, "--gate") ? overallOk : true;
 }

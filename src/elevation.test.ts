@@ -11,10 +11,6 @@ import {
   requireElevation,
   consumeElevation,
   _resetConsumedElevationForTests,
-  generateTotp,
-  verifyTotp,
-  generateBase32Secret,
-  buildOtpAuthUri,
   resolveTotpSecret,
   elevationIsActive,
   elevationCoversScope,
@@ -107,15 +103,36 @@ describe("requireElevation", () => {
   });
 
   it("honors KIT_ELEVATED=1 escape hatch", async () => {
+    const dir = tmpRepo();
     const prev = process.env.KIT_ELEVATED;
     try {
       process.env.KIT_ELEVATED = "1";
-      const r = await requireElevation("rotate");
+      const r = await requireElevation("rotate", dir);
       assert.equal(r.ok, true);
       assert.ok(r.reason.includes("KIT_ELEVATED"));
     } finally {
       if (prev !== undefined) process.env.KIT_ELEVATED = prev;
       else delete process.env.KIT_ELEVATED;
+      rmTemp(dir);
+    }
+  });
+
+  it("refuses the CI bypass when its audit chain is corrupt", async () => {
+    const dir = tmpRepo();
+    const previous = process.env.KIT_ELEVATED;
+    const path = join(dir, ".kit-audit.jsonl");
+    const damaged = '{"operation":"interrupted';
+    try {
+      process.env.KIT_ELEVATED = "1";
+      writeFileSync(path, damaged);
+      const result = await requireElevation("rotate", dir);
+      assert.equal(result.ok, false);
+      assert.match(result.reason, /audit-log unavailable/);
+      assert.equal(readFileSync(path, "utf8"), damaged);
+    } finally {
+      if (previous === undefined) delete process.env.KIT_ELEVATED;
+      else process.env.KIT_ELEVATED = previous;
+      rmTemp(dir);
     }
   });
 
@@ -131,46 +148,6 @@ describe("requireElevation", () => {
   });
 });
 
-describe("generateBase32Secret", () => {
-  it("uses RFC 4648 base32 alphabet (no padding) at the expected length", () => {
-    const s = generateBase32Secret(20);
-    // 20 bytes → 160 bits → 32 base32 chars (no padding when bits % 5 == 0)
-    assert.equal(s.length, 32);
-    assert.ok(/^[A-Z2-7]+$/.test(s), `unexpected chars: ${s}`);
-  });
-
-  it("returns different secrets on each call", () => {
-    assert.notEqual(generateBase32Secret(), generateBase32Secret());
-  });
-});
-
-describe("buildOtpAuthUri", () => {
-  it("includes secret + issuer + algorithm in the URI", () => {
-    const uri = buildOtpAuthUri({
-      accountName: "ralph@host",
-      issuer: "kit",
-      secret: "JBSWY3DPEHPK3PXP",
-    });
-    assert.ok(uri.startsWith("otpauth://totp/"));
-    assert.ok(uri.includes("secret=JBSWY3DPEHPK3PXP"));
-    assert.ok(uri.includes("issuer=kit"));
-    assert.ok(uri.includes("algorithm=SHA1"));
-    assert.ok(uri.includes("digits=6"));
-    assert.ok(uri.includes("period=30"));
-  });
-
-  it("URL-encodes account + issuer in the label", () => {
-    const uri = buildOtpAuthUri({
-      accountName: "user with spaces@x",
-      issuer: "My Issuer",
-      secret: "AAAA",
-    });
-    // Label segment is "<issuer>:<account>", URL-encoded.
-    assert.ok(uri.includes("My%20Issuer"));
-    assert.ok(uri.includes("user%20with%20spaces"));
-  });
-});
-
 describe("resolveTotpSecret", () => {
   it("returns env var when set", async () => {
     const prev = process.env.KIT_TOTP_SECRET;
@@ -181,45 +158,6 @@ describe("resolveTotpSecret", () => {
       if (prev !== undefined) process.env.KIT_TOTP_SECRET = prev;
       else delete process.env.KIT_TOTP_SECRET;
     }
-  });
-});
-
-describe("generateTotp / verifyTotp", () => {
-  // RFC 6238 Appendix B test vectors (SHA-1, 8-byte counter, 30s).
-  // The reference secret "12345678901234567890" base32-encodes to
-  // GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ.
-  const TEST_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
-
-  it("generates 6-digit codes", () => {
-    const code = generateTotp(TEST_SECRET, 0);
-    assert.equal(code.length, 6);
-    assert.ok(/^\d{6}$/.test(code));
-  });
-
-  it("verifies the current code", () => {
-    const code = generateTotp(TEST_SECRET);
-    assert.equal(verifyTotp(code, TEST_SECRET), true);
-  });
-
-  it("rejects malformed codes", () => {
-    assert.equal(verifyTotp("abc", TEST_SECRET), false);
-    assert.equal(verifyTotp("12345", TEST_SECRET), false);
-    assert.equal(verifyTotp("1234567", TEST_SECRET), false);
-  });
-
-  it("rejects codes outside the verification window", () => {
-    // Step 0 vs step at current time — difference is in the millions,
-    // far outside the ±1 default window.
-    const codeFromAgesAgo = generateTotp(TEST_SECRET, 0);
-    assert.equal(verifyTotp(codeFromAgesAgo, TEST_SECRET), false);
-  });
-
-  it("matches the RFC 6238 reference vector at T=59 (step 1)", () => {
-    // RFC 6238 Appendix B: T=59, K=ASCII"12345678901234567890" (SHA-1) → 94287082
-    const ref = generateTotp(TEST_SECRET, 1);
-    assert.equal(ref, "287082");
-    // ^ kit returns last 6 digits (RFC 4226 default), so the truncation
-    // matches the "94287082"[2..] = "287082" portion.
   });
 });
 

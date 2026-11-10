@@ -1,26 +1,16 @@
 /**
- * `kit skill test` P2b — attribute recorded tool calls to a skill's runs (transcript).
- * kit never runs a skill (zero-LLM). It reads what the agent already recorded: the memory
- * index normalizes every transcript into `tool_uses` (one row per call, ordered by `id`).
- * A skill run is a SPAN — a `Skill` tool call opens it (`tool_input` carries the slug), and
- * the tool calls that follow, until the next `Skill` call or the session ends, are that
- * skill's actions. Intersecting spans with tool usage yields per-skill runtime evidence,
- * which `adherence.ts` turns into the scope-adherence + negative-control verdicts.
+ * Attribute recorded requests to explicit Skill invocation spans without running a skill.
+ * Only a returned Skill invocation opens a span. A denied invocation leaves it unchanged.
+ * An unresolved invocation ends certain attribution. Later calls remain unattributed until
+ * another returned invocation establishes a boundary. Automatic activation has no span.
  *
- * The pure core (`parseSkillOpen`, `attributeRuns`) is deterministic and unit-tested; the
- * thin `readRunEvidence` reads the ordered rows from the DB and delegates to it.
- *
- * SCOPE OF THIS INCREMENT (stated honestly, surfaced in the command output):
- *   - Confidence is `span` — bounded by explicit `Skill` invocations. Skills that
- *     auto-activate without a `Skill` call leave no span → no runs → honest skip.
- *   - `denied` is always false here: the transcript records calls that RAN. A gate deny
- *     blocks a call before it runs and lands in `.kit-audit.jsonl`, not `tool_uses` — so
- *     denial-based "control held" evidence needs an audit-log join (a later increment).
- *   - Only TOOL-scope adherence is judged (tool ∈ declared allowed-tools). Egress/fs
- *     TARGET-scope adherence (broker verdict per target) is a later increment.
+ * Outcomes describe transcript responses, not execution or effects. Legacy rows remain unknown.
+ * The DB reader checks capture completeness for all messages in relevant sessions.
+ * A signed broker policy adds target scope checks. Structured audit denials can supply evidence.
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { ObservedAction, RuntimeEvidence } from "./adherence.js";
+import { toolOutcome, type ToolOutcome } from "../memory/tool-events.js";
 import { checkEgress, checkFsWrite } from "../exec-broker/decisions.js";
 import { policyFsRoots, type BrokerPolicy } from "../exec-broker/policy.js";
 import { extractHostsFromCommand } from "../broker/extract.js";
@@ -35,13 +25,14 @@ export interface ToolCallRow {
   timestamp: string;
   /** For a `Skill` row, the invoked skill slug (parsed from `tool_input`); else null. */
   opensSkill: string | null;
+  /** Missing outcomes are legacy requests without result evidence. */
+  outcome?: ToolOutcome;
 }
 
 /**
- * The time window of one target-skill run within a session: `[start, end)`. `start` is the
- * `Skill` call's timestamp; `end` is the NEXT `Skill` call's timestamp in the same session, or
- * "" (open — until session end). A denial at time T belongs to the span with `start ≤ T < end`
- * in the SAME session — precise, session-bounded attribution, not a global timestamp guess.
+ * A target invocation window `[start, end)` in one session. An empty end means session end.
+ * Only returned invocations supply starts. Denied invocations do not close a window.
+ * Other Skill requests end the window. Missing boundary timestamps cannot establish a window.
  */
 export interface SpanWindow {
   sessionId: string;
@@ -49,11 +40,7 @@ export interface SpanWindow {
   end: string;
 }
 
-/**
- * Compute the target skill's run windows from ordered rows (by `session_id, id`). Each `Skill`
- * row opens a span whose end is the next `Skill` row's timestamp in that session (any skill), or
- * "" at session end. Only the target skill's windows are returned. Pure.
- */
+/** Compute certain target windows from rows ordered by `(session_id, id)`. Pure. */
 export function targetSpanWindows(rows: ToolCallRow[], target: string): SpanWindow[] {
   const windows: SpanWindow[] = [];
   let curSession: string | null = null;
@@ -71,9 +58,12 @@ export function targetSpanWindows(rows: ToolCallRow[], target: string): SpanWind
       closeOpen(""); // previous session's open target span runs to session end
       curSession = row.sessionId;
     }
-    if (row.opensSkill !== null) {
-      closeOpen(row.timestamp); // any new skill closes the prior target span at its start
-      if (row.opensSkill === target) openTarget = { start: row.timestamp };
+    if (row.tool === "Skill") {
+      if (row.outcome === "denied") continue;
+      if (row.timestamp) closeOpen(row.timestamp);
+      else openTarget = null; // No timestamp means no safe denial window.
+      if (row.opensSkill === target && row.outcome === "returned" && row.timestamp)
+        openTarget = { start: row.timestamp };
     }
   }
   closeOpen(""); // final open target span runs to session end
@@ -151,12 +141,22 @@ export function parseSkillOpen(tool: string, toolInput: string | null | undefine
   return s.length > 0 ? s : null;
 }
 
+function observedAction(
+  row: ToolCallRow,
+  verdictOf?: (row: ToolCallRow) => BrokerVerdict,
+): ObservedAction {
+  return {
+    tool: row.tool,
+    denied: row.outcome === "denied",
+    outcome: row.outcome ?? "unknown",
+    brokerVerdict: verdictOf?.(row),
+  };
+}
+
 /**
- * Attribute ordered rows to the target skill's runs. Rows MUST be ordered by
- * (session_id, id). Within a session, a `Skill` row opens a span; while the open span is
- * the target skill, following non-`Skill` rows become its actions; a new `Skill` row (or a
- * session change) closes the span. The `Skill` row itself is a boundary, never an action.
- * Pure. Confidence is always `span` (we have explicit run boundaries).
+ * Attribute rows ordered by `(session_id, id)` to returned target invocations.
+ * Skill rows define boundaries and are not actions. Uncertain spans only contribute gap counts.
+ * Explicit denials do not replace an active span. Session changes always end attribution.
  */
 export function attributeRuns(
   rows: ToolCallRow[],
@@ -168,37 +168,63 @@ export function attributeRuns(
   let runs = 0;
   let curSession: string | null = null;
   let active = false;
+  let possibleTarget = false;
+  let unresolvedInvocations = 0;
+  let unattributedActions = 0;
+  let deniedInvocations = 0;
 
   for (const row of rows) {
     if (row.sessionId !== curSession) {
       curSession = row.sessionId;
       active = false;
+      possibleTarget = false;
     }
-    if (row.opensSkill !== null) {
-      active = row.opensSkill === target;
+    if (row.tool === "Skill") {
+      if (row.outcome === "denied") {
+        if (row.opensSkill === target) deniedInvocations++;
+        continue;
+      }
+      const returned = row.outcome === "returned" && row.opensSkill !== null;
+      possibleTarget = !returned && (active || possibleTarget || row.opensSkill === target);
+      if (possibleTarget) unresolvedInvocations++;
+      active = returned && row.opensSkill === target;
       if (active) {
         runs++;
         sessionsWithSpan.add(row.sessionId);
       }
       continue; // the Skill row opens/closes a span; it is not itself an action
     }
-    if (active) actions.push({ tool: row.tool, denied: false, brokerVerdict: verdictOf?.(row) });
+    if (active) actions.push(observedAction(row, verdictOf));
+    else if (possibleTarget) unattributedActions++;
   }
 
-  return { actions, runs, sessions: sessionsWithSpan.size, confidence: "span" };
+  return {
+    actions,
+    runs,
+    sessions: sessionsWithSpan.size,
+    confidence: "span",
+    unresolvedInvocations,
+    unattributedActions,
+    deniedInvocations,
+  };
 }
 
 /** Read ordered `tool_uses` rows (by `session_id, id`) so spans reconstruct exactly. */
 export function readToolCallRows(db: DatabaseSync): ToolCallRow[] {
+  const hasOutcome = db
+    .prepare("PRAGMA table_info(tool_uses)")
+    .all()
+    .some((column) => column.name === "outcome");
   const raw = db
     .prepare(
-      "SELECT session_id, tool_name, tool_input, timestamp FROM tool_uses ORDER BY session_id, id",
+      `SELECT session_id, tool_name, tool_input, timestamp, ${hasOutcome ? "outcome" : "'unknown' AS outcome"} FROM tool_uses ORDER BY session_id, id`,
     )
     .all() as {
     session_id: string | null;
     tool_name: string | null;
     tool_input: string | null;
     timestamp: string | null;
+    outcome: unknown;
   }[];
   return raw.map((r) => ({
     sessionId: r.session_id ?? "",
@@ -206,7 +232,41 @@ export function readToolCallRows(db: DatabaseSync): ToolCallRow[] {
     input: r.tool_input,
     timestamp: r.timestamp ?? "",
     opensSkill: parseSkillOpen(r.tool_name ?? "", r.tool_input),
+    outcome: toolOutcome(r.outcome),
   }));
+}
+
+/** A message with no tool rows is still a gap unless the parser recorded full capture. */
+function readCaptureCoverage(
+  db: DatabaseSync,
+  sessions: Set<string>,
+): NonNullable<RuntimeEvidence["capture"]> {
+  const columns = db.prepare("PRAGMA table_info(messages)").all();
+  const supported = ["tool_capture_version", "tool_capture_count"].every((name) =>
+    columns.some((column) => column.name === name),
+  );
+  if (!columns.length || sessions.size === 0) return { complete: false, incompleteMessages: 0 };
+  const captured = `CASE WHEN tool_capture_version = 1 AND typeof(tool_capture_count) = 'integer'
+    AND tool_capture_count >= 0 AND tool_capture_count =
+    (SELECT COUNT(*) FROM tool_uses t WHERE t.message_uuid = m.uuid AND t.session_id = m.session_id)
+    THEN 0 ELSE 1 END`;
+  const count = db.prepare(`SELECT COUNT(*) AS total,
+    COALESCE(SUM(${supported ? captured : "1"}), 0) AS incomplete
+    FROM messages m WHERE session_id = ?`);
+  const orphans = db.prepare(`SELECT COUNT(*) AS total FROM tool_uses t
+    LEFT JOIN messages m ON m.uuid = t.message_uuid AND m.session_id = t.session_id
+    WHERE t.session_id = ? AND m.uuid IS NULL`);
+  let incompleteMessages = 0;
+  let complete = supported;
+  for (const session of sessions) {
+    // SQLite COUNT and COALESCE(SUM, 0) return numeric aggregates, not timestamps.
+    const counts = count.get(session)! as { total: number; incomplete: number };
+    const orphanCount = orphans.get(session)! as { total: number };
+    const missing = counts.incomplete + orphanCount.total;
+    incompleteMessages += missing;
+    if (counts.total === 0 || missing > 0) complete = false;
+  }
+  return { complete, incompleteMessages };
 }
 
 /**
@@ -226,6 +286,10 @@ export function readRunEvidence(
     ? (row: ToolCallRow) => brokerVerdictForRow(row.tool, row.input, opts.policy as BrokerPolicy)
     : undefined;
   const evidence = attributeRuns(rows, target, verdictOf);
+  const sessions = new Set(
+    rows.filter((row) => row.opensSkill === target).map((row) => row.sessionId),
+  );
+  evidence.capture = readCaptureCoverage(db, sessions);
   const denialActions = opts.denialActions ?? [];
   if (denialActions.length === 0) return evidence;
   return { ...evidence, actions: [...evidence.actions, ...denialActions] };

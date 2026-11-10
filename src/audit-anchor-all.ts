@@ -28,7 +28,14 @@
  */
 
 import { verifyAuditChain } from "./audit.js";
-import { verifyAgainstAnchor, type AnchorRecord } from "./audit-anchor.js";
+import {
+  decideAnchorVerdict,
+  verifyAgainstAnchor,
+  type AnchorRecord,
+  type AnchorVerifyResult,
+} from "./audit-anchor.js";
+import { verifyExternalAnchor, type ExternalAnchorVerification } from "./audit-external.js";
+import { sanitizeDisplayText } from "./display-text.js";
 
 /**
  * Four outcomes, ranked by what a reader must do about them:
@@ -57,6 +64,8 @@ export type AnchoredLogDetail =
   | "unparseable"
   | "key-unavailable"
   | "anchor-vanished"
+  | "external-invalid"
+  | "external-unverified"
   | "unreadable";
 
 export interface AnchoredLogStatus {
@@ -73,18 +82,20 @@ export interface AnchoredLogStatus {
   unsealed?: number;
   /** ISO time the anchor was last advanced, straight off the record. */
   sealedAt?: string;
+  externalVerification?: ExternalAnchorVerification;
 }
 
 export interface AnchoredLogsReport {
   results: AnchoredLogStatus[];
   counts: Record<AnchoredLogOutcome, number>;
   /**
-   * Whether the command should exit 0. `missing` never fails. `stalled` fails only
-   * under strict — the same policy `decideAnchorVerdict` applies to one tree.
+   * Whether the command should exit 0. Strict mode fails stalled seals.
+   * Required external verification also fails missing logs and an empty union.
    */
   ok: boolean;
   /** Echoed back so a `--json` reader can tell which policy produced `ok`. */
   strict: boolean;
+  requireExternal?: boolean;
 }
 
 /** What a log path yielded: content, or why not. */
@@ -98,6 +109,74 @@ export interface AnchoredLogInput {
   record: AnchorRecord;
 }
 
+type AnchorInspection =
+  | { kind: "unreadable"; gone: boolean }
+  | { kind: "chain-broken"; chain: ReturnType<typeof verifyAuditChain> }
+  | { kind: "anchor"; result: AnchorVerifyResult };
+
+function inspectAnchor(read: LogRead, record: AnchorRecord, key: Buffer | null): AnchorInspection {
+  if (!read.ok) return { kind: "unreadable", gone: read.gone };
+  const chain = verifyAuditChain(read.content);
+  if (!chain.ok) return { kind: "chain-broken", chain };
+  return { kind: "anchor", result: verifyAgainstAnchor(read.content, record, key) };
+}
+
+type LogStatusContext = Omit<AnchoredLogStatus, "outcome" | "detail" | "message">;
+
+function classifyIntactSeal(
+  common: LogStatusContext,
+  a: AnchorVerifyResult,
+  requireExternal?: boolean,
+): AnchoredLogStatus {
+  const tail = a.newSinceAnchor ?? 0;
+  const verdict = decideAnchorVerdict({
+    result: a,
+    strict: false,
+    machineHasAnchors: true,
+    requireExternal: requireExternal,
+  });
+  if (!verdict.ok) {
+    return {
+      ...common,
+      outcome: "failed",
+      detail:
+        a.externalVerification?.status === "invalid"
+          ? "external-invalid"
+          : a.externalVerification?.status === "verified" && tail > 0
+            ? "unsealed-tail"
+            : "external-unverified",
+      unsealed: tail,
+      message: verdict.message,
+    };
+  }
+  if (tail > 0) {
+    return {
+      ...common,
+      outcome: "stalled",
+      detail: "unsealed-tail",
+      unsealed: tail,
+      message: `${a.expected} sealed, ${tail} entr${
+        tail === 1 ? "y" : "ies"
+      } BEYOND the seal and unauthenticated — run 'kit audit anchor' in that tree to re-seal`,
+    };
+  }
+  const entryLabel = a.expected === 1 ? "entry" : "entries";
+  let externalNote = "";
+  if (a.externalReceipt) {
+    externalNote =
+      a.externalVerification?.status === "verified"
+        ? ` + verified external anchor (${sanitizeDisplayText(a.externalReceipt.authority)})`
+        : "; external receipt UNVERIFIED";
+  }
+  return {
+    ...common,
+    outcome: "verified",
+    detail: "verified",
+    unsealed: 0,
+    message: `HMAC anchor verified (${a.expected} sealed ${entryLabel})${externalNote}`,
+  };
+}
+
 /**
  * Classify ONE anchored log. Pure given (record, read, key) so every branch —
  * including the ones that need a root-only or permission-denied filesystem to
@@ -108,33 +187,51 @@ export function classifyAnchoredLog(
   record: AnchorRecord,
   read: LogRead,
   key: Buffer | null,
+  opts: { requireExternal?: boolean; externalVerification?: ExternalAnchorVerification } = {},
+): AnchoredLogStatus {
+  return classifyInspection(logPath, record, inspectAnchor(read, record, key), opts);
+}
+
+function classifyUnreadableLog(
+  base: LogStatusContext,
+  gone: boolean,
+  requireExternal?: boolean,
+): AnchoredLogStatus {
+  return gone
+    ? {
+        ...base,
+        outcome: requireExternal ? "failed" : "missing",
+        detail: "log-gone",
+        message: requireExternal
+          ? "External verification REQUIRED but the anchored log is missing. Preserve the anchor record and investigate."
+          : `log no longer exists (sealed ${base.sealed} entr${
+              base.sealed === 1 ? "y" : "ies"
+            } at ${base.sealedAt}) — expected for a temp dir or a deleted clone; the anchor entry is pruned on the next seal`,
+      }
+    : {
+        ...base,
+        outcome: "failed",
+        detail: "unreadable",
+        message:
+          "log exists but could not be read here, so its seal could not be checked — a chain that cannot be verified is unknown, not verified",
+      };
+}
+
+function classifyInspection(
+  logPath: string,
+  record: AnchorRecord,
+  inspection: AnchorInspection,
+  opts: { requireExternal?: boolean; externalVerification?: ExternalAnchorVerification },
 ): AnchoredLogStatus {
   const sealedAt = record.updatedAt;
   const base = { logPath, sealed: record.count, sealedAt };
 
-  if (!read.ok) {
-    return read.gone
-      ? {
-          ...base,
-          outcome: "missing",
-          detail: "log-gone",
-          message: `log no longer exists (sealed ${record.count} entr${
-            record.count === 1 ? "y" : "ies"
-          } at ${sealedAt}) — expected for a temp dir or a deleted clone; the anchor entry is pruned on the next seal`,
-        }
-      : {
-          ...base,
-          outcome: "failed",
-          detail: "unreadable",
-          message:
-            "log exists but could not be read here, so its seal could not be checked — a chain that cannot be verified is unknown, not verified",
-        };
+  if (inspection.kind === "unreadable") {
+    return classifyUnreadableLog(base, inspection.gone, opts.requireExternal);
   }
 
-  // The keyless chain comes first: the anchor vouches for a sound log, so a broken
-  // chain is the finding and the tip comparison below would only describe it worse.
-  const chain = verifyAuditChain(read.content);
-  if (!chain.ok) {
+  if (inspection.kind === "chain-broken") {
+    const chain = inspection.chain;
     return {
       ...base,
       outcome: "failed",
@@ -146,32 +243,19 @@ export function classifyAnchoredLog(
     };
   }
 
-  const a = verifyAgainstAnchor(read.content, record, key);
-  const common = { ...base, entries: a.entries };
+  const a = { ...inspection.result, externalVerification: opts.externalVerification };
+  const common = { ...base, entries: a.entries, externalVerification: opts.externalVerification };
+  return classifySeal(common, a, opts.requireExternal);
+}
+
+function classifySeal(
+  common: LogStatusContext,
+  a: AnchorVerifyResult,
+  requireExternal?: boolean,
+): AnchoredLogStatus {
   switch (a.status) {
-    case "anchored-ok": {
-      const tail = a.newSinceAnchor ?? 0;
-      if (tail > 0) {
-        return {
-          ...common,
-          outcome: "stalled",
-          detail: "unsealed-tail",
-          unsealed: tail,
-          message: `${a.expected} sealed, ${tail} entr${
-            tail === 1 ? "y" : "ies"
-          } BEYOND the seal and unauthenticated — run 'kit audit anchor' in that tree to re-seal`,
-        };
-      }
-      return {
-        ...common,
-        outcome: "verified",
-        detail: "verified",
-        unsealed: 0,
-        message: `HMAC anchor verified (${a.expected} sealed entr${
-          a.expected === 1 ? "y" : "ies"
-        })${a.externalReceipt ? ` + external anchor (${a.externalReceipt.authority})` : ""}`,
-      };
-    }
+    case "anchored-ok":
+      return classifyIntactSeal(common, a, requireExternal);
     // A rotated key invalidates every anchor it sealed, by design. That is a re-seal,
     // not a tamper, so it reads as stalled — with its own detail so the two reasons a
     // seal stopped covering a log never collapse into one line.
@@ -204,25 +288,13 @@ export function classifyAnchoredLog(
           "the anchor record for this path disappeared while it was being read — refusing to report an unanchored log as verified",
       };
     case "truncated":
-      return {
-        ...common,
-        outcome: "failed",
-        detail: "truncated",
-        message: a.reason ?? `log has ${a.entries} entries but the anchor sealed ${a.expected}`,
-      };
     case "tip-mismatch":
-      return {
-        ...common,
-        outcome: "failed",
-        detail: "tip-mismatch",
-        message: a.reason ?? "anchored prefix HMAC does not match — the log was rewritten",
-      };
     case "unparseable":
       return {
         ...common,
         outcome: "failed",
-        detail: "unparseable",
-        message: a.reason ?? "log is unparseable — cannot reconcile with the anchor",
+        detail: a.status,
+        message: decideAnchorVerdict({ result: a, strict: true, machineHasAnchors: true }).message,
       };
   }
 }
@@ -238,14 +310,34 @@ export async function verifyAnchoredLogs(
   inputs: readonly AnchoredLogInput[],
   key: Buffer | null,
   read: LogReader,
-  opts: { strict?: boolean } = {},
+  opts: { strict?: boolean; requireExternal?: boolean } = {},
 ): Promise<AnchoredLogsReport> {
   const strict = opts.strict === true;
   const results: AnchoredLogStatus[] = [];
   for (const { logPath, record } of inputs) {
-    results.push(classifyAnchoredLog(logPath, record, await read(logPath), key));
+    const inspection = inspectAnchor(await read(logPath), record, key);
+    let externalVerification: ExternalAnchorVerification | undefined;
+    if (
+      record.external &&
+      inspection.kind === "anchor" &&
+      inspection.result.status === "anchored-ok"
+    ) {
+      externalVerification = await verifyExternalAnchor(logPath, record);
+    }
+    results.push(
+      classifyInspection(logPath, record, inspection, {
+        requireExternal: opts.requireExternal,
+        externalVerification,
+      }),
+    );
   }
-  return summarizeAnchoredLogs(results, strict);
+  const report = summarizeAnchoredLogs(results, strict || opts.requireExternal === true);
+  return {
+    ...report,
+    strict,
+    requireExternal: opts.requireExternal === true,
+    ok: report.ok && (!opts.requireExternal || results.length > 0),
+  };
 }
 
 /**

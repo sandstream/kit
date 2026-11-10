@@ -79,6 +79,25 @@ describe("kit status without full setup", () => {
   });
 });
 
+const HARDENED_GITIGNORE = [
+  ".env*",
+  "node_modules",
+  ".kit/*",
+  "!.kit/shared/",
+  ".kit-audit.jsonl",
+  ".kit-audit.jsonl.lock.sqlite*",
+  ".kit-audit.pending",
+  ".kit-skipped-commits.jsonl",
+  "*.prod-backup",
+  "*.pem",
+  "*.key",
+  "id_rsa*",
+  "id_ed25519*",
+  "*.p12",
+  "*-service-account*.json",
+  "",
+].join("\n");
+
 describe("kit status with memory hooks", () => {
   it("configured project: every signal on", async () => {
     const proj = join(tmp, "ready");
@@ -95,26 +114,7 @@ describe("kit status with memory hooks", () => {
       mode: 0o755,
     });
     writeFileSync(join(proj, "CLAUDE.md"), `# Project\n\n${KIT_BLOCK_BEGIN}\nuse kit\n`);
-    writeFileSync(
-      join(proj, ".gitignore"),
-      [
-        ".env*",
-        "node_modules",
-        ".kit/*",
-        "!.kit/shared/",
-        ".kit-audit.jsonl",
-        ".kit-audit.pending",
-        ".kit-skipped-commits.jsonl",
-        "*.prod-backup",
-        "*.pem",
-        "*.key",
-        "id_rsa*",
-        "id_ed25519*",
-        "*.p12",
-        "*-service-account*.json",
-        "",
-      ].join("\n"),
-    );
+    writeFileSync(join(proj, ".gitignore"), HARDENED_GITIGNORE);
     writeFileSync(join(proj, ".kit-allowlist.json"), "{}");
 
     const dbPath = join(proj, "memory.db");

@@ -1,24 +1,16 @@
 /**
- * kit memory — Claude Code transcript parser.
+ * Claude Code transcript parser for kit memory.
  *
  * Reads raw session transcripts from ~/.claude/projects/<project>/<session>.jsonl
  * and indexes them into the memory store. RAW + idempotent: one row per message
- * (deduped by uuid), no summarisation. Re-running is safe — already-seen messages
- * are ignored. Field mapping mirrors the Claude Code transcript format (also used
- * by cloudctx, MIT). Other harnesses (Codex/Cursor) get their own parser later;
- * sessions carry a `harness` tag so the store stays multi-harness.
+ * (deduped by uuid), without summaries. Reindex retains existing messages and
+ * adds native tool identifiers and response evidence. Sessions retain their harness tag.
  */
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import {
-  insertMessage,
-  insertToolUse,
-  upsertSession,
-  isFileIndexed,
-  markFileIndexed,
-} from "./db.js";
+import { insertMessage, upsertSession, isFileIndexed, markFileIndexed } from "./db.js";
 import { indexCodexSessions } from "./codex.js";
 import { indexGeminiSessions } from "./gemini.js";
 import { indexContinueSessions } from "./continue.js";
@@ -29,6 +21,13 @@ import { indexDroidSessions } from "./droid.js";
 import { indexAiderSessions } from "./aider.js";
 import { indexAntigravitySessions } from "./antigravity.js";
 import { extractText, type Content } from "./content.js";
+import { captureClaudeTools } from "./claude-tools.js";
+import {
+  captureTranscript,
+  transcriptRecord,
+  TOOL_CAPTURE_VERSION,
+  type TranscriptTools,
+} from "./transcript-tools.js";
 
 // Re-exported: callers and tests import extractText from the parser.
 export { extractText };
@@ -91,7 +90,7 @@ function indexFile(
   db: DatabaseSync,
   filepath: string,
   project: string,
-): { messages: number; toolUses: number } {
+): { messages: number; toolUses: number; retry: boolean } | undefined {
   const sessionId = basename(filepath, ".jsonl");
   let raw: string;
   try {
@@ -99,16 +98,25 @@ function indexFile(
   } catch (e) {
     // A read failure (permissions, I/O, a transcript rotated mid-index) is NOT the
     // same as an empty file — say so rather than silently reporting 0 indexed.
-    console.error(`kit: could not read transcript ${filepath} — ${(e as Error).message}`);
-    return { messages: 0, toolUses: 0 };
+    console.error(`kit: could not read transcript ${filepath}: ${(e as Error).message}`);
+    return;
   }
 
+  return captureTranscript(db, (tools) => indexRecords(db, raw, sessionId, project, tools));
+}
+
+function indexRecords(
+  db: DatabaseSync,
+  raw: string,
+  sessionId: string,
+  project: string,
+  tools: TranscriptTools,
+): { messages: number; toolUses: number } {
   // Ensure the session row exists before inserting messages so per-message
   // counters resolve against a real row.
   upsertSession(db, { sessionId, harness: "claude-code", project });
 
   let messages = 0;
-  let toolUses = 0;
   let malformed = 0;
   let firstTs: string | undefined;
   let lastTs: string | undefined;
@@ -117,55 +125,26 @@ function indexFile(
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let rec: TranscriptRecord;
-    try {
-      rec = JSON.parse(trimmed) as TranscriptRecord;
-    } catch {
+    const rec = transcriptRecord(trimmed, tools) as TranscriptRecord | undefined;
+    if (!rec) {
       malformed++;
-      continue; // skip malformed lines, keep indexing the rest
+      continue;
     }
     if (rec.type !== "user" && rec.type !== "assistant") continue;
-    if (!rec.uuid) continue;
+    if (!rec.uuid) {
+      tools.complete = false;
+      continue;
+    }
     if (rec.isSidechain) isSidechain = true;
 
-    const msg = rec.message;
     const ts = rec.timestamp;
     if (ts) {
       if (!firstTs) firstTs = ts;
       lastTs = ts;
     }
 
-    const added = insertMessage(db, {
-      uuid: rec.uuid,
-      sessionId: rec.sessionId ?? sessionId,
-      parentUuid: rec.parentUuid,
-      type: rec.type,
-      role: msg?.role,
-      content: extractText(msg?.content),
-      model: msg?.model,
-      inputTokens: msg?.usage?.input_tokens,
-      outputTokens: msg?.usage?.output_tokens,
-      cacheReadTokens: msg?.usage?.cache_read_input_tokens,
-      cacheCreationTokens: msg?.usage?.cache_creation_input_tokens,
-      timestamp: ts,
-      cwd: rec.cwd,
-      gitBranch: rec.gitBranch,
-      version: rec.version,
-    });
-
-    if (added) {
+    if (storeClaudeRecord(db, rec as TranscriptRecord & { uuid: string }, sessionId, tools))
       messages++;
-      for (const tool of extractToolUses(msg?.content)) {
-        insertToolUse(db, {
-          messageUuid: rec.uuid,
-          sessionId: rec.sessionId ?? sessionId,
-          toolName: tool.name,
-          toolInput: tool.input,
-          timestamp: ts,
-        });
-        toolUses++;
-      }
-    }
   }
 
   // Final upsert records the session's time bounds + sidechain flag.
@@ -182,11 +161,48 @@ function indexFile(
   // format. Surface it instead of reporting a clean 0 that reads as "up to date".
   if (messages === 0 && malformed > 0) {
     console.error(
-      `kit: ${basename(filepath)} — indexed 0 messages but ${malformed} line(s) failed to parse; transcript may be corrupt or an unrecognised format`,
+      `kit: indexed 0 messages but ${malformed} line(s) failed to parse; transcript may be corrupt or an unrecognised format`,
     );
   }
 
-  return { messages, toolUses };
+  return { messages, toolUses: tools.added };
+}
+
+function storeClaudeRecord(
+  db: DatabaseSync,
+  rec: TranscriptRecord & { uuid: string },
+  sessionId: string,
+  tools: TranscriptTools,
+): boolean {
+  const msg = rec.message;
+  const ts = rec.timestamp;
+  const added = insertMessage(db, {
+    uuid: rec.uuid,
+    sessionId: rec.sessionId ?? sessionId,
+    parentUuid: rec.parentUuid,
+    type: rec.type!,
+    role: msg?.role,
+    content: extractText(msg?.content),
+    model: msg?.model,
+    inputTokens: msg?.usage?.input_tokens,
+    outputTokens: msg?.usage?.output_tokens,
+    cacheReadTokens: msg?.usage?.cache_read_input_tokens,
+    cacheCreationTokens: msg?.usage?.cache_creation_input_tokens,
+    timestamp: ts,
+    cwd: rec.cwd,
+    gitBranch: rec.gitBranch,
+    version: rec.version,
+  });
+
+  const origin = rec.sessionId ?? sessionId;
+  tools.message(rec.uuid, origin);
+  captureClaudeTools(tools, msg?.content, {
+    uuid: rec.uuid,
+    sessionId: origin,
+    timestamp: ts,
+    added,
+  });
+  return added;
 }
 
 /** Walk ~/.claude/projects and index every transcript. Idempotent. */
@@ -217,12 +233,13 @@ export function indexClaudeTranscripts(db: DatabaseSync): IndexResult {
       // Skip files unchanged since the last index (incremental — avoids re-reading
       // every transcript each run; the per-message uuid dedup still backstops it).
       const mtimeMs = Math.floor(st.mtimeMs);
-      if (isFileIndexed(db, filePath, mtimeMs, st.size)) {
+      if (isFileIndexed(db, filePath, mtimeMs, st.size, TOOL_CAPTURE_VERSION)) {
         result.filesSkipped++;
         continue;
       }
       const counts = indexFile(db, filePath, projectName);
-      markFileIndexed(db, filePath, mtimeMs, st.size);
+      if (!counts) continue;
+      if (!counts.retry) markFileIndexed(db, filePath, mtimeMs, st.size, TOOL_CAPTURE_VERSION);
       result.files++;
       result.sessions++;
       result.messages += counts.messages;

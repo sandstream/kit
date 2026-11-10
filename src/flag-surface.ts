@@ -2,14 +2,12 @@
  * This generated table lists the flags accepted by each command.
  * The dispatcher checks the table once for every invocation.
  * Generate it with: node scripts/derive-command-flags.mjs --emit
- * flag-surface.test.ts checks the generated text and flags used in code.
+ * flag-surface.test.ts checks that this file matches the generator.
  *
- * The generator scans each command and direct imports read by argv helpers.
- * It also includes documented flags and compatibility flags.
- * The scan deliberately stops after direct imports.
- * The table can include flags passed to subprocesses.
- * This over-acceptance keeps existing commands usable.
- * It must not omit a flag that a command reads.
+ * Explicit declarations live in contracts/command-flags.json with behavioral test references.
+ * Other commands use a source scan, documented flags, and compatibility flags.
+ * The fallback scan can include unrelated flags from sibling handlers or subprocesses.
+ * A generated list does not prove that every accepted flag affects behavior.
  *
  * The dispatcher adds global flags to every command.
  * A command absent from the table is unvalidated.
@@ -28,7 +26,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--force",
     "--force-history",
     "--from",
-    "--help",
     "--host",
     "--install",
     "--json",
@@ -43,7 +40,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--no-recommended",
     "--no-setup",
     "--no-triage",
-    "--non-interactive",
     "--online",
     "--path",
     "--pin",
@@ -66,8 +62,8 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--yes",
   ],
   adr: ["--emit", "--json", "--min-support", "--root"],
-  "agent-audit": ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
-  "agent-config": ["--broker-gate", "--help", "--install-gate", "--limit", "--no-install-gate"],
+  "agent-audit": ["--attest", "--json", "--mode", "--no-auto-install"],
+  "agent-config": ["--broker-gate", "--install-gate", "--limit", "--no-install-gate"],
   airgap: ["--json"],
   analyze: [
     "--attest",
@@ -99,15 +95,14 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--issuer",
     "--json",
     "--list-scopes",
-    "--non-interactive",
     "--overwrite",
     "--scope",
     "--ttl-minutes",
   ],
-  baseline: ["--category", "--enforce", "--help", "--json"],
+  baseline: ["--category", "--enforce", "--json"],
   bootstrap: ["--json", "--minimal", "--no-memory", "--policy-source", "--profile"],
   broker: ["--force", "--gate", "--json"],
-  browser: ["--help", "--json"],
+  browser: ["--json"],
   check: [
     "--attest",
     "--category",
@@ -120,7 +115,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--no-auto-install",
     "--online",
     "--pin",
-    "--read-only",
     "--self",
     "--strict",
   ],
@@ -136,7 +130,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--write",
   ],
   clone: [
-    "--env",
     "--install",
     "--json",
     "--list",
@@ -144,7 +137,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--mode",
     "--no-recommended",
     "--no-setup",
-    "--non-interactive",
     "--recommended",
     "--services",
     "--skip-install",
@@ -153,7 +145,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--with-migrate",
     "--yes",
   ],
-  config: ["--allow-comment-loss", "--check", "--dry-run", "--force", "--help", "--json"],
+  config: ["--allow-comment-loss", "--check", "--dry-run", "--force", "--json"],
   context: ["--json", "--prompt", "--require-declaration"],
   coverage: [
     "--attest",
@@ -169,24 +161,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--verify",
     "--write",
   ],
-  "create-plugin": [
-    "--env",
-    "--install",
-    "--json",
-    "--list",
-    "--minimal",
-    "--mode",
-    "--no-recommended",
-    "--no-setup",
-    "--non-interactive",
-    "--recommended",
-    "--services",
-    "--skip-install",
-    "--store",
-    "--verify",
-    "--with-migrate",
-    "--yes",
-  ],
+  "create-plugin": ["--skip-install"],
   decisions: [
     "--assumed",
     "--confidence",
@@ -207,7 +182,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--force",
     "--force-history",
     "--from",
-    "--help",
     "--host",
     "--install",
     "--json",
@@ -222,7 +196,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--no-recommended",
     "--no-setup",
     "--no-triage",
-    "--non-interactive",
     "--online",
     "--path",
     "--pin",
@@ -244,7 +217,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--with-migrate",
     "--yes",
   ],
-  env: ["--compare", "--json", "--missing", "--non-interactive", "--show-values"],
+  env: ["--compare", "--json", "--missing", "--show-values"],
   escalate: ["--dry-run", "--json", "--merge-denied", "--repo", "--team"],
   fix: [
     "--aws-region",
@@ -303,34 +276,14 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--with",
   ],
   "gha-audit": ["--json"],
-  governance: ["--broker-gate", "--help", "--limit", "--no-install-gate"],
-  guard: [
-    "--all",
-    "--allow-scripts-pending",
-    "--call",
-    "--command",
-    "--dry-run",
-    "--help",
-    "--output",
-    "--output-document",
-    "--with",
-  ],
-  "guard-observe": [
-    "--all",
-    "--allow-scripts-pending",
-    "--call",
-    "--command",
-    "--dry-run",
-    "--help",
-    "--output",
-    "--output-document",
-    "--with",
-  ],
-  heal: ["--agent", "--dry-run", "--help"],
-  health: ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
-  hooks: ["--force", "--non-interactive"],
+  governance: [],
+  guard: [],
+  "guard-observe": [],
+  heal: ["--agent", "--dry-run"],
+  health: ["--attest", "--json", "--mode", "--no-auto-install"],
+  hooks: ["--force"],
   identity: ["--public"],
-  ingest: ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
+  ingest: ["--json"],
   init: [
     "--auto",
     "--category",
@@ -342,7 +295,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--force",
     "--force-history",
     "--from",
-    "--help",
     "--host",
     "--install",
     "--json",
@@ -357,7 +309,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--no-recommended",
     "--no-setup",
     "--no-triage",
-    "--non-interactive",
     "--online",
     "--path",
     "--pin",
@@ -381,8 +332,8 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   insight: ["--json"],
   install: ["--no-triage"],
-  login: ["--json", "--non-interactive", "--plan", "--retry-count", "--service"],
-  map: ["--budget", "--co-change", "--depth", "--help", "--json", "--name-only", "--no-merges"],
+  login: ["--json", "--plan", "--retry-count", "--service"],
+  map: ["--budget", "--co-change", "--depth", "--json", "--name-only", "--no-merges"],
   mcp: ["--from-env", "--paste"],
   memory: [
     "--all",
@@ -401,7 +352,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--global",
     "--harness",
     "--heatmap",
-    "--help",
     "--history",
     "--include-quarantined",
     "--injection",
@@ -418,7 +368,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--pull-cmd",
     "--push-cmd",
     "--quarantine",
-    "--read-only",
     "--reason",
     "--ref",
     "--remap-project",
@@ -446,7 +395,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--env-command",
     "--expected",
     "--force",
-    "--help",
     "--install",
     "--interruptions",
     "--json",
@@ -460,39 +408,11 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--steps",
     "--test-command",
   ],
-  open: [
-    "--env",
-    "--install",
-    "--json",
-    "--list",
-    "--minimal",
-    "--mode",
-    "--no-recommended",
-    "--no-setup",
-    "--non-interactive",
-    "--recommended",
-    "--services",
-    "--skip-install",
-    "--store",
-    "--verify",
-    "--with-migrate",
-    "--yes",
-  ],
+  open: [],
   panic: ["--no-checklist", "--reason"],
-  pkg: ["--agent", "--dry-run", "--help"],
-  plugin: ["--help", "--installed", "--skip-install", "--tag"],
-  policy: [
-    "--env",
-    "--force",
-    "--json",
-    "--key",
-    "--label",
-    "--list",
-    "--non-interactive",
-    "--remove",
-    "--strict",
-    "--ttl",
-  ],
+  pkg: ["--agent", "--dry-run"],
+  plugin: ["--installed", "--skip-install", "--tag"],
+  policy: ["--force", "--json", "--key", "--label", "--list", "--remove", "--strict", "--ttl"],
   profile: ["--gate", "--json", "--key", "--out"],
   review: [
     "--acknowledge-unknown",
@@ -521,24 +441,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--split",
     "--strict",
   ],
-  run: [
-    "--env",
-    "--install",
-    "--json",
-    "--list",
-    "--minimal",
-    "--mode",
-    "--no-recommended",
-    "--no-setup",
-    "--non-interactive",
-    "--recommended",
-    "--services",
-    "--skip-install",
-    "--store",
-    "--verify",
-    "--with-migrate",
-    "--yes",
-  ],
+  run: [],
   sbom: ["--agent", "--format"],
   scan: ["--json", "--list-delegates", "--sarif", "--strict", "--update-baseline"],
   secrets: [
@@ -553,13 +456,11 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--from",
     "--from-cli",
     "--github-repo",
-    "--help",
     "--host",
     "--keep-commented",
     "--key-id",
     "--mode",
     "--no-clean",
-    "--non-interactive",
     "--path",
     "--project",
     "--propagate",
@@ -590,7 +491,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--head",
     "--include-tests",
     "--json",
-    "--non-interactive",
     "--only",
     "--recursive",
     "--skip",
@@ -633,7 +533,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--force",
     "--force-history",
     "--from",
-    "--help",
     "--host",
     "--install",
     "--json",
@@ -648,7 +547,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--no-recommended",
     "--no-setup",
     "--no-triage",
-    "--non-interactive",
     "--online",
     "--path",
     "--pin",
@@ -671,18 +569,17 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--yes",
   ],
   skill: ["--gate", "--json", "--path", "--runtime", "--update-snapshot"],
-  skills: ["--broker-gate", "--help", "--limit", "--no-install-gate"],
+  skills: ["--broker-gate", "--limit", "--no-install-gate"],
   slopsquat: ["--fail-on"],
-  standards: ["--category", "--enforce", "--help", "--json"],
-  status: ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
+  standards: ["--category", "--enforce", "--json"],
+  status: ["--attest", "--json", "--mode", "--no-auto-install"],
   statusline: ["--json", "--mode"],
-  "supply-chain": ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
-  team: ["--broker-gate", "--help", "--limit", "--no-install-gate", "--role"],
+  "supply-chain": ["--attest", "--json", "--mode", "--no-auto-install"],
+  team: ["--broker-gate", "--limit", "--no-install-gate", "--role"],
   tools: ["--auth", "--json", "--latest"],
   triage: [
     "--checksum",
     "--deep",
-    "--help",
     "--json",
     "--pin",
     "--sandbox",
@@ -695,14 +592,31 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   usage: ["--deep", "--json", "--prove", "--tab"],
   "verify-provenance": ["--bundle", "--identity", "--issuer", "--offline", "--trusted-root"],
   watch: ["--force", "--hour", "--json", "--minute", "--no-pal", "--target"],
-  whoami: ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
+  whoami: ["--json"],
   "worktree-gates": [],
 };
 
+/** Declared flags that accept no value. Missing commands have no value contract. */
+export const COMMAND_BARE_FLAGS: Record<string, readonly string[]> = {
+  "create-plugin": ["--skip-install"],
+  governance: [],
+  guard: [],
+  "guard-observe": [],
+  ingest: ["--json"],
+  open: [],
+  run: [],
+  whoami: ["--json"],
+};
+
 /**
- * The flags a verb accepts, or null when the verb is not in the table (unvalidated rather
- * than unrestricted — dispatch skips the check and self-audit reports the gap).
+ * Return accepted flags, or null when the command has no table entry.
+ * The dispatcher skips absent entries. The self-audit reports that gap.
  */
 export function flagsForCommand(verb: string): readonly string[] | null {
-  return COMMAND_FLAGS[verb] ?? null;
+  return Object.hasOwn(COMMAND_FLAGS, verb) ? COMMAND_FLAGS[verb] : null;
+}
+
+/** Return known flags without values, or null when this command has no declaration. */
+export function flagsWithoutValuesForCommand(verb: string): readonly string[] | null {
+  return Object.hasOwn(COMMAND_BARE_FLAGS, verb) ? COMMAND_BARE_FLAGS[verb] : null;
 }

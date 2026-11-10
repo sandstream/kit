@@ -97,6 +97,31 @@ describe("parseOsv", () => {
 });
 
 describe("ingest dispatch", () => {
+  it("retains raw report text and identities for parser consumers", () => {
+    const raw = `fixture\x1b[2Jghp_${"a".repeat(36)}`;
+    const sarif = JSON.stringify({
+      runs: [
+        { tool: { driver: { name: raw } }, results: [{ ruleId: raw, message: { text: raw } }] },
+      ],
+    });
+    const osv = JSON.stringify({
+      results: [
+        { packages: [{ package: { name: raw }, vulnerabilities: [{ id: raw, summary: raw }] }] },
+      ],
+    });
+    for (const [format, data] of [
+      ["sarif", sarif],
+      ["osv", osv],
+    ] as const) {
+      const result = ingest(format, data);
+      assert.equal(result[0].name, `${raw}: ${raw}`);
+      assert.equal(result[0].detail, raw);
+      const strict = ingestStrict(format, data);
+      assert.ok(strict.ok);
+      assert.deepEqual(strict.findings, result);
+    }
+  });
+
   it("routes by format; unknown → []", () => {
     assert.equal(ingest("sarif", sarif).length, 2);
     assert.equal(ingest("osv", osv).length, 1);
@@ -130,6 +155,81 @@ describe("ingestStrict", () => {
     // parses fine, but it's an error blob, not a SARIF/OSV report
     assert.equal(ingestStrict("sarif", JSON.stringify({ error: "no db" })).ok, false);
     assert.equal(ingestStrict("osv", JSON.stringify({ runs: [] })).ok, false);
+  });
+});
+
+describe("ingestStrict: nested report fields", () => {
+  it("rejects malformed nested SARIF fields without throwing or returning partial findings", () => {
+    const invalidRuns = [
+      null,
+      [],
+      { results: {} },
+      { results: [null] },
+      { results: [[]] },
+      { tool: [] },
+      { tool: { driver: null } },
+      { tool: { driver: { name: 1 } } },
+      { tool: { driver: { rules: [null] } } },
+      { tool: { driver: { rules: [{ id: {} }] } } },
+      { tool: { driver: { rules: [{ properties: { tags: [1] } }] } } },
+      { results: [{ ruleId: 1 }] },
+      { results: [{ level: 1 }] },
+      { results: [{ message: "text" }] },
+      { results: [{ message: { text: {} } }] },
+      { results: [{ properties: { "security-severity": [] } }] },
+      { results: [{ locations: {} }] },
+      { results: [{ locations: [null] }] },
+      { results: [{ locations: [{ physicalLocation: [] }] }] },
+      { results: [{ locations: [{ physicalLocation: { artifactLocation: { uri: {} } } }] }] },
+      { results: [{ locations: [{ physicalLocation: { region: { startLine: -1 } } }] }] },
+    ];
+    for (const run of invalidRuns) {
+      const result = ingestStrict(
+        "sarif",
+        JSON.stringify({ runs: [{ results: [{ ruleId: "valid" }] }, run] }),
+      );
+      assert.equal(result.ok, false, JSON.stringify(run));
+    }
+  });
+
+  it("rejects malformed nested OSV fields without throwing or returning partial findings", () => {
+    const invalidResults = [
+      null,
+      [],
+      { packages: {} },
+      { packages: [null] },
+      { packages: [[]] },
+      { packages: [{ package: [] }] },
+      { packages: [{ package: { name: 1 } }] },
+      { packages: [{ package: { version: {} } }] },
+      { packages: [{ package: { ecosystem: false } }] },
+      { packages: [{ vulnerabilities: {} }] },
+      { packages: [{ vulnerabilities: [null] }] },
+      { packages: [{ vulnerabilities: [{ id: [] }] }] },
+      { packages: [{ vulnerabilities: [{ summary: {} }] }] },
+      { packages: [{ vulnerabilities: [{ database_specific: [] }] }] },
+      { packages: [{ vulnerabilities: [{ database_specific: { severity: 3 } }] }] },
+    ];
+    for (const result of invalidResults) {
+      const outcome = ingestStrict(
+        "osv",
+        JSON.stringify({
+          results: [{ packages: [{ vulnerabilities: [{ id: "valid" }] }] }, result],
+        }),
+      );
+      assert.equal(outcome.ok, false, JSON.stringify(result));
+    }
+  });
+
+  it("retains optional fields and unknown extensions on valid reports", () => {
+    assert.deepEqual(
+      ingestStrict("sarif", '{"runs":[{"tool":{"driver":{"name":"scanner"}}}],"extension":true}'),
+      { ok: true, findings: [] },
+    );
+    assert.deepEqual(ingestStrict("osv", '{"results":[{"packages":[]}],"extension":true}'), {
+      ok: true,
+      findings: [],
+    });
   });
 });
 

@@ -81,6 +81,7 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
     paths: [".kit/shared/memory.jsonl"],
   },
   { pattern: ".kit-audit.jsonl", reason: "audit log can contain secret labels + paths" },
+  { pattern: ".kit-audit.jsonl.lock.sqlite*", reason: "local audit write coordination" },
   { pattern: ".kit-audit.pending", reason: "pending audit records" },
   { pattern: ".kit-skipped-commits.jsonl", reason: "local bypass records" },
   { pattern: "*.pem", reason: "PEM keys / certs", paths: ["server.pem"] },
@@ -96,7 +97,8 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
 ];
 
 function git(cwd: string, args: string[], input?: string): Promise<string> {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
+  // Keep Git's read warnings stable for the diagnostic check below.
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" };
   // Hooks can export an index or worktree belonging to the calling repository.
   for (const key of [
     "GIT_DIR",
@@ -109,11 +111,12 @@ function git(cwd: string, args: string[], input?: string): Promise<string> {
   ])
     delete env[key];
   return new Promise((resolveOutput, reject) => {
+    let inputError: NodeJS.ErrnoException | undefined;
     const child = execFile(
       "git",
       args,
       { cwd, env, timeout: 5_000, maxBuffer: 8 * 1024 * 1024 },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         if (
           error &&
           !(args[0] === "check-ignore" && error.code === 1 && !error.killed && !error.signal)
@@ -123,13 +126,29 @@ function git(cwd: string, args: string[], input?: string): Promise<string> {
               `Git ${args[0]} failed (${error.code ?? error.signal ?? "unknown error"}); ignore protection could not be verified`,
             ),
           );
+        } else if (inputError) {
+          reject(
+            new Error(
+              `Git ${args[0]} input failed (${inputError.code ?? "unknown error"}); ignore protection could not be verified`,
+            ),
+          );
+        } else if (/^warning: unable to access /m.test(stderr)) {
+          // Git can return 0 or 1 after it fails to read an ignore file.
+          reject(
+            new Error(
+              `Git ${args[0]} could not read ignore rules; ignore protection could not be verified`,
+            ),
+          );
         } else {
           resolveOutput(stdout);
         }
       },
     );
-    // A failed spawn can close stdin before the NUL-delimited paths are written.
-    child.stdin?.on("error", () => {});
+    // A closed pipe does not establish which paths Git evaluated.
+    // Settle after the child closes so the caller does not leave a process behind.
+    child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
+      inputError = error;
+    });
     child.stdin?.end(input);
   });
 }

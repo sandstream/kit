@@ -4,12 +4,13 @@
  * is gated, an agent working in the new worktree then ran ungated. These tests use real git
  * repositories and real linked worktrees.
  */
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   gateLiveness,
@@ -19,6 +20,32 @@ import {
 } from "./agent-config.js";
 import { ensureWorktreeGates } from "./worktree-gates.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { ensureKitWrapper } from "./kit-wrapper.js";
+
+let fixtureHome: string;
+let previousHome: string | undefined;
+let previousUserProfile: string | undefined;
+
+beforeEach(() => {
+  fixtureHome = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-wt-gates-home-")));
+  previousHome = process.env.HOME;
+  previousUserProfile = process.env.USERPROFILE;
+  process.env.HOME = fixtureHome;
+  process.env.USERPROFILE = fixtureHome;
+  const cliPath = fileURLToPath(
+    new URL(import.meta.url.endsWith(".ts") ? "../dist/cli.js" : "./cli.js", import.meta.url),
+  );
+  const wrapper = ensureKitWrapper({ home: fixtureHome, cliPath });
+  assert.equal(wrapper.action, "written");
+});
+
+afterEach(() => {
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
+  if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = previousUserProfile;
+  rmTemp(fixtureHome);
+});
 
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync("git", ["-C", cwd, ...args], {
