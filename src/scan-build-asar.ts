@@ -10,7 +10,7 @@
  * is often far over the 5 MiB text-file budget, so it is read in windows that overlap by more
  * than any credential shape is long.
  */
-import { open, stat } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import type { SecretFinding } from "./utils/redactSecrets.js";
 import { findArtifactSecrets } from "./scan-build-sourcemap.js";
 
@@ -32,12 +32,13 @@ export async function findAsarSecrets(
 ): Promise<SecretFinding[] | "too-large"> {
   const window = opts.window ?? WINDOW;
   const overlap = opts.overlap ?? OVERLAP;
-  const { size } = await stat(path);
-  if (size > MAX_ASAR_BYTES) return "too-large";
-  const seen = new Set<string>();
-  const findings: SecretFinding[] = [];
+  // One descriptor for both the size and the reads, so the file checked is the file read.
   const handle = await open(path, "r");
   try {
+    const { size } = await handle.stat();
+    if (size > MAX_ASAR_BYTES) return "too-large";
+    const seen = new Set<string>();
+    const findings: SecretFinding[] = [];
     const buffer = Buffer.alloc(window);
     for (let pos = 0; pos < size; pos += window - overlap) {
       const { bytesRead } = await handle.read(buffer, 0, window, pos);
@@ -51,8 +52,8 @@ export async function findAsarSecrets(
       }
       if (pos + bytesRead >= size) break;
     }
+    return findings;
   } finally {
     await handle.close();
   }
-  return findings;
 }

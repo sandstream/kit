@@ -91,14 +91,15 @@ function isBrowserVisibleNextArtifact(file: string): boolean {
 
 const MAX_DEPTH = 8;
 
-async function walk(
-  dir: string,
-  root: string,
-  out: string[],
-  issues: BuildScanIssue[],
-  skipped: Record<string, number>,
-  depth = 0,
-): Promise<void> {
+/** What one walk collects: files to scan, directories it could not finish, and types it skipped. */
+interface WalkSink {
+  out: string[];
+  issues: BuildScanIssue[];
+  skipped: Record<string, number>;
+}
+
+async function walk(dir: string, root: string, sink: WalkSink, depth = 0): Promise<void> {
+  const { out, issues, skipped } = sink;
   const rel = relative(root, dir).split(sep).join("/");
   if (depth > MAX_DEPTH) {
     issues.push({
@@ -118,7 +119,7 @@ async function walk(
     if (SKIP_DIRS.has(ent.name)) continue;
     const full = join(dir, ent.name);
     if (ent.isDirectory()) {
-      await walk(full, root, out, issues, skipped, depth + 1);
+      await walk(full, root, sink, depth + 1);
     } else if (ent.isFile()) {
       const ext = ent.name.includes(".") ? ent.name.slice(ent.name.lastIndexOf(".")) : "";
       if (!SCANNABLE_EXTS.has(ext) && !ent.name.startsWith(".env")) {
@@ -160,7 +161,7 @@ export async function scanBuildArtifacts(
     } catch {
       continue;
     }
-    await walk(full, cwd, files, incomplete, report.skipped);
+    await walk(full, cwd, { out: files, issues: incomplete, skipped: report.skipped });
   }
 
   const hits: BuildHit[] = [];
