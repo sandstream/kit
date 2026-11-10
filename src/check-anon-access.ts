@@ -13,8 +13,9 @@
 
 import { constants } from "node:fs";
 import { open, readdir } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { join, relative } from "node:path";
 
+import { loadPublicTables, type PublicTables } from "./anon-public-tables.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 export const ANON_ACCESS_CHECK = "anonymous database access";
@@ -514,31 +515,8 @@ export async function checkAnonAccess(root: string): Promise<SecurityCheckResult
   }
   const analysis = analyzeAnonAccess(sources);
   const count = `${sources.length} SQL file${sources.length === 1 ? "" : "s"}`;
-  const declared = await loadPublicTables(root);
+  const declared = await loadPublicTables(root, normTable);
   return withIncompleteNote(resultFor(analysis.readable, count, declared), analysis.incomplete);
-}
-
-/** `[anon_access.public]`: tables a repo serves to anon on purpose, each with a reason. */
-interface PublicTables {
-  reasons: Map<string, string>;
-  /** Declared tables with an empty reason. They are reported and not applied. */
-  noReason: string[];
-}
-
-async function loadPublicTables(root: string): Promise<PublicTables> {
-  const empty: PublicTables = { reasons: new Map(), noReason: [] };
-  let declared: Record<string, string> | undefined;
-  try {
-    const { loadConfig } = await import("./config.js");
-    declared = (await loadConfig(resolve(root, ".kit.toml"))).anon_access?.public;
-  } catch {
-    return empty; // no .kit.toml, or one that other checks already report
-  }
-  for (const [table, reason] of Object.entries(declared ?? {})) {
-    if (reason.trim()) empty.reasons.set(normTable(table), reason.trim());
-    else empty.noReason.push(table);
-  }
-  return empty;
 }
 
 const BASE = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
