@@ -1,7 +1,30 @@
 ## [Unreleased]
 
+## [7.4.0] - 2026-11-10
+
+A repo can now record two decisions that `kit check` used to warn about on every run: a copyleft
+package it accepts, and a database table that anon reads on purpose. Each needs a reason. No
+breaking change.
+
 ### Added
 
+- **`[licenses.allow]` accepts a copyleft package, with a reason (#789).** The license check warned on
+  every run for a package the repo had already reviewed, such as a dynamically linked LGPL binary.
+  An entry names a package, or a prefix that ends in `*`, with the exact license and a reason:
+  `"@img/sharp-libvips-*" = { license = "LGPL-3.0-or-later", reason = "dynamically linked optional binary of sharp" }`.
+  The entry applies only when the package reports exactly that license. An entry without a license
+  or a reason is not applied and keeps the check at warn. The check detail still lists accepted
+  packages.
+- **`[anon_access.public]` declares tables that anon reads on purpose (#791).** The anonymous database
+  access check warned on every run for tables a public page needs. A declared table without a
+  personal-looking column no longer counts toward the warning, and the detail lists it. A declared
+  table with a personal-looking column still fails. An entry with an empty reason is ignored.
+- **`kit audit secrets --target <platform>` answers "which of my keys did kit push there?".** After a
+  provider breach, it lists every key name kit recorded writing to that platform (propagate, sync,
+  rotate, migrate, onecli register), the keys whose every recorded write failed, and the names
+  `[deploy.<platform>]` declares with no recorded write. Names only, never values; `--json` for
+  scripts. Writes are recorded from this release on, so anything pushed earlier or by hand is not
+  listed, and the command says so.
 - **`kit triage gem <name>[@version]`.** kit had no gem triage. strutil-core 1.0.1 ran a
   credential-stealing worm from its native extension during `gem install`; it was public for about five
   hours. The new triage reads the RubyGems API's per-version publish times for the cooling period,
@@ -11,6 +34,16 @@
 
 ### Fixed
 
+- **A committed, in-sync lockfile makes `^` and `~` ranges count as pinned (#790).** `pinned versions`
+  warned on every range, also when the repo commits `package-lock.json` and installs with `npm ci`.
+  A tracked `npm-shrinkwrap.json` or `package-lock.json` whose root ranges equal `package.json` now
+  makes the ranges count as pinned, and the detail names the lockfile. An untracked lockfile, or one
+  out of sync with `package.json`, keeps the warning. `[scan] strict_pins = true` keeps the old
+  behavior.
+- **The code guardrails skip generated test-report folders (#788).** The three guardrail checks read
+  `playwright-report/` and similar folders, where bundled assets are over the 256 KiB limit, so each
+  check fell from pass to warn. `playwright-report`, `test-results`, `blob-report`,
+  `storybook-static` and `.turbo` are now skipped.
 - **`kit gha-audit`'s pwn-request check reads triggers and steps instead of two words.** It flagged any
   file containing both `pull_request_target` and `actions/checkout`. On six workflows it was wrong four
   times: it warned on a base-branch checkout and on a comment naming the trigger, and passed
@@ -29,12 +62,6 @@
 
 ### Added
 
-- **`kit audit secrets --target <platform>` answers "which of my keys did kit push there?".** After a
-  provider breach, it lists every key name kit recorded writing to that platform (propagate, sync,
-  rotate, migrate, onecli register), the keys whose every recorded write failed, and the names
-  `[deploy.<platform>]` declares with no recorded write. Names only, never values; `--json` for
-  scripts. Writes are recorded from this release on, so anything pushed earlier or by hand is not
-  listed, and the command says so.
 - **The user-level agent audit reads Codex too.** `kit agent-audit` now also reads Codex's global
   instructions (`AGENTS.override.md` and `AGENTS.md` in `$CODEX_HOME`, default `~/.codex`) and its
   user skills (`~/.agents/skills`, and `<codex home>/skills` where older versions put them), with the
