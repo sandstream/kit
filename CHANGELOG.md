@@ -20,6 +20,12 @@
 
 ### Added
 
+- **`kit audit secrets --target <platform>` answers "which of my keys did kit push there?".** After a
+  provider breach, it lists every key name kit recorded writing to that platform (propagate, sync,
+  rotate, migrate, onecli register), the keys whose every recorded write failed, and the names
+  `[deploy.<platform>]` declares with no recorded write. Names only, never values; `--json` for
+  scripts. Writes are recorded from this release on, so anything pushed earlier or by hand is not
+  listed, and the command says so.
 - **The user-level agent audit reads Codex too.** `kit agent-audit` now also reads Codex's global
   instructions (`AGENTS.override.md` and `AGENTS.md` in `$CODEX_HOME`, default `~/.codex`) and its
   user skills (`~/.agents/skills`, and `<codex home>/skills` where older versions put them), with the

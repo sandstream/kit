@@ -468,12 +468,17 @@ export interface kitConfig {
   projects?: ProjectsConfig;
   /** Install-time supply-chain triage settings (`kit supply-chain`). */
   supply_chain?: import("./triage-cooling.js").SupplyChainConfig;
+  /** `anonymous database access`: tables served to anon on purpose, table name -> reason.
+   *  A declaration never covers a table with a personal-looking column. */
+  anon_access?: { public?: Record<string, string> };
   /** `kit scan` / `kit check` scanner settings. `tooling` = an Infisical project to
    *  resolve scanner tokens (SNYK_TOKEN, …) from; `guarddog` = enable the local
    *  behavioral-malware scan in `kit check` (persistent alt to KIT_GUARDDOG=1). */
   scan?: {
     tooling?: { project_id?: string; env?: string };
     guarddog?: boolean;
+    /** `pinned versions`: count every range as unpinned, even with a committed lockfile. */
+    strict_pins?: boolean;
     /** `kit scan` delegate library toggle: an allow-list of scanner ids
      *  (snyk/trivy/grype/semgrep/osv-scanner/socket) to run. Absent/empty ⇒ all
      *  registered scanners on (backwards-compatible); `kit scan --list-delegates`
@@ -818,6 +823,7 @@ export const KNOWN_SECTIONS = new Set([
   "agent_config",
   "web",
   "setup",
+  "anon_access", // [anon_access.public] — tables anon may read on purpose, each with a reason
   "env",
   "context",
   "projects",
@@ -872,6 +878,10 @@ export const kitConfigSchema = z
     agent_config: AgentConfigSchema,
     context: ContextSchema,
     projects: ProjectsSchema.optional(),
+    anon_access: z
+      .object({ public: z.record(z.string(), z.string()).optional() })
+      .passthrough()
+      .optional(),
     supply_chain: z
       .object({ internal_scopes: z.array(z.string()).optional() })
       .passthrough()
@@ -883,6 +893,7 @@ export const kitConfigSchema = z
           .passthrough()
           .optional(),
         guarddog: z.boolean().optional(),
+        strict_pins: z.boolean().optional(),
         delegates: z.array(z.string()).optional(),
       })
       .passthrough()

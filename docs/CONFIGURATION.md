@@ -8,12 +8,13 @@ code in either direction.
 Everything below lives in `.kit.toml` at the project root. `kit config sections` prints the same
 list in the terminal, marking which ones this repo already declares.
 
-kit accepts **26 sections**.
+kit accepts **27 sections**.
 
 | Section | What it configures | Set up with |
 | --- | --- | --- |
 | [`[agent_config]`](#agent_config) | How `kit agent-config` generates the rules files agents read (CLAUDE.md, AGENTS.md, …). | `kit agent-config` |
 | [`[air_gap]`](#air_gap) | No-egress posture: mirrors, offline threat data, and offline provenance verification. | [docs](AIR_GAP.md) |
+| [`[anon_access]`](#anon_access) | Database tables that the public anon role may read on purpose, each with a reason. | `kit check --category security` |
 | [`[browser]`](#browser) | Browser-verification capability declaration. | `kit browser` |
 | [`[context]`](#context) | The account and project each CLI must be pointed at, per tool. | `kit context check` |
 | [`[coverage]`](#coverage) | Which standards the evidence map scores against. | `kit coverage --list-standards` |
@@ -26,7 +27,7 @@ kit accepts **26 sections**.
 | [`[memory]`](#memory) | Memory capture and PAL behaviour, including this project's sensitivity class. | `kit memory` |
 | [`[policy]`](#policy) | Which vendor writes an agent may perform, pre-approved by operation. | `kit governance` |
 | [`[projects]`](#projects) | The project directories of a repository that holds several projects. | `kit check` |
-| [`[scan]`](#scan) | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]) and the client-exposed env allowlist. | `kit scan --list-delegates` |
+| [`[scan]`](#scan) | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]), the client-exposed env allowlist, and strict_pins. | `kit scan --list-delegates` |
 | [`[secrets]`](#secrets) | Which vault backs this project's secrets, and the key names it needs. | `kit secrets` |
 | [`[services]`](#services) | External CLIs this project authenticates against, with the login and check command for each. | `kit login` |
 | [`[setup]`](#setup) | Project bootstrap commands — install dependencies, migrate, verify. | `kit bootstrap` |
@@ -65,6 +66,20 @@ npm_registry = "https://npm.internal"
 ```
 
 Fuller treatment: [`docs/AIR_GAP.md`](AIR_GAP.md).
+
+## anon_access
+
+Database tables that the public anon role may read on purpose, each with a reason.
+
+**What it buys.** A table that a public page needs, such as a list of markets or active products, stops the anonymous database access check from warning on every run, and the reason stays next to it. A declaration applies only to a table without a personal-looking column; a table with one still fails. An entry with an empty reason is ignored and keeps the check at warn. Declared tables are listed in the check detail.
+
+```toml
+[anon_access.public]
+markets = "country list for the public order page"
+products = "active products shown in the kiosk"
+```
+
+Set up with `kit check --category security`.
 
 ## browser
 
@@ -234,9 +249,9 @@ Set up with `kit check`.
 
 ## scan
 
-Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]) and the client-exposed env allowlist.
+Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]), the client-exposed env allowlist, and strict_pins.
 
-**What it buys.** The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically. An entry in [[scan.allow]] silences one finding label in one file for kit security scan-staged. Kit reads it from the staged or committed .kit.toml, never the working copy, so review sees it. It needs a reason, a directory or a pattern is refused, the output names the entry that applied, and an entry that matches nothing is reported as stale.
+**What it buys.** The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically. An entry in [[scan.allow]] silences one finding label in one file for kit security scan-staged. Kit reads it from the staged or committed .kit.toml, never the working copy, so review sees it. It needs a reason, a directory or a pattern is refused, the output names the entry that applied, and an entry that matches nothing is reported as stale. The pinned-versions check treats package.json ranges as pinned when a committed npm lockfile matches package.json; strict_pins = true turns that off and warns on every range.
 
 ```toml
 [scan]
