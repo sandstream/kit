@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit triage gem <name>[@version]`.** kit had no gem triage. strutil-core 1.0.1 ran a
+  credential-stealing worm from its native extension during `gem install`; it was public for about five
+  hours. The new triage reads the RubyGems API's per-version publish times for the cooling period,
+  fails on an OSV malicious-package record (also once the registry has removed the gem), and warns on a
+  new gem or very few downloads. It reads no gem code and says so. The bash gate does not route
+  `gem install` through it yet; that is a change to the protected install gate.
+
 ### Fixed
 
 - **The audit lock's wait can be raised on a slow disk.** A writer waited 5 seconds for the audit lock

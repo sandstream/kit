@@ -172,6 +172,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Latest versions and release notes of the services this project uses (npm + GitHub releases), compared with the installed version: what upgrade is due",
   "triage npm": "Evaluate npm package: registry + GitHub health",
   "triage pip": "PyPI evaluation",
+  "triage gem": "RubyGems release: OSV malicious records, cooling, age; install-time code not read",
   "triage docker": "Docker image: CVE + sandbox",
   "triage repo": "GitHub repo evaluation",
   "triage skill": "Claude Code / agent skill evaluation",

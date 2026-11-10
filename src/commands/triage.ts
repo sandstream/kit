@@ -33,6 +33,7 @@ const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> =
   instructions: async (args) =>
     (await import("./triage-instructions.js")).cmdTriageInstructions(args),
   pkg: async (args) => (await import("./triage-pkg.js")).cmdTriagePkg(args),
+  gem: async (args) => (await import("./triage-gem.js")).cmdTriageGem(args),
 };
 
 function triageSubcommand(
@@ -40,6 +41,12 @@ function triageSubcommand(
 ): ((args: string[]) => Promise<boolean>) | undefined {
   return name && Object.hasOwn(TRIAGE_SUBCOMMANDS, name) ? TRIAGE_SUBCOMMANDS[name] : undefined;
 }
+
+/** Two help rows as one string, so the help block in `cmdTriage` does not grow. */
+const PIP_AND_GEM_HELP = [
+  "  kit triage pip <package>             Evaluate PyPI package",
+  "  kit triage gem <name>[@version]      Evaluate a RubyGems release (cooling, OSV malicious, history); install-time code not read",
+].join("\n");
 
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
@@ -68,7 +75,7 @@ export async function cmdTriage(): Promise<boolean> {
     console.log(
       "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
     );
-    console.log("  kit triage pip <package>             Evaluate PyPI package");
+    console.log(PIP_AND_GEM_HELP);
     console.log(
       "  kit triage brew <formula>            Evaluate Homebrew formula (resolves upstream repo, then repo-scores)",
     );
