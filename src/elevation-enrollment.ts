@@ -70,19 +70,44 @@ export async function enrollTotp(opts: {
   };
 }
 
+/** The TOTP file exists but cannot serve as a second factor. Elevation must stop. */
+export class TotpSecretUnusableError extends Error {
+  readonly filePath: string;
+  constructor(filePath: string, reason: string, options?: { cause?: unknown }) {
+    super(
+      `TOTP secret at ${filePath} is enrolled but unusable (${reason}). ` +
+        `Elevation is refused so a broken file cannot remove the second factor. ` +
+        `Repair the file, or run \`kit auth setup-totp --overwrite\` to enroll a new secret.`,
+      options,
+    );
+    this.name = "TotpSecretUnusableError";
+    this.filePath = filePath;
+  }
+}
+
 /**
  * Resolves the TOTP secret in priority order:
  *   1. `KIT_TOTP_SECRET` env var (overrides everything; useful for CI)
  *   2. `~/.kit/totp-secret` file (created by `kit auth setup-totp`)
- *   3. undefined. caller falls back to yes-prompt
+ *   3. undefined, only when no file exists (not enrolled). The caller then falls
+ *      back to the yes-prompt.
+ *
+ * A file that exists but is unreadable, empty, whitespace-only or a directory throws
+ * `TotpSecretUnusableError`. It is not the same as "not enrolled".
  */
 export async function resolveTotpSecret(): Promise<string | undefined> {
   if (process.env.KIT_TOTP_SECRET) return process.env.KIT_TOTP_SECRET;
+  const filePath = totpFilePath();
+  const { readFile } = await import("node:fs/promises");
+  let content: string;
   try {
-    const { readFile } = await import("node:fs/promises");
-    const content = await readFile(totpFilePath(), "utf-8");
-    return content.trim() || undefined;
-  } catch {
-    return undefined;
+    content = await readFile(filePath, "utf-8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    const code = error instanceof Error && "code" in error ? String(error.code) : "read failed";
+    throw new TotpSecretUnusableError(filePath, code, { cause: error });
   }
+  const secret = content.trim();
+  if (!secret) throw new TotpSecretUnusableError(filePath, "the file is empty");
+  return secret;
 }

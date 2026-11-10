@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+### Security
+
+- **`kit auth elevate` refuses when the TOTP file is enrolled but unusable.** A `~/.kit/totp-secret`
+  that is unreadable, empty, whitespace-only or a directory used to look like "not enrolled", so
+  elevation fell back to the YES prompt and a broken file removed the second factor. Only a missing
+  file (`ENOENT`) now gives the YES prompt. Any other case stops with a message that names the file.
+  Recovery: repair the file, or run `kit auth setup-totp --overwrite` to enroll a new secret.
+
 ## [7.4.0] - 2026-11-10
 
 A repo can now record two decisions that `kit check` used to warn about on every run: a copyleft

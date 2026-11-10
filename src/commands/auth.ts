@@ -8,6 +8,7 @@ import {
   verifyTotp,
   enrollTotp,
   resolveTotpSecret,
+  TotpSecretUnusableError,
 } from "../elevation.js";
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
@@ -174,7 +175,14 @@ async function cmdAuthElevate(): Promise<boolean> {
 
   // Resolve from env first, then ~/.kit/totp-secret (created by
   // `kit auth setup-totp`).
-  const totpSecret = await resolveTotpSecret();
+  let totpSecret: string | undefined;
+  try {
+    totpSecret = await resolveTotpSecret();
+  } catch (error) {
+    if (!(error instanceof TotpSecretUnusableError)) throw error;
+    console.error(`${c.red}✗ ${sanitizeDisplayText(error.message)}${c.reset}\n`);
+    return false;
+  }
   let method: "yes-prompt" | "totp" = "yes-prompt";
 
   if (totpSecret) {
