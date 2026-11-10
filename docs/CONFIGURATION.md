@@ -8,7 +8,7 @@ code in either direction.
 Everything below lives in `.kit.toml` at the project root. `kit config sections` prints the same
 list in the terminal, marking which ones this repo already declares.
 
-kit accepts **27 sections**.
+kit accepts **28 sections**.
 
 | Section | What it configures | Set up with |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ kit accepts **27 sections**.
 | [`[env]`](#env) | Per-environment overrides of any section above. | — |
 | [`[governance]`](#governance) | Whether agent operations are audited, under which environment, and the access/approval rules around them. | `kit governance` |
 | [`[hooks]`](#hooks) | Git hooks kit installs, and the commands each one runs. | `kit hooks add secret-scan` |
+| [`[licenses]`](#licenses) | Copyleft packages this repo accepts in the license check, each with the exact license and a reason. | `kit check --category security` |
 | [`[mcp]`](#mcp) | Declared MCP-server connections for this project. | [docs](MCP_TOOLS_GUIDE.md) |
 | [`[memory]`](#memory) | Memory capture and PAL behaviour, including this project's sensitivity class. | `kit memory` |
 | [`[policy]`](#policy) | Which vendor writes an agent may perform, pre-approved by operation. | `kit governance` |
@@ -192,6 +193,19 @@ pre-commit = ["kit security scan-staged"]
 ```
 
 Set up with `kit hooks add secret-scan`.
+
+## licenses
+
+Copyleft packages this repo accepts in the license check, each with the exact license and a reason.
+
+**What it buys.** A reviewed decision, such as a dynamically linked LGPL binary, stops the license check from warning on every run, and the reason stays next to it. A key is a package name or a prefix ending in *. The entry applies only when the package reports exactly that license. An entry without a license or a reason is ignored and keeps the check at warn. Accepted packages are still listed in the check detail.
+
+```toml
+[licenses.allow]
+"@img/sharp-libvips-*" = { license = "LGPL-3.0-or-later", reason = "dynamically linked optional binary of sharp" }
+```
+
+Set up with `kit check --category security`.
 
 ## mcp
 

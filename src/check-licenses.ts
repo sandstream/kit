@@ -50,27 +50,112 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function scanVerdict(result: ExecResult): SecurityCheckResult {
+/** One `[licenses.allow]` entry that has both a license and a reason. */
+interface AllowRule {
+  pattern: string;
+  license: string;
+}
+
+interface Allowlist {
+  rules: AllowRule[];
+  /** Entries that miss a license or a reason. They are reported, never applied. */
+  invalid: string[];
+}
+
+const NO_ALLOWLIST: Allowlist = { rules: [], invalid: [] };
+
+async function loadAllowlist(root: string): Promise<Allowlist> {
+  let allow: Record<string, { license?: string; reason?: string }> | undefined;
+  try {
+    const { loadConfig } = await import("./config.js");
+    allow = (await loadConfig(resolve(root, ".kit.toml"))).licenses?.allow;
+  } catch {
+    return NO_ALLOWLIST; // no .kit.toml, or one that other checks already report
+  }
+  if (!allow) return NO_ALLOWLIST;
+  const rules: AllowRule[] = [];
+  const invalid: string[] = [];
+  for (const [pattern, entry] of Object.entries(allow)) {
+    const license = entry.license?.trim();
+    if (license && entry.reason?.trim()) rules.push({ pattern, license });
+    else invalid.push(pattern);
+  }
+  return { rules, invalid };
+}
+
+/** Package name from a license-checker key such as `@scope/name@1.2.3`. */
+function packageName(key: string): string {
+  const at = key.lastIndexOf("@");
+  return at > 0 ? key.slice(0, at) : key;
+}
+
+function isAllowed(key: string, license: string, rules: AllowRule[]): boolean {
+  const name = packageName(key);
+  return rules.some(
+    (rule) =>
+      rule.license === license &&
+      (rule.pattern.endsWith("*")
+        ? name.startsWith(rule.pattern.slice(0, -1))
+        : name === rule.pattern),
+  );
+}
+
+function listed(items: string[]): string {
+  const remainder = items.length > 3 ? ` +${items.length - 3} more` : "";
+  return `${items.slice(0, 3).join(", ")}${remainder}`;
+}
+
+/** Split copyleft packages into accepted ones and violations. Throws on a malformed entry. */
+function classify(
+  packages: Record<string, unknown>,
+  rules: AllowRule[],
+): { violations: string[]; accepted: string[] } {
+  const violations: string[] = [];
+  const accepted: string[] = [];
+  for (const [pkg, info] of Object.entries(packages)) {
+    if (!isRecord(info) || (info.licenses !== undefined && typeof info.licenses !== "string")) {
+      throw new Error("invalid license entry");
+    }
+    const license = info.licenses ?? "";
+    if (!PROBLEMATIC_LICENSES.some((name) => license.toUpperCase().includes(name))) continue;
+    if (isAllowed(pkg, license, rules)) accepted.push(pkg);
+    else violations.push(`${pkg} (${license})`);
+  }
+  return { violations, accepted };
+}
+
+function scanVerdict(result: ExecResult, allowlist: Allowlist): SecurityCheckResult {
   try {
     const packages: unknown = JSON.parse(result.stdout);
     if (!isRecord(packages)) return failure(result, true);
-    const violations = Object.entries(packages).flatMap(([pkg, info]) => {
-      if (!isRecord(info) || (info.licenses !== undefined && typeof info.licenses !== "string")) {
-        throw new Error("invalid license entry");
-      }
-      const license = info.licenses ?? "";
-      const problematic = PROBLEMATIC_LICENSES.some((name) => license.toUpperCase().includes(name));
-      return problematic ? [`${pkg} (${license})`] : [];
-    });
-    if (violations.length === 0) {
-      return { ...BASE, status: "pass", detail: "no problematic licenses found" };
+    const { violations, accepted } = classify(packages, allowlist.rules);
+    const notes: string[] = [];
+    if (accepted.length) notes.push(`${accepted.length} accepted: ${listed(accepted)}`);
+    if (allowlist.invalid.length) {
+      notes.push(
+        `ignored [licenses.allow] entries with no reason or license: ${listed(allowlist.invalid)}`,
+      );
     }
-    const remainder = violations.length > 3 ? ` +${violations.length - 3} more` : "";
+    const suffix = notes.length ? ` (${notes.join("; ")})` : "";
+    if (violations.length === 0 && allowlist.invalid.length === 0) {
+      return { ...BASE, status: "pass", detail: `no problematic licenses found${suffix}` };
+    }
+    if (violations.length === 0) {
+      return {
+        ...BASE,
+        status: "warn",
+        detail: `no problematic licenses found${suffix}`,
+        severity: "low",
+        suggestion: "Give each [licenses.allow] entry in .kit.toml both a license and a reason.",
+      };
+    }
     return {
       ...BASE,
       status: "warn",
-      detail: `${violations.length} copyleft license(s): ${violations.slice(0, 3).join(", ")}${remainder}`,
+      detail: `${violations.length} copyleft license(s): ${listed(violations)}${suffix}`,
       severity: "medium",
+      suggestion:
+        'If the use is acceptable, add it under [licenses.allow] in .kit.toml: "<package or prefix*>" = { license = "<exact license>", reason = "<why>" }.',
     };
   } catch {
     return failure(result, true);
@@ -93,5 +178,5 @@ export async function checkLicenses(
     timeout: 120_000,
     cwd: root,
   });
-  return result.ok ? scanVerdict(result) : failure(result);
+  return result.ok ? scanVerdict(result, await loadAllowlist(root)) : failure(result);
 }

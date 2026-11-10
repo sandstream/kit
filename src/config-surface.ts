@@ -123,6 +123,14 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
     example: '[projects]\npaths = ["backend", "frontend", "infra/prod", "docker"]',
     command: "kit check",
   },
+  licenses: {
+    purpose:
+      "Copyleft packages this repo accepts in the license check, each with the exact license and a reason.",
+    buys: "A reviewed decision, such as a dynamically linked LGPL binary, stops the license check from warning on every run, and the reason stays next to it. A key is a package name or a prefix ending in *. The entry applies only when the package reports exactly that license. An entry without a license or a reason is ignored and keeps the check at warn. Accepted packages are still listed in the check detail.",
+    example:
+      '[licenses.allow]\n"@img/sharp-libvips-*" = { license = "LGPL-3.0-or-later", reason = "dynamically linked optional binary of sharp" }',
+    command: "kit check --category security",
+  },
   anon_access: {
     purpose: "Database tables that the public anon role may read on purpose, each with a reason.",
     buys: "A table that a public page needs, such as a list of markets or active products, stops the anonymous database access check from warning on every run, and the reason stays next to it. A declaration applies only to a table without a personal-looking column; a table with one still fails. An entry with an empty reason is ignored and keeps the check at warn. Declared tables are listed in the check detail.",

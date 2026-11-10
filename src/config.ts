@@ -468,6 +468,12 @@ export interface kitConfig {
   projects?: ProjectsConfig;
   /** Install-time supply-chain triage settings (`kit supply-chain`). */
   supply_chain?: import("./triage-cooling.js").SupplyChainConfig;
+  /** `kit check` license check: packages this repo accepts despite a copyleft license.
+   *  Key = package name, or a prefix ending in `*`. Each entry needs the exact license
+   *  and a reason; an entry without both is reported, not applied. */
+  licenses?: {
+    allow?: Record<string, { license?: string; reason?: string }>;
+  };
   /** `anonymous database access`: tables served to anon on purpose, table name -> reason.
    *  A declaration never covers a table with a personal-looking column. */
   anon_access?: { public?: Record<string, string> };
@@ -823,6 +829,7 @@ export const KNOWN_SECTIONS = new Set([
   "agent_config",
   "web",
   "setup",
+  "licenses", // [licenses.allow] — accepted copyleft packages, each with a reason
   "anon_access", // [anon_access.public] — tables anon may read on purpose, each with a reason
   "env",
   "context",
@@ -878,6 +885,19 @@ export const kitConfigSchema = z
     agent_config: AgentConfigSchema,
     context: ContextSchema,
     projects: ProjectsSchema.optional(),
+    licenses: z
+      .object({
+        allow: z
+          .record(
+            z.string(),
+            z
+              .object({ license: z.string().optional(), reason: z.string().optional() })
+              .passthrough(),
+          )
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
     anon_access: z
       .object({ public: z.record(z.string(), z.string()).optional() })
       .passthrough()

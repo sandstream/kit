@@ -89,3 +89,64 @@ it("reports a real child process error after its warning and redacts its credent
     rmTemp(root);
   }
 });
+
+const LGPL_REPORT = JSON.stringify({
+  "@img/sharp-libvips-darwin-arm64@1.3.4": { licenses: "LGPL-3.0-or-later" },
+  "left-pad@1.3.0": { licenses: "MIT" },
+});
+
+async function licenseResult(kitToml: string | null, report = LGPL_REPORT) {
+  const root = mkdtempSync(join(tmpdir(), "kit-license-allow-"));
+  try {
+    writeFileSync(join(root, "package.json"), "{}");
+    if (kitToml !== null) writeFileSync(join(root, ".kit.toml"), kitToml);
+    return await checkLicenses(root, {
+      resolveToolBin: async () => "scanner",
+      execFileNoThrow: async () => ({ ok: true, exitCode: 0, stderr: "", stdout: report }),
+    });
+  } finally {
+    rmTemp(root);
+  }
+}
+
+it("accepts a copyleft package that the repo allowlists with a reason", async () => {
+  const result = await licenseResult(
+    '[licenses.allow]\n"@img/sharp-libvips-*" = { license = "LGPL-3.0-or-later", reason = "dynamically linked optional binary of sharp" }\n',
+  );
+  assert.equal(result.status, "pass");
+  assert.match(result.detail, /1 accepted/);
+  assert.match(result.detail, /@img\/sharp-libvips-darwin-arm64@1\.3\.4/);
+});
+
+it("still warns when the allowlisted package reports a different license", async () => {
+  const result = await licenseResult(
+    '[licenses.allow]\n"@img/sharp-libvips-*" = { license = "LGPL-2.1", reason = "dynamically linked" }\n',
+  );
+  assert.equal(result.status, "warn");
+  assert.match(result.detail, /1 copyleft license/);
+});
+
+it("rejects an allowlist entry without a reason and keeps the warning", async () => {
+  const result = await licenseResult(
+    '[licenses.allow]\n"@img/sharp-libvips-*" = { license = "LGPL-3.0-or-later" }\n',
+  );
+  assert.equal(result.status, "warn");
+  assert.match(result.detail, /no reason/);
+  assert.match(result.detail, /@img\/sharp-libvips-\*/);
+});
+
+it("matches an exact package name without a wildcard, and not a longer name", async () => {
+  const exact = await licenseResult(
+    '[licenses.allow]\n"@img/sharp-libvips-darwin-arm64" = { license = "LGPL-3.0-or-later", reason = "dynamic" }\n',
+  );
+  assert.equal(exact.status, "pass");
+  const prefixOnly = await licenseResult(
+    '[licenses.allow]\n"@img/sharp-libvips" = { license = "LGPL-3.0-or-later", reason = "dynamic" }\n',
+  );
+  assert.equal(prefixOnly.status, "warn");
+});
+
+it("keeps today's verdict when the repo has no .kit.toml", async () => {
+  const result = await licenseResult(null);
+  assert.equal(result.status, "warn");
+});
