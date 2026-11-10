@@ -103,6 +103,12 @@ it("refuses direct file operations and audits each refusal", async () => {
       "review-recovery-pending",
       "review-interruption-assessment",
     ]);
+    // The last append can still hold its transaction open: SQLite keeps a journal beside the
+    // coordination file until it commits. Wait for that transient file before the inventory.
+    const journal = join(root, ".kit-audit.jsonl.lock.sqlite-journal");
+    for (let attempt = 0; attempt < 250 && existsSync(journal); attempt++) {
+      await new Promise((done) => setTimeout(done, 20));
+    }
     // Expected: refusal evidence requires the audit log and its persistent coordination file.
     assert.deepEqual(readdirSync(root).sort(), [
       ".kit-audit.jsonl",

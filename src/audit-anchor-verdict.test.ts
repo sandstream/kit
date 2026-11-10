@@ -178,12 +178,16 @@ describe("audit anchor - external command transport", () => {
       commandExternalAnchor("exit 7").anchor({ tip: "a", count: 1, logPath: "/x" }),
       /failed/,
     );
+    // A command that exits before it reads the request is refused as a stdin failure on Linux
+    // (`echo` loses that race), so these commands consume the request before they answer.
+    const answers = (text: string) =>
+      `"${process.execPath}" -e "process.stdin.resume();process.stdin.on('end',()=>process.stdout.write('${text}'))"`;
     await assert.rejects(
-      commandExternalAnchor("echo not-json").anchor({ tip: "a", count: 1, logPath: "/x" }),
+      commandExternalAnchor(answers("not-json")).anchor({ tip: "a", count: 1, logPath: "/x" }),
       /valid JSON receipt/,
     );
     await assert.rejects(
-      commandExternalAnchor("echo {}").anchor({ tip: "a", count: 1, logPath: "/x" }),
+      commandExternalAnchor(answers("{}")).anchor({ tip: "a", count: 1, logPath: "/x" }),
       /token/,
     );
   });

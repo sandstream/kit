@@ -65,8 +65,10 @@ function fixtureEnvironment(root: string, compiler: string): NodeJS.ProcessEnv {
     XDG_DATA_HOME: join(home, "data"),
     XDG_CACHE_HOME: join(home, "cache"),
   };
-  // The request is the last two arguments: a script file shifts them by one, a preload does not.
-  const body = `if (process.argv.slice(-2).join(" ") !== "which tsc") process.exit(1);
+  // The request is the last two arguments. Under a preload Node has already resolved the
+  // first one ("which") against the working directory, so only its last segment is compared.
+  const body = `const [verb, tool] = process.argv.slice(-2);
+if (require("node:path").basename(verb) !== "which" || tool !== "tsc") process.exit(1);
 process.stdout.write(${JSON.stringify(compiler)});`;
   if (process.platform === "win32") {
     copyFileSync(process.execPath, join(bin, "mise.exe"));

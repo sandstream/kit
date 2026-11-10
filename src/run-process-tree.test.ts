@@ -108,7 +108,20 @@ async function cleanupTreeFixture(
     assert.ok(await within(pending, 2500), "runner did not settle after fixture cleanup");
     for (const path of [tree.leafPid, tree.rootPid]) await assertRecordedProcessStopped(path);
   } finally {
-    fixture.cleanup();
+    await removeTreeFixture(fixture);
+  }
+}
+
+/** Windows releases a stopped process's working directory late; removal is tried again. */
+async function removeTreeFixture(fixture: RuntimeFixture): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fixture.cleanup();
+      return;
+    } catch (error) {
+      if (attempt >= 5 || (error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
+      await delay(1000);
+    }
   }
 }
 
