@@ -1371,7 +1371,7 @@
         "kit-js-ccn/v1:src/run.ts:function:(anonymous)<ad95d8ee1a12>#0|ccn=5|length=102",
         "kit-js-ccn/v1:src/run.ts:function:executeCommand#0|ccn=7|length=120",
         "kit-js-ccn/v1:src/scan-build-sourcemap.ts:function:findArtifactSecrets#0|ccn=18|length=57",
-        "kit-js-ccn/v1:src/scan-build.ts:function:scanBuildArtifacts#0|ccn=16|length=54",
+        "kit-js-ccn/v1:src/scan-build.ts:function:scanBuildArtifacts#0|ccn=18|length=59",
         "kit-js-ccn/v1:src/scan-diff.ts:function:classifyChange#0|ccn=21|length=22",
         "kit-js-ccn/v1:src/scan-diff.ts:function:describe#0|ccn=17|length=27",
         "kit-js-ccn/v1:src/scan-diff.ts:function:incompleteDescription#0|ccn=22|length=20",
