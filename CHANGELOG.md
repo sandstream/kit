@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Fixed
+
+- **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
+  prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
+  environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
+  notice) and the inline codes in `kit login` now share one rule.
+
 ## [7.4.0] - 2026-11-10
 
 A repo can now record two decisions that `kit check` used to warn about on every run: a copyleft
