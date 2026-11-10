@@ -587,14 +587,27 @@ async function cmdSecurityCosts(): Promise<boolean> {
   return allOk;
 }
 
+/** The base ref verify-pull audits from, and the header (with the fallback note when there is one). */
+async function verifyPullBase(
+  args: string[],
+  head: string,
+): Promise<{ base: string; header: string }> {
+  const named = flagValue(args, "--base");
+  const { base, fallback } = named
+    ? { base: named, fallback: false }
+    : await defaultPullBase(process.cwd());
+  let header = `${c.bold}${c.cyan}kit security verify-pull${c.reset}  ${c.dim}(${base} → ${head})${c.reset}`;
+  if (fallback)
+    header += `\n${c.dim}No usable ORIG_HEAD (set by git pull / merge), so only the last commit is audited. Name the pre-pull commit with --base to audit the whole pull.${c.reset}`;
+  return { base, header };
+}
+
 async function cmdSecurityVerifyPull(): Promise<boolean> {
   // kit security verify-pull [--base <ref>] [--head <ref>] [--json]
   const args = process.argv.slice(4);
-  const named = flagValue(args, "--base");
-  const resolved = named ? { base: named, fallback: false } : await defaultPullBase(process.cwd());
-  const base = resolved.base;
   const head = flagValue(args, "--head") ?? "HEAD";
   const jsonMode = hasFlag(args, "--json");
+  const { base, header } = await verifyPullBase(args, head);
 
   const report = await auditPull(process.cwd(), base, head);
   const severity = reportSeverity(report);
@@ -604,13 +617,7 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
     return severity !== "fail";
   }
 
-  console.log(
-    `${c.bold}${c.cyan}kit security verify-pull${c.reset}  ${c.dim}(${base} → ${head})${c.reset}`,
-  );
-  if (resolved.fallback)
-    console.log(
-      `${c.dim}No usable ORIG_HEAD (set by git pull / merge), so only the last commit is audited. Name the pre-pull commit with --base to audit the whole pull.${c.reset}`,
-    );
+  console.log(header);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   if (report.changedFiles.length === 0) {
