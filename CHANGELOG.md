@@ -11,6 +11,10 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+- **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
+  prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
+  environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
+  notice) and the inline codes in `kit login` now share one rule.
 
 ## [7.4.0] - 2026-11-10
 
