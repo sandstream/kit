@@ -93,11 +93,26 @@ async function acquireTransaction(database: DatabaseSync, deadline: number): Pro
   }
 }
 
-function commitTransaction(database: DatabaseSync): void {
-  try {
-    database.exec("COMMIT");
-  } catch {
-    throw new Error(LOCK_ERROR);
+const COMMIT_ATTEMPTS = 100;
+
+/**
+ * Release the lock. SQLite initializes a new database inside its first write transaction, so
+ * that COMMIT needs an exclusive lock, and a contender between its shared and reserved lock
+ * refuses it with SQLITE_BUSY. The transaction stays open and still excludes every other writer,
+ * so the commit is tried again for about two seconds before it fails.
+ */
+async function commitTransaction(database: DatabaseSync): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      database.exec("COMMIT");
+      return;
+    } catch (error) {
+      if (attempt >= COMMIT_ATTEMPTS || !isLockError(error)) {
+        // eslint-disable-next-line preserve-caught-error -- SQLite diagnostics can expose paths.
+        throw new Error(LOCK_ERROR);
+      }
+    }
+    await delay(20);
   }
 }
 
@@ -159,7 +174,7 @@ export async function withBudgetLock<T>(cwd: string, operation: () => Promise<T>
       throw new Error(LOCK_ERROR);
     }
     const value = await operation();
-    commitTransaction(database);
+    await commitTransaction(database);
     committed = true;
     return value;
   } finally {

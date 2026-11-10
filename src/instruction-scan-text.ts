@@ -23,14 +23,10 @@ const CONCEAL = new RegExp(
   "i",
 );
 
-function finding(
-  file: string,
-  line: number,
-  rule: InstructionRule,
-  raw: string,
-): InstructionFinding {
+/** The display form of a source line. It is the costly part of a finding: three secret passes. */
+function excerptOf(raw: string): string {
   const clean = sanitizeInstructionDisplay(raw);
-  return { file, line, rule, excerpt: clean.length > 160 ? `${clean.slice(0, 157)}...` : clean };
+  return clean.length > 160 ? `${clean.slice(0, 157)}...` : clean;
 }
 
 /**
@@ -88,7 +84,12 @@ export function* instructionFindings(file: string, text: string): Generator<Inst
       .filter((f) => f.confidence === "high")
       .map((f) => f.label);
     for (const label of labels) represented.add(label);
-    for (const rule of lineRules(raw, labels)) yield finding(file, line, rule, raw);
+    // One line can match several rules. Its excerpt is the same for each, so build it once.
+    let excerpt: string | undefined;
+    for (const rule of lineRules(raw, labels)) {
+      excerpt ??= excerptOf(raw);
+      yield { file, line, rule, excerpt };
+    }
     if (newline < 0) break;
     start = newline + 1;
   }
@@ -97,7 +98,7 @@ export function* instructionFindings(file: string, text: string): Generator<Inst
     if (f.confidence !== "high" || represented.has(f.label)) continue;
     const index = multilineStart(text, starts, f.label);
     const raw = text.slice(starts[index], starts[index + 1] ?? text.length).replace(/\r?\n$/, "");
-    yield finding(file, index + 1, `injection:${f.label}`, raw);
+    yield { file, line: index + 1, rule: `injection:${f.label}`, excerpt: excerptOf(raw) };
   }
 }
 
