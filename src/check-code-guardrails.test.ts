@@ -161,3 +161,23 @@ it("does not report a pass when a candidate source file cannot be scanned", asyn
   );
   assert.ok(results.every((row) => row.didNotRun === true));
 });
+
+it("skips generated test-report trees instead of warning that they were not scanned", async (t) => {
+  const f = fixture(t);
+  for (const dir of [
+    "playwright-report",
+    "test-results",
+    "blob-report",
+    "storybook-static",
+    ".turbo",
+  ]) {
+    f.put(`${dir}/trace/assets/bundle.js`, "x".repeat(256 * 1024 + 1));
+  }
+  f.put("src/app.ts", "export const ok = true;\n");
+  const results = await checkCodeGuardrails(f.root);
+  assert.deepEqual(
+    results.map((row) => row.status),
+    ["pass", "pass", "pass"],
+  );
+  assert.ok(results.every((row) => row.didNotRun !== true));
+});
