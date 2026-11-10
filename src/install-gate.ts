@@ -23,6 +23,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
 import { claudePluginInstall, ownerRepoArg } from "./install-gate-repos.js";
+import { binBase, hiddenVerb, PREFIX_BINS, skipWrapperArgs } from "./install-gate-flags.js";
 
 export { ownerRepoArg };
 
@@ -155,111 +156,6 @@ function dequote(tok: string): string {
     .replace(/['"]/g, "")
     .replace(/\x00D/g, '"')
     .replace(/\x00S/g, "'");
-}
-
-/**
- * The command NAME as the shell would resolve it for matching: drop a leading `\`
- * (the standard alias-bypass, `\npm` runs the real npm) and take the basename
- * (`/usr/bin/npm`, `./node_modules/.bin/pnpm` → `npm`/`pnpm`). Without this the exact
- * `t[0] === "npm"` matchers were defeated by any absolute/relative path or `\` escape.
- */
-function binBase(tok: string): string {
-  const noEsc = tok.replace(/^\\+/, "");
-  const base = noEsc.split("/").pop();
-  const resolved = base && base.length > 0 ? base : noEsc;
-  // Strip a trailing `@version` — corepack's `pnpm@9` / `yarn@1.22.19` dispatch syntax leaves
-  // that as argv0 after the wrapper is stripped, so `t[0] === "pnpm"` never matched. Only bin
-  // names flow through binBase (never package args), so a scoped/versioned package like
-  // `@scope/pkg@1` is unaffected.
-  return resolved.replace(/@.+$/, "");
-}
-
-/**
- * Wrapper binaries that prefix a real command without changing what it is
- * (`env FOO=bar npm i x`, `sudo npm i x`). We strip a leading run of these plus
- * any `VAR=value` env assignments so the matcher sees the actual package manager.
- * A bare `VAR=value npm i evil` would otherwise tokenize to t[0]="VAR=value" and
- * defeat every matcher — a full gate bypass.
- */
-const PREFIX_BINS = new Set([
-  "env",
-  "sudo",
-  "command",
-  "builtin",
-  "exec",
-  "nice",
-  "time",
-  "nohup",
-  "doas",
-  "setsid",
-  "stdbuf",
-  // corepack ships with Node and dispatches to the pinned package manager, so
-  // `corepack pnpm add evil` really runs `pnpm add evil`. It's a pure wrapper; stripping
-  // it exposes the real manager. Its own subcommands (enable/install/use) reduce to a
-  // bare verb no matcher claims, so no false positive.
-  "corepack",
-  // Wrappers whose own syntax puts a VALUE or a positional before the command:
-  // `timeout 600 npm i x`, `ionice -c 3 npm i x`, `chrt 10 npm i x`, `taskset 0x1 npm i x`,
-  // `flock /tmp/l npm i x`. Their values are skipped by `skipWrapperArgs`.
-  "timeout",
-  "ionice",
-  "chrt",
-  "taskset",
-  "flock",
-]);
-
-/**
- * Bins the gate matches as argv0, plus wrappers. Used to find where a wrapper's own arguments
- * end: `nice -n 5 npm i x` and `sudo -u root npm i x` put a value after the wrapper's flag,
- * and `timeout 600` a positional. Skipping only the flags left `5` / `root` / `600` as argv0
- * and the install unseen (kit-research adversarial-battery-tier3, G05).
- */
-const COMMAND_BINS = new Set([
-  "npm",
-  "pnpm",
-  "yarn",
-  "bun",
-  "npx",
-  "bunx",
-  "pip",
-  "pip3",
-  "pipx",
-  "uv",
-  "uvx",
-  "python",
-  "python3",
-  "poetry",
-  "pdm",
-  "claude",
-  "sh",
-  "bash",
-  "zsh",
-  "dash",
-]);
-
-/** Up to this many non-flag tokens after a wrapper are read as its values, when a command follows. */
-const MAX_WRAPPER_VALUES = 3;
-
-const startsCommand = (tok: string): boolean => {
-  const base = binBase(tok);
-  return COMMAND_BINS.has(base) || PREFIX_BINS.has(base) || /^[^\s=]+=/.test(tok);
-};
-
-/**
- * Index of the first token after a wrapper's flags AND values. Values are skipped only when a
- * known command or wrapper follows them within `MAX_WRAPPER_VALUES` tokens, so `sudo vim x`
- * still reads `vim` as the command.
- */
-function skipWrapperArgs(tokens: string[], i: number): number {
-  const flags = (k: number) => {
-    while (k < tokens.length && tokens[k].startsWith("-")) k++;
-    return k;
-  };
-  let k = flags(i);
-  const start = k;
-  for (let n = 0; n < MAX_WRAPPER_VALUES && k < tokens.length && !startsCommand(tokens[k]); n++)
-    k = flags(k + 1);
-  return k < tokens.length && startsCommand(tokens[k]) ? k : start;
 }
 
 /** Drop leading wrapper bins + `VAR=value` env assignments, returning the real argv. */
@@ -521,6 +417,7 @@ const REQUIREMENT_FLAG_RE = /^(-r|--requirement|-e|--editable|-c|--constraint)$/
 // keep `sometool` as the first positional). Long forms only; `-p`/glued `=` are handled
 // elsewhere (short -p is ambiguous across installers; `--x=v` is one token, auto-dropped).
 const VALUE_PKG_FLAG_RE = /^(--package|--spec|--from|--with)$/i;
+const isValueFlag = (flag: string) => SOURCE_FLAG_RE.test(flag) || VALUE_PKG_FLAG_RE.test(flag);
 
 /** Cut an unquoted trailing `# comment` (one starting a word) before tokenizing, so a
  *  comment's words aren't triaged as packages / mistaken for a registry redirect. A `#`
@@ -1183,66 +1080,6 @@ function isApprovalNoop(tokens: string[], pos: string[]): boolean {
 }
 
 /** Match one shell segment against the package-manager matchers, mutating `probe`. */
-/**
- * Options a package manager takes BEFORE its subcommand with a separate value
- * (`npm --prefix <dir> install x`). Only the separate form needs listing: `--prefix=<dir>`
- * is one token and is dropped as a flag. Without this, the value read as the subcommand and
- * the install passed with no output (kit-research home-repo-pattern-vs-kit, 8 of 8 forms).
- * An option NOT listed here is handled fail-closed by `leadingFlagsHideVerb`.
- */
-const GLOBAL_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
-  npm: new Set(["--prefix", "-C", "--loglevel", "--cache", "--workspace", "-w", "--location"]),
-  pnpm: new Set(["-C", "--dir", "--filter", "-F", "--loglevel", "--reporter"]),
-  yarn: new Set(["--cwd", "--modules-folder", "--cache-folder", "--mutex", "--network-timeout"]),
-  bun: new Set(["--cwd"]),
-  uv: new Set(["--directory", "--project", "--cache-dir", "--config-file", "--color"]),
-};
-
-/** Verbs a matcher reads in the subcommand slot (`npm <verb>`). */
-const SUBCOMMAND_VERB_RE =
-  /^(install|i|add|install-test|it|update|upgrade|ci|clean-install|exec|x|dlx|create|init|approve-scripts|install-scripts|approve-builds|global|pip|tool|run)$/;
-/** Verbs that fetch a package, looked for after an ambiguous leading option. */
-const FETCH_VERB_RE =
-  /^(install|i|add|install-test|it|update|upgrade|ci|clean-install|exec|x|dlx|create|init)$/;
-
-/**
- * Fold a known value-taking global option and its value into one `--flag=value` token, in
- * place, so the subcommand lands in its slot. Returns the first unknown option that is
- * followed by a non-flag token, which may have swallowed it as a value, or "".
- */
-function foldGlobalFlags(tokens: string[]): string {
-  const known = GLOBAL_VALUE_FLAGS[tokens[0]];
-  if (!known) return "";
-  let unknown = "";
-  let i = 1;
-  for (; i < tokens.length && tokens[i].startsWith("-"); i++) {
-    const flag = tokens[i];
-    const next = tokens[i + 1];
-    if (flag.includes("=") || next === undefined || next.startsWith("-")) continue;
-    if (known.has(flag)) tokens.splice(i, 2, `${flag}=${next}`);
-    else if (SOURCE_FLAG_RE.test(flag) || VALUE_PKG_FLAG_RE.test(flag))
-      i++; // its value; compactPositionals and sourceRedirect read the pair
-    else if (!unknown) unknown = flag;
-  }
-  return unknown;
-}
-
-/**
- * Fail-closed on an option kit does not know, before the subcommand: `npm --foo bar install x`.
- * kit cannot tell whether `--foo` takes `bar` as its value, so when the subcommand slot holds no
- * known verb and a fetch verb follows, the install is unverifiable.
- */
-function leadingFlagsHideVerb(tokens: string[], probe: InstallProbe): boolean {
-  const unknown = foldGlobalFlags(tokens);
-  if (!unknown) return false;
-  const verbs = compactPositionals(tokens);
-  if (SUBCOMMAND_VERB_RE.test(verbs[1] ?? "") || !verbs.slice(2).some((t) => FETCH_VERB_RE.test(t)))
-    return false;
-  probe.isInstall = true;
-  probe.unverifiable.push(`global-option:${tokens[0]} ${unknown} ${verbs[1]}`);
-  return true;
-}
-
 function scanSegment(segment: string, probe: InstallProbe): void {
   const raw = stripRedirections(stripInlineComment(segment).trim().split(/\s+/).filter(Boolean))
     .map(dequote)
@@ -1256,7 +1093,12 @@ function scanSegment(segment: string, probe: InstallProbe): void {
   const cmdRaw = raw.filter((t, i) => i >= start || !t.startsWith("-"));
 
   if (indirectInstall(tokens, probe) || claudePluginInstall(tokens, probe)) return;
-  if (leadingFlagsHideVerb(tokens, probe)) return;
+  const hidden = hiddenVerb(tokens, compactPositionals, isValueFlag);
+  if (hidden) {
+    probe.isInstall = true;
+    probe.unverifiable.push(hidden);
+    return;
+  }
 
   const pos = compactPositionals(tokens);
   if (pos.length === 0) return;
