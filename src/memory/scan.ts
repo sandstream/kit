@@ -14,6 +14,7 @@
  */
 import { basename } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { sanitizeDisplayText } from "../display-text.js";
 import { findSecrets } from "../utils/redactSecrets.js";
 import { findInjection } from "./injection.js";
 
@@ -47,21 +48,56 @@ interface Target {
   select: string;
 }
 
+const MESSAGE_CONTENT_TARGET: Target = {
+  table: "messages",
+  idCol: "id",
+  columns: ["content"],
+  select: "SELECT id, content, cwd AS __project FROM messages",
+};
+
+const TOOL_INPUT_TARGET: Target = {
+  table: "tool_uses",
+  idCol: "id",
+  columns: ["tool_input"],
+  select:
+    "SELECT t.id, t.tool_input, m.cwd AS __project FROM tool_uses t LEFT JOIN messages m ON m.uuid = t.message_uuid",
+};
+
 const TARGETS: Target[] = [
+  {
+    table: "sessions",
+    idCol: "id",
+    // Session metadata can change the origin of existing, non-quarantined messages.
+    columns: ["session_id", "harness", "project", "first_message_at", "last_message_at"],
+    select:
+      "SELECT id, session_id, harness, project, first_message_at, last_message_at, project AS __project FROM sessions",
+  },
+  MESSAGE_CONTENT_TARGET,
   {
     table: "messages",
     idCol: "id",
-    columns: ["content"],
-    select: "SELECT id, content, cwd AS __project FROM messages",
+    // Recall, session selection and statistics expose these fields independently of content.
+    columns: ["uuid", "session_id", "role", "model", "timestamp", "cwd", "git_branch"],
+    select:
+      "SELECT id, uuid, session_id, role, model, timestamp, cwd, git_branch, cwd AS __project FROM messages",
   },
   {
     table: "tool_uses",
     idCol: "id",
-    columns: ["tool_input"],
+    // Runtime and usage reports expose these fields independently of archived inputs.
+    columns: [
+      "message_uuid",
+      "session_id",
+      "tool_name",
+      "timestamp",
+      "call_id",
+      "outcome",
+      "outcome_at",
+    ],
     select:
-      "SELECT tool_uses.id AS id, tool_uses.tool_input AS tool_input, m.cwd AS __project " +
-      "FROM tool_uses LEFT JOIN messages m ON m.uuid = tool_uses.message_uuid",
+      "SELECT t.id, t.message_uuid, t.session_id, t.tool_name, t.timestamp, t.call_id, t.outcome, t.outcome_at, m.cwd AS __project FROM tool_uses t LEFT JOIN messages m ON m.uuid = t.message_uuid",
   },
+  TOOL_INPUT_TARGET,
   {
     table: "pending_actions",
     idCol: "id",
@@ -79,8 +115,10 @@ const TARGETS: Target[] = [
   {
     table: "saved_threads",
     idCol: "name",
-    columns: ["summary"],
-    select: "SELECT name, summary, project_path AS __project FROM saved_threads",
+    // Thread readers expose every copied text field, including identifiers and dates.
+    columns: ["name", "session_id", "summary", "project_path", "saved_at"],
+    select:
+      "SELECT name, session_id, summary, project_path, saved_at, project_path AS __project FROM saved_threads",
   },
 ];
 
@@ -89,9 +127,13 @@ const TARGETS: Target[] = [
 // high-confidence credential pattern.
 const HEURISTIC_LABELS = new Set(["kv-secret", "tfstate-value"]);
 
+function safeLocation(value: unknown): string {
+  return sanitizeDisplayText(String(value));
+}
+
 function projectName(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw) return null;
-  return raw.includes("/") ? basename(raw) : raw;
+  return safeLocation(raw.includes("/") ? basename(raw) : raw);
 }
 
 /** A per-cell finder: given text, return masked, confidence-tiered matches. */
@@ -104,12 +146,9 @@ type FindingEntry = ScanFinding & { _projects: Set<string> };
 /** Column names present in `table` (empty set if the table is absent). The table
  *  name is a hardcoded TARGETS constant — never user input — so interpolation is safe. */
 function tableColumns(db: DatabaseSync, table: string): Set<string> {
-  try {
-    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    return new Set(rows.map((r) => r.name));
-  } catch {
-    return new Set();
-  }
+  // Include generated columns. Schema read errors must propagate to the import gate.
+  const rows = db.prepare(`PRAGMA table_xinfo(${table})`).all() as { name: string }[];
+  return new Set(rows.map((r) => r.name));
 }
 
 /** Fold one result row's text cells into the dedup map. `idKey` names the id column
@@ -137,7 +176,7 @@ function foldRow(
           preview: f.preview,
           confidence: f.confidence,
           count: 0,
-          sample: `${table}#${row[idKey]}.${col}`,
+          sample: `${table}#${safeLocation(row[idKey])}.${col}`,
           projects: [],
           _projects: new Set<string>(),
         };
@@ -151,12 +190,9 @@ function foldRow(
 
 /**
  * Scan one target. Fast path: the rich SELECT (with its project-hint join/column).
- * If that throws — a crafted or older store missing an auxiliary column such as
- * `messages.cwd` — we do NOT skip the whole target. That was the R7 bypass: drop
- * `cwd` and the rich SELECT throws, so the payload column `content` in the SAME
- * target went unscanned and rode the merge in. Instead we fall back to scanning
- * each text column that ACTUALLY exists, so a payload in any present column is
- * always caught; only the (cosmetic) project attribution is dropped.
+ * If that fails, scan each available text column without the auxiliary columns.
+ * An absent identifier does not prevent a cell read, including in WITHOUT ROWID tables.
+ * Only attribution is optional. Schema and cell read failures must propagate.
  */
 function scanTarget(
   db: DatabaseSync,
@@ -178,16 +214,11 @@ function scanTarget(
   }
   const cols = tableColumns(db, target.table);
   if (cols.size === 0) return; // table genuinely absent → nothing here to scan
-  const idExpr = cols.has(target.idCol) ? target.idCol : "rowid";
+  // A missing identifier affects attribution, never whether a cell is scanned.
+  const idExpr = cols.has(target.idCol) ? target.idCol : "NULL";
   for (const col of target.columns) {
     if (!cols.has(col)) continue;
-    let cells: Record<string, unknown>[];
-    try {
-      cells = db.prepare(`SELECT ${idExpr} AS __id, ${col} FROM ${target.table}`).all();
-    } catch {
-      // this column is genuinely unreadable → skip just it, keep scanning the rest
-      continue;
-    }
+    const cells = db.prepare(`SELECT ${idExpr} AS __id, ${col} FROM ${target.table}`).all();
     for (const row of cells) foldRow(row, [col], "__id", target.table, finder, byKey, observe);
   }
 }
@@ -246,14 +277,13 @@ export function scanDbForInjection(
 }
 
 /**
- * What a model can be shown again from a store. Recall skips quarantined messages, and no recall
- * path reads `tool_uses` (it feeds counts and skill statistics only), so a pattern in either is
- * stored evidence, not a live vector. The other tables are read at session start or by search and
- * stay in. If `messages.quarantined` is missing the narrowed SELECT throws, `scanTarget` falls back
- * to every column, and the scan fails closed: nothing is excused.
+ * Only message content receives the authenticated quarantine exemption. Session metadata can
+ * change an existing message's origin. Lists and statistics also expose metadata from quarantined
+ * messages. Tool inputs remain archive evidence; recall does not read them.
+ * If the content SELECT lacks a required column, the fallback scans all available content.
  */
-const REPLAYABLE_TARGETS: Target[] = TARGETS.filter((t) => t.table !== "tool_uses").map((t) =>
-  t.table === "messages" ? { ...t, select: `${t.select} WHERE quarantined = 0` } : t,
+const REPLAYABLE_TARGETS: Target[] = TARGETS.filter((t) => t !== TOOL_INPUT_TARGET).map((t) =>
+  t === MESSAGE_CONTENT_TARGET ? { ...t, select: `${t.select} WHERE quarantined = 0` } : t,
 );
 
 /**

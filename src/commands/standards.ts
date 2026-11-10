@@ -11,10 +11,8 @@ import { resolveConfigPath } from "../cli-shared.js";
 import type { Baseline } from "../baseline.js";
 
 /**
- * `kit standards` — the deterministic dev-standards gate (P1: the general,
- * language-agnostic code-quality metrics via lizard/jscpd/scc). Mirrors `kit design`:
- * warn by default, `--enforce` fails on net-new findings AND on setup gaps (a tool
- * that could not run) — fail-closed for CI, quiet for local first-runs.
+ * General metrics use TypeScript, Lizard, jscpd and scc.
+ * Results warn by default. Enforcement rejects new findings and incomplete analysis.
  */
 /**
  * Snapshot every `kit standards` dimension (general + specific + plugins + platform)
@@ -85,6 +83,20 @@ async function cmdStandardsFreeze(): Promise<boolean> {
   return true;
 }
 
+/** Print the score over gates that ran. Findings and incomplete gates are counted separately. */
+function printScore(
+  summary: { failed: number; findings: number; score: string },
+  incomplete: number,
+): void {
+  const scoreColor =
+    summary.failed > 0 ? c.red : summary.findings > 0 || incomplete > 0 ? c.yellow : c.green;
+  console.log(
+    `  ${scoreColor}score ${summary.score}${c.reset} gates passed` +
+      `${summary.findings > 0 ? ` · ${summary.findings} with findings` : ""}` +
+      `${incomplete > 0 ? ` · ${c.dim}${incomplete} incomplete gate(s)${c.reset}` : ""}`,
+  );
+}
+
 export async function cmdStandards(): Promise<boolean> {
   const sub = process.argv[3];
   if (sub === "freeze") return cmdStandardsFreeze();
@@ -93,7 +105,7 @@ export async function cmdStandards(): Promise<boolean> {
   const category = flagValue(process.argv, "--category"); // general | specific | plugins | platform | <lang>
   const { BASELINE_FILE } = await import("../baseline.js");
   const { runStandardsGate } = await import("../standards-run.js");
-  // The SAME orchestration the MCP `kit_standards` tool uses — no divergent gate.
+  // The standards stage in MCP kit_review uses this orchestration too.
   const {
     ok,
     checks: results,
@@ -128,17 +140,10 @@ export async function cmdStandards(): Promise<boolean> {
     console.log(`  ${icon} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
     if (r.files) for (const f of r.files) console.log(`      ${c.dim}- ${f}${c.reset}`);
   }
-  // Score over gates that ran, then setup gaps and findings called out separately so
-  // neither is mistaken for the other.
-  const scoreColor = summary.failed > 0 ? c.red : summary.findings > 0 ? c.yellow : c.green;
-  console.log(
-    `  ${scoreColor}score ${summary.score}${c.reset} gates passed` +
-      `${summary.findings > 0 ? ` · ${summary.findings} with findings` : ""}` +
-      `${gaps.length > 0 ? ` · ${c.dim}${gaps.length} setup gap(s) (not run)${c.reset}` : ""}`,
-  );
+  printScore(summary, gaps.length);
   if (gaps.length > 0 && !enforce) {
     console.log(
-      `  ${c.dim}setup gaps are un-provisioned tools, not failures — install them to enable those gates; --enforce fails CI on them${c.reset}`,
+      `  ${c.dim}Evidence is incomplete. Check tool availability, report validity and source access. Use --enforce to reject incomplete gates.${c.reset}`,
     );
   }
   return ok;

@@ -10,6 +10,9 @@ export interface ContentBlock {
   text?: string;
   name?: string;
   input?: unknown;
+  id?: string;
+  tool_use_id?: string;
+  is_error?: boolean;
 }
 export type Content = string | ContentBlock[] | undefined;
 

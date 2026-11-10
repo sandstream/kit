@@ -32,7 +32,8 @@ import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
 import { scanTranscripts } from "../scan-transcripts.js";
 import { sampleCosts } from "../cost-monitor.js";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "../check-gitignore.js";
-import { auditPull, reportSeverity } from "../post-pull-audit.js";
+import { auditPull, defaultPullBase, reportSeverity } from "../post-pull-audit.js";
+import { pulledAgentFileLines } from "../pull-agent-files.js";
 
 async function cmdSecurityPrescan(): Promise<boolean> {
   const root = process.argv[4];
@@ -587,12 +588,27 @@ async function cmdSecurityCosts(): Promise<boolean> {
   return allOk;
 }
 
+/** The base ref verify-pull audits from, and the header (with the fallback note when there is one). */
+async function verifyPullBase(
+  args: string[],
+  head: string,
+): Promise<{ base: string; header: string }> {
+  const named = flagValue(args, "--base");
+  const { base, fallback } = named
+    ? { base: named, fallback: false }
+    : await defaultPullBase(process.cwd());
+  let header = `${c.bold}${c.cyan}kit security verify-pull${c.reset}  ${c.dim}(${base} → ${head})${c.reset}`;
+  if (fallback)
+    header += `\n${c.dim}No usable ORIG_HEAD (set by git pull / merge), so only the last commit is audited. Name the pre-pull commit with --base to audit the whole pull.${c.reset}`;
+  return { base, header };
+}
+
 async function cmdSecurityVerifyPull(): Promise<boolean> {
   // kit security verify-pull [--base <ref>] [--head <ref>] [--json]
   const args = process.argv.slice(4);
-  const base = flagValue(args, "--base") ?? "HEAD~1";
   const head = flagValue(args, "--head") ?? "HEAD";
   const jsonMode = hasFlag(args, "--json");
+  const { base, header } = await verifyPullBase(args, head);
 
   const report = await auditPull(process.cwd(), base, head);
   const severity = reportSeverity(report);
@@ -602,9 +618,7 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
     return severity !== "fail";
   }
 
-  console.log(
-    `${c.bold}${c.cyan}kit security verify-pull${c.reset}  ${c.dim}(${base} → ${head})${c.reset}`,
-  );
+  console.log(header);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   if (report.changedFiles.length === 0) {
@@ -664,6 +678,8 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
       `${c.dim}  → run ${c.bold}kit security policy check${c.reset}${c.dim} to verify the new state.${c.reset}\n`,
     );
   }
+
+  for (const line of pulledAgentFileLines(report.agentFiles, c)) console.log(line);
 
   if (severity === "ok") {
     console.log(`${c.green}✓ No security concerns in this pull.${c.reset}\n`);

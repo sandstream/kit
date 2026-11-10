@@ -89,6 +89,13 @@ Track token usage and operation counts:
 - Block when limits exceeded
 - Reset at midnight (tokens) or hourly (operations)
 
+Governed CLI and MCP operations charge the requested project's allowance before execution.
+A shared local lock serializes admission. The operation itself runs after that lock is released.
+A returned failure keeps the charge. A thrown error refunds its charge when storage permits.
+Process crashes keep the charge until the normal reset. Failed refunds remain visible in the audit.
+Read-only mode does not write accounting state. Inspection alone does not reserve allowance.
+See [budget behavior and limits](docs/INSPECTION_COMMANDS.md) for storage and concurrency requirements.
+
 ### 4. Approval Gates
 
 Destructive operations require human approval:
@@ -108,10 +115,25 @@ Track and alert on secret expiration:
 ### 6. Access Revocation
 
 Emergency kill-switch for agent access:
-- Periodic check against revocation endpoint
-- Immediately stop all operations if revoked
-- Clear local secrets and caches
-- Log revocation event
+- Check the configured endpoint before governed operations, subject to the cache interval.
+- Refuse the operation when access is revoked or cannot be verified.
+- Record the denial when audit logging is enabled.
+- Return the denial to the caller without terminating its process.
+
+The cache distinguishes the canonical target project directory, endpoint, and agent ID. Directory aliases share one identity.
+The default interval is 300 seconds. Set `check_interval = 0` to check before every operation.
+The cache uses elapsed time, so clock changes cannot extend a permission.
+A forced refresh invalidates an earlier permission. A failed refresh cannot restore it.
+Concurrent checks for the same identity wait for an active latest request.
+Completed results remain subject to the interval, even when an older request remains active.
+Failures are not cached as confirmed revocation, so a recovered endpoint can immediately restore access.
+
+Inspection and enforcement use the same response parser and a five-second request limit.
+The response must contain a boolean `revoked` field. Endpoint errors produce an unverified denial.
+Identity substitution must preserve the endpoint path. A dot segment that changes the path is refused before the request.
+
+Containment gap: this check does not terminate operations already running or erase provider credentials.
+Those capabilities remain outside this implemented check. Provider revocation requires a separate action.
 
 ## Implementation Files
 
@@ -122,7 +144,7 @@ Emergency kill-switch for agent access:
 
 ## CLI Commands
 
-- `kit governance` - Show governance status: the merged `[governance]` config, revocation status when enabled, budget usage and agent information. It takes no subcommands.
+- `kit governance [status]`: Show effective configuration, fresh revocation status, budget usage, and agent information. `status` is an alias.
 - `kit audit` - View the audit log.
 
 ## Integration Points

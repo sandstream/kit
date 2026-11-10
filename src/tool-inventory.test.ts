@@ -23,6 +23,10 @@ import { probeName, toLockSource, AGENT_RELEVANT_TOOLS } from "./tool-inventory.
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
 describe("probeName", () => {
+  it("probes the executable declared by the TypeScript compiler package", () => {
+    assert.equal(probeName("npm:typescript"), "tsc");
+  });
+
   it("strips the backend prefix and takes the executable name", () => {
     assert.equal(probeName("aqua:aquasecurity/trivy"), "trivy");
     assert.equal(probeName("aqua:trufflesecurity/trufflehog"), "trufflehog");

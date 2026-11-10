@@ -1,18 +1,10 @@
 #!/usr/bin/env node
 /**
- * Derive, per command module, the flags its call path actually reads.
- *
- * Authoring aid + the oracle behind `src/commands-flag-coverage.test.ts`. An allowlist
- * written from a handler file's own literals is its own outage: `CHECK_FLAGS` was built
- * that way and rejected `kit check --attest` and `--no-auto-install`, both documented and
- * both read one import away in `cli-checks-shared.ts`. So the scan follows the module's
- * STATIC IMPORT GRAPH and collects every flag literal handed to an argv reader anywhere on
- * it, then unions the flags `docs/COMMANDS.md` documents for that command's verbs.
- *
- * Deliberately generous in one direction only: it may include a flag kit passes to a
- * subprocess (`--severity` for trivy, `--name-only` for git), because over-accepting keeps
- * a working invocation working while under-accepting breaks one. The generated set is
- * review input for a human-authored allowlist, never a silent runtime source.
+ * Generate command flag lists from explicit contracts and a fallback source scan.
+ * Explicit contracts describe individual handlers. Their tests must exercise public CLI behavior.
+ * The fallback scan collects module literals, direct imports, documented flags, and compatibility flags.
+ * It can include sibling handlers or child program flags. It does not prove command behavior.
+ * Both unwanted acceptance and rejection of supported flags are defects.
  *
  * Usage:
  *   node scripts/derive-command-flags.mjs            # all modules, human-readable
@@ -22,6 +14,7 @@
 import { readFileSync, readdirSync, existsSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseFlagContracts } from "./command-flag-contracts.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "src");
@@ -144,7 +137,12 @@ export function verbToModule() {
   for (const m of cli.matchAll(/import\s*\{([^}]+)\}\s*from\s*["'`](\.[^"'`]+)["'`]/gs)) {
     const file = resolveImport(cliPath, m[2]);
     if (!file) continue;
-    for (const name of m[1].split(",").map((s) => s.trim().split(/\s+as\s+/).pop())) {
+    for (const name of m[1].split(",").map((s) =>
+      s
+        .trim()
+        .split(/\s+as\s+/)
+        .pop(),
+    )) {
       if (name) handlerModule.set(name, file);
     }
   }
@@ -198,46 +196,67 @@ export function docFlagsByVerb() {
  * scan cannot find it — and a floor built from the scan alone would start rejecting an
  * invocation kit's own generated files still print (`agent-config.ts`'s banner).
  *
- * This list is the ONLY hand-maintained part of the surface. An entry belongs here when kit
- * promises to accept a flag it deliberately ignores; a flag that should DO something belongs in
- * code, where the scan will find it.
+ * These aliases apply to commands without an explicit contract.
+ * An explicit contract must list each supported compatibility flag itself.
  */
 const COMPAT_FLAGS = {
   "agent-config": ["--install-gate"],
 };
 
 /**
- * Derive the whole surface: verb -> the flags its module reads (code) plus the flags
- * `docs/COMMANDS.md` documents for that verb. GLOBAL_FLAGS are NOT included; the guard adds
- * them, so a global can never be forgotten per-verb (that omission is what made
- * `kit check --read-only` exit 1 without running).
+ * Use an explicit contract when present, including an empty flag list.
+ * Use the source scan only for commands without contracts. The dispatcher adds global flags.
  */
 export function deriveFlagSurface(depth = 1) {
+  const globalSource = readFileSync(join(SRC, "utils", "flags.ts"), "utf8");
+  const globalDeclaration = /export const GLOBAL_FLAGS\s*=\s*\[([\s\S]*?)\]\s*as const/.exec(
+    globalSource,
+  );
+  if (!globalDeclaration) throw new Error("Cannot read the global flag declaration");
+  const globalFlags = new Set(
+    [...globalDeclaration[1].matchAll(LITERAL_IN_CALL)].map((match) => match[1]),
+  );
+  if (globalFlags.size === 0) throw new Error("The global flag declaration is empty");
   const verbs = verbToModule();
+  const declarations = JSON.parse(
+    readFileSync(join(ROOT, "contracts", "command-flags.json"), "utf8"),
+  );
+  const contracts = parseFlagContracts(declarations, new Set(verbs.keys()), globalFlags);
+  for (const [verb, entry] of Object.entries(declarations.commands)) {
+    for (const test of entry.tests) {
+      if (!existsSync(join(ROOT, test)))
+        throw new Error(`Invalid command flag contract: ${verb} test missing: ${test}`);
+    }
+  }
   const docFlags = docFlagsByVerb();
   const perModule = new Map();
   const surface = {};
+  const bareFlags = {};
   for (const [verb, file] of verbs) {
+    if (contracts.has(verb)) {
+      surface[verb] = contracts.get(verb).flags;
+      bareFlags[verb] = contracts.get(verb).bareFlags;
+      continue;
+    }
     if (!perModule.has(file)) perModule.set(file, flagsForModule(file, depth).flags);
     const flags = new Set(perModule.get(file).keys());
     for (const f of docFlags.get(verb) ?? []) flags.add(f);
     for (const f of COMPAT_FLAGS[verb] ?? []) flags.add(f);
-    surface[verb] = [...flags].sort();
+    surface[verb] = [...flags].filter((flag) => !globalFlags.has(flag)).sort();
   }
-  return { surface, verbs };
+  return { surface, bareFlags, verbs };
 }
 
 const GENERATED_HEADER = `/**
  * This generated table lists the flags accepted by each command.
  * The dispatcher checks the table once for every invocation.
  * Generate it with: node scripts/derive-command-flags.mjs --emit
- * flag-surface.test.ts checks the generated text and flags used in code.
+ * flag-surface.test.ts checks that this file matches the generator.
  *
- * The generator scans each command and its direct imports, no deeper, for argv-helper reads.
- * It also includes documented flags and compatibility flags.
- * The table can include flags passed to subprocesses.
- * This over-acceptance keeps existing commands usable.
- * It must not omit a flag that a command reads.
+ * Explicit declarations live in contracts/command-flags.json with behavioral test references.
+ * Other commands use a source scan, documented flags, and compatibility flags.
+ * The fallback scan can include unrelated flags from sibling handlers or subprocesses.
+ * A generated list does not prove that every accepted flag affects behavior.
  *
  * The dispatcher adds global flags to every command.
  * A command absent from the table is unvalidated.
@@ -246,23 +265,13 @@ const GENERATED_HEADER = `/**
 
 `;
 
-export function emit(surface) {
-  // The header already ends in a newline; `join("\n")` would add a second one, and Prettier
-  // collapses it — one more way a no-op regeneration produced a diff.
-  const lines = [
-    GENERATED_HEADER.replace(/\n+$/, ""),
-    "",
-    "export const COMMAND_FLAGS: Record<string, readonly string[]> = {",
-  ];
+function emitFlagTable(name, surface) {
+  const lines = [`export const ${name}: Record<string, readonly string[]> = {`];
   for (const verb of Object.keys(surface).sort()) {
     const flags = surface[verb];
     const key = /^[a-z][a-z0-9]*$/.test(verb) ? verb : JSON.stringify(verb);
     const inline = `  ${key}: [${flags.map((f) => JSON.stringify(f)).join(", ")}],`;
-    // Emit what Prettier would emit. This file is generated AND committed, so a regeneration that
-    // is content-identical must also be diff-identical. The single-line form gets reflowed to one
-    // flag per line, turning a no-op regeneration into a 512-line diff — which was misread as
-    // catastrophic data loss, and reported as such. Prettier's rule is width-based (printWidth
-    // 100), so the same threshold is applied here rather than guessed at.
+    // Match Prettier's width so regeneration preserves identical bytes.
     if (inline.length <= 100) {
       lines.push(inline);
     } else {
@@ -271,13 +280,31 @@ export function emit(surface) {
       lines.push(`  ],`);
     }
   }
-  lines.push("};", "");
+  lines.push("};");
+  return lines;
+}
+
+export function emit(surface, bareFlags) {
+  const lines = [
+    GENERATED_HEADER.replace(/\n+$/, ""),
+    "",
+    ...emitFlagTable("COMMAND_FLAGS", surface),
+    "",
+    "/** Declared flags that accept no value. Missing commands have no value contract. */",
+    ...emitFlagTable("COMMAND_BARE_FLAGS", bareFlags),
+    "",
+  ];
   lines.push(`/**
- * The flags a verb accepts, or null when the verb is not in the table (unvalidated rather
- * than unrestricted — dispatch skips the check and self-audit reports the gap).
+ * Return accepted flags, or null when the command has no table entry.
+ * The dispatcher skips absent entries. The self-audit reports that gap.
  */
 export function flagsForCommand(verb: string): readonly string[] | null {
-  return COMMAND_FLAGS[verb] ?? null;
+  return Object.hasOwn(COMMAND_FLAGS, verb) ? COMMAND_FLAGS[verb] : null;
+}
+
+/** Return known flags without values, or null when this command has no declaration. */
+export function flagsWithoutValuesForCommand(verb: string): readonly string[] | null {
+  return Object.hasOwn(COMMAND_BARE_FLAGS, verb) ? COMMAND_BARE_FLAGS[verb] : null;
 }
 `);
   return lines.join("\n");
@@ -291,9 +318,9 @@ function main() {
   const depth = depthArg ? Number.parseInt(depthArg.slice("--depth=".length), 10) : 1;
 
   if (emitMode) {
-    const { surface } = deriveFlagSurface(depth);
+    const { surface, bareFlags } = deriveFlagSurface(depth);
     const out = join(SRC, "flag-surface.ts");
-    writeFileSync(out, emit(surface), "utf-8");
+    writeFileSync(out, emit(surface, bareFlags), "utf-8");
     console.log(`wrote ${out.slice(ROOT.length + 1)} — ${Object.keys(surface).length} verbs`);
     return;
   }

@@ -196,6 +196,64 @@ export function ingest(format: IngestFormat, json: string): SecurityCheckResult[
 export type IngestOutcome =
   { ok: true; findings: SecurityCheckResult[] } | { ok: false; reason: string };
 
+type FieldCheck = (value: unknown) => boolean;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const isString: FieldCheck = (value) => typeof value === "string";
+const isLine: FieldCheck = (value) =>
+  typeof value === "number" && Number.isInteger(value) && value > 0;
+const arrayOf =
+  (check: FieldCheck): FieldCheck =>
+  (value) =>
+    Array.isArray(value) && value.every(check);
+
+/** Validate consumed fields when present. Scanner extensions remain permitted. */
+function fields(checks: Record<string, FieldCheck>): FieldCheck {
+  return (value) =>
+    isRecord(value) &&
+    Object.entries(checks).every(([key, check]) => value[key] === undefined || check(value[key]));
+}
+
+const sarifProperties = fields({ "security-severity": isString, tags: arrayOf(isString) });
+const sarifRun = fields({
+  tool: fields({
+    driver: fields({
+      name: isString,
+      rules: arrayOf(fields({ id: isString, properties: sarifProperties })),
+    }),
+  }),
+  results: arrayOf(
+    fields({
+      ruleId: isString,
+      level: isString,
+      message: fields({ text: isString }),
+      properties: sarifProperties,
+      locations: arrayOf(
+        fields({
+          physicalLocation: fields({
+            artifactLocation: fields({ uri: isString }),
+            region: fields({ startLine: isLine }),
+          }),
+        }),
+      ),
+    }),
+  ),
+});
+const osvResult = fields({
+  packages: arrayOf(
+    fields({
+      package: fields({ name: isString, ecosystem: isString, version: isString }),
+      vulnerabilities: arrayOf(
+        fields({
+          id: isString,
+          summary: isString,
+          database_specific: fields({ severity: isString }),
+        }),
+      ),
+    }),
+  ),
+});
+
 /**
  * Strict ingest: distinguishes a *valid but empty* report (scanner ran, found
  * nothing) from *malformed/unexpected* output (scanner errored, printed junk, or
@@ -211,18 +269,21 @@ export function ingestStrict(format: IngestFormat, json: string): IngestOutcome 
   } catch {
     return { ok: false, reason: "output is not valid JSON" };
   }
-  const isObj = !!parsed && typeof parsed === "object";
   if (format === "sarif") {
-    if (!isObj || !Array.isArray((parsed as SarifLog).runs)) {
+    if (!isRecord(parsed) || !Array.isArray(parsed.runs)) {
       return { ok: false, reason: "not a SARIF log (no `runs` array)" };
     }
+    if (!parsed.runs.every(sarifRun))
+      return { ok: false, reason: "invalid SARIF report structure" };
     return { ok: true, findings: parseSarif(json) };
   }
   if (format === "osv") {
-    if (!isObj || !Array.isArray((parsed as OsvLog).results)) {
+    if (!isRecord(parsed) || !Array.isArray(parsed.results)) {
       return { ok: false, reason: "not an OSV report (no `results` array)" };
     }
+    if (!parsed.results.every(osvResult))
+      return { ok: false, reason: "invalid OSV report structure" };
     return { ok: true, findings: parseOsv(json) };
   }
-  return { ok: false, reason: `unknown format: ${format as string}` };
+  return { ok: false, reason: "unknown report format" };
 }

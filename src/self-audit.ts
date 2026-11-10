@@ -335,6 +335,19 @@ const R1: SelfAuditRule = {
 // R1b — NaN-fresh: parsed timestamp compared to a cutoff without a finite guard
 // ---------------------------------------------------------------------------
 
+function parsedComparisonLine(file: SourceFile, window: FnWindow, name: string): number {
+  const text = windowText(file, window);
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- name is escaped source identifier text
+  const comparison = new RegExp(`(?<![\\w$])${escapeRe(name)}\\s*[<>]`, "g");
+  for (const match of text.matchAll(comparison)) {
+    const prefix = text.slice(0, match.index);
+    // A property with the same name is a separate value, including spaced access.
+    if (prefix.trimEnd().endsWith(".")) continue;
+    return window.start + prefix.split("\n").length - 1;
+  }
+  return -1;
+}
+
 const R1b: SelfAuditRule = {
   id: "R1b-nan-fresh",
   name: "NaN-fresh timestamp comparison",
@@ -376,12 +389,7 @@ const R1b: SelfAuditRule = {
           new RegExp(`isNaN\\s*\\(\\s*${escapeRe(parseVar)}\\b`).test(wtext);
 
         // Is the parsed var compared with < or > against something (a cutoff)?
-        const compareLineIdx = findLineMatching(
-          file.lines,
-          w,
-          // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
-          new RegExp(`\\b${escapeRe(parseVar)}\\s*[<>]`),
-        );
+        const compareLineIdx = parsedComparisonLine(file, w, parseVar);
         if (compareLineIdx >= 0 && !guarded) {
           findings.push({
             file,

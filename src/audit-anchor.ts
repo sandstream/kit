@@ -26,23 +26,30 @@
  * "only someone who can READ the 0600 anchor key can forge it". It is NOT
  * tamper-proof against a same-UID local principal: an attacker running as the
  * same user can read `~/.kit/audit-anchor.key` AND the anchor record, recompute
- * the tip, and re-seal a forged log. Closing THAT gap requires an EXTERNAL
- * anchor the local principal cannot rewrite (an RFC3161 TSA or a remote
- * append-only log) - see the ExternalTimestampAnchor extension point below.
+ * the tip, and re-seal a forged log. External proof requires protected
+ * verifier code, launch configuration, trust and current checkpoint state.
+ * A timestamp alone does not detect rollback. An attacker who controls the
+ * launcher can replace the delegated verifier. See ExternalTimestampAnchor.
  *
  * The append path stays KEYLESS so a project-sandboxed agent (which cannot read
  * `~/.kit`) can still append audit entries; anchoring is layered on top and is
  * best-effort / fail-soft on the write path. A log that was never anchored
  * verifies as "legacy (unanchored)" - a warning, not a hard failure.
  */
-import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
-import { execSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import {
+  readAnchorStore,
+  findAnchorRecord,
+  listAnchorRecords,
+  storeAnchorRecord,
+} from "./audit-anchor-store.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { secureFile } from "./utils/secure-perms.js";
 import { readProtectedAnchorKey } from "./audit-anchor-protected.js";
 import { getAuditAnchorKeyAt } from "./audit-anchor-key.js";
+import { issueExternalReceipt, type ExternalAnchorStatement } from "./audit-external.js";
+import { sanitizeDisplayText } from "./display-text.js";
 
 const ANCHOR_KEY_FILE = "audit-anchor.key";
 const ANCHOR_RECORD_FILE = "audit-anchor.json";
@@ -234,55 +241,18 @@ export interface AnchorRecord {
   version?: number;
   /**
    * Receipt from an EXTERNAL timestamp anchor (RFC3161 TSA / append-only log),
-   * present only when sealed with `kit audit anchor --external`. This is what
-   * closes the same-UID gap: a local principal who can read the 0600 key still
-   * cannot forge a fresh external receipt. Absent ⇒ HMAC-only seal.
+   * present only when sealed with `kit audit anchor --external`.
+   * The configured verifier must authenticate it against an independent checkpoint.
+   * Verifier configuration and authority policy must remain outside attacker control.
    */
   external?: ExternalAnchorReceipt;
-}
-
-type AnchorStore = Record<string, AnchorRecord>;
-
-async function readStore(dir?: string): Promise<AnchorStore> {
-  try {
-    const raw = await readFile(anchorRecordPath(dir), "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") return parsed as AnchorStore;
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Persist the store, pruning entries whose log file no longer exists so the
- * record self-heals after temp/ephemeral logs disappear (also keeps it bounded).
- */
-async function writeStore(store: AnchorStore, dir?: string): Promise<void> {
-  const pruned: AnchorStore = {};
-  for (const [logPath, rec] of Object.entries(store)) {
-    try {
-      await stat(logPath);
-      pruned[logPath] = rec;
-    } catch {
-      // log file gone -> drop the stale anchor entry
-    }
-  }
-  await mkdir(anchorDir(dir), { recursive: true });
-  const recordPath = anchorRecordPath(dir);
-  await writeFile(recordPath, JSON.stringify(pruned, null, 2) + "\n", {
-    encoding: "utf-8",
-    mode: 0o600,
-  });
-  secureFile(recordPath);
 }
 
 export async function readAnchorRecord(
   logPath: string,
   dir?: string,
 ): Promise<AnchorRecord | null> {
-  const store = await readStore(dir);
-  return store[logPath] ?? null;
+  return findAnchorRecord(await readAnchorStore(anchorRecordPath(dir)), logPath);
 }
 
 /**
@@ -296,10 +266,8 @@ export async function readAnchorRecord(
 export async function listAnchoredLogs(
   dir?: string,
 ): Promise<Array<{ logPath: string; record: AnchorRecord }>> {
-  const store = await readStore(dir);
-  return Object.keys(store)
-    .sort()
-    .map((logPath) => ({ logPath, record: store[logPath] }));
+  const store = await readAnchorStore(anchorRecordPath(dir));
+  return listAnchorRecords(store);
 }
 
 /**
@@ -309,7 +277,7 @@ export async function listAnchoredLogs(
  * is suspicious rather than benign-legacy. #fix2
  */
 export async function hasAnyAnchoredLogs(dir?: string): Promise<boolean> {
-  const store = await readStore(dir);
+  const store = await readAnchorStore(anchorRecordPath(dir));
   return Object.keys(store).length > 0;
 }
 
@@ -320,6 +288,23 @@ export async function hasAnyAnchoredLogs(dir?: string): Promise<boolean> {
  * (unparseable / unchained) so the caller can surface it.
  */
 export async function anchorAuditLog(
+  logPath: string,
+  content: string,
+  dir?: string,
+  opts: { external?: boolean } = {},
+): Promise<AnchorRecord> {
+  const { withAuditWriteLock } = await import("./audit-write-lock.js");
+  return withAuditWriteLock(logPath, async (canonical) => {
+    if ((await readFile(canonical, "utf8")) !== content) {
+      throw new Error(
+        "The audit log changed after the snapshot was read. Read it again before anchoring.",
+      );
+    }
+    return sealAuditLog(canonical, content, dir, opts);
+  });
+}
+
+async function sealAuditLog(
   logPath: string,
   content: string,
   dir?: string,
@@ -343,17 +328,9 @@ export async function anchorAuditLog(
   // back — a missing config or a failed/unreachable authority THROWS rather than
   // silently producing an HMAC-only seal that would later look externally sealed.
   if (opts.external) {
-    const ext = resolveExternalAnchor();
-    if (!ext) {
-      throw new Error(
-        "external anchoring requested but none configured — set KIT_EXTERNAL_ANCHOR_CMD",
-      );
-    }
-    rec.external = await ext.anchor({ tip: rec.tip, count: rec.count, logPath });
+    rec.external = await issueExternalReceipt(logPath, rec);
   }
-  const store = await readStore(dir);
-  store[logPath] = rec;
-  await writeStore(store, dir);
+  await storeAnchorRecord(anchorRecordPath(dir), logPath, rec);
   return rec;
 }
 
@@ -376,6 +353,11 @@ export interface AnchorVerifyResult {
   newSinceAnchor?: number;
   /** The external-anchor receipt on the record, if any (for require-external checks). */
   externalReceipt?: ExternalAnchorReceipt;
+  /** A trusted verifier must produce this result; receipt presence is insufficient. */
+  externalVerification?: {
+    status: "verified" | "invalid" | "unverified";
+    message: string;
+  };
   reason?: string;
 }
 
@@ -469,9 +451,7 @@ export interface AnchorVerdictInput {
    */
   machineHasAnchors: boolean;
   /**
-   * Require an EXTERNAL anchor receipt: `kit audit verify --require-external`. An
-   * HMAC-only seal (no external receipt) then FAILS — for regulated enclaves that
-   * must defeat even a same-UID forger. Independent of `strict`.
+   * Require a verified external anchor. Receipt presence does not establish authenticity.
    */
   requireExternal?: boolean;
 }
@@ -483,6 +463,69 @@ export interface AnchorVerdict {
   message: string;
 }
 
+function unverifiedAnchorVerdict(fatal: boolean, message: string): AnchorVerdict {
+  return { ok: !fatal, level: fatal ? "error" : "warn", message };
+}
+
+function externalProofFailure(result: AnchorVerifyResult, required: boolean): string | null {
+  if (result.externalVerification?.status === "invalid") return result.externalVerification.message;
+  if (!required) return null;
+  if (!result.externalReceipt) {
+    return "external anchor REQUIRED but this seal has none (HMAC-only). Re-seal with 'kit audit anchor --external'.";
+  }
+  if (result.externalVerification?.status !== "verified") {
+    return (
+      result.externalVerification?.message ??
+      "external anchor UNVERIFIED: the receipt has not been authenticated by a trusted verifier."
+    );
+  }
+  return null;
+}
+
+function intactAnchorVerdict(
+  result: AnchorVerifyResult,
+  strict: boolean,
+  requireExternal?: boolean,
+): AnchorVerdict {
+  const externalFailure = externalProofFailure(result, requireExternal === true);
+  if (externalFailure !== null) return unverifiedAnchorVerdict(true, externalFailure);
+  const tail = result.newSinceAnchor ?? 0;
+  if (tail > 0) {
+    // Unsealed tail = unauthenticated entries appended past the seal. Loud
+    // by default; a hard failure under --strict / require_anchor. #fix3
+    const msg = `HMAC anchor verified ${result.expected} sealed entries, but ${tail} entry(ies) BEYOND the seal are UNSEALED and UNAUTHENTICATED (anyone who can write the log can append keyless-rechained entries). Run 'kit audit anchor' to re-seal.`;
+    return unverifiedAnchorVerdict(strict || requireExternal === true, msg);
+  }
+  const externalUnverified =
+    result.externalReceipt && result.externalVerification?.status !== "verified";
+  const extNote = externalUnverified
+    ? "; external receipt present but UNVERIFIED"
+    : result.externalReceipt
+      ? ` + verified external anchor (${sanitizeDisplayText(result.externalReceipt.authority)})`
+      : "";
+  return {
+    ok: true,
+    level: externalUnverified ? "warn" : "ok",
+    message: `HMAC anchor verified (${result.expected} sealed entries)${extNote}.`,
+  };
+}
+
+function missingAnchorVerdict(
+  status: "no-anchor" | "key-unavailable",
+  failClosed: boolean,
+): AnchorVerdict {
+  if (status === "no-anchor") {
+    const msg = failClosed
+      ? "log is NOT anchored but this machine has anchored logs (or anchoring is required); refusing to treat an unanchored log as verified. A repointed/forged log_file would land here."
+      : "legacy (unanchored) audit log, keyless chain only. Run 'kit audit anchor' to seal it with the machine-local key.";
+    return unverifiedAnchorVerdict(failClosed, msg);
+  }
+  const msg = failClosed
+    ? "anchor present but the anchor key is unreadable here; cannot verify the HMAC seal (strict/require_anchor -> failing closed)."
+    : "anchor present but the anchor key is unreadable here; cannot check the HMAC seal (keyless chain still intact).";
+  return unverifiedAnchorVerdict(failClosed, msg);
+}
+
 /**
  * Map a raw anchor-verify result to a pass/fail verdict given the fail-closed
  * inputs. Pure + exported so the exact exit-code policy is unit-testable and the
@@ -491,63 +534,21 @@ export interface AnchorVerdict {
  */
 export function decideAnchorVerdict(input: AnchorVerdictInput): AnchorVerdict {
   const { result, strict, machineHasAnchors, requireExternal } = input;
-  const failClosed = strict || machineHasAnchors;
+  const requireCompleteSeal = strict || requireExternal === true;
+  const failClosed = requireCompleteSeal || machineHasAnchors;
   switch (result.status) {
-    case "anchored-ok": {
-      // External-anchor requirement: an HMAC-only seal can be forged by a same-UID
-      // principal who reads the 0600 key; require-external refuses it. Checked
-      // before the tail check so the strongest requirement wins.
-      if (requireExternal && !result.externalReceipt) {
-        return {
-          ok: false,
-          level: "error",
-          message:
-            "external anchor REQUIRED but this seal has none (HMAC-only) — re-seal with 'kit audit anchor --external'.",
-        };
-      }
-      const tail = result.newSinceAnchor ?? 0;
-      if (tail > 0) {
-        // Unsealed tail = unauthenticated entries appended past the seal. Loud
-        // by default; a hard failure under --strict / require_anchor. #fix3
-        const msg = `HMAC anchor verified ${result.expected} sealed entries, but ${tail} entry(ies) BEYOND the seal are UNSEALED and UNAUTHENTICATED (anyone who can write the log can append keyless-rechained entries). Run 'kit audit anchor' to re-seal.`;
-        return strict
-          ? { ok: false, level: "error", message: msg }
-          : { ok: true, level: "warn", message: msg };
-      }
-      const extNote = result.externalReceipt
-        ? ` + external anchor (${result.externalReceipt.authority})`
-        : "";
-      return {
-        ok: true,
-        level: "ok",
-        message: `HMAC anchor verified (${result.expected} sealed entries)${extNote}.`,
-      };
-    }
-    case "no-anchor": {
-      const msg = failClosed
-        ? "log is NOT anchored but this machine has anchored logs (or anchoring is required); refusing to treat an unanchored log as verified. A repointed/forged log_file would land here."
-        : "legacy (unanchored) audit log, keyless chain only. Run 'kit audit anchor' to seal it with the machine-local key.";
-      return failClosed
-        ? { ok: false, level: "error", message: msg }
-        : { ok: true, level: "warn", message: msg };
-    }
-    case "key-unavailable": {
-      const msg = failClosed
-        ? "anchor present but the anchor key is unreadable here; cannot verify the HMAC seal (strict/require_anchor -> failing closed)."
-        : "anchor present but the anchor key is unreadable here; cannot check the HMAC seal (keyless chain still intact).";
-      return failClosed
-        ? { ok: false, level: "error", message: msg }
-        : { ok: true, level: "warn", message: msg };
-    }
+    case "anchored-ok":
+      return intactAnchorVerdict(result, strict, requireExternal);
+    case "no-anchor":
+    case "key-unavailable":
+      return missingAnchorVerdict(result.status, failClosed);
     case "anchor-key-changed":
       // Distinct from content tamper. Default warn (rotation needs a re-seal),
       // hard failure under strict so a CI gate cannot drift unnoticed. #fix4
-      return {
-        ok: !strict,
-        level: strict ? "error" : "warn",
-        message:
-          result.reason ?? "anchor key changed (rotated/replaced); re-run 'kit audit anchor'.",
-      };
+      return unverifiedAnchorVerdict(
+        requireCompleteSeal,
+        result.reason ?? "anchor key changed (rotated/replaced); re-run 'kit audit anchor'.",
+      );
     case "truncated":
     case "tip-mismatch":
     case "unparseable":
@@ -593,6 +594,51 @@ export async function tryAdvanceAnchorOnAppend(
   opts: { expectedNewEntries?: number; expectedTailHashes?: string[] } = {},
 ): Promise<void> {
   if (process.env.KIT_AUDIT_ANCHOR === "0") return;
+  try {
+    const { withAuditWriteLock } = await import("./audit-write-lock.js");
+    await withAuditWriteLock(logPath, (canonical) => advanceAnchor(canonical, dir, opts));
+  } catch {
+    // A failed anchor does not invalidate an otherwise successful local append.
+  }
+}
+
+/** Hold the log lock across the append and its optional seal. */
+export async function appendWithAuditAnchor(
+  logPath: string,
+  append: (canonical: string) => Promise<string>,
+): Promise<void> {
+  const { withAuditWriteLock } = await import("./audit-write-lock.js");
+  await withAuditWriteLock(logPath, async (canonical) => {
+    const hash = await append(canonical);
+    await advanceAnchor(canonical, undefined, { expectedTailHashes: [hash] });
+  });
+}
+
+function matchesAppendedTail(seals: LineSeal[] | null, expected?: string[]): boolean {
+  if (!expected || expected.length === 0) return true;
+  if (!seals || seals.length < expected.length) return false;
+  const tail = seals.slice(seals.length - expected.length);
+  return tail.every((seal, index) => seal.hash === expected[index]);
+}
+
+async function canExtendAnchor(
+  content: string,
+  existing: AnchorRecord,
+  dir: string | undefined,
+  maxNewEntries: number,
+): Promise<boolean> {
+  const key = await tryReadAuditAnchorKey(dir);
+  if (!key) return false;
+  const verified = verifyAgainstAnchor(content, existing, key);
+  return verified.status === "anchored-ok" && (verified.newSinceAnchor ?? 0) <= maxNewEntries;
+}
+
+async function advanceAnchor(
+  logPath: string,
+  dir?: string,
+  opts: { expectedNewEntries?: number; expectedTailHashes?: string[] } = {},
+): Promise<void> {
+  if (process.env.KIT_AUDIT_ANCHOR === "0") return;
   const expectedTailHashes = opts.expectedTailHashes;
   const expectedNewEntries = Math.max(
     1,
@@ -604,11 +650,7 @@ export async function tryAdvanceAnchorOnAppend(
     // Bind to kit's own write: the on-disk tail must END with exactly the hashes
     // this append produced. If not, a concurrent writer rewrote the tail between
     // our append and this read — do NOT seal their bytes with the machine key.
-    if (expectedTailHashes && expectedTailHashes.length > 0) {
-      if (!seals || seals.length < expectedTailHashes.length) return;
-      const onDisk = seals.slice(seals.length - expectedTailHashes.length).map((s) => s.hash);
-      if (!onDisk.every((h, i) => h === expectedTailHashes[i])) return;
-    }
+    if (!matchesAppendedTail(seals, expectedTailHashes)) return;
     // CRITICAL: never silently re-seal over a prefix that no longer verifies.
     // Re-sealing a tampered / key-rotated log would erase a real alarm that
     // `kit audit verify` should have raised. Only advance when an existing
@@ -616,13 +658,8 @@ export async function tryAdvanceAnchorOnAppend(
     // (or when there is no anchor yet -> first seal). #fix4
     const existing = await readAnchorRecord(logPath, dir);
     if (existing) {
-      const key = await tryReadAuditAnchorKey(dir);
-      if (!key) return; // cannot verify the prefix -> do not re-seal
-      const v = verifyAgainstAnchor(content, existing, key);
-      if (v.status !== "anchored-ok") return; // preserve the alarm; do not re-seal
-      // Bound the auto-seal to what THIS append added. A tail larger than the
-      // caller's own writes is unattributed — do NOT absorb it into a green seal.
-      if ((v.newSinceAnchor ?? 0) > expectedNewEntries) return;
+      // Preserve invalid prefixes and tails larger than this append's own writes.
+      if (!(await canExtendAnchor(content, existing, dir, expectedNewEntries))) return;
     } else {
       // FIRST seal (no anchor yet) is bounded the SAME way: auto-anchor a log only
       // when it is as small as this append's own writes. A pre-existing multi-entry
@@ -635,7 +672,7 @@ export async function tryAdvanceAnchorOnAppend(
       if (total > expectedNewEntries) return;
       if (total === 0) return; // nothing (or unparseable) to seal
     }
-    await anchorAuditLog(logPath, content, dir);
+    await sealAuditLog(logPath, content, dir);
   } catch {
     // Best-effort: append must succeed even when anchoring cannot (sandbox /
     // unwritable home / unparseable log). The keyless chain still protects the
@@ -643,18 +680,11 @@ export async function tryAdvanceAnchorOnAppend(
   }
 }
 
-// ── Build 3 extension point: external timestamp / append anchor ──────────────
-//
-// The HMAC anchor above only resists a tamperer who CANNOT read the 0600 key.
-// To close the same-UID gap an enclave needs an anchor the local principal
-// cannot rewrite: an RFC3161 Time-Stamping Authority over the tip, or a remote
-// append-only log. This is the documented, intentionally-unimplemented hook.
-//
-// kit does NOT ship a network TSA client (it would break the local-first /
-// no-egress posture by default). An operator wires their own implementation and
-// kit submits the tip after each seal. Fail-closed by contract: an enclave that
-// requires external anchoring must treat a missing/failed external anchor as a
-// verification failure, exactly like the air-gap provenance path.
+// External authority contract.
+// The operator provides issuance and verification commands; Kit adds no network client.
+// Required verification needs both authenticated statement binding and a current checkpoint.
+// Protect the verifier, launcher, authority trust and checkpoint from the audited principal.
+// A timestamp alone cannot detect restoration of an older complete history.
 
 export interface ExternalAnchorReceipt {
   /** Opaque proof bytes (e.g. an RFC3161 TimeStampToken), base64-encoded. */
@@ -663,71 +693,21 @@ export interface ExternalAnchorReceipt {
   authority: string;
   /** ISO-8601 time the external anchor attests. */
   timestamp: string;
+  /** Versioned statement whose bytes the configured authority authenticates. */
+  statement?: ExternalAnchorStatement;
 }
 
 export interface ExternalTimestampAnchor {
   /** Submit an anchor tip for external timestamping. Implementations MUST be
    *  fail-closed: reject (throw / reject the promise) rather than return a
    *  fabricated receipt when the authority is unreachable. */
-  anchor(input: { tip: string; count: number; logPath: string }): Promise<ExternalAnchorReceipt>;
+  anchor(input: {
+    tip: string;
+    count: number;
+    logPath: string;
+    statement?: ExternalAnchorStatement;
+  }): Promise<ExternalAnchorReceipt>;
 }
 
-/**
- * A command-backed external anchor. kit ships NO network client (that would
- * break the local-first / no-egress default); instead the operator supplies a
- * command via `KIT_EXTERNAL_ANCHOR_CMD` that timestamps the tip however they
- * choose (an RFC3161 TSA submit, a post to a remote append-only log, …). The tip
- * + count + log path are passed as env (`KIT_ANCHOR_TIP`/`_COUNT`/`_LOGPATH`),
- * and the command MUST print a JSON receipt `{ token, authority?, timestamp? }`
- * on stdout. FAIL-CLOSED: a non-zero exit, a missing `token`, or unparseable
- * output throws — kit never fabricates a receipt.
- */
-export function commandExternalAnchor(cmd: string): ExternalTimestampAnchor {
-  return {
-    async anchor({ tip, count, logPath }) {
-      let out: string;
-      try {
-        out = execSync(cmd, {
-          env: {
-            ...process.env,
-            KIT_ANCHOR_TIP: tip,
-            KIT_ANCHOR_COUNT: String(count),
-            KIT_ANCHOR_LOGPATH: logPath,
-          },
-          encoding: "utf-8",
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout: 30_000,
-        });
-      } catch (e) {
-        throw new Error(`external anchor command failed: ${(e as Error).message}`, { cause: e });
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(out.trim());
-      } catch {
-        throw new Error("external anchor command did not emit a valid JSON receipt on stdout");
-      }
-      const r = (parsed ?? {}) as Partial<ExternalAnchorReceipt>;
-      if (typeof r.token !== "string" || !r.token) {
-        throw new Error("external anchor receipt is missing a non-empty `token`");
-      }
-      return {
-        token: r.token,
-        authority: typeof r.authority === "string" && r.authority ? r.authority : "command",
-        timestamp:
-          typeof r.timestamp === "string" && r.timestamp ? r.timestamp : new Date().toISOString(),
-      };
-    },
-  };
-}
-
-/**
- * Resolve a configured external anchor, or null when none is wired (the default —
- * kit ships no network client by design). Today the only built-in binding is the
- * command transport (`KIT_EXTERNAL_ANCHOR_CMD`); the interface stays open for an
- * in-process implementation an enclave links itself.
- */
-export function resolveExternalAnchor(): ExternalTimestampAnchor | null {
-  const cmd = (process.env.KIT_EXTERNAL_ANCHOR_CMD ?? "").trim();
-  return cmd ? commandExternalAnchor(cmd) : null;
-}
+// Keep the existing transport API available from its original module.
+export { commandExternalAnchor, resolveExternalAnchor } from "./audit-external.js";

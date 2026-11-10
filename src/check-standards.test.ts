@@ -243,7 +243,7 @@ it("allows append-only changelog growth while retaining its frozen size identity
 });
 
 describe("check-standards — collectStandardsKeys", () => {
-  it("returns empty slices when the general tools are absent (nothing to freeze)", async () => {
+  it("refuses to freeze when the general tools are absent", async () => {
     // The tools are FORCED absent rather than assumed absent. This test previously read
     // "lizard/jscpd/scc are not installed in this environment", which made its green depend
     // on the machine: provisioning lizard and jscpd turned it red without any code changing.
@@ -253,14 +253,10 @@ describe("check-standards — collectStandardsKeys", () => {
     const realPath = process.env.PATH;
     process.env.PATH = "";
     try {
-      const keys = await collectStandardsKeys(process.cwd());
-      assert.deepEqual(keys, {
-        complexity: [],
-        complexityMetrics: [],
-        duplication: [],
-        size: [],
-        sizeMetrics: [],
-      });
+      await assert.rejects(
+        collectStandardsKeys(process.cwd()),
+        /Cannot freeze standards.*incomplete/,
+      );
     } finally {
       process.env.PATH = realPath;
     }

@@ -1,20 +1,12 @@
 /**
- * `[policy.agent_writes]` is now enforced. These tests are organised around the five traps ROADMAP
- * named for this arc, because those are the ways this specific control fails OPEN:
- *
- *   1. an empty list means DENY, not allow;
- *   2. absent-vendor and present-but-empty must stay distinguishable;
- *   3. the op vocabulary needs one source, and an unknown op must be surfaced;
- *   4. policy may only NARROW — never grant past elevation;
- *   5. every branch needs a behavioural test that fails when the wiring is removed.
- *
- * Trap 5 is why the second half of this file exercises `propagate()` rather than only the pure
- * predicate: the original defect was that `checkPolicy` had unit tests proving the decision
- * function correct while nothing called it. Tests over a decision function are not evidence of a
- * working control.
+ * Exercise policy decisions and their actual propagation boundary.
+ * Empty lists deny. An absent vendor differs from a configured empty vendor.
+ * Unknown operations are visible. Policy can narrow authority but cannot grant it.
+ * Behavioral tests prove that propagation calls the policy gate.
+ * Provider clients and network calls stay inside local test fixtures.
  */
 
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
@@ -38,6 +30,13 @@ import { propagate, ALL_TARGETS } from "./secrets-propagate.js";
 import { withFakeGh as fakeGh } from "./fake-gh.test-support.js";
 import type { PolicyConfig } from "./config.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { installFakeProviderClis } from "./fake-provider-cli.test-support.js";
+
+let providers: ReturnType<typeof installFakeProviderClis>;
+before(() => {
+  providers = installFakeProviderClis();
+});
+after(() => providers.restore());
 
 describe("trap 1 — an empty vendor list denies", () => {
   it("`stripe = []` refuses the op, matching kit's own config comment", () => {

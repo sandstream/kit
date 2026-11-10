@@ -38,6 +38,7 @@ describe("review receipt worktree validation", () => {
     try {
       writeFileSync(join(root, REVIEW_RECEIPT_FILE), "receipt");
       writeFileSync(join(root, ".kit-review-receipt-history.jsonl"), "history");
+      writeFileSync(join(root, ".kit-budget-lock.sqlite"), "");
       assert.doesNotThrow(() => cleanReviewWorktree(root, git));
       writeFileSync(join(root, "other.txt"), "untracked");
       assert.throws(() => cleanReviewWorktree(root, git), /clean worktree/);

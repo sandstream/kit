@@ -33,8 +33,8 @@ sealed prefix and the `count` of entries it covers.
   the key is readable) recomputes the tip over the first `count` line hashes and
   compares it to the stored tip, and checks that at least `count` entries remain.
 - The append path stays KEYLESS. A project-sandboxed agent that cannot read
-  `~/.kit` still appends audit entries; anchoring is best-effort and fail-soft on
-  the write path and never blocks an append. Set `KIT_AUDIT_ANCHOR=0` to disable
+  `~/.kit` still appends audit entries. An unavailable anchor does not make a successful local append fail.
+  Set `KIT_AUDIT_ANCHOR=0` to disable
   append-time anchoring; set `KIT_AUDIT_ANCHOR_DIR` to relocate the key + record
   (used by the test suite for isolation).
 
@@ -48,6 +48,33 @@ Detection properties:
 | Append forged NEW entries beyond the seal (keyless re-chain) | NOT detected  | surfaced LOUDLY as unsealed tail                                  | FAIL (unsealed entries are unauthenticated) |
 | Repoint `log_file` at a forged, never-anchored log           | n/a           | warn (no-anchor)                                                  | FAIL once any log is anchored / required    |
 | Rotate / replace the anchor key                              | n/a           | reported as `anchor-key-changed` (distinct from a content tamper) | FAIL                                        |
+
+### Concurrent writes and recovery
+
+Kit uses one SQLite coordination file beside each audit log, named `<log path>.lock.sqlite`.
+The lock covers the previous hash read, the append, and the optional anchor update.
+Directory and file aliases use the same canonical log path. Logs with multiple hard links are refused.
+Separate logs use separate locks. The shared anchor index has its own lock for record updates.
+The lock order is the log first, then the anchor index.
+Each lock acquisition has a five-second limit. The protected operation can take longer.
+
+These locks require a local filesystem with working SQLite locks and trusted parent directories.
+Do not remove or replace coordination files during use. Kit retains them after each operation.
+Process exit releases the operating system lock. File writes are not a SQLite transaction.
+A process or machine failure can leave an incomplete log entry or an unsealed tail.
+Kit refuses further appends to an invalid chain and preserves the existing bytes.
+An automatic anchor update does not absorb an earlier unsealed tail.
+
+Kit publishes the anchor index as a complete file and preserves records for other logs.
+An invalid or unreadable index produces an error. It does not represent an empty machine.
+An explicit seal refuses a snapshot when the current log differs.
+Existing records under directory aliases remain readable. Conflicting alias records require inspection.
+
+Preserve damaged logs and anchor files before recovery. Restore only from a trusted backup.
+Run `kit audit verify` after recovery. Inspect any unsealed tail before an explicit `kit audit anchor`.
+Run `kit audit verify --strict` to confirm that the complete current log has a valid seal.
+Include the default `.kit-audit.jsonl.lock.sqlite*` files in `.gitignore`.
+For a custom log path, also ignore its corresponding coordination files.
 
 ### Fail-closed mode (`--strict` / `require_anchor`)
 
@@ -193,15 +220,105 @@ key", not "the gates ran on an untampered host". An unpinned self-signed Ed25519
 receipt proves only the integrity of its own claims, nothing about authenticity.
 Same same-UID boundary as the audit anchor.
 
-## 4. Closing the same-UID gap (external anchor, not shipped)
+## 4. External receipt verification
 
-Both layers above fall to a same-UID attacker who can read the local key. The
-only way to close that is an anchor the local principal cannot rewrite: an
-RFC3161 Time-Stamping Authority over the tip, or a remote append-only log.
+Kit delegates authority-specific cryptography to an operator-configured verifier. Kit does not include a network timestamp client.
+Configure `KIT_EXTERNAL_ANCHOR_CMD` for issuance and `KIT_EXTERNAL_ANCHOR_VERIFY_CMD` for verification.
+These are trusted operator commands. Receipt data and project configuration must never select the verifier or its trust roots.
+The commands receive JSON on stdin. Do not construct shell commands from receipt fields.
+The legacy `KIT_ANCHOR_TIP`, `KIT_ANCHOR_COUNT`, and `KIT_ANCHOR_LOGPATH` fields remain available to the issuer.
 
-kit ships a documented extension point (`ExternalTimestampAnchor` /
-`resolveExternalAnchor` in `src/audit-anchor.ts`) but no network TSA client,
-because a default network call would break the local-first / no-egress posture.
-An enclave wires its own implementation and treats a missing or failed external
-anchor as a verification failure, the same fail-closed contract as the air-gap
-provenance path (`docs/AIR_GAP.md`).
+`kit audit anchor --external` verifies the returned receipt before it publishes the local anchor record.
+A missing verifier, failed authority, invalid receipt, or unavailable checkpoint prevents publication.
+`kit audit verify --require-external` requires authenticated evidence and an acceptable current external checkpoint.
+The same requirement applies with `--all`, including an empty index or a missing log.
+Required external verification also rejects missing keys, changed keys, unanchored logs, and unsealed tails.
+Verification does not call the issuer, create a key, repair a record, or advance a checkpoint.
+
+Without `--require-external`, the HMAC policy remains available independently.
+An unchecked external receipt is identified as unverified. A verifier's invalid verdict is a failure even without the flag.
+Legacy receipts without the versioned statement remain unverified. Inspect the log before an explicit external reseal.
+
+### Statement and verifier protocol
+
+Requests use `version: 1`, `operation: "anchor" | "verify"`, a fresh `requestId`, and a `statement`.
+The statement uses these fields in this order:
+
+| Field            | Value                                                   |
+| ---------------- | ------------------------------------------------------- |
+| `version`        | `1`                                                     |
+| `domain`         | `kit.audit.external/v1`                                 |
+| `logPath`        | The canonical log path bound at issuance.               |
+| `count`          | The number of sealed entries.                           |
+| `tip`            | The HMAC tip of those entries.                          |
+| `anchorVersion`  | The anchor algorithm version.                           |
+| `algorithm`      | `hmac-sha256`                                           |
+| `keyFingerprint` | The anchor key fingerprint, or `null` for a legacy key. |
+
+`statementDigest` is SHA-256 of the UTF-8 JSON statement, with this field order and no extra whitespace.
+The verifier receives `receipt` and `receiptDigest` too. The latter hashes the transmitted receipt JSON by the same rule.
+The transmitted receipt contains `token`, `authority`, `timestamp`, and `statement`, in that order.
+Directory and case aliases may retain the bound path only when both paths identify the same existing file.
+A different log, tip, count, algorithm, version, or key cannot reuse the statement.
+
+The issuer returns `{ "token": "...", "authority": "...", "timestamp": "..." }`.
+Kit stores the statement with that receipt. This metadata alone provides no authentication.
+The verifier must authenticate every statement field, the authority, and the attested timestamp against independent trusted material.
+Its response must contain:
+
+```json
+{
+  "version": 1,
+  "requestId": "the request identifier",
+  "statementDigest": "the authenticated statement digest",
+  "receiptDigest": "the examined receipt digest",
+  "authenticity": "valid",
+  "rollback": "acceptable",
+  "authority": "the authenticated authority",
+  "attestedAt": "the authenticated receipt timestamp"
+}
+```
+
+Other authenticity results are `invalid` and `unknown`. Other rollback results are `stale` and `unknown`.
+Kit checks response binding and requires both `valid` and `acceptable` for required external verification.
+Missing fields, mismatched responses, process errors, timeouts, and excessive output cannot satisfy the requirement.
+Exit zero alone is insufficient. A verifier that always echoes success does not implement this contract.
+
+### Command execution limits
+
+The adapter sends request data through stdin. The trusted command string selects the program.
+It starts the command in the home directory with a limited inherited environment.
+The inherited names are PATH, HOME, USERPROFILE, SystemRoot, TMP and TEMP when present.
+The adapter derives KIT_ANCHOR_TIP, KIT_ANCHOR_COUNT and KIT_ANCHOR_LOGPATH from the request statement.
+Provider credentials must come from the command's protected credential source.
+Kit does not forward other environment variables, including NODE_OPTIONS and arbitrary KIT variables.
+
+Requests and combined stdout/stderr each have a one-megabyte limit.
+A command has a thirty-second deadline, followed by a bounded cleanup interval.
+Nonzero exit, a signal, invalid UTF-8, excessive output or an incomplete process shutdown fails verification.
+Kit suppresses provider diagnostics because they can contain credentials.
+
+On POSIX, Kit owns a process group and stops that group on timeout or normal host SIGINT/SIGTERM.
+Existing host signal listeners remain registered. Explicit termination from another listener can prevent cleanup completion.
+SIGKILL cannot invoke cleanup. A descendant that creates another process group can escape this boundary.
+Windows uses taskkill for an identifiable live process tree.
+Descendants that close inherited pipes can escape detection after their Windows parent exits.
+Native Windows console interruption and Linux execution require their own platform verification.
+These controls bound normal command execution. They do not provide a sandbox for a malicious verifier.
+
+### Trust and rollback limits
+
+The verifier must use independently pinned authority keys or certificate policy.
+It must compare the receipt with an independently protected checkpoint under an explicit freshness policy.
+A timestamp proves existence at a time. It does not prove that a log is the latest available history.
+An authentic old log, local anchor, and receipt can be restored together without breaking their signatures.
+A writable local replay cache cannot prevent that complete rollback.
+If the verifier cannot establish freshness, it must return rollback `unknown`, which fails required verification.
+
+Protect the verifier executable, configuration, environment, trust roots, and checkpoint from the audited principal.
+An attacker who controls the verifier or its launcher can replace the answer. Kit cannot establish those external protections itself.
+Authority issuance policy must also reject unauthorized replacement history. A new timestamp over attacker-selected data does not establish legitimate history.
+
+Read-only mode activation has its own audit event and can advance the local HMAC seal.
+For inspection without a new activation event, start the verifier with `KIT_READ_ONLY=1` already active.
+This is distinct from the verification operation, which does not modify the inspected evidence.

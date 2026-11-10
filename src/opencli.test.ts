@@ -11,6 +11,26 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // dist/opencli.test.js -> repo root is one level up.
 const SNAPSHOT_PATH = join(__dirname, "..", "contracts", "kit.opencli.json");
 
+it("publishes only each auth leaf's supported flags", () => {
+  const doc = buildOpenCliDoc();
+  for (const [leaf, own] of Object.entries({
+    elevate: ["--json", "--list-scopes", "--scope", "--ttl-minutes"],
+    status: ["--json"],
+    revoke: [],
+    "setup-totp": ["--account", "--issuer", "--overwrite"],
+  })) {
+    const command = doc.commands.auth.commands?.[leaf];
+    assert.deepEqual(command?.["x-kit-accepted-flags"], [...own, ...GLOBAL_FLAGS].sort());
+    assert.notEqual(command?.["x-kit-flags-inherited"], true);
+  }
+});
+
+it("advertises the documented governance status alias", () => {
+  const command = buildOpenCliDoc().commands.governance;
+  assert.equal(command.kind, "group");
+  assert.deepEqual(Object.keys(command.commands ?? {}), ["status"]);
+});
+
 describe("OpenCLI document snapshot", () => {
   it("regenerates identically to the committed contracts/kit.opencli.json", () => {
     const committed = readFileSync(SNAPSHOT_PATH, "utf-8");
@@ -61,6 +81,10 @@ describe("OpenCLI document shape", () => {
     assert.ok(airgap.commands?.verify, "airgap verify nested under the group");
     assert.equal(airgap.commands.verify.kind, "command");
   });
+});
+
+describe("OpenCLI argument metadata", () => {
+  const doc = buildOpenCliDoc();
 
   it("publishes accepted flag names from the generated flag surface", () => {
     const check = doc.commands.check;
@@ -106,6 +130,7 @@ describe("OpenCLI document shape", () => {
       "x-kit-audience",
       "x-kit-args-modeled",
       "x-kit-accepted-flags",
+      "x-kit-flags-without-values",
       "x-kit-flags-inherited",
     ]);
     const walk = (c: OpenCliDoc["commands"][string]) => {
@@ -114,12 +139,13 @@ describe("OpenCLI document shape", () => {
     };
     for (const c of Object.values(doc.commands)) walk(c);
   });
+});
 
-  // Audience ↔ MCP consistency: the exposure layer must respect the audience
-  // annotation. "human" commands are interactive/setup surfaces — they do not
-  // belong on the MCP surface; "harness" commands are hook stdin protocols —
-  // they belong on NO discovery surface. 6.0 removed the last tolerated
-  // overlap (the deprecated setup-time tools), so this is now exception-free.
+describe("OpenCLI command audiences", () => {
+  const doc = buildOpenCliDoc();
+
+  // Human commands are interactive setup surfaces. Harness commands are hook protocols.
+  // Neither audience belongs on the MCP surface.
   it("audience: human/harness commands are never MCP-exposed", () => {
     const offenders: string[] = [];
     for (const [name, c] of Object.entries(doc.commands)) {
@@ -142,14 +168,26 @@ describe("OpenCLI document shape", () => {
 });
 
 describe("OpenCLI subcommand flags", () => {
-  it("inherit the parent's list instead of repeating it on every subcommand", () => {
+  it("publish own auth flags and inherit other subcommand flags", () => {
     const doc = buildOpenCliDoc();
     let subcommands = 0;
     for (const [name, c] of Object.entries(doc.commands)) {
       for (const [sub, s] of Object.entries(c.commands ?? {})) {
         subcommands++;
+        if (name === "auth") {
+          // Auth leaves reject each other's flags. Their explicit sets are checked above.
+          assert.equal(s["x-kit-flags-inherited"], undefined);
+          assert.ok(Array.isArray(s["x-kit-accepted-flags"]));
+          assert.ok(Array.isArray(s["x-kit-flags-without-values"]));
+          continue;
+        }
         assert.equal(s["x-kit-flags-inherited"], true, `${name} ${sub} must mark inheritance`);
         assert.equal(s["x-kit-accepted-flags"], undefined, `${name} ${sub} repeats the list`);
+        assert.equal(
+          s["x-kit-flags-without-values"],
+          undefined,
+          `${name} ${sub} repeats value rules`,
+        );
       }
     }
     assert.ok(subcommands > 50, "the check saw the subcommands");

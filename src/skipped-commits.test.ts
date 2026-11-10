@@ -167,43 +167,44 @@ describe("gitReachabilityProbe — against real git", () => {
   });
 });
 
+async function repoWithLog(shas: string[]): Promise<{ dir: string; onMain: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "kit-skipped-cli-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", dir, ...args], { encoding: "utf-8" }).trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  git("commit", "-q", "--allow-empty", "-m", "on main");
+  const onMain = git("rev-parse", "HEAD");
+  git("checkout", "-q", "-b", "feature");
+  git("commit", "-q", "--allow-empty", "-m", "squashed away");
+  const orphan = git("rev-parse", "HEAD");
+  git("checkout", "-q", "main");
+  git("branch", "-q", "-D", "feature");
+  const resolved = shas.map((s) => (s === "ORPHAN" ? orphan : s === "MAIN" ? onMain : s));
+  await writeFile(
+    join(dir, SKIPPED_COMMITS_LOG),
+    resolved.map((s) => JSON.stringify(entry(s))).join("\n") + "\n",
+    "utf-8",
+  );
+  return { dir, onMain };
+}
+
 describe("the CLI banner reflects the partition", () => {
-  async function runVersion(cwd: string) {
-    const { stderr } = await exec(process.execPath, [CLI_PATH, "--version"], {
+  async function runBannerCommand(cwd: string) {
+    const { stdout, stderr } = await exec(process.execPath, [CLI_PATH, "whoami", "--json"], {
       cwd,
       env: { ...process.env, KIT_HIDE_HOOK_SKIP_BANNER: "0" },
       timeout: 60_000,
     });
+    assert.equal(typeof JSON.parse(stdout).environment, "string", "whoami must run");
     return stderr ?? "";
-  }
-
-  async function repoWithLog(shas: string[]): Promise<{ dir: string; onMain: string }> {
-    const dir = await mkdtemp(join(tmpdir(), "kit-skipped-cli-"));
-    const git = (...args: string[]) =>
-      execFileSync("git", ["-C", dir, ...args], { encoding: "utf-8" }).trim();
-    git("init", "-q", "-b", "main");
-    git("config", "user.email", "test@example.com");
-    git("config", "user.name", "Test");
-    git("commit", "-q", "--allow-empty", "-m", "on main");
-    const onMain = git("rev-parse", "HEAD");
-    git("checkout", "-q", "-b", "feature");
-    git("commit", "-q", "--allow-empty", "-m", "squashed away");
-    const orphan = git("rev-parse", "HEAD");
-    git("checkout", "-q", "main");
-    git("branch", "-q", "-D", "feature");
-    const resolved = shas.map((s) => (s === "ORPHAN" ? orphan : s === "MAIN" ? onMain : s));
-    await writeFile(
-      join(dir, SKIPPED_COMMITS_LOG),
-      resolved.map((s) => JSON.stringify(entry(s))).join("\n") + "\n",
-      "utf-8",
-    );
-    return { dir, onMain };
   }
 
   it("says nothing when every entry was squashed away", async () => {
     const { dir } = await repoWithLog(["ORPHAN"]);
     try {
-      const stderr = await runVersion(dir);
+      const stderr = await runBannerCommand(dir);
       assert.doesNotMatch(
         stderr,
         /bypassed pre-commit hook/,
@@ -217,7 +218,7 @@ describe("the CLI banner reflects the partition", () => {
   it("counts only the live entries, and says how many it set aside", async () => {
     const { dir } = await repoWithLog(["ORPHAN", "MAIN"]);
     try {
-      const stderr = await runVersion(dir);
+      const stderr = await runBannerCommand(dir);
       assert.match(
         stderr,
         /1 commit\(s\) bypassed pre-commit hook/,
@@ -236,7 +237,7 @@ describe("the CLI banner reflects the partition", () => {
   it("still warns about a sha it cannot resolve", async () => {
     const { dir } = await repoWithLog([A]);
     try {
-      const stderr = await runVersion(dir);
+      const stderr = await runBannerCommand(dir);
       assert.match(
         stderr,
         /1 commit\(s\) bypassed pre-commit hook/,

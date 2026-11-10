@@ -77,6 +77,15 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.3.0: memory keeps tool evidence, and commands refuse what they cannot honor.** Memory schema 18
+  records native tool requests and reported responses for Claude Code and Codex
+  ([tool evidence](docs/MEMORY_TOOL_EVIDENCE.md)). `kit agent-audit` reads the user-level agent
+  surfaces, Codex included, and names a redirected model endpoint. Unknown flags and malformed
+  arguments are refused before dispatch, so `kit secrets --dry-run` can no longer write `.env.local`.
+  Approval, revocation, budget and audit-receipt checks fail closed on invalid state. Three things
+  to know before you update: schema 18 is a one-way upgrade (7.2.2 and older refuse the store), TOTP
+  approval needs an interactive terminal, and a script that passed an ignored flag now gets a
+  non-zero exit. macOS is unverified in CI. Full list in the [CHANGELOG](CHANGELOG.md).
 - **7.2.2: `kit triage pkg`, and more of what `kit triage instructions` finds.** `kit triage pkg
   <file.pkg>` checks a macOS installer before it is opened: its SHA-256 against the publisher's list,
   the signing Team ID against the publisher you expect (the Node.js Foundation is built in), and
@@ -231,7 +240,9 @@ kit is a security tool, so it holds itself to the bar it sets. The receipts:
   receipt of which scanners actually ran plus the verdict, sealed with a machine-local anchor key; the
   `.kit-audit.jsonl` chain can be sealed with `kit audit anchor`. Honest scope: the anchor raises
   forgery from "anyone who can write the log" to "someone who can read the `0600` key", it is **not**
-  tamper-proof against a same-UID local principal (that needs the documented external TSA anchor).
+  tamper-proof against a same-UID local principal. External proof requires protected verifier code,
+  launch configuration, trust and current checkpoint state. A timestamp alone does not detect rollback.
+  See the [external receipt contract](docs/AUDIT_ATTESTATION.md).
 - **Local-first, zero LLM, no telemetry.** Your code never leaves the machine.
 
 > At-rest note: kit's local memory store (`~/.kit/memory.db`, `0600`) relies on OS full-disk
