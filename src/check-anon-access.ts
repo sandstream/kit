@@ -558,7 +558,9 @@ function resultFor(
     notes.push(`${accepted.length} declared public: ${accepted.map((t) => t.table).join(", ")}`);
   }
   if (declared.noReason.length) {
-    notes.push(`ignored [anon_access.public] entries with no reason: ${declared.noReason.join(", ")}`);
+    notes.push(
+      `ignored [anon_access.public] entries with no reason: ${declared.noReason.join(", ")}`,
+    );
   }
   const suffix = notes.length ? ` (${notes.join("; ")})` : "";
   if (readable.length === 0 && declared.noReason.length === 0) {

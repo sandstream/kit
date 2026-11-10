@@ -528,7 +528,10 @@ describe("checkAnonAccess: tables declared public in .kit.toml", () => {
 
   it("passes when each open table without personal columns is declared public with a reason", async () => {
     const onlyMarkets = MIGRATION.split("\n").slice(0, 3).join("\n");
-    const r = await run('[anon_access.public]\nmarkets = "country list for the public order page"\n', onlyMarkets);
+    const r = await run(
+      '[anon_access.public]\nmarkets = "country list for the public order page"\n',
+      onlyMarkets,
+    );
     assert.equal(r.status, "pass");
     assert.match(r.detail, /1 declared public: markets/);
   });
