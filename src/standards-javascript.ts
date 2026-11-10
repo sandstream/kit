@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GeneralScan } from "./check-standards.js";
 import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
@@ -10,7 +10,8 @@ import {
   sameJavaScriptInputs,
   type JavaScriptInput,
 } from "./standards-javascript-files.js";
-import { readJavaScriptReport, TYPESCRIPT_TOOL_VERSIONS } from "./standards-javascript-report.js";
+import { locateCompiler } from "./standards-javascript-compiler.js";
+import { readJavaScriptReport } from "./standards-javascript-report.js";
 
 export type JavaScriptScan = GeneralScan["complexity"] & {
   files: string[];
@@ -20,23 +21,7 @@ export type JavaScriptScan = GeneralScan["complexity"] & {
 async function compilerTool(): Promise<{ api: string; version: string }> {
   const bin = await resolveToolBin("tsc");
   if (!bin) throw new Error("JavaScript analysis requires a provisioned TypeScript compiler tool");
-  const executable = realpathSync(bin);
-  const root = dirname(dirname(executable));
-  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-  if (
-    manifest.name !== "typescript" ||
-    !TYPESCRIPT_TOOL_VERSIONS.has(manifest.version) ||
-    executable !== join(root, "bin", "tsc")
-  ) {
-    throw new Error(
-      "JavaScript analysis requires a supported canonical TypeScript compiler installation",
-    );
-  }
-  const api = realpathSync(join(root, "lib", "typescript.js"));
-  if (api !== join(root, "lib", "typescript.js")) {
-    throw new Error("TypeScript compiler API leaves its declared installation");
-  }
-  return { api, version: manifest.version };
+  return locateCompiler(bin);
 }
 
 function parserEnvironment(home: string): NodeJS.ProcessEnv {
