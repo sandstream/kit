@@ -77,6 +77,11 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.4.0: record accepted licenses and public tables, with a reason.** `[licenses.allow]` accepts a
+  reviewed copyleft package (exact license and a reason), and `[anon_access.public]` declares tables
+  that anon reads on purpose. A committed, in-sync lockfile makes `^` and `~` ranges count as pinned.
+  `kit audit secrets --target <platform>` lists the keys kit pushed to a platform, and `kit triage gem`
+  checks a RubyGems release before install. No breaking change.
 - **7.3.0: memory keeps tool evidence, and commands refuse what they cannot honor.** Memory schema 18
   records native tool requests and reported responses for Claude Code and Codex
   ([tool evidence](docs/MEMORY_TOOL_EVIDENCE.md)). `kit agent-audit` reads the user-level agent
