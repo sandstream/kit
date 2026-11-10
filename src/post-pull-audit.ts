@@ -21,6 +21,7 @@
 
 import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
+import { agentFilesIn } from "./pull-agent-files.js";
 
 export interface PullAuditReport {
   baseRef: string;
@@ -34,6 +35,8 @@ export interface PullAuditReport {
   policyChanged: boolean;
   kitTomlChanged: boolean;
   changedFiles: string[];
+  /** Added or changed files an agent or editor executes or obeys (hooks, MCP, tasks, instructions). */
+  agentFiles: { file: string; kind: string }[];
 }
 
 interface PackageJson {
@@ -173,6 +176,7 @@ export async function auditPull(
     policyChanged: false,
     kitTomlChanged: false,
     changedFiles: [],
+    agentFiles: [],
   };
 
   // 1. Dependencies
@@ -200,6 +204,7 @@ export async function auditPull(
   // 3. Plaintext secrets across all changed files
   const changed = await listChangedFiles(baseRef, headRef, cwd);
   report.changedFiles = changed;
+  report.agentFiles = agentFilesIn(changed);
   for (const path of changed) {
     const content = await tryGitShow(headRef, path, cwd);
     if (!content) continue;
@@ -228,7 +233,12 @@ export function reportSeverity(report: PullAuditReport): "ok" | "warn" | "fail" 
   if (report.removedGitignoreEntries.some((l) => /\.env|\.pem|\.key|id_rsa/.test(l))) {
     return "fail";
   }
-  if (report.newDependencies.length > 0 || report.allowlistChanged || report.policyChanged) {
+  if (
+    report.newDependencies.length > 0 ||
+    report.allowlistChanged ||
+    report.policyChanged ||
+    report.agentFiles.length > 0
+  ) {
     return "warn";
   }
   return "ok";

@@ -26,6 +26,11 @@
 
 ### Fixed
 
+- **`kit security verify-pull` names pulled files an agent or editor runs or obeys.** A pull that
+  added a `SessionStart` hook, a `workspace-tools` MCP server, a `.vscode/tasks.json` task that runs
+  when the folder opens, and an `AGENTS.md` telling the agent to run a script first reported _"No
+  security concerns"_. That is how the strutil-core gem worm spreads with stolen Git credentials. The
+  audit now lists such files with what each one is, and the pull is a warning.
 - **The post-pull audit checks the whole pull, not its last commit.** `kit security verify-pull`
   with no `--base` (how the `post-merge` hook runs it) compared `HEAD~1` with `HEAD`. A pull that
   brought in two commits, with a new dependency in the first, reported "No security concerns in this

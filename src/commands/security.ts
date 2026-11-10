@@ -33,6 +33,7 @@ import { scanTranscripts } from "../scan-transcripts.js";
 import { sampleCosts } from "../cost-monitor.js";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "../check-gitignore.js";
 import { auditPull, defaultPullBase, reportSeverity } from "../post-pull-audit.js";
+import { pulledAgentFileLines } from "../pull-agent-files.js";
 
 async function cmdSecurityPrescan(): Promise<boolean> {
   const root = process.argv[4];
@@ -677,6 +678,8 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
       `${c.dim}  → run ${c.bold}kit security policy check${c.reset}${c.dim} to verify the new state.${c.reset}\n`,
     );
   }
+
+  for (const line of pulledAgentFileLines(report.agentFiles, c)) console.log(line);
 
   if (severity === "ok") {
     console.log(`${c.green}✓ No security concerns in this pull.${c.reset}\n`);
