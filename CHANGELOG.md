@@ -26,6 +26,12 @@
 
 ### Fixed
 
+- **The post-pull audit checks the whole pull, not its last commit.** `kit security verify-pull`
+  with no `--base` (how the `post-merge` hook runs it) compared `HEAD~1` with `HEAD`. A pull that
+  brought in two commits, with a new dependency in the first, reported "No security concerns in this
+  pull". It now uses `ORIG_HEAD`, which `git pull` and `git merge` set to the commit they started
+  from, and falls back to `HEAD~1` with a line saying so when `ORIG_HEAD` is missing or not an
+  ancestor of `HEAD`.
 - **`kit security scan-build` reads Electron's `app.asar`, and says what it did not read.** A key
   inside `dist/linux-unpacked/resources/app.asar` passed with _"✓ no matches"_: `.asar` was not a
   scanned type, and the green line did not mention skipped files. An asar is a JSON header plus the

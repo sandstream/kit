@@ -113,6 +113,49 @@ function diffLines(
   };
 }
 
+/**
+ * The base of the range a pull brought in, when the caller named none.
+ *
+ * `HEAD~1` alone is the last commit, and a pull that fast-forwards several commits brought in all
+ * of them: a dependency added in any but the last was never audited, and the hook said green
+ * (kit-research `thomas-wolf-future-of-software-vs-kit`). `git pull` and `git merge` record the
+ * commit they started from in `ORIG_HEAD`, so `ORIG_HEAD..HEAD` is what the pull brought in.
+ *
+ * `ORIG_HEAD` is used only when it is a strict ancestor of `HEAD`. Other commands set it too
+ * (reset, rebase), and then it can point anywhere; the fallback is `HEAD~1`, and `fallback` says so.
+ * A stale ancestor `ORIG_HEAD` over-audits (it also covers later commits of your own), which errs
+ * toward showing more, never less.
+ */
+export async function defaultPullBase(
+  cwd: string = process.cwd(),
+): Promise<{ base: string; fallback: boolean }> {
+  const rev = async (ref: string): Promise<string | null> => {
+    try {
+      const { stdout } = await exec(
+        "git",
+        ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+        {
+          cwd,
+          timeout: 5_000,
+        },
+      );
+      return stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  };
+  const [orig, head] = await Promise.all([rev("ORIG_HEAD"), rev("HEAD")]);
+  if (orig && head && orig !== head) {
+    try {
+      await exec("git", ["merge-base", "--is-ancestor", orig, head], { cwd, timeout: 5_000 });
+      return { base: "ORIG_HEAD", fallback: false };
+    } catch {
+      /* not an ancestor: fall through */
+    }
+  }
+  return { base: "HEAD~1", fallback: true };
+}
+
 export async function auditPull(
   cwd: string = process.cwd(),
   baseRef: string = "HEAD~1",
