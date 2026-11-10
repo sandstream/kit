@@ -36,6 +36,12 @@ const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> =
   gem: async (args) => (await import("./triage-gem.js")).cmdTriageGem(args),
 };
 
+function triageSubcommand(
+  name: string | undefined,
+): ((args: string[]) => Promise<boolean>) | undefined {
+  return name && Object.hasOwn(TRIAGE_SUBCOMMANDS, name) ? TRIAGE_SUBCOMMANDS[name] : undefined;
+}
+
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
   const sandbox = hasFlag(args, "--sandbox");
@@ -50,7 +56,7 @@ export async function cmdTriage(): Promise<boolean> {
   if (typeArg === "check-skills") {
     return cmdTriageCheckSkills();
   }
-  const subcommand = typeArg ? TRIAGE_SUBCOMMANDS[typeArg] : undefined;
+  const subcommand = triageSubcommand(typeArg);
   if (subcommand) return subcommand(filtered.slice(1));
   const type = typeArg as TriageType;
   const target = skillTargetFor(type, filtered[1]);

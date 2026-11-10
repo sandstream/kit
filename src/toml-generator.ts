@@ -58,6 +58,7 @@ export const DEFAULT_SECURITY_SCANNERS: Record<string, string> = {
  */
 export const DEFAULT_STANDARDS_TOOLS: Record<string, string> = {
   "pipx:lizard": "latest",
+  "npm:typescript": "6.0.3",
   "npm:jscpd": "latest",
   "aqua:boyter/scc": "latest",
 };

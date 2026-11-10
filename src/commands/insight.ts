@@ -1,93 +1,130 @@
 /**
- * `kit insight` — Pillar 4's deterministic lifecycle-insight surface. First
- * subcommand: `unused` — which loaded MCP servers / skills were never actually
- * called, correlating the loaded toolchain (agent-sbom) against recorded usage
- * (the memory index's tool_uses table: MCP tools by `mcp__<server>__<tool>`,
- * skills by the `Skill` tool's `{skill}` input). Zero-LLM, pure counting.
- *
- * Honesty (no false green): reports SUGGESTIONS, never auto-removes; and with no
- * indexed usage it SKIPS ("can't judge") rather than declaring everything unused.
+ * Compare loaded components with references in retained indexed messages.
+ * Missing MCP references support a removal suggestion only when native capture is complete for those messages.
+ * Missing explicit Skill references remain unknown because files can be read without a Skill call.
+ * Unindexed history and uncaptured subagents remain outside this evidence.
  */
+import { statSync } from "node:fs";
+import type { DatabaseSync } from "node:sqlite";
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import { discoverAgentToolchain } from "../agent-sbom.js";
-import { scanToolUsage, scanSkillUsage, hasIndexedToolUsage } from "../insight/usage-scan.js";
-import { computeUnused } from "../insight/unused.js";
+import {
+  scanToolUsage,
+  scanSkillUsage,
+  scanToolCapture,
+  type ToolCaptureCoverage,
+  type ToolUsageEntry,
+} from "../insight/usage-scan.js";
+import { computeUnused, type UnusedFinding, type UnusedReport } from "../insight/unused.js";
+
+function readUsageSnapshot(db: DatabaseSync | undefined) {
+  // Use one read snapshot for both references and the capture that qualifies their absence.
+  db?.exec("BEGIN");
+  const usage = db ? scanToolUsage(db) : [];
+  const skillUsage = db ? scanSkillUsage(db) : undefined;
+  const capture = db
+    ? scanToolCapture(db)
+    : {
+        complete: false,
+        observedMessages: 0,
+        incompleteMessages: 0,
+        orphanToolCalls: 0,
+      };
+  db?.exec("COMMIT");
+  return { usage, skillUsage, capture };
+}
+
+function printFindingGroup(title: string, findings: UnusedFinding[], referenceLabel: string): void {
+  if (findings.length === 0) return;
+  console.log(`  ${c.bold}${title}${c.reset}`);
+  for (const f of findings) {
+    const mark = f.verdict === "used" ? `${c.green}✓${c.reset}` : `${c.yellow}⚠${c.reset}`;
+    const tag =
+      f.verdict === "used"
+        ? `${c.green}used${c.reset}   `
+        : f.verdict === "unused"
+          ? `${c.yellow}UNUSED${c.reset} `
+          : `${c.dim}unknown${c.reset}`;
+    const note =
+      f.verdict === "unused"
+        ? `  ${c.dim}no recorded reference within covered history${c.reset}`
+        : "";
+    console.log(
+      `    ${mark} ${tag} ${f.name}  ${c.dim}${f.refs} ${referenceLabel}${c.reset}${note}`,
+    );
+  }
+}
+
+function printUnusedReport(
+  report: UnusedReport,
+  usage: ToolUsageEntry[],
+  capture: ToolCaptureCoverage,
+): void {
+  const total = usage.reduce((n, e) => n + e.count, 0);
+  console.log(
+    `${c.bold}kit insight${c.reset}: tool usage  ${c.dim}(${total} tool call(s) indexed)${c.reset}`,
+  );
+  console.log(
+    capture.complete
+      ? `  Tool capture: complete for ${capture.observedMessages} indexed message(s).`
+      : `  Tool capture: incomplete (${capture.incompleteMessages}/${capture.observedMessages} message(s) incomplete; ${capture.orphanToolCalls} orphan call(s)). Missing references are unknown.`,
+  );
+  console.log(
+    "  Scope: retained indexed messages. Unindexed history and uncaptured subagents remain unknown.",
+  );
+  console.log("  Skill coverage: explicit references only. Missing skill references are unknown.");
+
+  printFindingGroup(
+    "mcp servers",
+    report.findings.filter((f) => f.kind === "mcp-server"),
+    "ref(s)",
+  );
+  printFindingGroup(
+    "skills",
+    report.findings.filter((f) => f.kind === "skill"),
+    "explicit ref(s)",
+  );
+  if (report.loaded.skills === 0 && report.loaded.mcpServers === 0) {
+    console.log(
+      `  ${c.dim}No agent toolchain detected (.claude/skills, .mcp.json). Nothing to correlate.${c.reset}`,
+    );
+  }
+  if (report.pruneCandidates.length > 0) {
+    console.log(
+      `  ${c.dim}→ prune candidates: ${c.reset}${report.pruneCandidates.join(", ")}  ${c.dim}(kit removes nothing automatically)${c.reset}`,
+    );
+  }
+}
 
 async function insightUnused(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   const cwd = process.cwd();
   const loaded = discoverAgentToolchain(cwd);
 
-  const { openMemoryDb } = await import("../memory/db.js");
-  const db = openMemoryDb();
+  const { openMemoryDbReadOnly, getMemoryDbPath } = await import("../memory/db.js");
+  const db = statSync(getMemoryDbPath(), { throwIfNoEntry: false })
+    ? openMemoryDbReadOnly()
+    : undefined;
   try {
-    const indexed = hasIndexedToolUsage(db);
-    if (!indexed) {
-      if (jsonMode) {
-        console.log(JSON.stringify({ skipped: true, reason: "no indexed tool usage" }, null, 2));
-        return true;
-      }
-      console.log(`${c.bold}kit insight${c.reset} — loaded-but-unused`);
-      console.log(
-        `  ${c.yellow}!${c.reset} ${c.dim}no indexed tool usage — can't judge (run your agent, then ${c.reset}${c.bold}kit memory index${c.reset}${c.dim}). Skipped.${c.reset}`,
-      );
-      return true;
-    }
-
-    const usage = scanToolUsage(db);
-    const skillUsage = scanSkillUsage(db);
-    const report = computeUnused(loaded, usage, skillUsage);
+    const { usage, skillUsage, capture } = readUsageSnapshot(db);
+    const report = computeUnused(loaded, usage, skillUsage, capture);
+    const skipped = usage.length === 0 && !capture.complete;
 
     if (jsonMode) {
-      console.log(JSON.stringify({ skipped: false, ...report }, null, 2));
-      return true;
-    }
-
-    const total = usage.reduce((n, e) => n + e.count, 0);
-    console.log(
-      `${c.bold}kit insight${c.reset} — loaded-but-unused  ${c.dim}(${total} tool call(s) indexed)${c.reset}`,
-    );
-
-    const mcp = report.findings.filter((f) => f.kind === "mcp-server");
-    const skills = report.findings.filter((f) => f.kind === "skill");
-
-    if (mcp.length > 0) {
-      console.log(`  ${c.bold}mcp servers${c.reset}`);
-      for (const f of mcp) {
-        const mark = f.verdict === "used" ? `${c.green}✓${c.reset}` : `${c.yellow}⚠${c.reset}`;
-        const tag =
-          f.verdict === "used" ? `${c.green}used${c.reset}   ` : `${c.yellow}UNUSED${c.reset} `;
-        const note = f.verdict === "unused" ? `  ${c.dim}declared, never called${c.reset}` : "";
-        console.log(`    ${mark} ${tag} ${f.name}  ${c.dim}${f.refs} ref(s)${c.reset}${note}`);
-      }
-    }
-    if (skills.length > 0) {
-      console.log(`  ${c.bold}skills${c.reset}`);
-      for (const f of skills) {
-        const mark = f.verdict === "used" ? `${c.green}✓${c.reset}` : `${c.yellow}⚠${c.reset}`;
-        const tag =
-          f.verdict === "used" ? `${c.green}used${c.reset}   ` : `${c.yellow}UNUSED${c.reset} `;
-        const note = f.verdict === "unused" ? `  ${c.dim}loaded, never invoked${c.reset}` : "";
-        console.log(
-          `    ${mark} ${tag} ${f.name}  ${c.dim}${f.refs} invocation(s)${c.reset}${note}`,
-        );
-      }
-    }
-    if (loaded.skills.length === 0 && loaded.mcpServers.length === 0) {
       console.log(
-        `  ${c.dim}no agent toolchain detected (.claude/skills, .mcp.json, …) — nothing to correlate.${c.reset}`,
+        JSON.stringify(
+          { skipped, ...(skipped ? { reason: "no indexed tool usage" } : {}), ...report, capture },
+          null,
+          2,
+        ),
       );
-    }
-
-    if (report.pruneCandidates.length > 0) {
-      console.log(
-        `  ${c.dim}→ prune candidates: ${c.reset}${report.pruneCandidates.join(", ")}  ${c.dim}(kit removes nothing automatically)${c.reset}`,
-      );
+    } else {
+      printUnusedReport(report, usage, capture);
     }
     return true;
   } finally {
-    db.close();
+    db?.close();
   }
 }
 

@@ -1,4 +1,5 @@
 import type { MemoryClass } from "./class.js";
+import type { ToolOutcome } from "./tool-events.js";
 /**
  * kit memory — shared types for the local conversation store.
  */
@@ -38,6 +39,10 @@ export interface MessageInput {
    */
   memoryClass?: MemoryClass;
   version?: string;
+  /** Parser coverage for this message. Zero means legacy, partial, or unsupported capture. */
+  toolCaptureVersion?: number;
+  /** Expected request count for a message with complete capture, including zero. */
+  toolCaptureCount?: number;
 }
 
 export interface ToolUseInput {
@@ -46,6 +51,11 @@ export interface ToolUseInput {
   toolName: string;
   toolInput?: string;
   timestamp?: string;
+  callId?: string;
+  outcome?: ToolOutcome;
+  outcomeAt?: string;
+  /** Position among tool calls within the parent message, for legacy reindex. */
+  ordinal?: number;
 }
 
 export interface SearchHit {

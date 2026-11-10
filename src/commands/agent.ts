@@ -10,9 +10,6 @@ import { hasFlag, flagInt } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { checkSkills } from "../check-skills.js";
-import { mergeGovernanceConfigAsync, formatGovernanceStatus } from "../governance.js";
-import { checkRevocationStatus } from "../revocation.js";
-import { getBudgetStatus, formatBudgetStatus } from "../budget.js";
 import {
   writeAgentConfig,
   detectAgentTargets,
@@ -206,48 +203,7 @@ export async function cmdAgentConfig(): Promise<boolean> {
   return !failed;
 }
 
-export async function cmdGovernance(): Promise<boolean> {
-  const config = await loadConfig(resolveConfigPath());
-  const governanceConfig = await mergeGovernanceConfigAsync(config.governance);
-
-  console.log(`${c.bold}${c.cyan}Governance Status${c.reset}`);
-  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
-
-  // Display governance configuration
-  console.log(formatGovernanceStatus(governanceConfig));
-  console.log();
-
-  // Check revocation status
-  if (governanceConfig.revocation.enabled) {
-    const revoked = await checkRevocationStatus(config.governance);
-    const icon = revoked ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
-    const status = revoked ? `${c.red}REVOKED${c.reset}` : `${c.green}Active${c.reset}`;
-    console.log(`  ${icon} Access Status: ${status}`);
-  }
-
-  // Display budget status
-  if (governanceConfig.agent.max_tokens_per_day || governanceConfig.agent.max_operations_per_hour) {
-    console.log();
-    const budgetStatus = await getBudgetStatus(config.governance);
-    console.log(formatBudgetStatus(budgetStatus));
-  }
-
-  // Display agent info
-  if (governanceConfig.agent.id || governanceConfig.agent.name) {
-    console.log();
-    console.log("Agent Information");
-    console.log("─".repeat(50));
-    if (governanceConfig.agent.name) {
-      console.log(`Name: ${governanceConfig.agent.name}`);
-    }
-    if (governanceConfig.agent.id) {
-      console.log(`ID: ${governanceConfig.agent.id}`);
-    }
-  }
-
-  console.log();
-  return true;
-}
+export { cmdGovernance } from "./governance.js";
 
 export async function cmdTeam(): Promise<boolean> {
   const subcommand = process.argv[3];

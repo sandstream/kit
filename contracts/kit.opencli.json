@@ -57,6 +57,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -77,6 +82,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -97,6 +107,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -117,6 +132,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -137,6 +157,11 @@
       "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -164,6 +189,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -171,7 +201,7 @@
       "commands": {
         "anchor": {
           "kind": "command",
-          "summary": "Seal the audit log with the machine-local HMAC key (--external also gets a receipt from KIT_EXTERNAL_ANCHOR_CMD — closes the same-UID gap)",
+          "summary": "Seal the audit log with the machine-local HMAC key. --external requires KIT_EXTERNAL_ANCHOR_CMD and KIT_EXTERNAL_ANCHOR_VERIFY_CMD before publication.",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -198,7 +228,7 @@
         },
         "verify": {
           "kind": "command",
-          "summary": "Verify the audit log's keyless hash chain + HMAC anchor (--require-external demands a TSA receipt; exit 1 on break/forge/truncation)",
+          "summary": "Verify the audit chain and HMAC seal. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -228,6 +258,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -235,37 +270,82 @@
       "commands": {
         "elevate": {
           "kind": "command",
-          "summary": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt); --list-scopes to see what each scope unlocks first (--json)",
+          "summary": "Confirm project approval in a terminal (--scope <name>, --ttl-minutes <1..240>); --list-scopes [--json] lists scope definitions without approval",
+          "x-kit-accepted-flags": [
+            "--env",
+            "--help",
+            "--json",
+            "--list-scopes",
+            "--non-interactive",
+            "--read-only",
+            "--readonly",
+            "--scope",
+            "--ttl-minutes",
+            "--version"
+          ],
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
-          "x-kit-flags-inherited": true,
+          "x-kit-flags-without-values": [
+            "--help",
+            "--json",
+            "--list-scopes",
+            "--non-interactive",
+            "--version"
+          ],
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
         "revoke": {
           "kind": "command",
-          "summary": "Drop the elevation marker",
+          "summary": "Remove this project's approval marker; a failed removal returns an error",
+          "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
-          "x-kit-flags-inherited": true,
+          "x-kit-flags-without-values": [
+            "--help",
+            "--non-interactive",
+            "--version"
+          ],
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
         "setup-totp": {
           "kind": "command",
-          "summary": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
+          "summary": "Enroll a TOTP secret (--issuer <name>, --account <name>, --overwrite); writes ~/.kit/totp-secret with owner-only access",
+          "x-kit-accepted-flags": [
+            "--account",
+            "--env",
+            "--help",
+            "--issuer",
+            "--non-interactive",
+            "--overwrite",
+            "--read-only",
+            "--readonly",
+            "--version"
+          ],
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
-          "x-kit-flags-inherited": true,
+          "x-kit-flags-without-values": [
+            "--help",
+            "--non-interactive",
+            "--overwrite",
+            "--version"
+          ],
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
         "status": {
           "kind": "command",
-          "summary": "Show active elevation",
+          "summary": "Show this project's local approval marker (--json for structured output)",
+          "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
-          "x-kit-flags-inherited": true,
+          "x-kit-flags-without-values": [
+            "--help",
+            "--json",
+            "--non-interactive",
+            "--version"
+          ],
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         }
@@ -289,6 +369,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -308,6 +393,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -329,6 +419,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -368,6 +463,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -415,6 +515,11 @@
       "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -464,6 +569,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -489,6 +599,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -519,6 +634,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -578,6 +698,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -626,6 +751,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -654,36 +784,26 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
     "create-plugin": {
       "kind": "command",
       "summary": "Scaffold a new kit plugin package",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--install",
-        "--json",
-        "--list",
-        "--minimal",
-        "--mode",
-        "--no-recommended",
-        "--no-setup",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--recommended",
-        "--services",
-        "--skip-install",
-        "--store",
-        "--verify",
-        "--version",
-        "--with-migrate",
-        "--yes"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--skip-install","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--skip-install",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -735,6 +855,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -744,6 +869,11 @@
       "x-kit-accepted-flags": ["--enforce","--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -804,6 +934,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -862,6 +997,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -894,6 +1034,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -920,6 +1065,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -945,6 +1095,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "harness",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -970,6 +1125,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "harness",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -995,6 +1155,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "harness",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -1020,6 +1185,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "harness",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -1029,6 +1199,11 @@
       "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1036,7 +1211,7 @@
       "commands": {
         "status": {
           "kind": "command",
-          "summary": "Budget + revocation + agent info",
+          "summary": "Inspect access configuration, budget usage, revocation, and agent identity",
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
           "x-kit-flags-inherited": true,
@@ -1046,67 +1221,42 @@
       },
       "kind": "group",
       "summary": "View governance status and agent access controls",
-      "x-kit-accepted-flags": [
-        "--broker-gate",
-        "--env",
-        "--help",
-        "--limit",
-        "--no-install-gate",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
     "guard": {
       "kind": "command",
       "summary": "Install gate for YOUR terminal (observe mode): PATH shims for npm/npx/brew/pip/bun/… log what the gate would decide — install | status | uninstall",
-      "x-kit-accepted-flags": [
-        "--all",
-        "--allow-scripts-pending",
-        "--call",
-        "--command",
-        "--dry-run",
-        "--env",
-        "--help",
-        "--non-interactive",
-        "--output",
-        "--output-document",
-        "--read-only",
-        "--readonly",
-        "--version",
-        "--with"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
     "guard-observe": {
       "kind": "command",
-      "summary": "Shim protocol (invoked by ~/.kit/shims wrappers, not by you): record what the install gate would decide for a package-manager call",
-      "x-kit-accepted-flags": [
-        "--all",
-        "--allow-scripts-pending",
-        "--call",
-        "--command",
-        "--dry-run",
-        "--env",
-        "--help",
-        "--non-interactive",
-        "--output",
-        "--output-document",
-        "--read-only",
-        "--readonly",
-        "--version",
-        "--with"
-      ],
+      "summary": "Shim protocol: guard-observe [Kit options] [--] <tool> [args...]. Record the install gate decision without executing or blocking the observed tool",
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "harness",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -1116,6 +1266,11 @@
       "x-kit-accepted-flags": ["--agent","--dry-run","--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1136,6 +1291,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1192,6 +1352,11 @@
       "x-kit-accepted-flags": ["--env","--force","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1201,26 +1366,26 @@
       "x-kit-accepted-flags": ["--env","--help","--non-interactive","--public","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
     "ingest": {
       "kind": "command",
-      "summary": "Ingest external SARIF / OSV reports into kit's consolidated verdict (kit ingest <sarif|osv> <file>)",
-      "x-kit-accepted-flags": [
-        "--attest",
-        "--env",
-        "--help",
-        "--json",
-        "--mode",
-        "--no-auto-install",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "summary": "Validate a local SARIF / OSV report and print normalized findings (kit ingest <sarif|osv> <file>)",
+      "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--json",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1281,6 +1446,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -1290,6 +1460,11 @@
       "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -1299,6 +1474,11 @@
       "x-kit-accepted-flags": ["--env","--help","--no-triage","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1330,6 +1510,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1352,6 +1537,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "experimental"
     },
@@ -1417,6 +1607,11 @@
       "x-kit-accepted-flags": ["--env","--from-env","--help","--non-interactive","--paste","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1792,6 +1987,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -1864,36 +2064,25 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
     "open": {
       "kind": "command",
       "summary": "Open service dashboard in browser (stripe, vercel, railway, etc.)",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--install",
-        "--json",
-        "--list",
-        "--minimal",
-        "--mode",
-        "--no-recommended",
-        "--no-setup",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--recommended",
-        "--services",
-        "--skip-install",
-        "--store",
-        "--verify",
-        "--version",
-        "--with-migrate",
-        "--yes"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1912,6 +2101,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -1921,6 +2115,11 @@
       "x-kit-accepted-flags": ["--agent","--dry-run","--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -1996,6 +2195,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2020,6 +2224,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -2105,6 +2314,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -2135,6 +2349,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -2207,36 +2426,25 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
     "run": {
       "kind": "command",
       "summary": "Execute a command with project env vars loaded",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--install",
-        "--json",
-        "--list",
-        "--minimal",
-        "--mode",
-        "--no-recommended",
-        "--no-setup",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--recommended",
-        "--services",
-        "--skip-install",
-        "--store",
-        "--verify",
-        "--version",
-        "--with-migrate",
-        "--yes"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -2246,6 +2454,11 @@
       "x-kit-accepted-flags": ["--agent","--env","--format","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2267,6 +2480,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2410,6 +2628,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -2549,6 +2772,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2577,6 +2805,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2599,6 +2832,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2698,6 +2936,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -2769,6 +3012,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2801,6 +3049,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -2820,6 +3073,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2829,6 +3087,11 @@
       "x-kit-accepted-flags": ["--env","--fail-on","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -2859,6 +3122,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2879,6 +3147,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2888,6 +3161,11 @@
       "x-kit-accepted-flags": ["--env","--help","--json","--mode","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "harness",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2908,6 +3186,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -2928,6 +3211,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -2958,6 +3246,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -3092,6 +3385,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
@@ -3101,6 +3399,11 @@
       "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--self","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -3121,6 +3424,11 @@
       "x-kit-accepted-flags": ["--enforce","--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
@@ -3141,6 +3449,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -3162,6 +3475,11 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -3184,26 +3502,26 @@
       ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
     "whoami": {
       "kind": "command",
-      "summary": "Show current agent / user identity",
-      "x-kit-accepted-flags": [
-        "--attest",
-        "--env",
-        "--help",
-        "--json",
-        "--mode",
-        "--no-auto-install",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "summary": "Show configured agent, access environment, and budget usage",
+      "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--json",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
@@ -3213,6 +3531,11 @@
       "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "harness",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     }
@@ -3221,7 +3544,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "7.2.2"
+    "version": "7.3.0"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

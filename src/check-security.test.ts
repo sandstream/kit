@@ -682,7 +682,14 @@ describe("license check tool boundary", () => {
 
       assert.equal(result.status, "warn");
       assert.equal(result.didNotRun, true);
-      assert.match(result.detail, /license-checker not installed/i);
+      // The stubs are POSIX shell scripts. Windows cannot start them, so the scanner
+      // counts as not executable there and the exit status exists only on POSIX.
+      assert.match(
+        result.detail,
+        process.platform === "win32"
+          ? /license-checker not installed or not executable/i
+          : /license check failed \(exit 127\)/i,
+      );
       assert.equal(
         existsSync(npxMarker),
         false,

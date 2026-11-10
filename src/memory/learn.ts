@@ -124,7 +124,7 @@ export function learnRecurring(db: DatabaseSync, opts: LearnOptions = {}): Learn
   const rows = db
     .prepare(
       `SELECT content, session_id FROM messages
-       WHERE type = 'user' AND content IS NOT NULL AND content != ''`,
+       WHERE quarantined = 0 AND type = 'user' AND content IS NOT NULL AND content != ''`,
     )
     .all() as { content: string; session_id: string }[];
 

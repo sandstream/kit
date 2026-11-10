@@ -43,20 +43,20 @@ describe("revocation fail-closed", () => {
   });
 });
 
+let calls: Array<{ url: string; init?: RequestInit }>;
+
+function stubFetch(impl: () => unknown) {
+  calls = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    return impl();
+  }) as unknown as typeof fetch;
+}
+
 describe("forceRevocationCheck", () => {
   type Cfg = Parameters<typeof forceRevocationCheck>[0];
   const realFetch = globalThis.fetch;
   const realWarn = console.warn;
-
-  let calls: Array<{ url: string; init?: RequestInit }>;
-
-  function stubFetch(impl: () => unknown) {
-    calls = [];
-    globalThis.fetch = (async (url: string, init?: RequestInit) => {
-      calls.push({ url, init });
-      return impl();
-    }) as unknown as typeof fetch;
-  }
 
   beforeEach(() => {
     calls = [];
@@ -146,7 +146,7 @@ describe("forceRevocationCheck", () => {
     });
   });
 
-  it("ignores the cache — every call hits the endpoint again", async () => {
+  it("ignores the cache and contacts the endpoint on every call", async () => {
     stubFetch(() => ({ ok: true, json: async () => ({ revoked: false }) }));
     await forceRevocationCheck(enabled);
     await forceRevocationCheck(enabled);
@@ -168,7 +168,7 @@ describe("forceRevocationCheck", () => {
     assert.equal(calls.length, 0);
   });
 
-  it("does not overwrite the cache with a fail-closed result", async () => {
+  it("discards stale permission after failure and retries until a verified recovery", async () => {
     // Seed the shared cache with a real not-revoked verdict.
     stubFetch(() => ({ ok: true, json: async () => ({ revoked: false }) }));
     await forceRevocationCheck(enabled);
@@ -176,15 +176,20 @@ describe("forceRevocationCheck", () => {
     stubFetch(() => {
       throw new Error("network down");
     });
-    // The caller still sees the fail-closed answer...
     assert.equal((await forceRevocationCheck(enabled)).revoked, true);
 
     stubFetch(() => {
-      throw new Error("must not be called");
+      throw new Error("network still down");
     });
-    // ...but the transient failure was not cached as a verdict, so a recovered
-    // agent is not pinned into "revoked" until the TTL expires.
+    // A failed refresh invalidates the old permission. It cannot authorize another operation.
+    assert.equal(await checkRevocationStatus(enabled), true);
+    assert.equal(calls.length, 1);
+
+    stubFetch(() => ({ ok: true, json: async () => ({ revoked: false }) }));
+    // An uncertain result is not cached as a verdict. Recovery takes effect immediately.
     assert.equal(await checkRevocationStatus(enabled), false);
-    assert.equal(calls.length, 0);
+    assert.equal(calls.length, 1);
+    assert.equal(await checkRevocationStatus(enabled), false);
+    assert.equal(calls.length, 1);
   });
 });

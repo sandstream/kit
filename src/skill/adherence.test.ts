@@ -21,35 +21,47 @@ const ev = (actions: ObservedAction[], over: Partial<RuntimeEvidence> = {}): Run
 
 describe("isOutOfScope", () => {
   it("flags a tool not in a bounded scope", () => {
-    assert.equal(isOutOfScope({ tool: "Edit", denied: false }, SCOPE), true);
-    assert.equal(isOutOfScope({ tool: "Read", denied: false }, SCOPE), false);
+    assert.equal(isOutOfScope({ tool: "Edit", denied: false, outcome: "returned" }, SCOPE), true);
+    assert.equal(isOutOfScope({ tool: "Read", denied: false, outcome: "returned" }, SCOPE), false);
   });
   it("does not judge tool-scope when allowedTools is undefined (broker verdict still applies)", () => {
-    assert.equal(isOutOfScope({ tool: "Edit", denied: false }, undefined), false);
     assert.equal(
-      isOutOfScope({ tool: "WebFetch", brokerVerdict: "out-of-scope", denied: false }, undefined),
+      isOutOfScope({ tool: "Edit", denied: false, outcome: "returned" }, undefined),
+      false,
+    );
+    assert.equal(
+      isOutOfScope(
+        { tool: "WebFetch", brokerVerdict: "out-of-scope", denied: false, outcome: "returned" },
+        undefined,
+      ),
       true,
     );
   });
   it("flags an out-of-scope broker verdict even for an allowed tool", () => {
     assert.equal(
-      isOutOfScope({ tool: "WebFetch", brokerVerdict: "out-of-scope", denied: false }, SCOPE),
+      isOutOfScope(
+        { tool: "WebFetch", brokerVerdict: "out-of-scope", denied: false, outcome: "returned" },
+        SCOPE,
+      ),
       true,
     );
     assert.equal(
-      isOutOfScope({ tool: "WebFetch", brokerVerdict: "in-scope", denied: false }, SCOPE),
+      isOutOfScope(
+        { tool: "WebFetch", brokerVerdict: "in-scope", denied: false, outcome: "returned" },
+        SCOPE,
+      ),
       false,
     );
   });
 });
 
 describe("summarizeEvidence", () => {
-  it("counts violations (ran) vs deniedForbidden (blocked)", () => {
+  it("counts violations (returned results) vs deniedForbidden (blocked)", () => {
     const s = summarizeEvidence(
       SCOPE,
       ev([
-        { tool: "Read", denied: false }, // in scope
-        { tool: "Edit", denied: false }, // out of scope, RAN → violation
+        { tool: "Read", denied: false, outcome: "returned" }, // in scope
+        { tool: "Edit", denied: false, outcome: "returned" }, // out of scope, returned result
         { tool: "Edit", denied: true }, // out of scope, DENIED → deniedForbidden
         { tool: "WebFetch", brokerVerdict: "out-of-scope", denied: true }, // denied
       ]),
@@ -65,12 +77,15 @@ describe("checkAdherence", () => {
     assert.equal(checkAdherence(SCOPE, ev([], { runs: 0 })).status, "skip");
   });
   it("passes when every action is in scope", () => {
-    const r = checkAdherence(SCOPE, ev([{ tool: "Read", denied: false }], { runs: 3 }));
+    const r = checkAdherence(
+      SCOPE,
+      ev([{ tool: "Read", denied: false, outcome: "returned" }], { runs: 3 }),
+    );
     assert.equal(r.status, "pass");
     assert.match(r.detail, /3 observed run/);
   });
-  it("fails when an out-of-scope action ran (span confidence)", () => {
-    const r = checkAdherence(SCOPE, ev([{ tool: "Edit", denied: false }]));
+  it("fails when an out-of-scope request has a returned result (span confidence)", () => {
+    const r = checkAdherence(SCOPE, ev([{ tool: "Edit", denied: false, outcome: "returned" }]));
     assert.equal(r.status, "fail");
     assert.match(r.detail, /out-of-scope/);
   });
@@ -81,7 +96,7 @@ describe("checkAdherence", () => {
   it("downgrades a would-be fail to inconclusive skip under session confidence", () => {
     const r = checkAdherence(
       SCOPE,
-      ev([{ tool: "Edit", denied: false }], { confidence: "session" }),
+      ev([{ tool: "Edit", denied: false, outcome: "returned" }], { confidence: "session" }),
     );
     assert.equal(r.status, "skip");
     assert.match(r.detail, /inconclusive/);
@@ -89,7 +104,7 @@ describe("checkAdherence", () => {
   it("notes low confidence on a clean pass", () => {
     const r = checkAdherence(
       SCOPE,
-      ev([{ tool: "Read", denied: false }], { confidence: "session" }),
+      ev([{ tool: "Read", denied: false, outcome: "returned" }], { confidence: "session" }),
     );
     assert.equal(r.status, "pass");
     assert.match(r.detail, /low confidence/);
@@ -105,20 +120,26 @@ describe("checkNegativeControls", () => {
     assert.equal(r.status, "pass");
     assert.match(r.detail, /denied across 2 run/);
   });
-  it("fails when a forbidden action succeeded", () => {
-    const r = checkNegativeControls(SCOPE, ev([{ tool: "Edit", denied: false }]));
+  it("fails when a forbidden request has a returned result", () => {
+    const r = checkNegativeControls(
+      SCOPE,
+      ev([{ tool: "Edit", denied: false, outcome: "returned" }]),
+    );
     assert.equal(r.status, "fail");
-    assert.match(r.detail, /control absent/);
+    assert.match(r.detail, /recorded returned result/);
   });
   it("skips (not pass) when no forbidden action was ever attempted", () => {
-    const r = checkNegativeControls(SCOPE, ev([{ tool: "Read", denied: false }]));
+    const r = checkNegativeControls(
+      SCOPE,
+      ev([{ tool: "Read", denied: false, outcome: "returned" }]),
+    );
     assert.equal(r.status, "skip");
     assert.match(r.detail, /not exercised/);
   });
   it("inconclusive skip under session confidence for a would-be fail", () => {
     const r = checkNegativeControls(
       SCOPE,
-      ev([{ tool: "Edit", denied: false }], { confidence: "session" }),
+      ev([{ tool: "Edit", denied: false, outcome: "returned" }], { confidence: "session" }),
     );
     assert.equal(r.status, "skip");
     assert.match(r.detail, /inconclusive/);
@@ -130,7 +151,7 @@ describe("auditRuntime", () => {
     const a = auditRuntime(
       SCOPE,
       ev([
-        { tool: "Read", denied: false },
+        { tool: "Read", denied: false, outcome: "returned" },
         { tool: "Edit", denied: true },
       ]),
     );
@@ -145,7 +166,7 @@ describe("auditRuntime", () => {
   });
 
   it("a real violation fails adherence AND negative controls", () => {
-    const a = auditRuntime(SCOPE, ev([{ tool: "Edit", denied: false }]));
+    const a = auditRuntime(SCOPE, ev([{ tool: "Edit", denied: false, outcome: "returned" }]));
     assert.equal(a.checks[0].status, "fail");
     assert.equal(a.checks[1].status, "fail");
   });

@@ -10,9 +10,9 @@
  * test failure), exactly as public-surface does.
  *
  * HONEST-BY-CONSTRUCTION: kit's registry models command NAMES, summaries, stability
- * tiers, MCP exposure, and accepted long-flag names. It still does not model positional
- * args, flag value types, arity, choices, or aliases, so the standard OpenCLI `args` /
- * `flags` arrays remain omitted rather than fabricated. The kit-specific
+ * tiers, MCP exposure, accepted long-flag names, and known flags without values.
+ * Positional arguments, other flag value types, arity, choices, and aliases remain unmodeled.
+ * The standard OpenCLI `args` and `flags` arrays therefore remain omitted. The kit-specific
  * `x-kit-accepted-flags` extension is the dispatch allowlist from flag-surface.ts plus
  * global flags, which is enough for drift/audit tools to answer "does kit accept this
  * documented flag on this command?". We emit JSON (OpenCLI accepts YAML or JSON) to stay
@@ -30,9 +30,10 @@ import {
   type CommandTier,
   type CommandAudience,
 } from "./cli.js";
-import { COMMAND_FLAGS } from "./flag-surface.js";
+import { COMMAND_FLAGS, flagsWithoutValuesForCommand } from "./flag-surface.js";
 import { KIT_MCP_TOOLS } from "./mcp-server.js";
-import { GLOBAL_FLAGS } from "./utils/flags.js";
+import { BARE_GLOBAL_FLAGS, GLOBAL_FLAGS } from "./utils/flags.js";
+import { AUTH_FLAGS, authBareFlags } from "./auth-arguments.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -65,9 +66,11 @@ export interface OpenCliCommand {
    * kit does not yet model.
    */
   "x-kit-accepted-flags"?: string[];
+  /** Known flags that reject inline values. An absent flag has no value contract here. */
+  "x-kit-flags-without-values"?: string[];
   /**
-   * On a subcommand: it accepts exactly its parent command's `x-kit-accepted-flags` (kit checks
-   * flags per top-level command), so the list is not repeated on every child.
+   * Subcommands inherit their parent's accepted flags and flags without values.
+   * The dispatcher checks these declarations per top-level command.
    */
   "x-kit-flags-inherited"?: true;
   /** Nested subcommands, present only on `kind: "group"`. */
@@ -104,7 +107,11 @@ export function buildOpenCliDoc(): OpenCliDoc {
   };
 
   const node = (name: string, kind: OpenCliCommand["kind"], flagVerb = name): OpenCliCommand => {
-    const flags = acceptedFlags(flagVerb);
+    const authLeaf = name.startsWith("auth ") ? name.slice(5) : "";
+    const hasAuthFlags = Object.hasOwn(AUTH_FLAGS, authLeaf);
+    const flags = hasAuthFlags
+      ? [...new Set([...AUTH_FLAGS[authLeaf], ...GLOBAL_FLAGS])].sort()
+      : acceptedFlags(flagVerb);
     return {
       kind,
       summary: COMMAND_HELP[name] ?? "",
@@ -113,6 +120,12 @@ export function buildOpenCliDoc(): OpenCliDoc {
       "x-kit-audience": COMMAND_AUDIENCE[name] ?? "all",
       "x-kit-args-modeled": flags !== null,
       ...(flags !== null ? { "x-kit-accepted-flags": flags } : {}),
+      "x-kit-flags-without-values": [
+        ...BARE_GLOBAL_FLAGS,
+        ...(hasAuthFlags
+          ? authBareFlags(authLeaf)
+          : (flagsWithoutValuesForCommand(flagVerb) ?? [])),
+      ].sort(),
     };
   };
 
@@ -132,8 +145,9 @@ export function buildOpenCliDoc(): OpenCliDoc {
     child["x-kit-stability"] = parentNode["x-kit-stability"];
     child["x-kit-audience"] = parentNode["x-kit-audience"];
     child["x-kit-mcp"] = false;
-    if (child["x-kit-accepted-flags"]) {
+    if (child["x-kit-accepted-flags"] && !(parent === "auth" && Object.hasOwn(AUTH_FLAGS, sub))) {
       delete child["x-kit-accepted-flags"];
+      delete child["x-kit-flags-without-values"];
       child["x-kit-flags-inherited"] = true;
     }
     (parentNode.commands ??= {})[sub] = child;

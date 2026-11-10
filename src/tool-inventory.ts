@@ -86,6 +86,7 @@ export function probeName(declaration: string): string {
   const withoutBackend = declaration.includes(":")
     ? declaration.slice(declaration.indexOf(":") + 1)
     : declaration;
+  if (withoutBackend === "typescript") return "tsc";
   const last = withoutBackend.split("/").filter(Boolean).pop() ?? withoutBackend;
   return last.replace(/^@/, "");
 }

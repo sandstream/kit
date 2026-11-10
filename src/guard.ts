@@ -30,6 +30,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { sanitizeDisplayText } from "./display-text.js";
 
 /** The fetch-and-run + install front doors worth standing a guard at. */
 export const GUARD_TOOLS: readonly string[] = [
@@ -327,13 +328,37 @@ export interface GuardObservation {
   refs: string[];
 }
 
+/** Mask credentials before storage limits or terminal output can hide their shape. */
+function sanitizeGuardText(text: string): string {
+  const maskUserinfo = (value: string) =>
+    value.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s/?#]*/gi, (authority) => {
+      const at = authority.lastIndexOf("@");
+      return at < 0
+        ? authority
+        : authority.slice(0, authority.indexOf("://") + 3) + "[REDACTED]" + authority.slice(at);
+    });
+  return maskUserinfo(sanitizeDisplayText(maskUserinfo(text)));
+}
+
+function sanitizeObservation(obs: GuardObservation): GuardObservation {
+  return {
+    ts: sanitizeGuardText(obs.ts),
+    cwd: sanitizeGuardText(obs.cwd),
+    tool: sanitizeGuardText(obs.tool),
+    command: sanitizeGuardText(obs.command).slice(0, 200),
+    wouldBlock: obs.wouldBlock,
+    reason: sanitizeGuardText(obs.reason).slice(0, 300),
+    refs: obs.refs.map(sanitizeGuardText),
+  };
+}
+
 /** Append one observation (0600 file, 0700 dir). Best-effort: a logging failure
  *  must never surface into the user's package-manager call. */
 export function appendObservation(obs: GuardObservation): void {
   try {
     const path = guardLogPath();
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    appendFileSync(path, JSON.stringify(obs) + "\n", { mode: 0o600 });
+    appendFileSync(path, JSON.stringify(sanitizeObservation(obs)) + "\n", { mode: 0o600 });
   } catch {
     // observe is best-effort by contract
   }
@@ -346,7 +371,7 @@ export function readObservations(): GuardObservation[] {
     const out: GuardObservation[] = [];
     for (const line of lines) {
       try {
-        out.push(JSON.parse(line) as GuardObservation);
+        out.push(sanitizeObservation(JSON.parse(line) as GuardObservation));
       } catch {
         // one corrupt row never hides the rest
       }

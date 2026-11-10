@@ -1,5 +1,6 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile, rm, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -455,10 +456,10 @@ describe("kit_fix", () => {
   let tempDir: string;
   let originalCwd: string;
 
-  // Lock functions use process.cwd() — chdir to temp dir for isolation
   beforeEach(async () => {
     originalCwd = process.cwd();
     tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-fix-"));
+    execFileSync("git", ["init", "-q", tempDir]);
     await writeFile(join(tempDir, ".gitignore"), GITIGNORE, "utf-8");
     process.chdir(tempDir);
   });
@@ -494,7 +495,6 @@ describe("kit_fix", () => {
     } finally {
       await cl1();
     }
-    // Run fix again — lock files already exist
     const { client: c2, cleanup: cl2 } = await createTestClient();
     try {
       const result = await c2.callTool({ name: "kit_fix", arguments: {} });
