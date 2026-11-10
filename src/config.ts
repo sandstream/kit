@@ -474,6 +474,8 @@ export interface kitConfig {
   scan?: {
     tooling?: { project_id?: string; env?: string };
     guarddog?: boolean;
+    /** `pinned versions`: count every range as unpinned, even with a committed lockfile. */
+    strict_pins?: boolean;
     /** `kit scan` delegate library toggle: an allow-list of scanner ids
      *  (snyk/trivy/grype/semgrep/osv-scanner/socket) to run. Absent/empty ⇒ all
      *  registered scanners on (backwards-compatible); `kit scan --list-delegates`
@@ -883,6 +885,7 @@ export const kitConfigSchema = z
           .passthrough()
           .optional(),
         guarddog: z.boolean().optional(),
+        strict_pins: z.boolean().optional(),
         delegates: z.array(z.string()).optional(),
       })
       .passthrough()
