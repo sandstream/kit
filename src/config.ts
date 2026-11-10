@@ -468,6 +468,12 @@ export interface kitConfig {
   projects?: ProjectsConfig;
   /** Install-time supply-chain triage settings (`kit supply-chain`). */
   supply_chain?: import("./triage-cooling.js").SupplyChainConfig;
+  /** `kit check` license check: packages this repo accepts despite a copyleft license.
+   *  Key = package name, or a prefix ending in `*`. Each entry needs the exact license
+   *  and a reason; an entry without both is reported, not applied. */
+  licenses?: {
+    allow?: Record<string, { license?: string; reason?: string }>;
+  };
   /** `kit scan` / `kit check` scanner settings. `tooling` = an Infisical project to
    *  resolve scanner tokens (SNYK_TOKEN, …) from; `guarddog` = enable the local
    *  behavioral-malware scan in `kit check` (persistent alt to KIT_GUARDDOG=1). */
@@ -818,6 +824,7 @@ export const KNOWN_SECTIONS = new Set([
   "agent_config",
   "web",
   "setup",
+  "licenses", // [licenses.allow] — accepted copyleft packages, each with a reason
   "env",
   "context",
   "projects",
@@ -872,6 +879,19 @@ export const kitConfigSchema = z
     agent_config: AgentConfigSchema,
     context: ContextSchema,
     projects: ProjectsSchema.optional(),
+    licenses: z
+      .object({
+        allow: z
+          .record(
+            z.string(),
+            z
+              .object({ license: z.string().optional(), reason: z.string().optional() })
+              .passthrough(),
+          )
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
     supply_chain: z
       .object({ internal_scopes: z.array(z.string()).optional() })
       .passthrough()

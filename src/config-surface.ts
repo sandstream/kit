@@ -123,6 +123,14 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
     example: '[projects]\npaths = ["backend", "frontend", "infra/prod", "docker"]',
     command: "kit check",
   },
+  licenses: {
+    purpose:
+      "Copyleft packages this repo accepts in the license check, each with the exact license and a reason.",
+    buys: "A reviewed decision, such as a dynamically linked LGPL binary, stops the license check from warning on every run, and the reason stays next to it. A key is a package name or a prefix ending in *. The entry applies only when the package reports exactly that license. An entry without a license or a reason is ignored and keeps the check at warn. Accepted packages are still listed in the check detail.",
+    example:
+      '[licenses.allow]\n"@img/sharp-libvips-*" = { license = "LGPL-3.0-or-later", reason = "dynamically linked optional binary of sharp" }',
+    command: "kit check --category security",
+  },
   supply_chain: {
     purpose:
       "Install-time triage settings: which package scopes count as internal, and the cooling period for new releases.",
