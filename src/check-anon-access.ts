@@ -15,6 +15,7 @@ import { constants } from "node:fs";
 import { open, readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 
+import { loadPublicTables, type PublicTables } from "./anon-public-tables.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 export const ANON_ACCESS_CHECK = "anonymous database access";
@@ -514,16 +515,44 @@ export async function checkAnonAccess(root: string): Promise<SecurityCheckResult
   }
   const analysis = analyzeAnonAccess(sources);
   const count = `${sources.length} SQL file${sources.length === 1 ? "" : "s"}`;
-  return withIncompleteNote(resultFor(analysis.readable, count), analysis.incomplete);
+  const declared = await loadPublicTables(root, normTable);
+  return withIncompleteNote(resultFor(analysis.readable, count, declared), analysis.incomplete);
 }
 
 const BASE = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
 const SUGGESTION =
-  "Replace USING (true) with a row-scoped condition, or move personal columns to a table anon cannot read. Run `kit check --category security` again after the migration.";
+  "Replace USING (true) with a row-scoped condition, or move personal columns to a table anon cannot read. If a table without personal columns is public on purpose, declare it under [anon_access.public] in .kit.toml with a reason. Run `kit check --category security` again after the migration.";
 
-function resultFor(readable: ReadableTable[], count: string): SecurityCheckResult {
+function resultFor(
+  all: ReadableTable[],
+  count: string,
+  declared: PublicTables,
+): SecurityCheckResult {
+  // A declaration never covers a table with a personal-looking column.
+  const accepted = all.filter((t) => !t.personalColumns.length && declared.reasons.has(t.table));
+  const readable = all.filter((t) => !accepted.includes(t));
+  const notes: string[] = [];
+  if (accepted.length) {
+    notes.push(`${accepted.length} declared public: ${accepted.map((t) => t.table).join(", ")}`);
+  }
+  if (declared.noReason.length) {
+    notes.push(
+      `ignored [anon_access.public] entries with no reason: ${declared.noReason.join(", ")}`,
+    );
+  }
+  const suffix = notes.length ? ` (${notes.join("; ")})` : "";
+  if (readable.length === 0 && declared.noReason.length === 0) {
+    const what = accepted.length ? "no undeclared table" : "no table";
+    return { ...BASE, status: "pass", detail: `${what} is readable by anon in ${count}${suffix}` };
+  }
   if (readable.length === 0) {
-    return { ...BASE, status: "pass", detail: `no table is readable by anon in ${count}` };
+    return {
+      ...BASE,
+      status: "warn",
+      severity: "low",
+      detail: `no undeclared table is readable by anon in ${count}${suffix}`,
+      suggestion: "Give each [anon_access.public] entry in .kit.toml a reason.",
+    };
   }
   const list = readable.map(describe).join("; ");
   if (readable.some((t) => t.personalColumns.length > 0)) {
@@ -532,7 +561,7 @@ function resultFor(readable: ReadableTable[], count: string): SecurityCheckResul
       status: "fail",
       severity: "high",
       hasFindings: true,
-      detail: `anon can read ${readable.length} table(s) in ${count}: ${list}`,
+      detail: `anon can read ${readable.length} table(s) in ${count}: ${list}${suffix}`,
       suggestion: SUGGESTION,
     };
   }
@@ -541,7 +570,7 @@ function resultFor(readable: ReadableTable[], count: string): SecurityCheckResul
     status: "warn",
     severity: "medium",
     hasFindings: true,
-    detail: `anon can read ${readable.length} table(s) in ${count}, none with a personal-looking column: ${list}`,
+    detail: `anon can read ${readable.length} table(s) in ${count}, none with a personal-looking column: ${list}${suffix}`,
     suggestion: SUGGESTION,
   };
 }

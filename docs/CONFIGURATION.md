@@ -8,12 +8,13 @@ code in either direction.
 Everything below lives in `.kit.toml` at the project root. `kit config sections` prints the same
 list in the terminal, marking which ones this repo already declares.
 
-kit accepts **26 sections**.
+kit accepts **27 sections**.
 
 | Section | What it configures | Set up with |
 | --- | --- | --- |
 | [`[agent_config]`](#agent_config) | How `kit agent-config` generates the rules files agents read (CLAUDE.md, AGENTS.md, …). | `kit agent-config` |
 | [`[air_gap]`](#air_gap) | No-egress posture: mirrors, offline threat data, and offline provenance verification. | [docs](AIR_GAP.md) |
+| [`[anon_access]`](#anon_access) | Database tables that the public anon role may read on purpose, each with a reason. | `kit check --category security` |
 | [`[browser]`](#browser) | Browser-verification capability declaration. | `kit browser` |
 | [`[context]`](#context) | The account and project each CLI must be pointed at, per tool. | `kit context check` |
 | [`[coverage]`](#coverage) | Which standards the evidence map scores against. | `kit coverage --list-standards` |
@@ -65,6 +66,20 @@ npm_registry = "https://npm.internal"
 ```
 
 Fuller treatment: [`docs/AIR_GAP.md`](AIR_GAP.md).
+
+## anon_access
+
+Database tables that the public anon role may read on purpose, each with a reason.
+
+**What it buys.** A table that a public page needs, such as a list of markets or active products, stops the anonymous database access check from warning on every run, and the reason stays next to it. A declaration applies only to a table without a personal-looking column; a table with one still fails. An entry with an empty reason is ignored and keeps the check at warn. Declared tables are listed in the check detail.
+
+```toml
+[anon_access.public]
+markets = "country list for the public order page"
+products = "active products shown in the kiosk"
+```
+
+Set up with `kit check --category security`.
 
 ## browser
 
