@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Fixed
+
+- **`kit gha-audit`'s pwn-request check reads triggers and steps instead of two words.** It flagged any
+  file containing both `pull_request_target` and `actions/checkout`. On six workflows it was wrong four
+  times: it warned on a base-branch checkout and on a comment naming the trigger, and passed
+  `gh pr checkout` then `npm test`, and a `workflow_run` that checks out and runs the triggering PR's
+  head. Comments are now stripped, the `on:` triggers are read, and a finding needs a privileged trigger
+  plus a step that brings in PR code; the message names the shape. Every `pull_request_target` workflow
+  also gets a low-severity row: GitHub blocks that trigger in public repositories from 2026-12-02
+  unless an Actions event policy allows it.
+
 ## [7.3.0] - 2026-11-10
 
 ### Added
