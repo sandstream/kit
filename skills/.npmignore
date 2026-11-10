@@ -1,0 +1,4 @@
+# Python bytecode is not packed: CI runs the skill scripts before the publish step,
+# and the 7.4.0 tarball shipped skills/triage/scripts/__pycache__.
+__pycache__/
+*.pyc
