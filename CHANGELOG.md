@@ -158,6 +158,13 @@
   A script that elevated without a terminal now gets a refusal.
 - Unknown flags and malformed arguments are refused before dispatch. A script that passed a flag kit
   ignored now gets a non-zero exit (exit 2 from the hook gates).
+- On Windows, many processes that append to an anchored audit log at the same time can exceed the
+  five-second lock deadline. kit then prints "audit-log append failed" and that event is not
+  written. Each permission check on Windows starts a PowerShell process, and the checks run inside
+  the lock. Two CI tests with 8 concurrent writers fail intermittently for this reason.
+- An external anchor or verifier command gets its request on stdin. A command that exits within a
+  few milliseconds without reading it can be refused as a stdin failure. Read stdin before you
+  answer.
 - The full test suite was run on macOS before the release. No CI job runs macOS.
 
 ## [7.2.2] - 2026-11-05
