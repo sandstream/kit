@@ -159,6 +159,51 @@ export async function defaultPullBase(
   return { base: "HEAD~1", fallback: true };
 }
 
+/** Dependencies `package.json` gained and lost between the two refs. A malformed file gives none. */
+async function dependencyChanges(
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<{ added: string[]; removed: string[] }> {
+  const beforePkg = await tryGitShow(baseRef, "package.json", cwd);
+  const afterPkg = await tryGitShow(headRef, "package.json", cwd);
+  try {
+    const before = beforePkg ? (JSON.parse(beforePkg) as PackageJson) : null;
+    const after = afterPkg ? (JSON.parse(afterPkg) as PackageJson) : null;
+    return diffDeps(before, after);
+  } catch {
+    return { added: [], removed: [] };
+  }
+}
+
+/** Plaintext secrets in the head version of each changed file. */
+async function plaintextHitsIn(
+  changed: string[],
+  headRef: string,
+  cwd: string,
+): Promise<PullAuditReport["plaintextHits"]> {
+  const hits: PullAuditReport["plaintextHits"] = [];
+  for (const path of changed) {
+    const content = await tryGitShow(headRef, path, cwd);
+    if (!content) continue;
+    const findings = findSecrets(content);
+    if (findings.length > 0) hits.push({ file: path, findings });
+  }
+  return hits;
+}
+
+/** Whether a file's content differs between the two refs; a missing file counts as empty. */
+async function fileChanged(
+  path: string,
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<boolean> {
+  const before = await tryGitShow(baseRef, path, cwd);
+  const after = await tryGitShow(headRef, path, cwd);
+  return (before ?? "") !== (after ?? "");
+}
+
 export async function auditPull(
   cwd: string = process.cwd(),
   baseRef: string = "HEAD~1",
@@ -179,51 +224,24 @@ export async function auditPull(
     agentFiles: [],
   };
 
-  // 1. Dependencies
-  const beforePkg = await tryGitShow(baseRef, "package.json", cwd);
-  const afterPkg = await tryGitShow(headRef, "package.json", cwd);
-  if (beforePkg || afterPkg) {
-    try {
-      const before = beforePkg ? (JSON.parse(beforePkg) as PackageJson) : null;
-      const after = afterPkg ? (JSON.parse(afterPkg) as PackageJson) : null;
-      const { added, removed } = diffDeps(before, after);
-      report.newDependencies = added;
-      report.removedDependencies = removed;
-    } catch {
-      // malformed package.json — skip
-    }
-  }
+  const deps = await dependencyChanges(baseRef, headRef, cwd);
+  report.newDependencies = deps.added;
+  report.removedDependencies = deps.removed;
 
-  // 2. .gitignore
-  const beforeGi = await tryGitShow(baseRef, ".gitignore", cwd);
-  const afterGi = await tryGitShow(headRef, ".gitignore", cwd);
-  const giDiff = diffLines(beforeGi, afterGi);
+  const giDiff = diffLines(
+    await tryGitShow(baseRef, ".gitignore", cwd),
+    await tryGitShow(headRef, ".gitignore", cwd),
+  );
   report.newGitignoreEntries = giDiff.added;
   report.removedGitignoreEntries = giDiff.removed;
 
-  // 3. Plaintext secrets across all changed files
-  const changed = await listChangedFiles(baseRef, headRef, cwd);
-  report.changedFiles = changed;
-  report.agentFiles = agentFilesIn(changed);
-  for (const path of changed) {
-    const content = await tryGitShow(headRef, path, cwd);
-    if (!content) continue;
-    const findings = findSecrets(content);
-    if (findings.length > 0) {
-      report.plaintextHits.push({ file: path, findings });
-    }
-  }
+  report.changedFiles = await listChangedFiles(baseRef, headRef, cwd);
+  report.agentFiles = agentFilesIn(report.changedFiles);
+  report.plaintextHits = await plaintextHitsIn(report.changedFiles, headRef, cwd);
 
-  // 4 + 5. Allowlist / policy / kit.toml shape changes
-  const allowlistBefore = await tryGitShow(baseRef, ".kit-allowlist.json", cwd);
-  const allowlistAfter = await tryGitShow(headRef, ".kit-allowlist.json", cwd);
-  report.allowlistChanged = (allowlistBefore ?? "") !== (allowlistAfter ?? "");
-  const policyBefore = await tryGitShow(baseRef, ".kit-policy.json", cwd);
-  const policyAfter = await tryGitShow(headRef, ".kit-policy.json", cwd);
-  report.policyChanged = (policyBefore ?? "") !== (policyAfter ?? "");
-  const tomlBefore = await tryGitShow(baseRef, ".kit.toml", cwd);
-  const tomlAfter = await tryGitShow(headRef, ".kit.toml", cwd);
-  report.kitTomlChanged = (tomlBefore ?? "") !== (tomlAfter ?? "");
+  report.allowlistChanged = await fileChanged(".kit-allowlist.json", baseRef, headRef, cwd);
+  report.policyChanged = await fileChanged(".kit-policy.json", baseRef, headRef, cwd);
+  report.kitTomlChanged = await fileChanged(".kit.toml", baseRef, headRef, cwd);
 
   return report;
 }
