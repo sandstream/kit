@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [7.3.0] - 2026-11-10
+
 ### Added
 
 - **The user-level agent audit reads Codex too.** `kit agent-audit` now also reads Codex's global
@@ -23,35 +25,11 @@
   and the Bedrock and Vertex variants, from the environment or a Claude settings `env` block, when
   they point away from the vendor. A proxy there sees every prompt, tool result and secret the
   agent reads. Plain HTTP fails; a third-party or local host warns. Only the host is printed.
-
-### Fixed
-
-- **`kit triage pip` had no cooling period.** A release younger than `min_release_age_days` got a
-  warning from `kit triage npm` and none from `kit triage pip`, so a four-day-old semgrep passed
-  where a one-day-old jscpd was flagged. pip triage now applies the same period, dated by the
-  earliest PyPI upload (or the `KIT_PYPI_INDEX` mirror) and enforced the same way. With no Python
-  lockfile read, a pip warning is never waived as a security fix, and the output says why.
-- **`kit triage pip name@1.2.3` failed as unresolvable.** That is npm's spelling; pip's is
-  `name==1.2.3`, and the triage script read `@1.2.3` as a broken version spec. kit now reads the npm
-  form as the pip one and prints that it did. A PEP 508 direct reference (`name @ https://…`) is
-  left alone.
-- **`kit audit secrets` showed a history kit never recorded.** The secrets forensics view filtered
-  the audit log for `secrets.sync`, `migrate`, `rotate`, `onecli.register` and `propagate`, but
-  nothing wrote those operations: only `secrets.generate` was logged, and the view's tests passed on
-  fixture lines they wrote themselves. `propagate` (each target tried), `sync`, `rotate`, `migrate`
-  and `onecli register` now append one event per write with the key name, the target and the
-  outcome, never the value. Key names go in `name`/`names`: the log redacts any metadata field whose
-  name contains "key", which would have grouped every write under `[REDACTED]`. A test writes
-  through the real writers and reads back through the view. Writes made before this release are
-  not in the log.
-
-### Fixed
-
-- Stop child process groups on limits and parent interrupts. Bound stream cleanup and preserve UTF-8 across output chunks.
-
-- Keep observed package-manager arguments separate from Kit flags. Mask URL credentials in guard logs before truncation and display.
-- Apply target read-only policy and branch detection to child command governance. Inspect parsed arguments for network targets.
-- Mask raw child arguments before audit and response encoding. Reject invalid environment configuration before execution.
+- **Memory preserves native tool requests and reported responses across Claude Code and Codex.**
+  Schema 18 records call identifiers, outcome evidence, and capture coverage.
+  Older rows remain unknown until supported transcripts supply evidence. See [tool evidence](docs/MEMORY_TOOL_EVIDENCE.md).
+- **`kit triage instructions [path]` scans selected agent instruction files.** Findings include file, line, and rule.
+  The result includes coverage status and named gaps. See [scope and limits](docs/INSTRUCTION_SCAN.md).
 
 ### Corrected command behavior
 
@@ -82,7 +60,6 @@
   TOTP approval requires an interactive terminal. Missing values and unrelated flags fail before policy effects.
 - **Revocation failures remain visible.** A failed marker removal returns failure. Read-only mode refuses enrollment and marker mutation.
   `auth status --json` reports local approval state. It does not establish provider access.
-
 - **Identity inspection uses the access gate's environment decision.** It distinguishes the selected configuration, reports default budgets, and refuses invalid state.
   Profile output masks recognized credentials and terminal controls. Empty identity sections report `agent: null`.
 - **Report import refuses malformed evidence.** SARIF and OSV imports validate consumed structure and protect displayed findings.
@@ -107,15 +84,6 @@
 - **The scope adoption test examines parsed code.** Unrelated objects and quoted examples cannot supply a declaration.
   Runtime permission checks remain separate from this structural test.
 
-### Added
-
-- **Memory preserves native tool requests and reported responses across Claude Code and Codex.**
-  Schema 18 records call identifiers, outcome evidence, and capture coverage.
-  Older rows remain unknown until supported transcripts supply evidence. See [tool evidence](docs/MEMORY_TOOL_EVIDENCE.md).
-
-- **`kit triage instructions [path]` scans selected agent instruction files.** Findings include file, line, and rule.
-  The result includes coverage status and named gaps. See [scope and limits](docs/INSTRUCTION_SCAN.md).
-
 ### Security
 
 - **Unsupported preview flags fail before command dispatch.** `kit secrets --dry-run` can no longer create or overwrite `.env.local`.
@@ -125,7 +93,6 @@
 - **Git ignore checks distinguish missing rules from failed verification.** Closed input pipes and unreadable ignore files report unverified protection.
 - **MCP repair evidence uses the requested project and actual result.** Budget checks and usage share the target directory.
   A returned repair failure produces a failed audit outcome and retains the action details.
-
 - **Memory imports check session and message metadata before merge.** Quarantine does not exempt fields exposed through recall, lists, or statistics.
   This also prevents quarantined imports from changing a live session's metadata through a shared identifier.
   Scans include generated columns and tables without row identifiers. Unreadable fields stop the scan.
@@ -141,19 +108,51 @@
   A commit hook that replaces the staged snapshot causes publication to stop.
 - **Quarantined messages stay out of `memory learn`.** Imported quarantined messages cannot reappear as recurring instructions or skill drafts.
   Quarantined rows do not contribute to candidate counts.
-
 - **License scan failures retain the cause.** The check reports an error after preceding warnings.
   It separates a missing scanner from a failed scan and redacts credentials in diagnostic text.
   Invalid report structures, timeouts, and truncated output remain incomplete checks.
 
 ### Fixed
 
+- **`kit triage pip` had no cooling period.** A release younger than `min_release_age_days` got a
+  warning from `kit triage npm` and none from `kit triage pip`, so a four-day-old semgrep passed
+  where a one-day-old jscpd was flagged. pip triage now applies the same period, dated by the
+  earliest PyPI upload (or the `KIT_PYPI_INDEX` mirror) and enforced the same way. With no Python
+  lockfile read, a pip warning is never waived as a security fix, and the output says why.
+- **`kit triage pip name@1.2.3` failed as unresolvable.** That is npm's spelling; pip's is
+  `name==1.2.3`, and the triage script read `@1.2.3` as a broken version spec. kit now reads the npm
+  form as the pip one and prints that it did. A PEP 508 direct reference (`name @ https://…`) is
+  left alone.
+- **`kit audit secrets` showed a history kit never recorded.** The secrets forensics view filtered
+  the audit log for `secrets.sync`, `migrate`, `rotate`, `onecli.register` and `propagate`, but
+  nothing wrote those operations: only `secrets.generate` was logged, and the view's tests passed on
+  fixture lines they wrote themselves. `propagate` (each target tried), `sync`, `rotate`, `migrate`
+  and `onecli register` now append one event per write with the key name, the target and the
+  outcome, never the value. Key names go in `name`/`names`: the log redacts any metadata field whose
+  name contains "key", which would have grouped every write under `[REDACTED]`. A test writes
+  through the real writers and reads back through the view. Writes made before this release are
+  not in the log.
+- Stop child process groups on limits and parent interrupts. Bound stream cleanup and preserve UTF-8 across output chunks.
+- Keep observed package-manager arguments separate from Kit flags. Mask URL credentials in guard logs before truncation and display.
+- Apply target read-only policy and branch detection to child command governance. Inspect parsed arguments for network targets.
+- Mask raw child arguments before audit and response encoding. Reject invalid environment configuration before execution.
 - **Bookmarks select the current worktree and preserve the recorded origin.** Imported paths remain separate from local recall scope.
   An explicit `--session` selects the requested session without adding its identifier to the bookmark name.
   Missing session values are rejected before any bookmark changes.
 - **Memory imports preserve a known harness when incoming evidence is absent.** New sessions without a harness receive `unknown`.
 - **MCP `kit_fix` repairs Git ignore protection and creates configured secret templates.** It uses the CLI file helpers in the requested project.
   Existing templates remain unchanged. Failed file repairs return `ok: false` with the cause.
+
+### Known limitations
+
+- Memory schema 18 is a one-way upgrade. Once 7.3.0 has opened a memory store, kit 7.2.2 and older
+  refuse it with "Newer memory schema is not supported; update kit before opening this store".
+  Update kit on every machine that shares the store.
+- `kit auth elevate` with TOTP needs an interactive terminal, also when `KIT_TOTP_SECRET` is set.
+  A script that elevated without a terminal now gets a refusal.
+- Unknown flags and malformed arguments are refused before dispatch. A script that passed a flag kit
+  ignored now gets a non-zero exit (exit 2 from the hook gates).
+- The full test suite was run on macOS before the release. No CI job runs macOS.
 
 ## [7.2.2] - 2026-11-05
 

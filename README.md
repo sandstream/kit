@@ -77,6 +77,15 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.3.0: memory keeps tool evidence, and commands refuse what they cannot honor.** Memory schema 18
+  records native tool requests and reported responses for Claude Code and Codex
+  ([tool evidence](docs/MEMORY_TOOL_EVIDENCE.md)). `kit agent-audit` reads the user-level agent
+  surfaces, Codex included, and names a redirected model endpoint. Unknown flags and malformed
+  arguments are refused before dispatch, so `kit secrets --dry-run` can no longer write `.env.local`.
+  Approval, revocation, budget and audit-receipt checks fail closed on invalid state. Three things
+  to know before you update: schema 18 is a one-way upgrade (7.2.2 and older refuse the store), TOTP
+  approval needs an interactive terminal, and a script that passed an ignored flag now gets a
+  non-zero exit. macOS is unverified in CI. Full list in the [CHANGELOG](CHANGELOG.md).
 - **7.2.2: `kit triage pkg`, and more of what `kit triage instructions` finds.** `kit triage pkg
   <file.pkg>` checks a macOS installer before it is opened: its SHA-256 against the publisher's list,
   the signing Team ID against the publisher you expect (the Node.js Foundation is built in), and
