@@ -49,6 +49,16 @@ export function auditFixture(t: TestContext, anchored = false) {
   return { root, project, home, env, workers };
 }
 
+/**
+ * Let a contention test's writers wait up to 30 s for the lock. These tests check that every
+ * write lands in one valid chain, not how long a writer waits; with the 5 s default they timed
+ * out on slow Windows runners. The test that measures the 5 s limit does not call this.
+ */
+export const CONTENTION_LOCK_WAIT_MS = "30000";
+export function allowSlowLock(context: { env: NodeJS.ProcessEnv }): void {
+  context.env.KIT_AUDIT_LOCK_WAIT_MS = CONTENTION_LOCK_WAIT_MS;
+}
+
 export function startAuditWorker(context: ReturnType<typeof auditFixture>, body: string): Worker {
   const source = `
     import assert from "node:assert/strict";

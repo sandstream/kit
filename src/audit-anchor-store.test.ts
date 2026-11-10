@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import {
+  allowSlowLock,
   auditCli,
   auditFixture,
   runAuditWorkers,
@@ -19,6 +20,7 @@ import {
 
 test("concurrent seals for different logs retain every anchor record", async (t) => {
   const fixture = auditFixture(t);
+  allowSlowLock(fixture);
   await runAuditWorkers([
     startAuditWorker(
       fixture,
