@@ -44,6 +44,14 @@ breaking change.
   `playwright-report/` and similar folders, where bundled assets are over the 256 KiB limit, so each
   check fell from pass to warn. `playwright-report`, `test-results`, `blob-report`,
   `storybook-static` and `.turbo` are now skipped.
+- **`kit gha-audit`'s pwn-request check reads triggers and steps instead of two words.** It flagged any
+  file containing both `pull_request_target` and `actions/checkout`. On six workflows it was wrong four
+  times: it warned on a base-branch checkout and on a comment naming the trigger, and passed
+  `gh pr checkout` then `npm test`, and a `workflow_run` that checks out and runs the triggering PR's
+  head. Comments are now stripped, the `on:` triggers are read, and a finding needs a privileged trigger
+  plus a step that brings in PR code; the message names the shape. Every `pull_request_target` workflow
+  also gets a low-severity row: GitHub blocks that trigger in public repositories from 2026-12-02
+  unless an Actions event policy allows it.
 - **The audit lock's wait can be raised on a slow disk.** A writer waited 5 seconds for the audit lock
   and then failed. Several writers queue behind one lock, and on GitHub's Windows runners the last
   of 16 appends from 8 processes, and of 12 seals in one process, needed longer; two tests failed on

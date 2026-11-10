@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { auditWorkflow } from "./gha-audit.js";
 
+const HEAD_SHA = "${{ github.event.pull_request.head.sha }}";
+
 describe("auditWorkflow", () => {
   it("flags unpinned action refs (tag/branch), not full-SHA pins", () => {
     const wf = [
@@ -24,14 +26,30 @@ describe("auditWorkflow", () => {
     assert.equal(checkoutFinding?.severity, "medium");
   });
 
-  it("flags pwn-request (pull_request_target + checkout)", () => {
+  it("flags pwn-request (pull_request_target + a checkout of the PR head)", () => {
     const wf =
-      "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n      - uses: actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n";
+      "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n      - uses: actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n        with:\n          ref: " +
+      HEAD_SHA +
+      "\n      - run: npm test\n";
     const findings = auditWorkflow(wf, "danger.yml");
     const pwn = findings.find((f) => f.name.startsWith("pwn-request"));
     assert.ok(pwn);
     assert.equal(pwn?.severity, "high");
     assert.equal(pwn?.rule?.id, "OWASP-A08");
+    assert.match(pwn?.detail ?? "", /a checkout of the pull request.s head/);
+  });
+});
+
+describe("auditWorkflow: pull_request_target without PR code", () => {
+  it("a plain checkout under pull_request_target is not a pwn request, but the default block is named", () => {
+    // Under pull_request_target a checkout without `ref:` takes the BASE branch, not PR code.
+    const wf =
+      "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n      - uses: actions/checkout@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n";
+    const findings = auditWorkflow(wf, "label.yml");
+    assert.ok(!findings.some((f) => f.name.startsWith("pwn-request")));
+    const block = findings.find((f) => f.name.startsWith("pull_request_target default block"));
+    assert.equal(block?.severity, "low");
+    assert.match(block?.detail ?? "", /2026-12-02/);
   });
 
   it("clean workflow → no findings", () => {
