@@ -42,7 +42,10 @@ function assertLog(path: string, operations: string[]): string {
 const pauseWrite = `
   const fs = (await import("node:fs/promises")).default;
   const { syncBuiltinESMExports } = await import("node:module");
-  const target = join(await fs.realpath(project), ".kit-audit.jsonl");
+  // Match the product's canonical path. The promise realpath expands Windows short names
+  // (RUNNER~1), the synchronous one does not, and the comparison below is by string.
+  const { realpathSync } = await import("node:fs");
+  const target = join(realpathSync(project), ".kit-audit.jsonl");
   const appendFile = fs.appendFile;
   let reachedWrite;
   const writeReached = new Promise((resolve) => { reachedWrite = resolve; });

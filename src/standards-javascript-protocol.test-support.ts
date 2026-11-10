@@ -65,7 +65,8 @@ function fixtureEnvironment(root: string, compiler: string): NodeJS.ProcessEnv {
     XDG_DATA_HOME: join(home, "data"),
     XDG_CACHE_HOME: join(home, "cache"),
   };
-  const body = `if (process.argv[2] !== "which" || process.argv[3] !== "tsc") process.exit(1);
+  // The request is the last two arguments: a script file shifts them by one, a preload does not.
+  const body = `if (process.argv.slice(-2).join(" ") !== "which tsc") process.exit(1);
 process.stdout.write(${JSON.stringify(compiler)});`;
   if (process.platform === "win32") {
     copyFileSync(process.execPath, join(bin, "mise.exe"));

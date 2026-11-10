@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { readAuditLog } from "./audit.js";
 import { createCliContractFixture } from "./cli-contract.test-support.js";
 import { projectConfig, seedBudget } from "./governance-outcome.test-support.js";
@@ -57,7 +57,17 @@ function startContender(
   const script = `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "executed");`;
   const child = spawn(
     process.execPath,
-    [...loader, "--import", preload, cli, "run", "--", process.execPath, "-e", script],
+    [
+      ...loader,
+      "--import",
+      pathToFileURL(preload).href,
+      cli,
+      "run",
+      "--",
+      process.execPath,
+      "-e",
+      script,
+    ],
     {
       cwd: fixture.cwd,
       env: { ...fixture.env, KIT_TEST_BUDGET_READY: ready },

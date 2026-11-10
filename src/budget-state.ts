@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
 import fs, { lstat, mkdir, open, type FileHandle } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { isReadOnlyMode } from "./read-only-mode.js";
 import { sameIdentity } from "./utils/same-file.js";
 
@@ -119,11 +120,38 @@ async function unchangedDestination(path: string, previous?: BigIntStats): Promi
   }
 }
 
+const WINDOWS = process.platform === "win32";
+const REPLACE_ATTEMPTS = 50;
+
+function replacementRefused(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
+}
+
+/**
+ * Move the complete temporary file over the destination.
+ * Windows refuses to replace a file while any handle to it is open, so a reader in
+ * another process can refuse the move for a moment. Try again for about one second.
+ * POSIX replaces the name while readers keep their snapshot, so it never tries again.
+ */
+async function moveIntoPlace(temporary: string, path: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await fs.rename(temporary, path);
+      return;
+    } catch (error) {
+      if (!WINDOWS || attempt >= REPLACE_ATTEMPTS || !replacementRefused(error)) throw error;
+    }
+    await delay(20);
+  }
+}
+
 async function replaceState(
   path: string,
   state: BudgetState,
-  previous?: BigIntStats,
+  previous?: FileHandle,
 ): Promise<void> {
+  const stat = await previous?.stat({ bigint: true });
   const temporary = `${path}.tmp-${randomUUID()}`;
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
   const file = await open(temporary, flags, 0o600);
@@ -134,8 +162,10 @@ async function replaceState(
     } finally {
       await file.close();
     }
-    await unchangedDestination(path, previous);
-    await fs.rename(temporary, path);
+    await unchangedDestination(path, stat);
+    // Our own handle to the destination would refuse the move on Windows.
+    if (WINDOWS) await previous?.close();
+    await moveIntoPlace(temporary, path);
   } catch (writeError) {
     try {
       await fs.unlink(temporary);
@@ -159,11 +189,11 @@ export async function saveBudgetState(state: BudgetState, cwd: string): Promise<
     if (!isBudgetState(state)) throw new Error("Invalid budget state");
     await mkdir(dirname(path), { recursive: true });
     previous = await writableState(path);
-    const stat = await previous?.stat({ bigint: true });
-    await replaceState(path, state, stat);
+    await replaceState(path, state, previous);
   } catch {
     throw new Error("Could not save budget usage. Check .kit-budget.json.");
   } finally {
+    // Closing again after the Windows early close is harmless: FileHandle.close is idempotent.
     await previous?.close();
   }
 }

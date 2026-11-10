@@ -338,9 +338,12 @@ test("refuses stdin failure and stops the command", async (t) => {
     fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); fs.closeSync(0);
     process.stdout.write('looks-valid'); setInterval(() => {}, 1000);
   `);
+  // Windows runs the command through cmd.exe, which keeps its own handle to the stdin pipe.
+  // The pipe therefore stays open after the command closes it, the write stalls, and the
+  // timeout refuses the command instead of a write error.
   await assert.rejects(
     runExternalProtocol(command, "x".repeat(900_000), { timeoutMs: 3_000 }),
-    /stdin/i,
+    process.platform === "win32" ? /timeout/i : /stdin/i,
   );
   await assertStopped(pid());
 });

@@ -13,8 +13,11 @@ export function registerWorktree(root: string, worktree: string, name: string): 
   mkdirSync(worktree, { recursive: true });
   const gitdir = join(root, ".git", "worktrees", name);
   mkdirSync(gitdir, { recursive: true });
-  writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
-  writeFileSync(join(gitdir, "gitdir"), join(worktree, ".git") + "\n");
+  // Git writes these two paths with forward slashes on every platform. It strips the
+  // literal suffix "/.git" from the second one, so a backslash form names the wrong directory.
+  const gitSpelling = (path: string) => path.replaceAll("\\", "/");
+  writeFileSync(join(worktree, ".git"), `gitdir: ${gitSpelling(gitdir)}\n`);
+  writeFileSync(join(gitdir, "gitdir"), gitSpelling(join(worktree, ".git")) + "\n");
   writeFileSync(join(gitdir, "commondir"), "../..\n");
   writeFileSync(join(gitdir, "HEAD"), `ref: refs/heads/${name}\n`);
 }

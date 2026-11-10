@@ -36,7 +36,10 @@ function running(pid: number): boolean {
 }
 
 type RuntimeFixture = ReturnType<typeof createCliContractFixture>;
-type TreeMode = "timeout" | "output" | "exit" | "escape";
+// "orphan" is "exit" with a detached descendant. Windows ends a descendant that is not
+// detached when its parent exits (libuv puts it in a kill-on-close job), so only a
+// detached one outlives the parent and keeps the output pipes open.
+type TreeMode = "timeout" | "output" | "exit" | "escape" | "orphan";
 
 function killRecordedProcess(path: string): void {
   if (!existsSync(path)) return;
@@ -80,14 +83,14 @@ function writeTreePrograms(fixture: RuntimeFixture, mode: TreeMode) {
     `${watchdog}
     fs.writeFileSync(${JSON.stringify(rootPid)}, String(process.pid));
     const child = require('node:child_process').spawn(process.execPath, [${JSON.stringify(leaf)}], {
-      stdio: ['ignore', 1, 2], detached: ${mode === "escape"},
+      stdio: ['ignore', 1, 2], detached: ${mode === "escape" || mode === "orphan"},
     });
     child.on('error', () => process.exit(2));
     const ready = setInterval(() => {
       if (!fs.existsSync(${JSON.stringify(leafPid)})) return;
       clearInterval(ready);
       ${mode === "output" ? "fs.writeSync(1, 'x'.repeat(4096));" : ""}
-      ${mode === "exit" ? "process.exit(0);" : ""}
+      ${mode === "exit" || mode === "orphan" ? "process.exit(0);" : ""}
     }, 10);
   `,
   );
@@ -168,7 +171,7 @@ it(
 it("bounds pipe cleanup when descendants cannot be reached by the tree kill", async (t) => {
   // POSIX: the descendant deliberately starts a separate session. Windows:
   // taskkill cannot traverse a tree whose parent has already exited.
-  const { pending, leafPid } = treeFixture(t, process.platform === "win32" ? "exit" : "escape");
+  const { pending, leafPid } = treeFixture(t, process.platform === "win32" ? "orphan" : "escape");
   const result = await within(pending, 3500);
   assert.ok(existsSync(leafPid));
   assert.ok(result, "inherited pipes must not defeat the execution deadline");

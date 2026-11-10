@@ -11,6 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -112,7 +113,9 @@ it("refuses direct file operations and audits each refusal", async () => {
     else process.env.KIT_READ_ONLY = previous;
     if (previousAnchor === undefined) delete process.env.KIT_AUDIT_ANCHOR;
     else process.env.KIT_AUDIT_ANCHOR = previousAnchor;
-    rmSync(root, { recursive: true, force: true });
+    // The refusals are audited without awaiting. The last append can still hold the
+    // coordination database for a moment, and Windows refuses to delete an open file.
+    await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
   }
 });
 

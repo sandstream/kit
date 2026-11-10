@@ -9,7 +9,7 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { realpathSync } from "node:fs";
-import { posix, win32 } from "node:path";
+import { basename, dirname, posix, resolve, win32 } from "node:path";
 import {
   getProjectRecallRoots,
   registerProjectIdentity,
@@ -34,6 +34,27 @@ export interface SaveThreadInput {
   recallProjectPath?: string;
 }
 
+/**
+ * Resolve a path that may not exist with the same native resolver as an existing one.
+ * On Windows the JavaScript resolver keeps 8.3 short names (RUNNER~1) that the native
+ * resolver expands. A recorded subdirectory that is gone must still spell its existing
+ * ancestor the way an existing root is spelled, or it never matches that root.
+ */
+function nativeExistingAncestor(path: string): string {
+  let ancestor = resolve(path);
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      return resolve(realpathSync.native(ancestor), ...missing);
+    } catch {
+      const parent = dirname(ancestor);
+      if (parent === ancestor) return resolveLocalProjectPath(path);
+      missing.unshift(basename(ancestor));
+      ancestor = parent;
+    }
+  }
+}
+
 /** Compare paths without changing the stored spelling or importing another OS's root. */
 function threadScope(roots: string[]): (path: string | null) => boolean {
   const cache = new Map<string, string>();
@@ -47,7 +68,7 @@ function threadScope(roots: string[]): (path: string | null) => boolean {
       try {
         local = realpathSync.native(path);
       } catch {
-        local = resolveLocalProjectPath(path);
+        local = nativeExistingAncestor(path);
       }
     }
     const normalized = windows

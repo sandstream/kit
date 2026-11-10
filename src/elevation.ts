@@ -214,6 +214,16 @@ function stateFromMarker(parsed: Partial<VerifiedElevationState>): VerifiedEleva
   };
 }
 
+/**
+ * Synchronous form of the canonical project path that grants record.
+ * Grants record `fs.promises.realpath`, which is the native resolver. On Windows the
+ * JavaScript `realpathSync` keeps 8.3 short names (RUNNER~1) that the native resolver
+ * expands, so only the native form can equal the recorded binding.
+ */
+function canonicalProjectSync(cwd: string): string {
+  return realpathSync.native(cwd);
+}
+
 async function readBoundElevation(cwd: string): Promise<VerifiedElevationState | null> {
   const path = resolve(cwd, ELEVATION_FILE);
   try {
@@ -245,7 +255,7 @@ async function readBoundElevation(cwd: string): Promise<VerifiedElevationState |
     }
     const { elevationGrantIsActive } = await import("./elevation-authority.js");
     if (!elevationGrantIsActive(state.projectDirectory, state.grantId)) return null;
-    if (realpathSync(cwd) !== parsed.projectDirectory) return null;
+    if (canonicalProjectSync(cwd) !== parsed.projectDirectory) return null;
     return state;
   } catch {
     console.warn("[kit] elevation marker present but unreadable/corrupt. ignoring");
@@ -491,7 +501,7 @@ export async function consumeElevation(
       const { consumeElevationGrant } = await import("./elevation-authority.js");
       granted = consumeElevationGrant(state, () => {
         // Validate the target and exact signed marker again under the authority transaction.
-        if (realpathSync(cwd) !== state.projectDirectory)
+        if (canonicalProjectSync(cwd) !== state.projectDirectory)
           throw new Error("Approval target changed");
         const path = resolve(state.projectDirectory, ELEVATION_FILE);
         const current = JSON.parse(readFileSync(path, "utf8")) as VerifiedElevationState;

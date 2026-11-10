@@ -221,12 +221,13 @@ syncBuiltinESMExports();
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).count, count);
     const after = fixture.snapshot();
-    delete after["project/.kit-audit.jsonl"];
+    // Snapshot keys use the native separator, so build them with join.
+    delete after[join("project", ".kit-audit.jsonl")];
     // Expected: audit activation needs its persistent coordination file. No report or home writes are allowed.
     const lock = lstatSync(join(fixture.cwd, ".kit-audit.jsonl.lock.sqlite"));
     assert.ok(lock.isFile());
     assert.equal(lock.nlink, 1);
-    delete after["project/.kit-audit.jsonl.lock.sqlite"];
+    delete after[join("project", ".kit-audit.jsonl.lock.sqlite")];
     assert.deepEqual(after, before);
     const events = readFileSync(join(fixture.cwd, ".kit-audit.jsonl"), "utf8")
       .trim()
