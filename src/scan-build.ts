@@ -2,6 +2,7 @@ import { open, readdir, stat } from "node:fs/promises";
 import { resolve, join, relative, sep } from "node:path";
 import type { SecretFinding } from "./utils/redactSecrets.js";
 import { ArtifactIncompleteError, findArtifactSecrets, MAX_BYTES } from "./scan-build-sourcemap.js";
+import { findAsarSecrets } from "./scan-build-asar.js";
 
 /**
  * Walks built-artifact directories looking for leaked credentials. The
@@ -23,6 +24,12 @@ export interface BuildHit {
 export interface BuildScanIssue {
   file: string;
   detail: string;
+}
+
+/** What the scan read, beyond its findings. */
+export interface BuildScanReport {
+  /** Files in the build dirs not read because of their type, counted by extension. */
+  skipped: Record<string, number>;
 }
 
 export class BuildScanIncompleteError extends Error {
@@ -63,6 +70,7 @@ const SCANNABLE_EXTS = new Set([
   ".env",
   ".env.local",
   ".env.production",
+  ".asar",
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".pnpm-store", "cache"]);
@@ -88,6 +96,7 @@ async function walk(
   root: string,
   out: string[],
   issues: BuildScanIssue[],
+  skipped: Record<string, number>,
   depth = 0,
 ): Promise<void> {
   const rel = relative(root, dir).split(sep).join("/");
@@ -109,10 +118,14 @@ async function walk(
     if (SKIP_DIRS.has(ent.name)) continue;
     const full = join(dir, ent.name);
     if (ent.isDirectory()) {
-      await walk(full, root, out, issues, depth + 1);
+      await walk(full, root, out, issues, skipped, depth + 1);
     } else if (ent.isFile()) {
       const ext = ent.name.includes(".") ? ent.name.slice(ent.name.lastIndexOf(".")) : "";
-      if (!SCANNABLE_EXTS.has(ext) && !ent.name.startsWith(".env")) continue;
+      if (!SCANNABLE_EXTS.has(ext) && !ent.name.startsWith(".env")) {
+        const key = ext || "(no extension)";
+        skipped[key] = (skipped[key] ?? 0) + 1;
+        continue;
+      }
       out.push(full);
     }
   }
@@ -133,6 +146,7 @@ async function readBounded(path: string): Promise<string | "too-large"> {
 export async function scanBuildArtifacts(
   cwd: string = process.cwd(),
   customDirs?: string[],
+  report: BuildScanReport = { skipped: {} },
 ): Promise<BuildHit[]> {
   const dirsToScan = customDirs ?? DEFAULT_BUILD_DIRS;
   const files: string[] = [];
@@ -146,13 +160,17 @@ export async function scanBuildArtifacts(
     } catch {
       continue;
     }
-    await walk(full, cwd, files, incomplete);
+    await walk(full, cwd, files, incomplete, report.skipped);
   }
 
   const hits: BuildHit[] = [];
   for (const path of files) {
     const rel = relative(cwd, path).split(sep).join("/");
     if (!isBrowserVisibleNextArtifact(rel)) continue;
+    if (rel.endsWith(".asar")) {
+      await scanAsar(path, rel, hits, incomplete);
+      continue;
+    }
     let content: string | "too-large";
     try {
       content = await readBounded(path);
@@ -183,4 +201,21 @@ export async function scanBuildArtifacts(
   }
   if (incomplete.length) throw new BuildScanIncompleteError(incomplete, hits);
   return hits;
+}
+
+async function scanAsar(
+  path: string,
+  rel: string,
+  hits: BuildHit[],
+  incomplete: BuildScanIssue[],
+): Promise<void> {
+  let found: SecretFinding[] | "too-large";
+  try {
+    found = await findAsarSecrets(path, rel);
+  } catch {
+    incomplete.push({ file: rel, detail: `${rel}: file could not be read` });
+    return;
+  }
+  if (found === "too-large") incomplete.push({ file: rel, detail: `${rel}: asar exceeds 1 GiB` });
+  else if (found.length > 0) hits.push({ file: rel, findings: found });
 }

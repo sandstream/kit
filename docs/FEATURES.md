@@ -179,7 +179,7 @@ in to any vault is always your own account action; kit never does it for you.
 ### Security scanners
 
 - `kit security scan-staged`: Pre-commit: scan staged blobs for known credential patterns; only findings the commit introduces block it
-- `kit security scan-build`: Walk `.next/`, `dist/`, `build/` for credentials inlined into artifacts (`NEXT_PUBLIC_` typos)
+- `kit security scan-build`: Walk `.next/`, `dist/`, `build/` for credentials inlined into artifacts (`NEXT_PUBLIC_` typos), Electron `app.asar` archives included (read as bytes, up to 1 GiB). Files of other types are not read, and the output counts them by extension
 - `kit security scan-transcripts`: Walk `.claude/`, `~/.claude/projects/`, `.opencode/` for replayed-secret leaks
 - `kit security check-gitignore [--fix]`: Verify `.env*`, `*.pem`, `id_rsa`, `.kit/elevation.json` are ignored
 - `kit security verify-pull [--base <ref>]`: After `git pull`: audit new deps, gitignore drops, introduced secrets, policy changes
