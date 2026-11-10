@@ -97,6 +97,7 @@
     "knownSections": [
       "agent_config",
       "air_gap",
+      "anon_access",
       "browser",
       "context",
       "coverage",

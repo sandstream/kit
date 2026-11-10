@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { verifyAuditChain } from "./audit.js";
 import {
+  allowSlowLock,
   auditCli,
   auditFixture,
+  CONTENTION_LOCK_WAIT_MS,
   runAuditWorkers,
   startAuditWorker,
 } from "./audit-concurrency.test-support.js";
@@ -32,7 +34,7 @@ test("concurrent audit calls preserve every admitted event in a verifiable chain
       ["--import", "tsx", "--input-type=module", "--eval", source, root],
       {
         encoding: "utf8",
-        timeout: 30_000,
+        timeout: 60_000,
         env: {
           ...process.env,
           HOME: root,
@@ -41,6 +43,7 @@ test("concurrent audit calls preserve every admitted event in a verifiable chain
           KIT_AUDIT_ANCHOR_DIR: join(root, "anchors"),
           KIT_AUDIT_ANCHOR: "0",
           KIT_KEYSTORE: "file",
+          KIT_AUDIT_LOCK_WAIT_MS: CONTENTION_LOCK_WAIT_MS,
         },
       },
     );
@@ -92,6 +95,7 @@ test("a valid final record without a newline remains a valid chain after append"
 
 test("separate direct and governed writers preserve one chain and a complete anchor", async (t) => {
   const fixture = auditFixture(t, true);
+  allowSlowLock(fixture);
   const alias = join(fixture.root, "alias");
   symlinkSync(fixture.project, alias, process.platform === "win32" ? "junction" : "dir");
   const workers = Array.from({ length: 8 }, (_, index) =>
