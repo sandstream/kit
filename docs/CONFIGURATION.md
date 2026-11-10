@@ -8,7 +8,7 @@ code in either direction.
 Everything below lives in `.kit.toml` at the project root. `kit config sections` prints the same
 list in the terminal, marking which ones this repo already declares.
 
-kit accepts **27 sections**.
+kit accepts **28 sections**.
 
 | Section | What it configures | Set up with |
 | --- | --- | --- |
