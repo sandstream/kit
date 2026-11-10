@@ -58,6 +58,20 @@ export interface GemRegistryView {
   mfaRequired: Record<string, boolean>;
 }
 
+/** One usable row: a version with a publish time, or null. */
+function gemRow(row: GemVersionRow | null | undefined) {
+  const version = typeof row?.number === "string" ? row.number : null;
+  const at = typeof row?.created_at === "string" ? row.created_at : null;
+  if (!version || !at || Number.isNaN(Date.parse(at))) return null;
+  return {
+    version,
+    at,
+    prerelease: row?.prerelease === true,
+    downloads: typeof row?.downloads_count === "number" ? row.downloads_count : 0,
+    mfa: row?.metadata?.rubygems_mfa_required === "true",
+  };
+}
+
 /** The versions document as a registry view, or null when it is not one. Pure. */
 export function gemRegistryView(doc: unknown): GemRegistryView | null {
   if (!Array.isArray(doc)) return null;
@@ -68,15 +82,15 @@ export function gemRegistryView(doc: unknown): GemRegistryView | null {
     downloads: 0,
     mfaRequired: {},
   };
-  for (const row of doc as GemVersionRow[]) {
-    const v = typeof row?.number === "string" ? row.number : null;
-    const at = typeof row?.created_at === "string" ? row.created_at : null;
-    if (!v || !at || Number.isNaN(Date.parse(at))) continue;
-    if (!(v in view.times)) view.versions.push(v);
-    if (!view.times[v] || Date.parse(at) < Date.parse(view.times[v])) view.times[v] = at;
-    if (row.prerelease === true) view.prerelease.add(v);
-    if (typeof row.downloads_count === "number") view.downloads += row.downloads_count;
-    view.mfaRequired[v] ||= row.metadata?.rubygems_mfa_required === "true";
+  for (const raw of doc as GemVersionRow[]) {
+    const row = gemRow(raw);
+    if (!row) continue;
+    const seen = view.times[row.version];
+    if (!seen) view.versions.push(row.version);
+    if (!seen || Date.parse(row.at) < Date.parse(seen)) view.times[row.version] = row.at;
+    if (row.prerelease) view.prerelease.add(row.version);
+    view.downloads += row.downloads;
+    view.mfaRequired[row.version] ||= row.mfa;
   }
   return view.versions.length > 0 ? view : null;
 }
