@@ -64,7 +64,10 @@ async function inSync(root: string, file: string, manifest: NodeManifest): Promi
   }
 }
 
-export async function npmLockfileCover(root: string, manifest: NodeManifest): Promise<LockfileCover> {
+export async function npmLockfileCover(
+  root: string,
+  manifest: NodeManifest,
+): Promise<LockfileCover> {
   if (await strictPins(root)) return {};
   for (const file of NPM_LOCKFILES) {
     if (!(await isTracked(root, file))) continue;
