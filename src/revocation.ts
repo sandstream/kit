@@ -1,111 +1,139 @@
+import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
 import type { GovernanceConfig } from "./config.js";
 import { mergeGovernanceConfig } from "./governance.js";
 
-export interface RevocationStatus {
-  revoked: boolean;
-  reason?: string;
-  timestamp?: string;
-}
+import {
+  readRevocationStatus,
+  type RevocationStatus,
+  type RevocationObservation,
+} from "./revocation-transport.js";
+export type { RevocationStatus } from "./revocation-transport.js";
 
 let lastRevocationCheck = 0;
 let cachedRevocationStatus: RevocationStatus | null = null;
+let cachedRevocationIdentity: string | undefined;
 
-// Internal fetch result. `cacheable` is false for fail-closed results derived
-// from ambiguous/erroring responses — those must NOT be cached as a verdict,
-// otherwise a single bad response would pin the agent into a state until the
-// cache TTL expires (and an ambiguous "revoked" would survive a recovery).
-interface FetchResult {
-  status: RevocationStatus;
-  cacheable: boolean;
+interface PendingCheck {
+  active: number;
+  latest?: PendingRequest;
 }
 
-/**
- * Check if agent access has been revoked
- */
+interface PendingRequest {
+  pending: boolean;
+  result: Promise<RevocationObservation>;
+}
+
+const pendingChecks = new Map<string, PendingCheck>();
+
+function revocationIdentity(config: Required<GovernanceConfig>, cwd?: string): string | undefined {
+  try {
+    return JSON.stringify([
+      realpathSync(resolve(cwd ?? process.cwd())),
+      config.revocation.revocation_endpoint,
+      config.agent.id,
+    ]);
+  } catch {
+    console.warn("Could not verify the project directory. Access denied.");
+    return undefined;
+  }
+}
+
+/** Return true when access is revoked or cannot be verified. */
 export async function checkRevocationStatus(
   config: GovernanceConfig | undefined,
+  opts: { cwd?: string } = {},
 ): Promise<boolean> {
+  return !(await checkRevocationAccess(config, opts)).allowed;
+}
+
+/** Preserve the difference between confirmed revocation and an uncertain check. */
+export async function checkRevocationAccess(
+  config: GovernanceConfig | undefined,
+  opts: { cwd?: string } = {},
+): Promise<{ allowed: true } | { allowed: false; reason: string }> {
+  const result = await readCachedStatus(config, opts);
+  if ("disabled" in result) return { allowed: true };
+  if (!result.verified) {
+    return { allowed: false, reason: "Revocation status could not be verified" };
+  }
+  return result.status.revoked ? { allowed: false, reason: "Access revoked" } : { allowed: true };
+}
+
+async function readCachedStatus(
+  config: GovernanceConfig | undefined,
+  opts: { cwd?: string },
+): Promise<RevocationObservation | { disabled: true }> {
   const fullConfig = mergeGovernanceConfig(config);
 
   if (!fullConfig.revocation.enabled) {
-    return false;
+    return { disabled: true };
   }
 
   // Use cached status if recent enough
-  const now = Date.now();
-  const checkInterval = (fullConfig.revocation.check_interval || 300) * 1000;
+  const identity = revocationIdentity(fullConfig, opts.cwd);
+  if (!identity) return { verified: false, error: "Could not verify the project directory." };
+  const pending = pendingChecks.get(identity)?.latest;
+  if (pending?.pending) return pending.result;
+  const now = performance.now();
+  const checkInterval = (fullConfig.revocation.check_interval ?? 300) * 1000;
 
-  if (cachedRevocationStatus && now - lastRevocationCheck < checkInterval) {
-    return cachedRevocationStatus.revoked;
+  if (
+    cachedRevocationStatus &&
+    cachedRevocationIdentity === identity &&
+    now - lastRevocationCheck < checkInterval
+  ) {
+    return { verified: true, status: cachedRevocationStatus };
   }
 
-  // Check revocation endpoint
-  const { status, cacheable } = await fetchRevocationStatus(fullConfig);
+  return refreshRevocationStatus(fullConfig, identity);
+}
 
-  if (cacheable) {
-    cachedRevocationStatus = status;
-    lastRevocationCheck = now;
-  }
+/** Keep older in-flight replies from restoring permission after a newer check. */
+function refreshRevocationStatus(
+  config: Required<GovernanceConfig>,
+  identity: string,
+): Promise<RevocationObservation> {
+  const state = pendingChecks.get(identity) ?? { active: 0 };
+  pendingChecks.set(identity, state);
+  state.active++;
+  if (cachedRevocationIdentity === identity) cachedRevocationStatus = null;
 
-  return status.revoked;
+  const request: PendingRequest = {
+    pending: true,
+    result: fetchRevocationStatus(config)
+      .then((observation) => {
+        request.pending = false;
+        if (state.latest && state.latest !== request) return state.latest.result;
+        if (observation.verified) {
+          cachedRevocationIdentity = identity;
+          cachedRevocationStatus = observation.status;
+          lastRevocationCheck = performance.now();
+        }
+        return observation;
+      })
+      .finally(() => {
+        if (--state.active === 0) pendingChecks.delete(identity);
+      }),
+  };
+  state.latest = request;
+  return request.result;
 }
 
 /**
  * Fetch revocation status from endpoint
  */
-async function fetchRevocationStatus(config: Required<GovernanceConfig>): Promise<FetchResult> {
-  if (!config.revocation.revocation_endpoint || !config.agent.id) {
-    // Revocation is enabled (callers gate on revocation.enabled) but the
-    // endpoint or agent id is missing — we cannot prove access is still valid.
-    // Fail CLOSED. Don't cache: this is a misconfiguration, not a verdict.
-    console.warn(
-      "Revocation enabled but revocation_endpoint/agent.id is missing — failing closed (assume revoked)",
-    );
-    return { status: { revoked: true }, cacheable: false };
+async function fetchRevocationStatus(
+  config: Required<GovernanceConfig>,
+): Promise<RevocationObservation> {
+  const observation = await readRevocationStatus({
+    endpoint: config.revocation.revocation_endpoint,
+    agentId: config.agent.id,
+  });
+  if (!observation.verified) {
+    console.warn(`${observation.error} Access denied until verification succeeds.`);
   }
-
-  try {
-    const endpoint = config.revocation.revocation_endpoint.replace("{agent_id}", config.agent.id);
-
-    const response = await fetch(endpoint, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      // Fail CLOSED: a revocation endpoint that is configured but errors must NOT
-      // be read as "not revoked" — that lets a possibly-revoked agent keep running
-      // and lets anyone who can disrupt the endpoint disable the kill-switch.
-      console.warn(
-        `Revocation check failed (${response.statusText}) — failing closed (assume revoked)`,
-      );
-      return { status: { revoked: true }, cacheable: false };
-    }
-
-    const data = (await response.json()) as unknown;
-
-    // Validate shape: a 200 with no boolean `revoked` ({}, {revoked:"no"}, …) is
-    // ambiguous. Treating it as not-revoked is fail-OPEN and would be cached as a
-    // verdict. Fail CLOSED and don't cache the ambiguous result.
-    if (
-      typeof data !== "object" ||
-      data === null ||
-      typeof (data as Record<string, unknown>).revoked !== "boolean"
-    ) {
-      console.warn(
-        "Revocation response missing boolean `revoked` field — failing closed (assume revoked)",
-      );
-      return { status: { revoked: true }, cacheable: false };
-    }
-
-    return { status: data as RevocationStatus, cacheable: true };
-  } catch (error) {
-    // Network/parse failure — fail CLOSED (see above).
-    console.warn(`Revocation check failed (${error}) — failing closed (assume revoked)`);
-    return { status: { revoked: true }, cacheable: false };
-  }
+  return observation;
 }
 
 /**
@@ -113,6 +141,7 @@ async function fetchRevocationStatus(config: Required<GovernanceConfig>): Promis
  */
 export async function forceRevocationCheck(
   config: GovernanceConfig | undefined,
+  opts: { cwd?: string } = {},
 ): Promise<RevocationStatus> {
   const fullConfig = mergeGovernanceConfig(config);
 
@@ -120,18 +149,14 @@ export async function forceRevocationCheck(
     return { revoked: false };
   }
 
-  const { status, cacheable } = await fetchRevocationStatus(fullConfig);
-
-  if (cacheable) {
-    cachedRevocationStatus = status;
-    lastRevocationCheck = Date.now();
-  }
-
-  return status;
+  const identity = revocationIdentity(fullConfig, opts.cwd);
+  if (!identity) return { revoked: true };
+  const result = await refreshRevocationStatus(fullConfig, identity);
+  return result.verified ? { ...result.status } : { revoked: true };
 }
 
 /**
- * Clear local secrets and caches (called when revocation detected)
+ * Legacy terminal handler: clear the local verdict and exit. Does not erase provider secrets.
  */
 export async function handleRevocation(config: GovernanceConfig | undefined): Promise<void> {
   console.error("\n" + "=".repeat(80));

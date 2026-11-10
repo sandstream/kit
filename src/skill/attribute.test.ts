@@ -35,6 +35,7 @@ const row = (
   input: null,
   timestamp,
   opensSkill,
+  outcome: "returned",
 });
 
 describe("attributeRuns", () => {
@@ -83,7 +84,9 @@ describe("attributeRuns", () => {
     );
     assert.equal(ev.sessions, 1);
   });
+});
 
+describe("attributeRuns across sessions", () => {
   it("counts runs across sessions and multiple invocations", () => {
     const rows: ToolCallRow[] = [
       row("s1", "Skill", "run-tests"),
@@ -109,10 +112,11 @@ describe("attributeRuns", () => {
     assert.equal(ev.actions.length, 0);
   });
 
-  it("marks every attributed action as not-denied (transcript records runs)", () => {
+  it("preserves the recorded returned outcome on attributed actions", () => {
     const rows: ToolCallRow[] = [row("s1", "Skill", "x"), row("s1", "Bash")];
     const ev = attributeRuns(rows, "x");
     assert.equal(ev.actions[0].denied, false);
+    assert.equal(ev.actions[0].outcome, "returned");
   });
 
   it("threads a broker verdict onto attributed actions via verdictOf", () => {

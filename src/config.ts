@@ -4,6 +4,9 @@ import { z } from "zod";
 import { warnUnknownConfigKeys } from "./config-unknown-keys.js";
 import { ContextSchema } from "./config-context-schema.js";
 import { ProjectsSchema, type ProjectsConfig } from "./projects-config.js";
+import { resolveActiveEnvironment } from "./config-environment.js";
+import { isTokenLimit, isOperationLimit } from "./budget-limits.js";
+export { resolveActiveEnvironment } from "./config-environment.js";
 
 /**
  * A `.kit.toml` that exists but is unparseable or fails schema validation. Tagged so the
@@ -675,8 +678,14 @@ const GovernanceConfigSchema = z
       .object({
         id: z.string().optional(),
         name: z.string().optional(),
-        max_tokens_per_day: z.number().optional(),
-        max_operations_per_hour: z.number().optional(),
+        max_tokens_per_day: z
+          .number()
+          .refine(isTokenLimit, "Expected a finite nonnegative token limit")
+          .optional(),
+        max_operations_per_hour: z
+          .number()
+          .refine(isOperationLimit, "Expected a nonnegative safe integer operation limit")
+          .optional(),
       })
       .passthrough()
       .optional(),
@@ -831,14 +840,22 @@ export const KNOWN_SECTIONS = new Set([
   "upstream", // [upstream.<id>] — release sources for kit upstream
 ]);
 
-export const kitConfigSchema = z
+// Overrides use the same section schemas as the base. Omitted sections are valid.
+const EnvOverrideSchema = z
   .object({
-    version: z.number().int().nonnegative().optional(),
     tools: z.record(z.string(), z.string()).optional(),
     services: z.record(z.string(), ServiceConfigSchema).optional(),
     secrets: SecretsConfigSchema.optional(),
     skills: SkillsConfigSchema.optional(),
     governance: GovernanceConfigSchema.optional(),
+  })
+  .passthrough();
+
+export const kitConfigSchema = z
+  .object({
+    version: z.number().int().nonnegative().optional(),
+    ...EnvOverrideSchema.shape,
+    env: z.record(z.string(), EnvOverrideSchema).optional(),
     hooks: HooksConfigSchema,
     deploy: DeployConfigSchema,
     browser: z
@@ -962,38 +979,16 @@ export const kitConfigSchema = z
   })
   .passthrough(); // allow unknown top-level keys (warn, not error)
 
-/**
- * Format Zod validation errors into human-readable messages.
- */
-function formatValidationErrors(errors: z.ZodIssue[]): string {
-  return errors
-    .map((issue) => {
-      const path = issue.path.length > 0 ? issue.path.join(".") : "(root)";
-      return `  • ${path}: ${issue.message}`;
-    })
-    .join("\n");
-}
-
-/**
- * Detect the active environment name from CLI args, env vars, or NODE_ENV.
- * Resolution order:
- *   1. --env=<name> CLI flag
- *   2. KIT_ENV environment variable
- *   3. NODE_ENV (development→dev, production→prod, test→test)
- *   4. "dev" default
- */
-export function resolveActiveEnvironment(cliArgs: string[] = process.argv.slice(2)): string {
-  const flag = cliArgs.find((a) => a.startsWith("--env="));
-  if (flag) return flag.split("=")[1];
-
-  if (process.env.KIT_ENV) return process.env.KIT_ENV;
-
-  const nodeEnv = process.env.NODE_ENV;
-  if (nodeEnv === "production") return "prod";
-  if (nodeEnv === "development") return "dev";
-  if (nodeEnv) return nodeEnv;
-
-  return "dev";
+/** Validate configuration and report the path of each invalid value. */
+function validateConfig(value: unknown): kitConfig {
+  const result = kitConfigSchema.safeParse(value);
+  if (!result.success) {
+    const formatted = result.error.issues
+      .map(({ path, message }) => `  • ${path.length ? path.join(".") : "(root)"}: ${message}`)
+      .join("\n");
+    throw new InvalidConfigError(`Invalid .kit.toml:\n${formatted}`);
+  }
+  return result.data as unknown as kitConfig;
 }
 
 /**
@@ -1027,24 +1022,14 @@ export async function loadConfig(path: string, envName?: string): Promise<kitCon
     );
   }
 
-  // Validate — surface friendly errors for wrong types, invalid enum values, etc.
-  const result = kitConfigSchema.safeParse(raw);
-
-  if (!result.success) {
-    const formatted = formatValidationErrors(result.error.issues);
-    throw new InvalidConfigError(`Invalid .kit.toml:\n${formatted}`);
-  }
-
-  warnUnknownConfigKeys(path, raw, KNOWN_SECTIONS, result.data.browser);
-
-  const base = result.data as unknown as kitConfig;
+  // Validate all declared overrides before selecting an environment.
+  const base = validateConfig(raw);
+  warnUnknownConfigKeys(path, raw, KNOWN_SECTIONS, base.browser);
 
   // Apply environment override if requested and available
   const activeEnv = envName ?? resolveActiveEnvironment();
   const override = base.env?.[activeEnv];
-  if (override && activeEnv !== "dev") {
-    return mergeEnvironmentConfig(base, override);
-  }
-
-  return base;
+  return validateConfig(
+    override && activeEnv !== "dev" ? mergeEnvironmentConfig(base, override) : base,
+  );
 }

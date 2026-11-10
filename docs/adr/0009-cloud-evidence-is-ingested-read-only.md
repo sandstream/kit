@@ -2,7 +2,7 @@
 id: ADR-0009
 title: cloud evidence is ingested read-only, kit holds no cloud credential
 status: accepted
-enforced_by: [src/ingest-offline.test.ts]
+enforced_by: [src/ingest-offline.test.ts, src/commands/ingest.test.ts]
 ---
 
 # ADR-0009: cloud evidence is ingested read-only
@@ -14,7 +14,8 @@ credential of its own.
 
 - The customer, or the customer's CI, runs a cloud scanner (for example `prowler` or Scout
   Suite) with its own read-only identity.
-- kit reads the resulting SARIF with `kit ingest sarif <file>` and merges it into the verdict.
+- `kit ingest sarif <file>` reads the resulting report and prints normalized findings.
+- Configured scanner adapters use the same strict parser to feed the security verdict.
 - kit does not start a cloud scanner and does not call a cloud API in this phase.
 - kit has no cloud write action, and `kit heal` has no cloud step.
 
@@ -42,6 +43,9 @@ The "no cloud call" rule does not fit the `kit-enforce` grammar without false po
 it has no `kit-enforce` block. `src/ingest-offline.test.ts` runs the real `kit ingest sarif`
 command with `fetch`, sockets, DNS, `http` and `https` blocked, and it must still succeed. A
 control case proves the block works. Adding a `fetch` call to the built ingest code made the
-test fail. The test covers `kit ingest` only. It does not cover a future cloud delegate.
+test fail. `src/commands/ingest.test.ts` also covers interactive imports with update suppression removed.
+It checks both report formats and blocks registry notices after the command.
+Negative controls prove that the network guard stops an attempted call.
+These tests cover `kit ingest` only. They do not cover a future cloud delegate.
 
 The owner accepted this ADR on 2026-11-02.

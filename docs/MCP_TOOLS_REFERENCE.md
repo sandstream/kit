@@ -27,11 +27,11 @@ governance floor (revocation, budget, permissions, expired-secret block).
 | --- | --- | --- |
 | `kit_check` | read | Run all checks — tools, services, secrets, skills, hooks, deploy env, security, tests, locks — and return the same verdict `kit check` computes, as `{ ok, scope, dimensions, failed, findings, counts, passesOmitted, detail }`. Passing rows are left out of the response and the complete run is written to `detail.path`; a `skip` or a `didNotRun` is never left out, because lost coverage is not a pass. `detail: true` returns the full document inline instead (measured: 9,799 chars vs 3,210 — the response is paid per call, the tool schema once per session). |
 | `kit_review` | read | Full repo audit in one shot — the check, design, standards, and ADR gates as one structured report (`{ ok, failed, stages }`), from the same core `kit review` renders. `stages: ["standards"]` scopes to named gates (the fast, read-only lint loop — no full security scan), `category` scopes the standards stage, `concise: true` omits pass/skip rows (per-stage counts stay). |
-| `kit_fix` | write | Auto-fix what `kit_check` found: install missing tools, generate missing lock files. Returns actions taken. |
+| `kit_fix` | write | Repair missing tools, lock files, secret placeholders, and Git ignore protection in the requested project. Existing templates remain unchanged. Returns actions and errors; `ok` is false if a repair fails. Use `kit fix` through `kit_run` for hooks, service guidance, and deploy environment repairs. |
 | `kit_triage` | write | Security-triage a dependency **before** installing it (`type`: npm/pip/docker/brew/repo/skill + `target`). A PASS is recorded in the triage log the install gates read, so an MCP-run triage satisfies them identically to a CLI-run one. Refuses in read-only mode — an unrecordable pass could not satisfy the gates anyway. |
 | `kit_memory` | read | Search cross-session conversation memory plus the repo's curated shared decisions (`query`, `limit?`, `global?`). Search-only by design: writes stay on the CLI/indexer path so an MCP client can never inject text into the trusted store. Quarantined rows excluded. A missing store returns empty — it is never created by a read. |
 | `kit_secrets` | write | Generate `.env.local` by resolving secrets defined in `.kit.toml`. Returns written key names — never values. |
-| `kit_run` | write | Execute a command with the secret-loaded env — the escape hatch for every kit command without its own tool. Egress-mediated via extracted hosts. |
+| `kit_run` | write | Execute a child with the parent environment and optional `.env.local`. Apply project policy and audit the actual child outcome. Explicit URL hosts are checked against active resource rules. |
 | `kit_context` | read | Gather project context (stack, services, env status) for the agent. |
 | `kit_map` | read | Repo map: import-neighborhood slice around seed paths (`paths`, `depth?`, `budget?`, `co_change?`). |
 | `kit_init` | write | Detect the stack and generate `.kit.toml` for a project that has none (`dryRun` to preview). |
@@ -47,3 +47,16 @@ route tool search — keep it in sync with this document when tools change.
 Tools return `{ content: [{ type: "text", text }], isError? }`. `text` is
 JSON for structured results, or an `Error: …` line. Read-only refusals and
 governance denials are `isError: true` with the reason in `text`.
+
+## Child command boundary
+
+`kit_run` uses the same command policy path as CLI `kit run`.
+An invalid existing `.kit.toml` stops execution. A missing file is allowed.
+The target project supplies read-only policy and branch-based governance.
+URL checks inspect parsed arguments. Response and audit text mask secrets before encoding arguments.
+A child failure retains its output and exit code with `isError: true`.
+Enabled audit layers record that failure. A permission refusal does not start the child.
+
+Child output stays inside the tool result. Child standard input cannot consume MCP requests.
+Explicit URL checks cannot infer arbitrary child file writes, environment access, or hidden network requests.
+See [child command execution](COMMANDS.md#child-command-execution) for environment and audit limits.

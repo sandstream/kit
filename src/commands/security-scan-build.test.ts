@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cmdSecurityScanBuild } from "./security-scan-build.js";
+import { cmdSecurityScanBuild, skippedLine } from "./security-scan-build.js";
 import { rmTemp } from "../temp-cleanup.test-support.js";
 
 async function runScan(
@@ -101,5 +101,31 @@ describe("kit security scan-build", () => {
     } finally {
       rmTemp(dir);
     }
+  });
+});
+
+describe("skippedLine", () => {
+  it("is null when every file was read", () => {
+    assert.equal(skippedLine({}), null);
+  });
+
+  it("counts and names the unread types, most frequent first, at most eight", () => {
+    assert.equal(
+      skippedLine({ ".png": 3, ".node": 1, ".dmg": 1 }),
+      "Not read: 5 file(s) by type (.png ×3, .dmg ×1, .node ×1). A credential inside them is not covered.",
+    );
+    const many = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`.e${i}`, 1]));
+    assert.match(skippedLine(many) ?? "", /, 2 more type\(s\)\)/);
+  });
+
+  it("the green line is followed by what was not read", async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-scan-build-cmd-"));
+    t.after(() => rmTemp(dir));
+    mkdirSync(join(dir, "dist"), { recursive: true });
+    writeFileSync(join(dir, "dist", "main.js"), "ok\n");
+    writeFileSync(join(dir, "dist", "setup.exe"), "binary");
+    const { ok, output } = await runScan(dir);
+    assert.equal(ok, true);
+    assert.match(output, /Not read: 1 file\(s\) by type \(\.exe ×1\)/);
   });
 });

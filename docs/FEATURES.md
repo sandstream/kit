@@ -179,7 +179,7 @@ in to any vault is always your own account action; kit never does it for you.
 ### Security scanners
 
 - `kit security scan-staged`: Pre-commit: scan staged blobs for known credential patterns; only findings the commit introduces block it
-- `kit security scan-build`: Walk `.next/`, `dist/`, `build/` for credentials inlined into artifacts (`NEXT_PUBLIC_` typos)
+- `kit security scan-build`: Walk `.next/`, `dist/`, `build/` for credentials inlined into artifacts (`NEXT_PUBLIC_` typos), Electron `app.asar` archives included (read as bytes, up to 1 GiB). Files of other types are not read, and the output counts them by extension
 - `kit security scan-transcripts`: Walk `.claude/`, `~/.claude/projects/`, `.opencode/` for replayed-secret leaks
 - `kit security check-gitignore [--fix]`: Verify `.env*`, `*.pem`, `id_rsa`, `.kit/elevation.json` are ignored
 - `kit security verify-pull [--base <ref>]`: After `git pull`: audit new deps, gitignore drops, introduced secrets, policy changes
@@ -204,7 +204,7 @@ Error-severity findings (missing CI script, reintroduced `|| true`, unguarded im
 `kit hooks add <name>` installs a managed hook that calls back into kit. No `.kit.toml` config required.
 
 - `secret-scan` (pre-commit): Block commits that introduce known credential patterns
-- `post-pull-audit` (post-merge): Run `verify-pull` after every `git pull` / merge
+- `post-pull-audit` (post-merge): Run `verify-pull` after every `git pull` / merge, over `ORIG_HEAD..HEAD` (every commit the pull brought in). It warns on pulled files an agent or editor runs or obeys: `.claude/settings*.json`, MCP configs (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`), `.vscode/tasks.json`, dev container config, `.envrc`, agent command/skill/rule dirs, CI workflows, git hook dirs, and `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` anywhere. `git pull --rebase` fires no `post-merge`, so a rebase pull is not audited
 - `context-check` (pre-push): Block a push when the live CLI context does not match `.kit.toml [context]` (see Context lock)
 - `worktree-gates` (post-checkout): When git creates a worktree, install the PreToolUse gates there if the main checkout has them. `kit agent-config` installs it by default
 

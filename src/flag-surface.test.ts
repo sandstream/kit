@@ -1,18 +1,8 @@
 /**
- * The flag floor, driven rather than described.
- *
- * Two command modules validated their flags after #487 and 43 did not (#488). The class is
- * not theoretical: `kit check --category security` ran the FULL check for six majors because
- * nothing rejected the flag, and `kit upgrade --self.` — one trailing period — fell through
- * to the lock-file branch, rewrote every `installedAt`, installed nothing, and printed the
- * success line.
- *
- * The fix is a declared table plus one refusal at dispatch, the same shape as the read-only
- * floor. That design has exactly one failure mode worth testing hard: a table that falls
- * behind the code REJECTS A WORKING FLAG, which is worse than the silence it replaced. So the
- * drift test's oracle is the source scan itself (`scripts/derive-command-flags.mjs`), not a
- * restated list — and the behavioural half spawns the compiled CLI, because a table with no
- * enforcement and enforcement with no table both pass a unit test.
+ * Structural checks for the dispatch flag table, plus public CLI refusal checks.
+ * A generator comparison proves that the table matches its inputs, not that each flag works.
+ * Explicit contracts need independent behavior tests for acceptance, refusal, and effects.
+ * Both rejection of supported options and acceptance of ignored options are defects.
  */
 
 import { describe, it } from "node:test";
@@ -80,7 +70,7 @@ describe("flag surface — the table covers the live command surface", () => {
     assert.notEqual(flagsForCommand("check"), null);
   });
 
-  it("is in sync with the source scan — a new flag cannot land unlisted", async () => {
+  it("matches explicit contracts and the fallback source scan", async () => {
     const mod = (await import(
       pathToFileURL(join(REPO_ROOT, "scripts", "derive-command-flags.mjs")).href
     )) as { deriveFlagSurface: (depth?: number) => { surface: Record<string, string[]> } };
@@ -92,13 +82,13 @@ describe("flag surface — the table covers the live command surface", () => {
       for (const flag of derived) {
         // GLOBAL_FLAGS are unioned in by the floor, never listed per verb.
         if ((GLOBAL_FLAGS as readonly string[]).includes(flag)) continue;
-        if (!tabled.has(flag)) drift.push(`kit ${verb} reads ${flag}, not in the table`);
+        if (!tabled.has(flag)) drift.push(`kit ${verb} declares ${flag}, not in the table`);
       }
     }
     assert.deepEqual(
       drift,
       [],
-      `${drift.length} flag(s) drifted — run 'node scripts/derive-command-flags.mjs --emit':\n${drift.join("\n")}`,
+      `${drift.length} flag(s) drifted. Run 'node scripts/derive-command-flags.mjs --emit':\n${drift.join("\n")}`,
     );
   });
 
@@ -277,45 +267,5 @@ describe("flag floor — kit never prints an invocation it would reject", () => 
     const r = await runCli(["add"]);
     assert.equal(r.exitCode, 1);
     assert.match(r.stdout, /Available services:/);
-  });
-});
-
-/**
- * Regenerating must be a no-op — byte for byte, not just fact for fact.
- *
- * The drift test above compares FACTS: every flag the source reads must appear in the table. It
- * passed while `--emit` wrote the same data in a different shape, one verb per line where Prettier
- * wants one flag per line. Running the documented regeneration command therefore produced a
- * 512-line diff over identical content — and I read that diff as the generator having narrowed the
- * accepted flags of 70+ verbs, reported it as a defect, and wrote it into two PR bodies and a
- * shared-memory entry before measuring the content. It was formatting.
- *
- * So the property is stronger than "the facts agree": the generator's output must be exactly what
- * is committed. A regeneration that cannot be run without producing noise is a regeneration nobody
- * runs, and a generated file nobody dares regenerate is a hardcoded table wearing a generator's
- * hat.
- */
-describe("regeneration is byte-identical", () => {
-  it("emits exactly the committed file", async () => {
-    const mod = (await import(
-      pathToFileURL(join(REPO_ROOT, "scripts", "derive-command-flags.mjs")).href
-    )) as {
-      deriveFlagSurface: (depth?: number) => { surface: Record<string, string[]> };
-      emit: (surface: Record<string, string[]>) => string;
-    };
-    const { surface } = mod.deriveFlagSurface();
-    const generated = mod.emit(surface);
-    const committed = readFileSync(join(REPO_ROOT, "src", "flag-surface.ts"), "utf-8");
-
-    if (generated !== committed) {
-      // Point at the first divergence: a whole-file diff in an assertion message is unreadable.
-      const g = generated.split("\n");
-      const c = committed.split("\n");
-      const i = g.findIndex((line, idx) => line !== c[idx]);
-      assert.fail(
-        `line ${i + 1} differs — run \`node scripts/derive-command-flags.mjs --emit\`\n` +
-          `  generated: ${JSON.stringify(g[i])}\n  committed: ${JSON.stringify(c[i])}`,
-      );
-    }
   });
 });

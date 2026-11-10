@@ -465,23 +465,20 @@ describe("checkGovernance (pre-flight: deny ordering, fail-closed paths, warning
   });
 
   it("denies when revocation is enabled but unconfigured (fail-closed, no process exit)", async () => {
-    // revocation.enabled with no endpoint/agent.id cannot prove access is still
-    // valid, so checkRevocationStatus assumes revoked. Unlike withGovernance,
-    // checkGovernance must NOT call handleRevocation — that would process.exit(1)
-    // on what is only a pre-flight query. This test completing proves it doesn't.
+    // Missing endpoint or identity cannot prove permission. The caller receives
+    // an unverified denial without process termination or a false revocation claim.
     const config = makeConfig({ revocation: { enabled: true } });
     const result = await checkGovernance(config, {
       operation: "read-config",
       operationType: "read",
     });
     assert.equal(result.allowed, false);
-    assert.equal(result.reason, "Access has been revoked");
+    assert.equal(result.reason, "Revocation status could not be verified");
     assert.equal(result.warnings, undefined);
   });
 
-  it("reports revocation ahead of an exhausted budget when both would deny", async () => {
-    // Order is load-bearing: identity ("you are revoked") must win over a
-    // recoverable quota message, or an operator chases the wrong problem.
+  it("reports an unverified revocation check before an exhausted budget", async () => {
+    // Verification must succeed before budget policy can allow an operation.
     const config = makeConfig({
       revocation: { enabled: true },
       agent: { max_tokens_per_day: 50, max_operations_per_hour: 100 },
@@ -493,7 +490,7 @@ describe("checkGovernance (pre-flight: deny ordering, fail-closed paths, warning
       estimatedTokens: 20,
     });
     assert.equal(result.allowed, false);
-    assert.equal(result.reason, "Access has been revoked");
+    assert.equal(result.reason, "Revocation status could not be verified");
   });
 
   it("allows an operation that lands exactly on the token limit", async () => {

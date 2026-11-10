@@ -86,10 +86,10 @@ export function gitHistoryFixture(t: TestContext) {
         db.close();
       }
     },
-    push() {
+    push(expected = true) {
       const result = pushMemory(config, passphrase, dir);
       assert.equal(result.verified, true);
-      assert.equal(result.pushed, true);
+      assert.equal(result.pushed, expected);
       return result;
     },
     pull() {

@@ -50,7 +50,12 @@ import {
   verifyMemoryPublication,
 } from "./remote-sync-git.js";
 import type { MergeResult } from "./merge.js";
-import { ensureCommitIdentity, matchesPublishedSnapshot } from "./remote-sync-publish.js";
+import {
+  ensureCommitIdentity,
+  matchesPublishedSnapshot,
+  prepareMemoryCheckout,
+  stageMemorySnapshot,
+} from "./remote-sync-publish.js";
 import { parseProjectMappings, type ProjectMapping } from "./remap.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 
@@ -344,10 +349,11 @@ export function pushMemory(
       // exit 0 ≠ "the blob landed" — the command could no-op. Not verifiable here.
       return { target: "command transport", file: cfg.file, pushed: true, verified: false };
     }
-    // git transport — clone into the (empty) dir FIRST, then write the blob inside it.
+    // Keep ciphertext outside the checkout so Git attributes cannot change its bytes.
     assertRemoteNotProjectOrigin(cfg.remote!, projectRoot);
-    cloneMemoryBranch(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir);
-    if (matchesPublishedSnapshot(cfg, passphrase, dir)) {
+    const present = cloneMemoryBranch(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir);
+    if (present) prepareMemoryCheckout(dir, cfg.file);
+    if (present && matchesPublishedSnapshot(cfg, passphrase, dir)) {
       verifyMemoryPublication(
         dir,
         cfg.branch ?? DEFAULT_BRANCH,
@@ -355,9 +361,10 @@ export function pushMemory(
       );
       return { target: displayRemote(cfg.remote!), file: cfg.file, pushed: false, verified: true };
     }
-    encryptBlobForSync(cfg, passphrase, join(dir, cfg.file));
-    git(["add", "--", cfg.file], dir);
-    const dirty = git(["status", "--porcelain"], dir).trim();
+    const candidate = join(dir, ".git", "kit-memory-upload");
+    encryptBlobForSync(cfg, passphrase, candidate);
+    const object = stageMemorySnapshot(dir, cfg.file, candidate);
+    const dirty = git(["diff", "--cached", "--name-only"], dir).trim();
     if (!dirty) {
       verifyMemoryPublication(
         dir,
@@ -369,8 +376,8 @@ export function pushMemory(
     // Identify the commit so a fresh-init repo has an author; rely on the user's
     // git identity, falling back to a neutral one only if git has none configured.
     ensureCommitIdentity(dir);
-    git(["commit", "-q", "-m", "kit memory sync", "--", cfg.file], dir);
-    publishMemoryBranch(dir, cfg.branch ?? DEFAULT_BRANCH);
+    git(["commit", "-q", "-m", "kit memory sync"], dir);
+    publishMemoryBranch(dir, cfg.branch ?? DEFAULT_BRANCH, { file: cfg.file, object });
     return { target: displayRemote(cfg.remote!), file: cfg.file, pushed: true, verified: true };
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -1,3 +1,5 @@
+import { sanitizeDisplayText } from "./display-text.js";
+
 // Keys of [browser] that kit reads; anything else is warned about, not rejected.
 const KNOWN_BROWSER_KEYS = new Set(["app", "start", "build", "routes", "port", "cdp_url"]);
 
@@ -18,7 +20,7 @@ export function warnUnknownConfigKeys(
   for (const key of Object.keys(raw)) {
     if (!knownSections.has(key)) {
       console.warn(
-        `Warning: unknown section [${key}] in .kit.toml (known: ${[...knownSections].join(", ")})`,
+        `Warning: unknown section [${sanitizeDisplayText(key)}] in .kit.toml (known: ${[...knownSections].join(", ")})`,
       );
     }
   }
@@ -26,7 +28,7 @@ export function warnUnknownConfigKeys(
     if (KNOWN_BROWSER_KEYS.has(key) || warnedBrowserKeys.has(`${path}\0${key}`)) continue;
     warnedBrowserKeys.add(`${path}\0${key}`);
     console.warn(
-      `Warning: unknown key [browser].${key} in .kit.toml is ignored (known: ${[...KNOWN_BROWSER_KEYS].join(", ")})`,
+      `Warning: unknown key [browser].${sanitizeDisplayText(key)} in .kit.toml is ignored (known: ${[...KNOWN_BROWSER_KEYS].join(", ")})`,
     );
   }
 }

@@ -1,18 +1,15 @@
 /**
  * Loaded-vs-used correlation for the insight loop. Pure + deterministic: given the loaded
  * toolchain (agent-sbom.discoverAgentToolchain) and the used signal (usage-scan.scanToolUsage),
- * decide which loaded MCP servers were never called.
+ * identify components with no recorded reference within the covered history.
  *
- * Honesty rules (no false green):
- * - MCP servers correlate cleanly (a call is `mcp__<server>__<tool>`), so they get
- *   a real used/unused verdict.
- * - Skills correlate via the `Skill` tool's `{skill:<slug>}` input (exact slug
- *   match against the loaded skill's directory name) — a real used/unused verdict.
- *   Passing no skill-usage map falls back to "unknown" (never "unused").
- * - "unused" is a PRUNE SUGGESTION, never an automatic removal.
+ * A positive reference proves use, regardless of the call outcome.
+ * Absence supports an unused verdict only with complete message capture.
+ * Tool capture does not certify skill use. Missing explicit Skill references always remain unknown.
+ * An unused verdict is a suggestion. Kit never removes components automatically.
  */
 import type { AgentComponentInput } from "../agent-sbom.js";
-import { mcpServerOf, type ToolUsageEntry } from "./usage-scan.js";
+import { mcpServerOf, type ToolCaptureCoverage, type ToolUsageEntry } from "./usage-scan.js";
 
 export type UsageVerdict = "used" | "unused" | "unknown";
 
@@ -26,11 +23,46 @@ export interface UnusedFinding {
 }
 
 export interface UnusedReport {
+  /** Capture describes retained indexed messages, not all history or uncaptured subagents. */
+  scope: "retained-indexed-messages";
+  /** Skill files can be read without a Skill call. Native tool coverage cannot prove semantic skill absence. */
+  skillCoverage: "explicit-references-only";
   findings: UnusedFinding[];
-  /** MCP servers loaded but never called — the (confident) prune suggestions. */
+  /** MCP servers with no recorded reference within the covered history. */
   pruneCandidates: string[];
   /** Loaded counts, for the summary line. */
   loaded: { skills: number; mcpServers: number };
+}
+
+function byName(a: AgentComponentInput, b: AgentComponentInput): number {
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+function collectServerReferences(usage: ToolUsageEntry[]): Map<string, number> {
+  const serverRefs = new Map<string, number>();
+  for (const e of usage) {
+    const server = e.mcpServer ?? mcpServerOf(e.tool);
+    if (server) serverRefs.set(server, (serverRefs.get(server) ?? 0) + e.count);
+  }
+  return serverRefs;
+}
+
+function findSkillUsage(
+  skills: AgentComponentInput[],
+  skillUsage?: Map<string, number>,
+): UnusedFinding[] {
+  const findings: UnusedFinding[] = [];
+  for (const s of [...skills].sort(byName)) {
+    // Without a skill map, the caller has supplied no evidence for this component kind.
+    if (skillUsage === undefined) {
+      findings.push({ kind: "skill", name: s.name, source: s.source, refs: 0, verdict: "unknown" });
+      continue;
+    }
+    const refs = skillUsage.get(s.name) ?? 0;
+    const verdict: UsageVerdict = refs > 0 ? "used" : "unknown";
+    findings.push({ kind: "skill", name: s.name, source: s.source, refs, verdict });
+  }
+  return findings;
 }
 
 /**
@@ -41,41 +73,27 @@ export function computeUnused(
   loaded: { skills: AgentComponentInput[]; mcpServers: AgentComponentInput[] },
   usage: ToolUsageEntry[],
   skillUsage?: Map<string, number>,
+  capture?: ToolCaptureCoverage,
 ): UnusedReport {
-  // Sum recorded refs per MCP server across all its tools.
-  const serverRefs = new Map<string, number>();
-  for (const e of usage) {
-    const server = e.mcpServer ?? mcpServerOf(e.tool);
-    if (server) serverRefs.set(server, (serverRefs.get(server) ?? 0) + e.count);
-  }
-
-  const byName = (a: AgentComponentInput, b: AgentComponentInput) =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
-
-  const findings: UnusedFinding[] = [];
+  const canJudgeAbsence =
+    capture?.complete === true &&
+    capture.observedMessages > 0 &&
+    capture.incompleteMessages === 0 &&
+    capture.orphanToolCalls === 0;
+  const serverRefs = collectServerReferences(usage);
+  const findings = findSkillUsage(loaded.skills, skillUsage);
   const pruneCandidates: string[] = [];
-
-  for (const s of [...loaded.skills].sort(byName)) {
-    // With a skill-usage map, judge by exact-slug invocation count; without one,
-    // stay honest ("unknown" — never "unused").
-    if (skillUsage === undefined) {
-      findings.push({ kind: "skill", name: s.name, source: s.source, refs: 0, verdict: "unknown" });
-      continue;
-    }
-    const refs = skillUsage.get(s.name) ?? 0;
-    const verdict: UsageVerdict = refs > 0 ? "used" : "unused";
-    if (verdict === "unused") pruneCandidates.push(s.name);
-    findings.push({ kind: "skill", name: s.name, source: s.source, refs, verdict });
-  }
 
   for (const m of [...loaded.mcpServers].sort(byName)) {
     const refs = serverRefs.get(m.name) ?? 0;
-    const verdict: UsageVerdict = refs > 0 ? "used" : "unused";
+    const verdict: UsageVerdict = refs > 0 ? "used" : canJudgeAbsence ? "unused" : "unknown";
     if (verdict === "unused") pruneCandidates.push(m.name);
     findings.push({ kind: "mcp-server", name: m.name, source: m.source, refs, verdict });
   }
 
   return {
+    scope: "retained-indexed-messages",
+    skillCoverage: "explicit-references-only",
     findings,
     pruneCandidates,
     loaded: { skills: loaded.skills.length, mcpServers: loaded.mcpServers.length },

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -36,18 +36,16 @@ function project(): { dir: string; env: Record<string, string> } {
   };
 }
 
-function run(args: string[], cwd: string, env: Record<string, string>): string {
-  try {
-    return execFileSync(process.execPath, [CLI, ...args], {
-      cwd,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...env },
-    });
-  } catch (e) {
-    const err = e as { stdout?: string; stderr?: string };
-    return String(err.stdout ?? "") + String(err.stderr ?? "");
-  }
+function run(args: string[], cwd: string, env: Record<string, string>, expectedExit = 0): string {
+  const result = spawnSync(process.execPath, [CLI, ...args], {
+    cwd,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, ...env },
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, expectedExit, result.stdout + result.stderr);
+  return expectedExit === 0 ? result.stdout : result.stdout + result.stderr;
 }
 
 describe("kit audit log --limit accepts both flag forms", () => {
@@ -71,6 +69,7 @@ describe("kit audit log --limit accepts both flag forms", () => {
       return (out.match(/synthetic-op-\d+/g) ?? []).length;
     } finally {
       rmTemp(dir);
+      rmTemp(env.HOME);
     }
   }
 
@@ -115,6 +114,7 @@ describe("kit auth elevate --list-scopes lists instead of elevating", () => {
       assert.match(out, /one-shot|reusable for the TTL/);
     } finally {
       rmTemp(dir);
+      rmTemp(env.HOME);
     }
   });
 
@@ -141,16 +141,18 @@ describe("kit auth elevate --list-scopes lists instead of elevating", () => {
       );
     } finally {
       rmTemp(dir);
+      rmTemp(env.HOME);
     }
   });
 
   it("an out-of-range --ttl-minutes is REJECTED, not silently clamped", () => {
     const { dir, env } = project();
     try {
-      const out = run(["auth", "elevate", "--ttl-minutes=999"], dir, env);
-      assert.match(out, /--ttl-minutes must be between 1 and 240/);
+      const out = run(["auth", "elevate", "--ttl-minutes=999"], dir, env, 2);
+      assert.match(out, /--ttl-minutes must be an integer between 1 and 240/);
     } finally {
       rmTemp(dir);
+      rmTemp(env.HOME);
     }
   });
 });

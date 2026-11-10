@@ -84,6 +84,14 @@ export function mergeGovernanceConfig(userConfig?: GovernanceConfig): Required<G
     agent: {
       ...DEFAULT_GOVERNANCE.agent,
       ...userConfig.agent,
+      max_tokens_per_day:
+        userConfig.agent?.max_tokens_per_day === undefined
+          ? DEFAULT_GOVERNANCE.agent.max_tokens_per_day
+          : userConfig.agent.max_tokens_per_day,
+      max_operations_per_hour:
+        userConfig.agent?.max_operations_per_hour === undefined
+          ? DEFAULT_GOVERNANCE.agent.max_operations_per_hour
+          : userConfig.agent.max_operations_per_hour,
     },
     audit: {
       ...DEFAULT_GOVERNANCE.audit,
@@ -117,12 +125,13 @@ export function mergeGovernanceConfig(userConfig?: GovernanceConfig): Required<G
  */
 export async function mergeGovernanceConfigAsync(
   userConfig?: GovernanceConfig,
+  cwd?: string,
 ): Promise<Required<GovernanceConfig>> {
   const merged = mergeGovernanceConfig(userConfig);
 
   // If environment is not explicitly set, detect it
   if (!userConfig?.environment) {
-    merged.environment = await getCurrentEnvironment(userConfig);
+    merged.environment = await getCurrentEnvironment(userConfig, cwd);
   }
 
   return merged;
@@ -206,10 +215,24 @@ export function isDestructiveOperation(
 /**
  * Get current git branch
  */
-export async function getCurrentGitBranch(): Promise<string | null> {
+export async function getCurrentGitBranch(cwd?: string): Promise<string | null> {
   try {
-    const { execSync } = await import("node:child_process");
-    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+    const { execFileSync } = await import("node:child_process");
+    const env = { ...process.env };
+    for (const key of [
+      "GIT_DIR",
+      "GIT_WORK_TREE",
+      "GIT_INDEX_FILE",
+      "GIT_COMMON_DIR",
+      "GIT_OBJECT_DIRECTORY",
+      "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+      "GIT_PREFIX",
+    ])
+      delete env[key];
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd,
+      env,
+      timeout: 5000,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
@@ -250,29 +273,43 @@ export function detectEnvironmentFromBranch(branch: string): "dev" | "staging" |
  */
 export async function getCurrentEnvironment(
   config?: GovernanceConfig,
+  cwd?: string,
 ): Promise<"dev" | "staging" | "prod"> {
+  return (await getCurrentEnvironmentInfo(config, cwd)).environment;
+}
+
+export interface GovernanceEnvironmentInfo {
+  environment: "dev" | "staging" | "prod";
+  source: "config" | "env" | "git" | "default";
+}
+
+/** Return the access environment and the source of that decision. */
+export async function getCurrentEnvironmentInfo(
+  config?: GovernanceConfig,
+  cwd?: string,
+): Promise<GovernanceEnvironmentInfo> {
   // 1. Explicit config takes precedence
   if (config?.environment) {
-    return config.environment;
+    return { environment: config.environment, source: "config" };
   }
 
   // 2. NODE_ENV environment variable
   const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-  if (nodeEnv === "production") return "prod";
-  if (nodeEnv === "staging") return "staging";
-  if (nodeEnv === "development") return "dev";
+  if (nodeEnv === "production") return { environment: "prod", source: "env" };
+  if (nodeEnv === "staging") return { environment: "staging", source: "env" };
+  if (nodeEnv === "development") return { environment: "dev", source: "env" };
 
   // 3. Git branch detection
-  const branch = await getCurrentGitBranch();
+  const branch = await getCurrentGitBranch(cwd);
   if (branch) {
     const envFromBranch = detectEnvironmentFromBranch(branch);
     if (envFromBranch) {
-      return envFromBranch;
+      return { environment: envFromBranch, source: "git" };
     }
   }
 
   // 4. Default to dev
-  return "dev";
+  return { environment: "dev", source: "default" };
 }
 
 /**

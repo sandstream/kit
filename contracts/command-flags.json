@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "commands": {
+    "create-plugin": {
+      "flags": ["--skip-install"],
+      "reason": "Only --skip-install controls this handler. Clone and setup flags do not apply.",
+      "tests": ["src/command-owned-flags.test.ts", "src/cli-flag-values-contract.test.ts"],
+      "bareFlags": ["--skip-install"]
+    },
+    "governance": {
+      "flags": [],
+      "reason": "Governance reports current status. Agent setup, team log limits, and broker installation options do not apply.",
+      "tests": ["src/cli-argument-preflight.test.ts"],
+      "bareFlags": []
+    },
+    "guard": {
+      "flags": [],
+      "reason": "Guard actions have no command-specific options. Install parser options belong to observed programs.",
+      "tests": ["src/guard-flag-contract.test.ts"],
+      "bareFlags": []
+    },
+    "guard-observe": {
+      "flags": [],
+      "reason": "Only global Kit options precede the tool. All subsequent arguments belong to the observed tool.",
+      "tests": [
+        "src/guard-flag-contract.test.ts",
+        "src/guard-observe-contract.test.ts",
+        "src/guard-readonly-contract.test.ts",
+        "src/cli-flag-values-contract.test.ts"
+      ],
+      "bareFlags": []
+    },
+    "ingest": {
+      "flags": ["--json"],
+      "reason": "Ingest can format parsed findings as JSON. It does not create an attestation.",
+      "tests": [
+        "src/command-owned-flags.test.ts",
+        "src/cli-flag-values-contract.test.ts",
+        "src/commands/ingest.test.ts"
+      ],
+      "bareFlags": ["--json"]
+    },
+    "open": {
+      "flags": [],
+      "reason": "Open accepts a service name. It has no structured output option.",
+      "tests": ["src/command-owned-flags.test.ts"],
+      "bareFlags": []
+    },
+    "run": {
+      "flags": [],
+      "reason": "Run uses global Kit options. Arguments after the separator belong to the child command.",
+      "tests": [
+        "src/command-owned-flags.test.ts",
+        "src/cli-run-environment-policy.test.ts",
+        "src/cli-flag-values-contract.test.ts"
+      ],
+      "bareFlags": []
+    },
+    "whoami": {
+      "flags": ["--json"],
+      "reason": "Whoami supports JSON output. Status mode selection does not apply.",
+      "tests": [
+        "src/command-owned-flags.test.ts",
+        "src/cli-flag-values-contract.test.ts",
+        "src/commands/whoami.test.ts",
+        "src/cli-whoami-profile.test.ts",
+        "src/cli-whoami-budget-contract.test.ts",
+        "src/cli-argument-preflight.test.ts"
+      ],
+      "bareFlags": ["--json"]
+    }
+  }
+}

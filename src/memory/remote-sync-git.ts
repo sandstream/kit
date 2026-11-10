@@ -28,6 +28,7 @@ export function cloneMemoryBranch(
     gitMemoryCommand(
       [
         "clone",
+        "--no-checkout",
         ...(history ? [] : ["--depth", "1"]),
         "--single-branch",
         "--branch",
@@ -101,11 +102,20 @@ export function verifyMemoryPublication(dir: string, branch: string, commit: str
  * A retry joins the new remote tip with an `ours` merge: the current encrypted
  * blob stays at the tip while both parents remain reachable for history replay.
  */
-export function publishMemoryBranch(dir: string, branch: string): void {
+export function publishMemoryBranch(
+  dir: string,
+  branch: string,
+  snapshot: { file: string; object: string },
+): void {
   let observedRemote = firstParent(dir);
   let lastFailure: unknown;
   for (let attempt = 0; attempt < 8; attempt++) {
     const commit = revision(dir, "HEAD");
+    if (blobAt(dir, commit, snapshot.file) !== snapshot.object) {
+      throw new Error(
+        "Memory snapshot changed during commit; refusing to publish different ciphertext",
+      );
+    }
     try {
       gitMemoryCommand(["push", "-q", "origin", `HEAD:${branch}`], dir);
     } catch (error) {
@@ -278,4 +288,10 @@ function* indexedSnapshots(dir: string, file: string): Generator<string> {
 export function gitMemorySnapshots(dir: string, file: string): Iterable<string> | null {
   if (!blobAt(dir, "HEAD", file)) return null;
   return indexedSnapshots(dir, file);
+}
+
+/** Read the current ciphertext without checkout conversions. The caller must close the iterator. */
+export function gitMemoryHeadSnapshot(dir: string, file: string): Iterable<string> | null {
+  const blob = blobAt(dir, "HEAD", file);
+  return blob ? materializeSnapshots(dir, [blob]) : null;
 }

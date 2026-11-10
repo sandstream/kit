@@ -2,13 +2,19 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parseTargets, ALL_TARGETS, propagate } from "./secrets-propagate.js";
 import { installFakeGh } from "./fake-gh.test-support.js";
+import { installFakeProviderClis } from "./fake-provider-cli.test-support.js";
 
 // The github target runs `gh secret set`; never let this file reach the real CLI.
 let gh: ReturnType<typeof installFakeGh>;
+let providers: ReturnType<typeof installFakeProviderClis>;
 before(() => {
+  providers = installFakeProviderClis();
   gh = installFakeGh();
 });
-after(() => gh.restore());
+after(() => {
+  gh.restore();
+  providers.restore();
+});
 
 describe("parseTargets", () => {
   it("parses a comma-separated list of known targets", () => {
@@ -45,10 +51,8 @@ describe("ALL_TARGETS", () => {
 
 describe("propagate", () => {
   it("returns one result per requested target", async () => {
-    // The underlying CLIs (vercel/gh/fly/wrangler/railway/aws) won't be in
-    // PATH in this test runner, so each adapter exits non-zero with code 127
-    // (command not found). What we care about here is the SHAPE: one result
-    // per target, no exceptions thrown out.
+    // Local stand-ins refuse each write. Installed provider clients stay unreachable.
+    // The contract is one result per target without uncaught errors.
     const results = await propagate("TEST_KEY", "test-value", ["vercel", "github"]);
     assert.equal(results.length, 2);
     assert.equal(results[0].target, "vercel");

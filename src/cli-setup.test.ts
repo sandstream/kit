@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -12,9 +12,18 @@ const exec = promisify(execFile);
 
 describe("kit setup", () => {
   let tempDir: string;
+  let fixtureEnv: Record<string, string>;
 
   before(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "kit-integ-setup-"));
+    const fixtureHome = join(tempDir, "home");
+    await mkdir(fixtureHome);
+    // Exercise this build in a disposable home, independent of the installed Kit version.
+    fixtureEnv = {
+      HOME: fixtureHome,
+      USERPROFILE: fixtureHome,
+      KIT_WRAPPER_ALLOW_DEV: "1",
+    };
     await exec("git", ["init", "-q", tempDir]);
     await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
   });
@@ -26,7 +35,7 @@ describe("kit setup", () => {
   it("runs all 6 pipeline steps with config-sourced secrets", async () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_CONFIG_SECRET, "utf-8");
 
-    const result = await runCli(["setup"], tempDir);
+    const result = await runCli(["setup"], tempDir, fixtureEnv);
 
     // All steps should complete
     assert.ok(
@@ -40,7 +49,7 @@ describe("kit setup", () => {
   it("completes setup pipeline with node tool + config secrets", async () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_FULL_PIPELINE, "utf-8");
 
-    const result = await runCli(["setup"], tempDir);
+    const result = await runCli(["setup"], tempDir, fixtureEnv);
 
     // node is already installed so install step should pass
     assert.ok(result.stdout.includes("[1/6]"), "should show step 1");

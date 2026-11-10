@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 /** Unknown formats must not be interpreted as older stores or partially migrated. */
 export function assertSupportedMemorySchema(db: DatabaseSync): number | undefined {
@@ -39,5 +39,18 @@ export function assertSupportedMemorySchema(db: DatabaseSync): number | undefine
     !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_projects'").get()
   )
     throw new Error("Project identity storage is missing; recover from an intact store");
+  if (rows[0].version >= 18) assertToolEvidenceColumns(db);
   return rows[0].version;
+}
+
+function assertToolEvidenceColumns(db: DatabaseSync): void {
+  for (const [table, names] of [
+    ["tool_uses", ["call_id", "outcome", "outcome_at"]],
+    ["messages", ["tool_capture_version", "tool_capture_count"]],
+    ["file_index", ["parser_version"]],
+  ] as const) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (names.some((name) => !columns.some((column) => column.name === name)))
+      throw new Error("Tool evidence storage is missing; recover from an intact store");
+  }
 }

@@ -43,6 +43,7 @@ import {
 import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
 import { checkTranscriptSecrets } from "./check-transcripts.js";
+import { checkLicenses } from "./check-licenses.js";
 
 const exec = promisify(execFile);
 
@@ -2257,98 +2258,7 @@ async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
   return osvFinding(name, result.stdout);
 }
 
-/**
- * Check dependency licenses for GPL/AGPL that create legal obligations.
- */
-const PROBLEMATIC_LICENSES = ["GPL", "AGPL", "LGPL", "CPAL", "OSL", "EUPL"];
-
-function licenseScannerUnavailable(detail: string): SecurityCheckResult {
-  return {
-    category: "supply-chain",
-    name: "license check",
-    status: "warn",
-    detail,
-    severity: "low",
-    suggestion: "Install license-checker through a triaged tool declaration, then re-run",
-    didNotRun: true,
-  };
-}
-
-function findProblematicLicenses(packages: Record<string, { licenses?: string }>): string[] {
-  return Object.entries(packages).flatMap(([pkg, info]) => {
-    const license = info.licenses ?? "";
-    const problematic = PROBLEMATIC_LICENSES.some((name) => license.toUpperCase().includes(name));
-    return problematic ? [`${pkg} (${license})`] : [];
-  });
-}
-
-function licenseScanVerdict(result: { stderr: string; stdout: string }): SecurityCheckResult {
-  try {
-    const packages = JSON.parse(result.stdout) as Record<string, { licenses?: string }>;
-    const violations = findProblematicLicenses(packages);
-    if (violations.length === 0) {
-      return {
-        category: "supply-chain",
-        name: "license check",
-        status: "pass",
-        detail: "no problematic licenses found",
-      };
-    }
-    const remainder = violations.length > 3 ? ` +${violations.length - 3} more` : "";
-    return {
-      category: "supply-chain",
-      name: "license check",
-      status: "warn",
-      detail: `${violations.length} copyleft license(s): ${violations.slice(0, 3).join(", ")}${remainder}`,
-      severity: "medium",
-    };
-  } catch {
-    return {
-      category: "supply-chain",
-      name: "license check",
-      status: "warn",
-      detail: licenseFailureDetail(result),
-      severity: "low",
-      didNotRun: true,
-    };
-  }
-}
-
-export async function checkLicenses(
-  root: string,
-  tools = { resolveToolBin, execFileNoThrow },
-): Promise<SecurityCheckResult> {
-  try {
-    await access(resolve(root, "package.json"));
-  } catch {
-    return {
-      category: "supply-chain",
-      name: "license check",
-      status: "skip",
-      detail: "no package.json found",
-    };
-  }
-  const licenseCheckerBin = await tools.resolveToolBin("license-checker");
-  if (!licenseCheckerBin) {
-    return licenseScannerUnavailable("license-checker not installed or not executable");
-  }
-
-  const result = await tools.execFileNoThrow(licenseCheckerBin, ["--json", "--production"], {
-    timeout: 120_000,
-    cwd: root,
-  });
-  if (!result.ok) {
-    return licenseScannerUnavailable(
-      `license-checker not installed or not executable: ${licenseFailureDetail(result)}`,
-    );
-  }
-  return licenseScanVerdict(result);
-}
-
-function licenseFailureDetail(result: { stderr: string; stdout: string }): string {
-  const firstLine = (result.stderr || result.stdout).trim().split("\n")[0]?.trim();
-  return firstLine ? `license check failed: ${firstLine.slice(0, 200)}` : "license check failed";
-}
+export { checkLicenses };
 
 /**
  * Run static analysis using Semgrep to catch security anti-patterns in source code.

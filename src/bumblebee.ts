@@ -27,6 +27,7 @@ import {
   stat,
 } from "node:fs/promises";
 import { homedir } from "node:os";
+import { fetchWithRetry } from "./download-retry.js";
 import { join } from "node:path";
 
 const exec = promisify(execFile);
@@ -271,23 +272,8 @@ async function downloadAndInstall(
 ): Promise<void> {
   const url = `${RELEASE_BASE_URL}/v${BUMBLEBEE_VERSION}/${target.assetName}`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let buf: Buffer;
-  try {
-    const res = await fetch(url, { signal: controller.signal, redirect: "follow" });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} fetching ${url}`);
-    }
-    // Even though the checksum below is authoritative for integrity, refuse a
-    // redirect that downgraded us off HTTPS before trusting the body.
-    if (!res.url.startsWith("https:")) {
-      throw new Error(`refusing non-https download URL after redirects: ${res.url}`);
-    }
-    buf = Buffer.from(await res.arrayBuffer());
-  } finally {
-    clearTimeout(timer);
-  }
+  // Retries a 5xx, 408, 429, timeout or network error; the pinned checksum below still decides trust.
+  const buf = await fetchWithRetry(url, { timeoutMs });
 
   const digest = sha256(buf);
   if (digest !== target.checksum) {

@@ -13,6 +13,7 @@ import {
 } from "../services/memory-hook.js";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import {
   openMemoryDb,
   openMemoryDbReadOnly,
@@ -1716,9 +1717,20 @@ async function memRestore(): Promise<boolean> {
 }
 
 async function memSave(): Promise<boolean> {
-  const name = process.argv
-    .slice(4)
-    .filter((a) => !a.startsWith("--"))
+  const args = process.argv.slice(4);
+  const missingSessionValue = args.some((arg, index) => {
+    if (arg === "--session") {
+      const value = args[index + 1];
+      return !value?.trim() || value.startsWith("--");
+    }
+    return arg.startsWith("--session=") && !arg.slice("--session=".length).trim();
+  });
+  if (missingSessionValue) {
+    console.error(`${c.red}--session requires a non-empty session id${c.reset}`);
+    return false;
+  }
+  const name = args
+    .filter((arg, index) => !arg.startsWith("--") && args[index - 1] !== "--session")
     .join(" ")
     .trim();
   if (!name) {
@@ -1736,7 +1748,7 @@ async function memSave(): Promise<boolean> {
     );
     return false;
   }
-  saveThread(db, { name, sessionId, projectPath: root });
+  saveThread(db, { name, sessionId, recallProjectPath: root });
   db.close();
   console.log(
     `${c.green}✓${c.reset} saved copilot ${c.bold}${name}${c.reset} ${c.dim}→ ${sessionId}${c.reset}`,
@@ -1789,12 +1801,19 @@ async function memResume(): Promise<boolean> {
   console.log(
     "Live resume requires this harness's native session files on this machine; availability is not checked.",
   );
-  console.log(
-    `${c.bold}${t.name}${c.reset}${t.harness ? ` ${c.dim}[${t.harness}]${c.reset}` : ""} — run:`,
-  );
+  const label = sanitizeForPrompt([t.name, t.harness].filter(Boolean).join(" | "));
+  const plainLabel = stripVTControlCharacters(label.text)
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  console.log(`Stored session: ${plainLabel}${label.flagged ? ` ${INJECTION_TAG}` : ""}`);
   if (commands.length === 0) {
-    console.log(`  ${c.dim}no known live-resume command for harness ${t.harness}${c.reset}`);
-    console.log(`  ${c.dim}session id: ${t.session_id}${c.reset}`);
+    console.log(
+      `  ${c.dim}no safe live-resume command is available for this stored session${c.reset}`,
+    );
+    console.log(
+      `  ${c.dim}use the harness session history to find the original conversation${c.reset}`,
+    );
     return true;
   }
   for (const cmd of commands) console.log(`  ${cmd}`);

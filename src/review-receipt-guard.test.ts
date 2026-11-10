@@ -11,6 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -102,13 +103,25 @@ it("refuses direct file operations and audits each refusal", async () => {
       "review-recovery-pending",
       "review-interruption-assessment",
     ]);
-    assert.deepEqual(readdirSync(root), [".kit-audit.jsonl"]);
+    // The last append can still hold its transaction open: SQLite keeps a journal beside the
+    // coordination file until it commits. Wait for that transient file before the inventory.
+    const journal = join(root, ".kit-audit.jsonl.lock.sqlite-journal");
+    for (let attempt = 0; attempt < 250 && existsSync(journal); attempt++) {
+      await new Promise((done) => setTimeout(done, 20));
+    }
+    // Expected: refusal evidence requires the audit log and its persistent coordination file.
+    assert.deepEqual(readdirSync(root).sort(), [
+      ".kit-audit.jsonl",
+      ".kit-audit.jsonl.lock.sqlite",
+    ]);
   } finally {
     if (previous === undefined) delete process.env.KIT_READ_ONLY;
     else process.env.KIT_READ_ONLY = previous;
     if (previousAnchor === undefined) delete process.env.KIT_AUDIT_ANCHOR;
     else process.env.KIT_AUDIT_ANCHOR = previousAnchor;
-    rmSync(root, { recursive: true, force: true });
+    // The refusals are audited without awaiting. The last append can still hold the
+    // coordination database for a moment, and Windows refuses to delete an open file.
+    await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
   }
 });
 

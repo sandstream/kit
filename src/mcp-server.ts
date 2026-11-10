@@ -3,26 +3,18 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { resolve, join, relative } from "node:path";
 import { loadConfig } from "./config.js";
-import { checkTools } from "./check-tools.js";
 import { runCheckGate } from "./check-run.js";
 import { summarizeCheckRun, fullCheckPayload } from "./check-mcp-summary.js";
 import { writeCheckDetail } from "./check-detail-store.js";
-import { installTools } from "./install.js";
+import { repairLocalProject } from "./fix-local.js";
 import { generateSecrets } from "./secrets.js";
-import {
-  readSkillsLock,
-  readCliLock,
-  updateSkillsLock,
-  updateCliLock,
-  readkitMeta,
-} from "./lock.js";
 import { generateMcpInit } from "./mcp-init.js";
-import { executeCommand, redactCommandForEnvironment, requireWorkingDirectory } from "./run.js";
+import { redactArgumentsForEnvironment, requireWorkingDirectory } from "./run.js";
+import { executeGovernedCommand } from "./run-governance.js";
 import { gatherProjectContext } from "./context.js";
 import { mapReport } from "./commands/repomap.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
 import { runGovernedBrokered } from "./governance-middleware.js";
-import type { kitConfig } from "./config.js";
 import { runTriage, type TriageType } from "./triage.js";
 import { recordTriageRun } from "./commands/triage.js";
 import { openMemoryDb, searchMessages, getMemoryDbPath, recordQuery } from "./memory/db.js";
@@ -189,16 +181,6 @@ function governanceRefusal(reason: string): {
     ],
     isError: true,
   };
-}
-
-/** Load config for governance; a missing/invalid .kit.toml yields an empty config
- *  (governance disabled by default) so a governed tool still runs where it always did. */
-async function loadConfigForGovernance(cwd?: string): Promise<kitConfig> {
-  try {
-    return await loadConfig(configPath(cwd));
-  } catch {
-    return {} as kitConfig;
-  }
 }
 
 export function createMcpServer(): McpServer {
@@ -416,32 +398,28 @@ function register_kit_secrets(server: McpServer): void {
 }
 
 function register_kit_fix(server: McpServer): void {
-  // kit_fix — auto-fix issues (generate lock files, install tools)
+  // Repair tools, lock files, secret placeholders, and Git ignore protection.
   server.registerTool(
     "kit_fix",
     {
       description:
-        "Auto-fix issues found by kit check (install missing tools, generate missing lock files). Returns actions taken.",
+        "Repair missing tools, lock files, secret placeholders, and Git ignore protection. Returns actions and errors. Use kit fix through kit_run for hooks, service guidance, and deploy environment repairs.",
       inputSchema: {
         cwd: z
           .string()
           .optional()
           .describe(
-            "Project directory to fix (defaults to the server process's own). Every write resolves from this argument — the lock files, the .gitignore hardening, the generated .env.template — and so does the governance audit entry, so a fix aimed at another project both acts on it and files its evidence there.",
+            "Project directory to fix. Defaults to the server's working directory. Relative file paths and the governance audit resolve from this directory.",
           ),
       },
     },
     async ({ cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_fix");
-      // A wrong-target WRITE is worse than a wrong verdict, which is why this handler carried a
-      // cross-project refusal until the write surface was threaded AND measured: the lock files,
-      // the .gitignore edit, the generated template and the governance audit line all have to land
-      // in `cwd`. `fix-cwd.test.ts` asserts each one lands in B and that A gains none of them.
+      // File repairs use the requested project. fix-local.test.ts exercises the MCP handler.
       try {
         const config = await loadConfig(configPath(cwd));
-        // One resolution, used by both the broker context and the lock step below — two
-        // independent `cwd ?? process.cwd()` expressions is how they drift apart.
-        const target = cwd ?? process.cwd();
+        // Resolve the project once for both file repairs and governance evidence.
+        const target = resolve(cwd ?? process.cwd());
 
         const gov = await runGovernedBrokered(
           config,
@@ -449,74 +427,26 @@ function register_kit_fix(server: McpServer): void {
             operation: "fix",
             operationType: "write",
             metadata: {},
-            // Infrastructure: fix installs tools (mise → $HOME) and writes lock files as kit's own
-            // provisioning — not an agent project action the [scope] RoE governs. Audited exemption.
+            // Kit provisions tools and project files under the audited infrastructure exemption.
             infrastructure: true,
           },
-          async () => {
-            const actions: Array<{ name: string; action: string; detail: string }> = [];
-
-            // Fix missing tools (inside the governed closure)
-            if (config.tools && Object.keys(config.tools).length > 0) {
-              const toolResults = await checkTools(config.tools);
-              if (toolResults.some((t) => !t.ok)) {
-                const installResults = await installTools(config.tools);
-                for (const r of installResults) {
-                  if (r.action !== "already_ok") {
-                    actions.push({ name: r.name, action: r.action, detail: r.detail });
-                  }
-                }
-              }
-            }
-
-            // Fix missing lock files. This handler carries its OWN copy of the lock step rather
-            // than calling `cmdFix` (it needs structured actions, not console output), which means
-            // threading `cwd` through `cmdFix` did NOT reach here — the same CLI-vs-MCP divergence
-            // this codebase has been bitten by before. Both readers and writers take it now.
-            const skillsLock = await readSkillsLock(target);
-            const cliLock = await readCliLock(target);
-
-            if (!skillsLock) {
-              const skills: Record<string, string> = {
-                ...config.skills?.required,
-                ...config.skills?.optional,
-              };
-              const meta = await readkitMeta(target);
-              await updateSkillsLock(
-                skills,
-                meta?.name ? `${meta.name}@${meta.version}` : undefined,
-                target,
-              );
-              actions.push({
-                name: "skills-lock.json",
-                action: "generated",
-                detail: "Created skills-lock.json",
-              });
-            }
-
-            if (!cliLock) {
-              const tools: Record<
-                string,
-                { version: string; source: "mise" | "npm" | "pip" | "manual" }
-              > = {};
-              if (config.tools) {
-                for (const [name, version] of Object.entries(config.tools)) {
-                  tools[name] = { version, source: "mise" };
-                }
-              }
-              await updateCliLock(tools, target);
-              actions.push({
-                name: "cli-lock.json",
-                action: "generated",
-                detail: "Created cli-lock.json",
-              });
-            }
-
-            return actions;
+          () => {
+            return repairLocalProject(config, target);
           },
-          { cwd: target },
+          {
+            cwd: target,
+            assessResult: (actions) => {
+              const failed = actions.filter((action) => action.action === "failed");
+              return {
+                success: failed.length === 0,
+                error: failed.length
+                  ? failed.map((action) => `${action.name}: ${action.detail}`).join("; ")
+                  : undefined,
+              };
+            },
+          },
         );
-        if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
+        if (!gov.ok && gov.result === undefined) return governanceRefusal(gov.reason ?? "denied");
         const actions = gov.result!;
         const ok = actions.every((a) => a.action !== "failed");
         return {
@@ -590,52 +520,24 @@ function register_kit_run(server: McpServer): void {
       },
     },
     async ({ command, cwd }) => {
-      if (isReadOnlyMode()) return readOnlyRefusal("kit_run");
       try {
         const workDir = await requireWorkingDirectory(cwd);
-        const displayCommand = await redactCommandForEnvironment(command, workDir);
         // Tokenize like a shell (respecting quotes) — a naive whitespace split turns
         // `git commit -m "a b"` into the wrong argv and silently runs a different
         // command. An unterminated quote throws → we refuse rather than mis-split.
         const { shellSplit } = await import("./utils/shellSplit.js");
         const commandArgs = shellSplit(command);
+        const displayArgs = await redactArgumentsForEnvironment(commandArgs, workDir);
+        const displayCommand = displayArgs.map((arg) => JSON.stringify(arg)).join(" ");
 
-        // Per-command egress extraction (MCP-runtime adoption step 4): kit_run executes an
-        // ARBITRARY command, so its effects can't be fully declared — but the explicit http(s)
-        // URLs in the command text CAN be, using the same conservative extractor the PreToolUse
-        // egress-gate uses. Under [scope].enforce_runtime those hosts are gated against
-        // [scope].egress before the command spawns. Honest limits (documented, not false-greened):
-        // a command that reaches the network without an explicit URL is out of the extractor's
-        // reach, and fs/env are NOT declarable from an arbitrary command (the command inherits env
-        // by design) — those remain un-mediated here; the PreToolUse fs-gate covers Write/Edit.
-        const { extractHostsFromCommand } = await import("./broker/extract.js");
-        const egressTargets = extractHostsFromCommand(command);
-
-        // kit_run inherits the secret-loaded env and executes an arbitrary command,
-        // so it must pass the same governance floor as a CLI write (revocation,
-        // budget, permission, expired-secret block) and be audited — not just gated
-        // by read-only mode.
-        const config = await loadConfigForGovernance(cwd);
-        const gov = await runGovernedBrokered(
-          config,
-          {
-            operation: "run",
-            operationType: "write",
-            metadata: {
-              command: displayCommand,
-              mediation: "egress-only (arbitrary command; fs/env un-mediated)",
-            },
-            egressTargets,
-          },
-          () =>
-            executeCommand({
-              commandArgs,
-              cwd: workDir,
-              inheritEnv: true,
-            }),
-          { cwd: workDir },
-        );
-        if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
+        const gov = await executeGovernedCommand({
+          commandArgs,
+          cwd: workDir,
+          inheritEnv: true,
+          streamOutput: false,
+          stdin: "ignore",
+        });
+        if (!gov.ok && !gov.result) return governanceRefusal(gov.reason ?? "denied");
         const result = gov.result!;
 
         const status = result.timedOut
