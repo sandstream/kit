@@ -13,22 +13,29 @@ const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
 const daysAgo = (d: number) => new Date(NOW - d * 86_400_000).toISOString();
 
 /** Deps with a canned registry document and OSV answer; records what was asked. */
-function deps(
-  doc: unknown,
-  vulns: { id: string }[] = [],
-  over: Partial<GemTriageDeps> = {},
-): GemTriageDeps & { asked: string[] } {
+type Recording = GemTriageDeps & { asked: string[] };
+type Vuln = { id: string };
+
+function deps(doc: unknown, vulns: Vuln[] = [], over: Partial<GemTriageDeps> = {}): Recording {
   const asked: string[] = [];
-  return {
-    env: {},
-    now: () => NOW,
-    getJson: async (url) => (asked.push(url), doc),
-    postJson: async (url, body) => (asked.push(`${url} ${JSON.stringify(body)}`), { vulns }),
-    airGap: async () => ({ enabled: false, mirrors: {} }),
-    lockfile: () => null,
-    asked,
-    ...over,
-  };
+  async function getJson(url: string): Promise<unknown> {
+    asked.push(url);
+    return doc;
+  }
+  async function postJson(url: string, body: unknown): Promise<unknown> {
+    asked.push(`${url} ${JSON.stringify(body)}`);
+    return { vulns };
+  }
+  async function airGap() {
+    return { enabled: false, mirrors: {} };
+  }
+  function now(): number {
+    return NOW;
+  }
+  function lockfile(): string | null {
+    return null;
+  }
+  return { env: {}, now, getJson, postJson, airGap, lockfile, asked, ...over };
 }
 
 /** The strutil-core timeline: a clean 1.0.0, then 1.0.1 under two hours later. */
