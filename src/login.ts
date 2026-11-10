@@ -6,6 +6,7 @@ import { isNonInteractive } from "./environment.js";
 import { parseCommand } from "./utils/parseCommand.js";
 import { safeStatusLine } from "./utils/redactSecrets.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
+import { c } from "./utils/colors.js";
 
 const exec = promisify(execFile);
 
@@ -19,7 +20,7 @@ async function runInteractive(command: string): Promise<{ ok: boolean; detail: s
   const parsed = parseCommand(command);
   if (parsed.kind === "informational") {
     if (!isNonInteractive()) {
-      console.log(`\x1b[33m${parsed.message}\x1b[0m`);
+      console.log(`${c.yellow}${parsed.message}${c.reset}`);
     }
     return {
       ok: false,
@@ -128,7 +129,7 @@ export async function loginServices(
       continue;
     }
 
-    console.log(`\n\x1b[1mLogging in to ${status.name}...\x1b[0m`);
+    console.log(`\n${c.bold}Logging in to ${status.name}...${c.reset}`);
     const login = await deps.runLogin(config.login);
 
     if (!login.ok) {
@@ -138,7 +139,7 @@ export async function loginServices(
 
     // Run link command if configured (e.g. supabase link, vercel link)
     if (config.link) {
-      console.log(`\x1b[2mLinking ${status.name}...\x1b[0m`);
+      console.log(`${c.dim}Linking ${status.name}...${c.reset}`);
       const link = await deps.runLink(config.link);
       if (!link.ok) {
         results.push({

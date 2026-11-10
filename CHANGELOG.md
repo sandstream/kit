@@ -13,6 +13,10 @@
   `ionice`, `chrt`, `taskset` and `flock` are stripped like `nice`. `env -i` and `sudo -i` are no
   longer read as a registry option. A registry option placed before `--prefix` is now caught as
   well. Found by kit-research's adversarial battery, tier 3 (rows G01 and G05).
+- **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
+  prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
+  environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
+  notice) and the inline codes in `kit login` now share one rule.
 
 ## [7.4.0] - 2026-11-10
 

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { isAirGap } from "./scanners.js";
+import { c } from "./utils/colors.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_NAME = "sandstream-kit";
@@ -222,10 +223,7 @@ export function isNewer(latest: string, current: string): boolean {
 
 /** Format and print the update notice after command output. */
 export function printUpdateNotice(info: UpdateInfo): void {
-  const dim = "\x1b[2m";
-  const reset = "\x1b[0m";
-  const yellow = "\x1b[33m";
-  const cyan = "\x1b[36m";
+  const { dim, reset, yellow, cyan } = c;
   console.log(
     `\n  ${dim}╰─${reset} ${yellow}Update available${reset}: ${dim}${info.current}${reset} → ${cyan}${info.latest}${reset}  ` +
       `${dim}run ${reset}${cyan}kit upgrade --self${reset}${dim} (triages before installing)${reset}`,
