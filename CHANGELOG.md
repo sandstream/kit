@@ -32,6 +32,12 @@
   pull". It now uses `ORIG_HEAD`, which `git pull` and `git merge` set to the commit they started
   from, and falls back to `HEAD~1` with a line saying so when `ORIG_HEAD` is missing or not an
   ancestor of `HEAD`.
+- **`kit security scan-build` reads Electron's `app.asar`, and says what it did not read.** A key
+  inside `dist/linux-unpacked/resources/app.asar` passed with _"✓ no matches"_: `.asar` was not a
+  scanned type, and the green line did not mention skipped files. An asar is a JSON header plus the
+  packed files, uncompressed, so it is now matched as bytes in overlapping windows (up to 1 GiB). The
+  output ends with the files not read, counted by extension (`Not read: 3 file(s) by type (.node ×2,
+.AppImage ×1)`), since a binary in a build dir can still carry a key.
 - **`kit triage pip` had no cooling period.** A release younger than `min_release_age_days` got a
   warning from `kit triage npm` and none from `kit triage pip`, so a four-day-old semgrep passed
   where a one-day-old jscpd was flagged. pip triage now applies the same period, dated by the
