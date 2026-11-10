@@ -4,7 +4,9 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { auditPull, reportSeverity } from "./post-pull-audit.js";
+import { auditPull, defaultPullBase, reportSeverity } from "./post-pull-audit.js";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function git(dir: string, ...args: string[]): void {
@@ -137,5 +139,73 @@ describe("auditPull", () => {
     } finally {
       rmTemp(dir);
     }
+  });
+});
+
+describe("defaultPullBase: the whole pull, not its last commit", () => {
+  const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
+
+  /** An upstream with two new commits, the dependency in the FIRST, pulled by fast-forward. */
+  function pulledTwoCommits(): { root: string; clone: string } {
+    const root = mkdtempSync(join(tmpdir(), "kit-pull-range-"));
+    const up = join(root, "up");
+    git(root, "init", "-q", up);
+    git(up, "config", "user.email", "t@t");
+    git(up, "config", "user.name", "t");
+    writeFileSync(join(up, "package.json"), '{"name":"x","dependencies":{}}\n');
+    commit(up, "initial");
+    const clone = join(root, "me");
+    git(root, "clone", "-q", up, clone);
+    writeFileSync(join(up, "package.json"), '{"name":"x","dependencies":{"left-padd":"1.0.0"}}\n');
+    commit(up, "add a dependency");
+    writeFileSync(join(up, "README.md"), "# x\n");
+    commit(up, "readme");
+    git(clone, "pull", "-q", "--ff-only");
+    return { root, clone };
+  }
+
+  it("uses ORIG_HEAD after a multi-commit pull, so a dependency in an earlier commit is seen", async (t) => {
+    const { root, clone } = pulledTwoCommits();
+    t.after(() => rmTemp(root));
+    assert.deepEqual(await defaultPullBase(clone), { base: "ORIG_HEAD", fallback: false });
+    const whole = await auditPull(clone, "ORIG_HEAD");
+    assert.deepEqual(whole.newDependencies, ["left-padd"]);
+    // The old default saw only the README commit and reported nothing.
+    assert.deepEqual((await auditPull(clone, "HEAD~1")).newDependencies, []);
+  });
+
+  it("falls back to HEAD~1, and says so, when there is no ORIG_HEAD", async (t) => {
+    const dir = tmpRepo();
+    t.after(() => rmTemp(dir));
+    writeFileSync(join(dir, "a"), "1");
+    commit(dir, "one");
+    writeFileSync(join(dir, "a"), "2");
+    commit(dir, "two");
+    assert.deepEqual(await defaultPullBase(dir), { base: "HEAD~1", fallback: true });
+  });
+
+  it("falls back when ORIG_HEAD is not an ancestor of HEAD (a reset set it)", async (t) => {
+    const dir = tmpRepo();
+    t.after(() => rmTemp(dir));
+    for (const n of ["1", "2", "3"]) {
+      writeFileSync(join(dir, "a"), n);
+      commit(dir, n);
+    }
+    git(dir, "reset", "-q", "--hard", "HEAD~1"); // ORIG_HEAD is now a descendant
+    assert.deepEqual(await defaultPullBase(dir), { base: "HEAD~1", fallback: true });
+  });
+
+  it("kit security verify-pull with no --base warns about the earlier commit's dependency", async (t) => {
+    const { root, clone } = pulledTwoCommits();
+    t.after(() => rmTemp(root));
+    const out = execFileSync(process.execPath, [CLI, "security", "verify-pull", "--json"], {
+      cwd: clone,
+      encoding: "utf8",
+      env: { ...process.env, KIT_HIDE_HOOK_SKIP_BANNER: "1" },
+      timeout: 60_000,
+    });
+    const r = JSON.parse(out) as { baseRef: string; newDependencies: string[] };
+    assert.equal(r.baseRef, "ORIG_HEAD");
+    assert.deepEqual(r.newDependencies, ["left-padd"]);
   });
 });

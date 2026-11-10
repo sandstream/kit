@@ -32,7 +32,7 @@ import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
 import { scanTranscripts } from "../scan-transcripts.js";
 import { sampleCosts } from "../cost-monitor.js";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "../check-gitignore.js";
-import { auditPull, reportSeverity } from "../post-pull-audit.js";
+import { auditPull, defaultPullBase, reportSeverity } from "../post-pull-audit.js";
 
 async function cmdSecurityPrescan(): Promise<boolean> {
   const root = process.argv[4];
@@ -590,7 +590,9 @@ async function cmdSecurityCosts(): Promise<boolean> {
 async function cmdSecurityVerifyPull(): Promise<boolean> {
   // kit security verify-pull [--base <ref>] [--head <ref>] [--json]
   const args = process.argv.slice(4);
-  const base = flagValue(args, "--base") ?? "HEAD~1";
+  const named = flagValue(args, "--base");
+  const resolved = named ? { base: named, fallback: false } : await defaultPullBase(process.cwd());
+  const base = resolved.base;
   const head = flagValue(args, "--head") ?? "HEAD";
   const jsonMode = hasFlag(args, "--json");
 
@@ -605,6 +607,10 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
   console.log(
     `${c.bold}${c.cyan}kit security verify-pull${c.reset}  ${c.dim}(${base} → ${head})${c.reset}`,
   );
+  if (resolved.fallback)
+    console.log(
+      `${c.dim}No usable ORIG_HEAD (set by git pull / merge), so only the last commit is audited. Name the pre-pull commit with --base to audit the whole pull.${c.reset}`,
+    );
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   if (report.changedFiles.length === 0) {

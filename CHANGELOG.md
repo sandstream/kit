@@ -26,6 +26,12 @@
 
 ### Fixed
 
+- **The post-pull audit checks the whole pull, not its last commit.** `kit security verify-pull`
+  with no `--base` (how the `post-merge` hook runs it) compared `HEAD~1` with `HEAD`. A pull that
+  brought in two commits, with a new dependency in the first, reported "No security concerns in this
+  pull". It now uses `ORIG_HEAD`, which `git pull` and `git merge` set to the commit they started
+  from, and falls back to `HEAD~1` with a line saying so when `ORIG_HEAD` is missing or not an
+  ancestor of `HEAD`.
 - **`kit triage pip` had no cooling period.** A release younger than `min_release_age_days` got a
   warning from `kit triage npm` and none from `kit triage pip`, so a four-day-old semgrep passed
   where a one-day-old jscpd was flagged. pip triage now applies the same period, dated by the
