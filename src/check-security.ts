@@ -44,6 +44,7 @@ import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
 import { checkTranscriptSecrets } from "./check-transcripts.js";
 import { checkLicenses } from "./check-licenses.js";
+import { npmLockfileCover } from "./check-pinned-lockfile.js";
 
 const exec = promisify(execFile);
 
@@ -1206,6 +1207,7 @@ function workspaceMemberNames(cwd: string): Set<string> {
 export async function checkPinnedVersions(root: string): Promise<SecurityCheckResult> {
   const unpinned: string[] = [];
   const checked: string[] = [];
+  let staleLock: string | undefined;
   const result = (status: "pass" | "warn" | "skip", detail: string): SecurityCheckResult => ({
     category: "supply-chain",
     name: "pinned versions",
@@ -1229,11 +1231,23 @@ export async function checkPinnedVersions(root: string): Promise<SecurityCheckRe
     }
     const members = workspaceMemberNames(root);
     const isMember = (name: string) => members.has(name);
-    unpinned.push(
+    const ranges = [
       ...unpinnedNodeDeps(packageJson.dependencies, isMember),
       ...unpinnedNodeDeps(packageJson.devDependencies, isMember),
-    );
-    checked.push("package.json");
+    ];
+    // A committed lockfile that matches package.json makes `npm ci` install exact versions,
+    // so its ranges are pinned in effect. `[scan] strict_pins = true` turns this off.
+    const cover = ranges.length ? await npmLockfileCover(root, packageJson) : {};
+    if (cover.covered) {
+      const s = ranges.length === 1 ? "" : "s";
+      checked.push(
+        `package.json: ${ranges.length} range${s} resolved by the committed ${cover.covered}`,
+      );
+    } else {
+      unpinned.push(...ranges);
+      checked.push("package.json");
+      if (cover.reason) staleLock = cover.reason;
+    }
   }
 
   const requirements = await readFile(resolve(root, "requirements.txt"), "utf-8").catch(
@@ -1244,7 +1258,10 @@ export async function checkPinnedVersions(root: string): Promise<SecurityCheckRe
     checked.push("requirements.txt");
   }
 
-  if (unpinned.length > 0) return result("warn", `${unpinned.length} unpinned dependencies`);
+  if (unpinned.length > 0) {
+    const note = staleLock ? ` (${staleLock})` : "";
+    return result("warn", `${unpinned.length} unpinned dependencies${note}`);
+  }
   if (checked.length === 0) return result("skip", "no package.json or requirements.txt to check");
   return result("pass", `all dependencies pinned (${checked.join(", ")})`);
 }

@@ -123,6 +123,13 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
     example: '[projects]\npaths = ["backend", "frontend", "infra/prod", "docker"]',
     command: "kit check",
   },
+  anon_access: {
+    purpose: "Database tables that the public anon role may read on purpose, each with a reason.",
+    buys: "A table that a public page needs, such as a list of markets or active products, stops the anonymous database access check from warning on every run, and the reason stays next to it. A declaration applies only to a table without a personal-looking column; a table with one still fails. An entry with an empty reason is ignored and keeps the check at warn. Declared tables are listed in the check detail.",
+    example:
+      '[anon_access.public]\nmarkets = "country list for the public order page"\nproducts = "active products shown in the kiosk"',
+    command: "kit check --category security",
+  },
   supply_chain: {
     purpose:
       "Install-time triage settings: which package scopes count as internal, and the cooling period for new releases.",
@@ -133,8 +140,8 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
   },
   scan: {
     purpose:
-      "Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]) and the client-exposed env allowlist.",
-    buys: "The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically. An entry in [[scan.allow]] silences one finding label in one file for kit security scan-staged. Kit reads it from the staged or committed .kit.toml, never the working copy, so review sees it. It needs a reason, a directory or a pattern is refused, the output names the entry that applied, and an entry that matches nothing is reported as stale.",
+      "Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles), reviewed exceptions for the staged-secret scan ([[scan.allow]]), the client-exposed env allowlist, and strict_pins.",
+    buys: "The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically. An entry in [[scan.allow]] silences one finding label in one file for kit security scan-staged. Kit reads it from the staged or committed .kit.toml, never the working copy, so review sees it. It needs a reason, a directory or a pattern is refused, the output names the entry that applied, and an entry that matches nothing is reported as stale. The pinned-versions check treats package.json ranges as pinned when a committed npm lockfile matches package.json; strict_pins = true turns that off and warns on every range.",
     example:
       '[scan]\nguarddog = true\ndelegates = ["osv-scanner", "trivy"]\nimages = ["ghcr.io/acme/api:1.4.2"]\n\n[[scan.allow]]\npath = ".gitlab-ci.yml"\nmatch = "keyed-secret"\nreason = "CI cache key, not a cryptographic key"\nreviewed = "2026-11-01"',
     command: "kit scan --list-delegates",
