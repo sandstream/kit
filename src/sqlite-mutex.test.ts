@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync }
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { verifyAuditChain } from "./audit.js";
+import { lockWaitMs } from "./sqlite-mutex.js";
 import {
+  allowSlowLock,
   auditFixture,
   runAuditWorkers,
   startAuditWorker,
@@ -292,5 +294,63 @@ test(
     await Promise.all([holder.finish(), waiter.finish()]);
     assertLog(logPath(fixture), ["seed", "held-write", "after-held-write"]);
     assertLog(logPath(fixture, "independent.jsonl"), ["independent-local", "independent-external"]);
+  },
+);
+
+test("the lock wait can be raised by KIT_AUDIT_LOCK_WAIT_MS, never lowered", () => {
+  assert.equal(lockWaitMs({}), 5000);
+  assert.equal(lockWaitMs({ KIT_AUDIT_LOCK_WAIT_MS: "30000" }), 30_000);
+  assert.equal(lockWaitMs({ KIT_AUDIT_LOCK_WAIT_MS: " 30000 " }), 30_000);
+  // Below the default, the default stands: the variable cannot make appends fail sooner.
+  assert.equal(lockWaitMs({ KIT_AUDIT_LOCK_WAIT_MS: "100" }), 5000);
+  assert.equal(lockWaitMs({ KIT_AUDIT_LOCK_WAIT_MS: "0" }), 5000);
+  // Capped, so a typo cannot make a stuck writer wait for hours.
+  assert.equal(lockWaitMs({ KIT_AUDIT_LOCK_WAIT_MS: "999999999" }), 120_000);
+  for (const bad of ["", "abc", "-1", "5e4", "30000ms", "1.5"])
+    assert.equal(lockWaitMs({ KIT_AUDIT_LOCK_WAIT_MS: bad }), 5000, bad);
+});
+
+test(
+  "a raised wait outlasts a lock held for longer than five seconds",
+  { timeout: 30_000 },
+  async (t) => {
+    const fixture = auditFixture(t);
+    allowSlowLock(fixture);
+    const holder = startAuditWorker(
+      fixture,
+      `
+    const { DatabaseSync } = await import("node:sqlite");
+    const database = new DatabaseSync(${JSON.stringify(logPath(fixture) + ".lock.sqlite")});
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      const release = next();
+      signal("locked");
+      await release;
+    } finally { database.close(); }
+  `,
+    );
+    await holder.wait("ready");
+    holder.child.send("start");
+    await holder.wait("locked");
+    const waiter = startAuditWorker(
+      fixture,
+      `
+    const started = performance.now();
+    signal("waiting");
+    assert.equal(await audit.appendAuditEventDirect(event("after-slow-holder"), { cwd: project }), true);
+    signal("elapsed:" + Math.round(performance.now() - started));
+  `,
+    );
+    await waiter.wait("ready");
+    waiter.child.send("start");
+    await waiter.wait("waiting");
+    // Past the 5 s default: with the default budget this append would have failed.
+    await new Promise((resolve) => setTimeout(resolve, 5600));
+    holder.child.send("release");
+    await holder.finish();
+    await waiter.finish();
+    const elapsed = Number(waiter.messages.find((m) => m.startsWith("elapsed:"))!.slice(8));
+    assert.ok(elapsed >= 5500, "The waiter got the lock after " + elapsed + " ms");
+    assertLog(logPath(fixture), ["after-slow-holder"]);
   },
 );

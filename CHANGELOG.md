@@ -1,9 +1,23 @@
 ## [Unreleased]
 
+### Fixed
+
+- **The audit lock's wait can be raised on a slow disk.** A writer waited 5 seconds for the audit lock
+  and then failed. Several writers queue behind one lock, and on GitHub's Windows runners the last
+  of 16 appends from 8 processes, and of 12 seals in one process, needed longer; two tests failed on
+  five pull requests that did not touch the lock. `KIT_AUDIT_LOCK_WAIT_MS` raises the wait, to at most 120000. A value under 5000 is ignored, so it cannot make appends fail sooner. The contention tests
+  use 30 seconds; the test of the 5-second limit is unchanged.
+
 ## [7.3.0] - 2026-11-10
 
 ### Added
 
+- **`kit audit secrets --target <platform>` answers "which of my keys did kit push there?".** After a
+  provider breach, it lists every key name kit recorded writing to that platform (propagate, sync,
+  rotate, migrate, onecli register), the keys whose every recorded write failed, and the names
+  `[deploy.<platform>]` declares with no recorded write. Names only, never values; `--json` for
+  scripts. Writes are recorded from this release on, so anything pushed earlier or by hand is not
+  listed, and the command says so.
 - **The user-level agent audit reads Codex too.** `kit agent-audit` now also reads Codex's global
   instructions (`AGENTS.override.md` and `AGENTS.md` in `$CODEX_HOME`, default `~/.codex`) and its
   user skills (`~/.agents/skills`, and `<codex home>/skills` where older versions put them), with the

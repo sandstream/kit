@@ -219,7 +219,7 @@
         },
         "secrets": {
           "kind": "command",
-          "summary": "Forensics: who/what touched each key + when (reads audit log)",
+          "summary": "Forensics: who/what touched each key + when (reads audit log); --target <platform> lists the keys kit pushed there",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -254,6 +254,7 @@
         "--require-external",
         "--since-days",
         "--strict",
+        "--target",
         "--version"
       ],
       "x-kit-args-modeled": true,

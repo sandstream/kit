@@ -1,5 +1,5 @@
 // `kit audit` commands — extracted from cli.ts (split step 4).
-import { readSecretAuditEvents, groupBySecret, summarize } from "../audit-secrets.js";
+import { readSecretAuditEvents, groupBySecret, summarize, exposureAt } from "../audit-secrets.js";
 import { readAuditLog } from "../audit.js";
 import { resolve } from "node:path";
 import { printAuditTable } from "../output.js";
@@ -9,8 +9,58 @@ import { c } from "../utils/colors.js";
 import { hasFlag, flagValue, flagInt } from "../utils/flags.js";
 import { sanitizeDisplayText } from "../display-text.js";
 
+/** Key names `[deploy.<target>]` declares in any environment, or none when it declares nothing. */
+async function declaredAt(target: string): Promise<string[]> {
+  try {
+    const deploy = (await loadConfig(resolveConfigPath())).deploy as
+      Record<string, { environments?: Record<string, { required?: string[] }> }> | undefined;
+    const envs = deploy?.[target]?.environments ?? {};
+    return Object.values(envs).flatMap((e) => e.required ?? []);
+  } catch {
+    return [];
+  }
+}
+
+/** `kit audit secrets --target <name>`: what kit put on one platform, as a rotation checklist. */
+async function cmdAuditSecretsTarget(target: string, args: string[]): Promise<boolean> {
+  // A breach question covers everything ever pushed, so the window is unlimited unless asked.
+  const since = flagInt(args, "--since-days", 36_500);
+  const events = await readSecretAuditEvents(process.cwd(), since > 0 ? since : 36_500);
+  const x = exposureAt(events, target, await declaredAt(target));
+  if (hasFlag(args, "--json")) {
+    console.log(JSON.stringify(x, null, 2));
+    return true;
+  }
+  console.log(`${c.bold}${c.cyan}kit audit secrets --target ${target}${c.reset}`);
+  console.log(
+    `${c.dim}Keys kit recorded writing to ${target} (names only; never values).${c.reset}\n`,
+  );
+  for (const p of x.pushed)
+    console.log(
+      `  ${c.red}rotate${c.reset} ${c.bold}${p.key}${c.reset}  ${c.dim}last ${p.lastPushed.slice(0, 19)} via ${p.operations.join(", ")}${c.reset}`,
+    );
+  for (const a of x.attempted)
+    console.log(
+      `  ${c.yellow}check${c.reset}  ${c.bold}${a.key}${c.reset}  ${c.dim}every recorded write failed (last ${a.lastAttempt.slice(0, 19)}); it may still have reached ${target}${c.reset}`,
+    );
+  for (const k of x.declaredOnly)
+    console.log(
+      `  ${c.yellow}check${c.reset}  ${c.bold}${k}${c.reset}  ${c.dim}declared in [deploy.${target}] with no recorded write: set there some other way${c.reset}`,
+    );
+  if (x.pushed.length + x.attempted.length + x.declaredOnly.length === 0)
+    console.log(
+      `  ${c.dim}No recorded write to ${target} and no [deploy.${target}] names.${c.reset}`,
+    );
+  console.log(
+    `\n${c.dim}Writes are recorded by kit releases after 7.2.2 (secrets propagate, sync, rotate, migrate, onecli). Anything pushed before that, or by hand, is not in this list.${c.reset}`,
+  );
+  return true;
+}
+
 async function cmdAuditSecrets(): Promise<boolean> {
   const args = process.argv.slice(4); // after "audit secrets"
+  const target = flagValue(args, "--target");
+  if (target) return cmdAuditSecretsTarget(target, args);
   // NaN-guard: a non-numeric --since-days would make the cutoff NaN, so the time-window filter
   // silently no-ops and ALL events are returned (wrong output, no error). `flagInt` already falls
   // back on an unparsable value; the `> 0` test additionally rejects 0 and negatives.
@@ -392,7 +442,7 @@ async function cmdAuditAnchor(): Promise<boolean> {
 export async function cmdAudit(): Promise<boolean> {
   const args = process.argv.slice(3);
 
-  // Sub-sub: kit audit secrets [--since-days N] [--key NAME] [--json]
+  // Sub-sub: kit audit secrets [--since-days N] [--key NAME] [--target NAME] [--json]
   if (args[0] === "secrets") {
     return cmdAuditSecrets();
   }

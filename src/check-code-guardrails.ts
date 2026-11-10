@@ -12,6 +12,13 @@ const SKIP_DIRS = new Set([
   ".next",
   "vendor",
   "target",
+  // Generated test and build reports. They hold bundled third-party code, often
+  // over the size limit, and a skip there must not turn the check into a warning.
+  "playwright-report",
+  "test-results",
+  "blob-report",
+  "storybook-static",
+  ".turbo",
 ]);
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 256 * 1024;
