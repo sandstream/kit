@@ -6,8 +6,10 @@
  * (src/gha-skip-gate.ts):
  *   - unpinned action refs: `uses: owner/repo@v1` / `@main` instead of a full
  *     commit SHA (tj-actions/changed-files CVE-2025-30066, ~23k repos).
- *   - "pwn request": `pull_request_target` + `actions/checkout` (runs untrusted
- *     PR code with repo secrets).
+ *   - "pwn request": a privileged trigger (`pull_request_target`, `workflow_run`,
+ *     `issue_comment`) plus a step that brings pull-request code in (src/gha-pwn.ts).
+ *   - `pull_request_target`, which GitHub blocks in public repositories from 2026-12-02 unless
+ *     an Actions event policy allows it.
  *
  * Pure analyzers (text → findings); `runGhaAudit` reads `.github/workflows/*`.
  */
@@ -15,6 +17,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { auditSkippableGates } from "./gha-skip-gate.js";
+import { PRT_DEFAULT_BLOCK_DATE, pwnRequest, workflowTriggers } from "./gha-pwn.js";
 
 const UNPINNED_RULE = {
   id: "CWE-1357",
@@ -59,21 +62,40 @@ export function auditWorkflow(content: string, file: string): SecurityCheckResul
     });
   }
 
-  if (/pull_request_target/.test(content) && /actions\/checkout/.test(content)) {
-    out.push({
-      category: "exposure",
-      name: `pwn-request risk (${file})`,
-      status: "warn",
-      detail: "pull_request_target + actions/checkout can run untrusted PR code with repo secrets",
-      severity: "high",
-      suggestion:
-        "avoid checking out PR head under pull_request_target, or gate on a label/permission",
-      rule: PWN_RULE,
-    });
-  }
+  out.push(...pwnRows(content, file));
 
   out.push(...auditSkippableGates(content, file));
   return out;
+}
+
+/** The pwn-request finding and the default-block notice for one workflow. Pure. */
+function pwnRows(content: string, file: string): SecurityCheckResult[] {
+  const rows: SecurityCheckResult[] = [];
+  const pwn = pwnRequest(content);
+  if (pwn) {
+    rows.push({
+      category: "exposure",
+      name: `pwn-request risk (${file})`,
+      status: "warn",
+      detail: `${pwn.trigger} runs with the repository's secrets and write token, and this workflow brings in pull-request code: ${pwn.shapes.join("; ")}`,
+      severity: "high",
+      suggestion:
+        "use pull_request for anything that runs PR code, or keep the PR code as data that no step executes; gate the privileged job on a label or maintainer approval",
+      rule: PWN_RULE,
+    });
+  }
+  if (workflowTriggers(content).includes("pull_request_target")) {
+    rows.push({
+      category: "supply-chain",
+      name: `pull_request_target default block (${file})`,
+      status: "warn",
+      severity: "low",
+      detail: `GitHub blocks pull_request_target in public repositories from ${PRT_DEFAULT_BLOCK_DATE} unless an Actions event policy allows it for this workflow; kit has not read this repository's visibility or policies`,
+      suggestion:
+        "switch to pull_request if the workflow needs no secrets; otherwise allow this file in an Actions event policy (Settings → Actions → Policies) after checking it never runs PR code",
+    });
+  }
+  return rows;
 }
 
 /** Audit all workflows under .github/workflows. Read-only. */
