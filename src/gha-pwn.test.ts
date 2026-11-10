@@ -49,7 +49,7 @@ describe("pwnRequest on the six measured workflows", () => {
 
 describe("pwnRequest on kit-research adversarial-battery-tier3 W08 and W12", () => {
   it("W08: reads a trigger written as a flow map", () => {
-    const wf = `on: { pull_request_target: { types: [opened] } }\n${job("      - run: gh pr checkout \${{ github.event.number }} && make\n")}`;
+    const wf = `on: { pull_request_target: { types: [opened] } }\n${job("      - run: gh pr checkout ${{ github.event.number }} && make\n")}`;
     assert.equal(pwnRequest(wf)!.trigger, "pull_request_target");
   });
 
