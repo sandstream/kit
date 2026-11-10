@@ -123,6 +123,14 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
     example: '[projects]\npaths = ["backend", "frontend", "infra/prod", "docker"]',
     command: "kit check",
   },
+  anon_access: {
+    purpose:
+      "Database tables that the public anon role may read on purpose, each with a reason.",
+    buys: "A table that a public page needs, such as a list of markets or active products, stops the anonymous database access check from warning on every run, and the reason stays next to it. A declaration applies only to a table without a personal-looking column; a table with one still fails. An entry with an empty reason is ignored and keeps the check at warn. Declared tables are listed in the check detail.",
+    example:
+      '[anon_access.public]\nmarkets = "country list for the public order page"\nproducts = "active products shown in the kiosk"',
+    command: "kit check --category security",
+  },
   supply_chain: {
     purpose:
       "Install-time triage settings: which package scopes count as internal, and the cooling period for new releases.",

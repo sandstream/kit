@@ -506,3 +506,44 @@ describe("checkAnonAccess: unreadable files", () => {
     },
   );
 });
+
+describe("checkAnonAccess: tables declared public in .kit.toml", () => {
+  const MIGRATION = [
+    "CREATE TABLE public.markets (id int, name text);",
+    "ALTER TABLE public.markets ENABLE ROW LEVEL SECURITY;",
+    "CREATE POLICY m ON public.markets FOR SELECT TO anon USING (true);",
+    "CREATE TABLE public.guests (id int, email text);",
+    "ALTER TABLE public.guests ENABLE ROW LEVEL SECURITY;",
+    "CREATE POLICY g ON public.guests FOR SELECT TO anon USING (true);",
+  ].join("\n");
+
+  async function run(kitToml: string, migration = MIGRATION) {
+    const dir = tree({ "supabase/migrations/1_init.sql": migration, ".kit.toml": kitToml });
+    try {
+      return await checkAnonAccess(dir);
+    } finally {
+      rmTemp(dir);
+    }
+  }
+
+  it("passes when each open table without personal columns is declared public with a reason", async () => {
+    const onlyMarkets = MIGRATION.split("\n").slice(0, 3).join("\n");
+    const r = await run('[anon_access.public]\nmarkets = "country list for the public order page"\n', onlyMarkets);
+    assert.equal(r.status, "pass");
+    assert.match(r.detail, /1 declared public: markets/);
+  });
+
+  it("still fails for a declared table with a personal column", async () => {
+    const r = await run('[anon_access.public]\nmarkets = "country list"\nguests = "guest list"\n');
+    assert.equal(r.status, "fail");
+    assert.match(r.detail, /guests \(personal columns: email\)/);
+    assert.match(r.detail, /anon can read 1 table\(s\)/);
+  });
+
+  it("ignores a declaration without a reason and keeps the warning", async () => {
+    const onlyMarkets = MIGRATION.split("\n").slice(0, 3).join("\n");
+    const r = await run('[anon_access.public]\nmarkets = ""\n', onlyMarkets);
+    assert.equal(r.status, "warn");
+    assert.match(r.detail, /no reason: markets/);
+  });
+});
