@@ -94,7 +94,9 @@ function isAllowed(key: string, license: string, rules: AllowRule[]): boolean {
   return rules.some(
     (rule) =>
       rule.license === license &&
-      (rule.pattern.endsWith("*") ? name.startsWith(rule.pattern.slice(0, -1)) : name === rule.pattern),
+      (rule.pattern.endsWith("*")
+        ? name.startsWith(rule.pattern.slice(0, -1))
+        : name === rule.pattern),
   );
 }
 
