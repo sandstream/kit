@@ -159,12 +159,9 @@ export async function defaultPullBase(
   return { base: "HEAD~1", fallback: true };
 }
 
-export async function auditPull(
-  cwd: string = process.cwd(),
-  baseRef: string = "HEAD~1",
-  headRef: string = "HEAD",
-): Promise<PullAuditReport> {
-  const report: PullAuditReport = {
+/** A report with nothing found yet, for the range it will describe. */
+function emptyReport(baseRef: string, headRef: string): PullAuditReport {
+  return {
     baseRef,
     headRef,
     newDependencies: [],
@@ -178,6 +175,14 @@ export async function auditPull(
     changedFiles: [],
     agentFiles: [],
   };
+}
+
+export async function auditPull(
+  cwd: string = process.cwd(),
+  baseRef: string = "HEAD~1",
+  headRef: string = "HEAD",
+): Promise<PullAuditReport> {
+  const report = emptyReport(baseRef, headRef);
 
   // 1. Dependencies
   const beforePkg = await tryGitShow(baseRef, "package.json", cwd);
