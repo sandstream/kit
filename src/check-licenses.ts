@@ -105,21 +105,30 @@ function listed(items: string[]): string {
   return `${items.slice(0, 3).join(", ")}${remainder}`;
 }
 
+/** Split copyleft packages into accepted ones and violations. Throws on a malformed entry. */
+function classify(
+  packages: Record<string, unknown>,
+  rules: AllowRule[],
+): { violations: string[]; accepted: string[] } {
+  const violations: string[] = [];
+  const accepted: string[] = [];
+  for (const [pkg, info] of Object.entries(packages)) {
+    if (!isRecord(info) || (info.licenses !== undefined && typeof info.licenses !== "string")) {
+      throw new Error("invalid license entry");
+    }
+    const license = info.licenses ?? "";
+    if (!PROBLEMATIC_LICENSES.some((name) => license.toUpperCase().includes(name))) continue;
+    if (isAllowed(pkg, license, rules)) accepted.push(pkg);
+    else violations.push(`${pkg} (${license})`);
+  }
+  return { violations, accepted };
+}
+
 function scanVerdict(result: ExecResult, allowlist: Allowlist): SecurityCheckResult {
   try {
     const packages: unknown = JSON.parse(result.stdout);
     if (!isRecord(packages)) return failure(result, true);
-    const violations: string[] = [];
-    const accepted: string[] = [];
-    for (const [pkg, info] of Object.entries(packages)) {
-      if (!isRecord(info) || (info.licenses !== undefined && typeof info.licenses !== "string")) {
-        throw new Error("invalid license entry");
-      }
-      const license = info.licenses ?? "";
-      if (!PROBLEMATIC_LICENSES.some((name) => license.toUpperCase().includes(name))) continue;
-      if (isAllowed(pkg, license, allowlist.rules)) accepted.push(pkg);
-      else violations.push(`${pkg} (${license})`);
-    }
+    const { violations, accepted } = classify(packages, allowlist.rules);
     const notes: string[] = [];
     if (accepted.length) notes.push(`${accepted.length} accepted: ${listed(accepted)}`);
     if (allowlist.invalid.length) {
