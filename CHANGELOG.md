@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+### Fixed
+
+- **The audit lock's wait can be raised on a slow disk.** A writer waited 5 seconds for the audit lock
+  and then failed. Several writers queue behind one lock, and on GitHub's Windows runners the last
+  of 16 appends from 8 processes, and of 12 seals in one process, needed longer; two tests failed on
+  five pull requests that did not touch the lock. `KIT_AUDIT_LOCK_WAIT_MS` raises the wait, to at most 120000. A value under 5000 is ignored, so it cannot make appends fail sooner. The contention tests
+  use 30 seconds; the test of the 5-second limit is unchanged.
+
 ## [7.3.0] - 2026-11-10
 
 ### Added

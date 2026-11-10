@@ -128,6 +128,11 @@ export const KNOBS: KnobGroup[] = [
         kind: "env",
         desc: "relocate the HMAC audit-anchor key + record (default ~/.kit)",
       },
+      {
+        name: "KIT_AUDIT_LOCK_WAIT_MS",
+        kind: "env",
+        desc: "raise how long a writer waits for the audit lock (default and minimum 5000, at most 120000) — for slow disks; it cannot lower the wait",
+      },
     ],
   },
   {

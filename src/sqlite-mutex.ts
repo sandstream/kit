@@ -5,6 +5,25 @@ import { setTimeout as delay } from "node:timers/promises";
 import { sameIdentity } from "./utils/same-file.js";
 
 const WAIT_MS = 5000;
+const MAX_WAIT_MS = 120_000;
+
+/**
+ * How long one caller waits for the lock. The default is 5 s. `KIT_AUDIT_LOCK_WAIT_MS` may only
+ * RAISE it (to at most two minutes): several writers queue behind one lock, and on a slow disk
+ * the last of them can need longer than 5 s for the writers ahead of it to finish. Measured on
+ * GitHub's Windows runners, where 8 processes × 2 appends and 12 seals in one process both timed
+ * out. A value below the default, or not a whole number, is ignored, so the variable cannot be
+ * used to make audit appends fail sooner.
+ */
+export function lockWaitMs(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.KIT_AUDIT_LOCK_WAIT_MS?.trim() ?? "";
+  if (!/^\d{1,9}$/.test(raw)) return WAIT_MS;
+  return Math.min(Math.max(Number(raw), WAIT_MS), MAX_WAIT_MS);
+}
+
+function timedOut(waitMs: number): Error {
+  return new Error(`Timed out waiting for the audit lock after ${waitMs} ms.`);
+}
 const localLocks = new Set<string>();
 
 function regularFile(path: string): BigIntStats | undefined {
@@ -44,24 +63,28 @@ function busy(error: unknown): boolean {
   return [5, 6].includes(sqlite.errcode & 0xff);
 }
 
-async function wait(deadline: number): Promise<void> {
-  const remaining = deadline - performance.now();
-  if (remaining <= 0) throw new Error("Timed out waiting for the audit lock after 5000 ms.");
+/** One caller's wait: when it ends, and the budget it was given (for the message). */
+interface Budget {
+  deadline: number;
+  waitMs: number;
+}
+
+async function wait(budget: Budget): Promise<void> {
+  const remaining = budget.deadline - performance.now();
+  if (remaining <= 0) throw timedOut(budget.waitMs);
   await delay(Math.min(20, remaining));
 }
 
-async function acquire(database: DatabaseSync, deadline: number): Promise<void> {
+async function acquire(database: DatabaseSync, budget: Budget): Promise<void> {
   for (;;) {
-    if (performance.now() >= deadline) {
-      throw new Error("Timed out waiting for the audit lock after 5000 ms.");
-    }
+    if (performance.now() >= budget.deadline) throw timedOut(budget.waitMs);
     try {
       database.exec("BEGIN IMMEDIATE");
       return;
     } catch (error) {
       if (!busy(error)) throw error;
     }
-    await wait(deadline);
+    await wait(budget);
   }
 }
 
@@ -74,14 +97,15 @@ async function acquire(database: DatabaseSync, deadline: number): Promise<void> 
  * Path checks reject ordinary substitution, but cannot secure hostile parent directories.
  */
 export async function withSqliteMutex<T>(path: string, operation: () => Promise<T>): Promise<T> {
-  const deadline = performance.now() + WAIT_MS;
-  while (localLocks.has(path)) await wait(deadline);
+  const waitMs = lockWaitMs();
+  const budget: Budget = { deadline: performance.now() + waitMs, waitMs };
+  while (localLocks.has(path)) await wait(budget);
   localLocks.add(path);
   let database: DatabaseSync | undefined;
   try {
     const opened = openDatabase(path);
     database = opened.database;
-    await acquire(database, deadline);
+    await acquire(database, budget);
     assertIdentity(path, opened.stat);
     return await operation();
   } finally {
