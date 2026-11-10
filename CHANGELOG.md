@@ -2,6 +2,12 @@
 
 ### Added
 
+- **`kit triage gem <name>[@version]`.** kit had no gem triage. strutil-core 1.0.1 ran a
+  credential-stealing worm from its native extension during `gem install`; it was public for about five
+  hours. The new triage reads the RubyGems API's per-version publish times for the cooling period,
+  fails on an OSV malicious-package record (also once the registry has removed the gem), and warns on a
+  new gem or very few downloads. It reads no gem code and says so. The bash gate does not route
+  `gem install` through it yet; that is a change to the protected install gate.
 - **The user-level agent audit reads Codex too.** `kit agent-audit` now also reads Codex's global
   instructions (`AGENTS.override.md` and `AGENTS.md` in `$CODEX_HOME`, default `~/.codex`) and its
   user skills (`~/.agents/skills`, and `<codex home>/skills` where older versions put them), with the

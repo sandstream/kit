@@ -241,7 +241,7 @@ export async function coolingCheck(input: CoolingInput): Promise<CoolingResult> 
   return { lines: [line], held: input.enforce };
 }
 
-async function supplyChainConfig(cwd: string): Promise<SupplyChainConfig> {
+export async function supplyChainConfig(cwd: string): Promise<SupplyChainConfig> {
   try {
     const { loadConfig } = await import("./config.js");
     return (await loadConfig(join(cwd, ".kit.toml"))).supply_chain ?? {};
@@ -320,7 +320,7 @@ function registryUrl(base: string, pkg: string): string {
   return `${base.replace(/\/+$/, "")}/${path.replace(/%40/g, "@")}`;
 }
 
-function limitFrom(cfg: SupplyChainConfig, env: NodeJS.ProcessEnv): number {
+export function limitFrom(cfg: SupplyChainConfig, env: NodeJS.ProcessEnv): number {
   const raw = env.KIT_MIN_RELEASE_AGE_DAYS?.trim();
   const days = raw ? Number(raw) : cfg.min_release_age_days;
   return typeof days === "number" && Number.isFinite(days) && days >= 0

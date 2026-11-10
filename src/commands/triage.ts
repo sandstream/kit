@@ -33,6 +33,7 @@ const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> =
   instructions: async (args) =>
     (await import("./triage-instructions.js")).cmdTriageInstructions(args),
   pkg: async (args) => (await import("./triage-pkg.js")).cmdTriagePkg(args),
+  gem: async (args) => (await import("./triage-gem.js")).cmdTriageGem(args),
 };
 
 export async function cmdTriage(): Promise<boolean> {
@@ -63,6 +64,9 @@ export async function cmdTriage(): Promise<boolean> {
       "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
     );
     console.log("  kit triage pip <package>             Evaluate PyPI package");
+    console.log(
+      "  kit triage gem <name>[@version]      Evaluate a RubyGems release (cooling, OSV malicious, history); install-time code not read",
+    );
     console.log(
       "  kit triage brew <formula>            Evaluate Homebrew formula (resolves upstream repo, then repo-scores)",
     );
