@@ -37,6 +37,10 @@ sealed prefix and the `count` of entries it covers.
   Set `KIT_AUDIT_ANCHOR=0` to disable
   append-time anchoring; set `KIT_AUDIT_ANCHOR_DIR` to relocate the key + record
   (used by the test suite for isolation).
+- A writer waits up to 5 seconds for the audit lock, then the append fails and says so. Several
+  writers queue behind one lock, so on a slow disk the last one can need longer.
+  `KIT_AUDIT_LOCK_WAIT_MS` raises the wait (at most 120000). A value under 5000 is ignored, so the
+  variable cannot make appends fail sooner.
 
 Detection properties:
 
