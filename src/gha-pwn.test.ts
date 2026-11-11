@@ -47,6 +47,35 @@ describe("pwnRequest on the six measured workflows", () => {
   });
 });
 
+describe("pwnRequest on kit-research adversarial-battery-tier3 W08 and W12", () => {
+  it("W08: reads a trigger written as a flow map", () => {
+    const wf = `on: { pull_request_target: { types: [opened] } }\n${job("      - run: gh pr checkout ${{ github.event.number }} && make\n")}`;
+    assert.equal(pwnRequest(wf)!.trigger, "pull_request_target");
+  });
+
+  const artifactRun = (steps: string) =>
+    `on:\n  workflow_run:\n    workflows: [ci]\n    types: [completed]\n${job(steps)}`;
+  const download = `      - uses: actions/download-artifact@${SHA}\n        with:\n          name: out\n          run-id: \${{ github.event.workflow_run.id }}\n          github-token: \${{ secrets.GITHUB_TOKEN }}\n`;
+
+  it("W12: flags an artifact from the triggering run followed by a run step", () => {
+    const f = pwnRequest(artifactRun(`${download}      - run: bash ./out/report.sh\n`))!;
+    assert.equal(f.trigger, "workflow_run");
+    assert.match(f.shapes.join(), /artifact from the triggering run/);
+    const gh = artifactRun(
+      "      - run: gh run download ${{ github.event.workflow_run.id }} -n out\n      - run: make\n",
+    );
+    assert.match(pwnRequest(gh)!.shapes.join(), /artifact from the triggering run/);
+  });
+
+  it("W12: passes an artifact of the same run, a download with no run step, and other triggers", () => {
+    const sameRun = `      - uses: actions/download-artifact@${SHA}\n        with:\n          name: out\n      - run: make\n`;
+    assert.equal(pwnRequest(artifactRun(sameRun)), null, "no run-id: this run's own artifact");
+    assert.equal(pwnRequest(artifactRun(download)), null, "nothing runs after the download");
+    const onPush = `on: push\n${job(`${download}      - run: make\n`)}`;
+    assert.equal(pwnRequest(onPush), null);
+  });
+});
+
 describe("workflowTriggers", () => {
   it("reads scalar, flow-list, block-mapping and block-list forms", () => {
     assert.deepEqual(workflowTriggers("on: push\n"), ["push"]);
@@ -57,6 +86,12 @@ describe("workflowTriggers", () => {
     assert.deepEqual(
       workflowTriggers(
         "on:\n  pull_request_target:\n    types: [opened]\n  push:\n    branches: [main]\njobs: {}\n",
+      ),
+      ["pull_request_target", "push"],
+    );
+    assert.deepEqual(
+      workflowTriggers(
+        "on: { pull_request_target: { types: [opened, 'synchronize'] }, 'push': null }\n",
       ),
       ["pull_request_target", "push"],
     );

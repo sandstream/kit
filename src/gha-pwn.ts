@@ -42,17 +42,42 @@ export function stripComments(text: string): string {
 
 const ON_KEY = /^(?:on|"on"|'on'):\s*(.*)$/;
 
-/** The events named in the top-level `on:` key: scalar, flow list or block mapping/list. */
+const unquote = (s: string) => s.trim().replace(/^['"]|['"]$/g, "");
+
+/**
+ * The keys at the top level of a one-line flow mapping: `{ a: {x: [1]}, 'b': null }` gives
+ * `a`, `b`. Nested `{}`/`[]` are skipped by depth, so a nested key never counts.
+ */
+function flowMapKeys(map: string): string[] {
+  const keys: string[] = [];
+  let depth = 0;
+  let token = "";
+  for (const ch of map) {
+    if (ch === "{" || ch === "[") {
+      depth++;
+      if (depth === 1) token = "";
+    } else if (ch === "}" || ch === "]") depth--;
+    else if (depth === 1 && ch === ":") {
+      if (unquote(token)) keys.push(unquote(token));
+      token = "\u0000"; // until the next top-level comma, this is a value, not a key
+    } else if (depth === 1 && ch === ",") token = "";
+    else if (depth === 1 && !token.startsWith("\u0000")) token += ch;
+  }
+  return keys;
+}
+
+/** The events named in the top-level `on:` key: scalar, flow list, flow map or block mapping/list. */
 export function workflowTriggers(text: string): string[] {
   const lines = stripComments(text).split("\n");
   const at = lines.findIndex((l) => ON_KEY.test(l));
   if (at < 0) return [];
   const inline = ON_KEY.exec(lines[at])![1].trim();
+  if (inline.startsWith("{")) return flowMapKeys(inline);
   if (inline)
     return inline
       .replace(/^\[|\]$/g, "")
       .split(",")
-      .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
+      .map(unquote)
       .filter(Boolean);
   const events: string[] = [];
   let indent = -1;
@@ -107,6 +132,23 @@ const PR_CODE_SHAPES: { re: RegExp; shape: string }[] = [
   },
 ];
 
+/**
+ * An artifact from the run that triggered a `workflow_run`, followed by a `run:` step. When that
+ * run was a pull request's, the artifact is PR-controlled ("artifacts from other workflows are
+ * untrusted", GitHub Docs). kit cannot tell from the text whether the step only reads it as data,
+ * so the message says what to check.
+ */
+const TRIGGERING_ARTIFACT =
+  /\bactions\/download-artifact@[^\n]*(?:\n[^\n]*){0,6}?\n\s*run-id:\s*.*github\.event\.workflow_run\.id|\bdawidd6\/action-download-artifact@|\bgh\s+run\s+download\b[^\n]*github\.event\.workflow_run\.id/;
+const RUN_STEP = /^\s*-?\s*run:/m;
+
+function triggeringArtifactShape(triggers: string[], body: string): string | null {
+  if (!triggers.includes("workflow_run")) return null;
+  const m = TRIGGERING_ARTIFACT.exec(body);
+  if (!m || !RUN_STEP.test(body.slice(m.index + m[0].length))) return null;
+  return "an artifact from the triggering run, then a run step (workflow_run; make sure the artifact is only read as data, never executed)";
+}
+
 export interface PwnFinding {
   trigger: string;
   shapes: string[];
@@ -118,5 +160,7 @@ export function pwnRequest(text: string): PwnFinding | null {
   if (triggers.length === 0) return null;
   const body = stripComments(text);
   const shapes = PR_CODE_SHAPES.filter((s) => s.re.test(body)).map((s) => s.shape);
+  const artifact = triggeringArtifactShape(triggers, body);
+  if (artifact) shapes.push(artifact);
   return shapes.length ? { trigger: triggers.join(", "), shapes } : null;
 }
