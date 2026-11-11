@@ -134,7 +134,7 @@ function adrFindings(adr: Awaited<ReturnType<typeof runAdrGate>>): JsonCheck[] {
     ...adr.gaps.map((v) => ({
       name: v.adrId,
       status: "warn" as const,
-      detail: `${v.file}:${v.line} ${v.message} (unprovable — unresolved import)`,
+      detail: `${v.file}:${v.line} ${v.message} (unprovable)`,
       category: "adr",
     })),
   ];

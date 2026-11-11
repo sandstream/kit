@@ -2,6 +2,14 @@
 
 ### Fixed
 
+- **`kit adr check` no longer passes a rule that checks nothing.** A `forbid_pattern` or `require_pattern`
+  rule printed _"no new violations"_ when its `paths` glob selected no file the gate reads (it reads
+  code files only, so a rule over `docs/**/*.md` matched nothing), when the glob was invalid, or when
+  the regex was invalid (`(?i)…` is not JavaScript syntax). `kit adr list` still said _"enforced"_.
+  Each case is now a gap on the ADR file, _"… — this rule checks nothing"_, which fails the gate like
+  any other gap. kit's own enforced ADRs all match real files and are unaffected. Found by kit-research
+  `ddd-ubiquitous-language-vs-kit`.
+
 - **`kit gha-audit` reads a trigger written as a flow map, and flags a `workflow_run` that runs after
   downloading the triggering run's artifact.** `on: { pull_request_target: { types: [opened] } }`
   read as no trigger, so `gh pr checkout` and `make` under it passed with no pwn-request row and no
