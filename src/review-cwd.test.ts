@@ -42,8 +42,13 @@ function withComponent(dir: string): void {
   writeFileSync(join(dir, "src", "Bad.tsx"), 'export const Bad = () => <img src="x.png" />;\n');
 }
 
-/** An ADR in the shape kit's parser accepts: YAML frontmatter with an `id`, plus an enforce block. */
+/**
+ * An ADR in the shape kit's parser accepts: YAML frontmatter with an `id`, plus an enforce block,
+ * and a clean file for its rule to check (a rule that matches no file is a gap, not a pass).
+ */
 function withAdr(dir: string): void {
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "App.tsx"), "export const App = () => null;\n");
   mkdirSync(join(dir, "docs", "adr"), { recursive: true });
   writeFileSync(
     join(dir, "docs", "adr", "0001-no-axios.md"),
@@ -135,9 +140,6 @@ describe("collectReview honours cwd in every stage", () => {
     const A = baseProject();
     const B = baseProject();
     withAdr(A); // A has one accepted, enforcing ADR; B has none
-    // A clean file for the rule to check: a rule that matches no file is a gap, not a pass.
-    mkdirSync(join(A, "src"), { recursive: true });
-    writeFileSync(join(A, "src", "App.tsx"), "export const App = () => null;\n");
     try {
       const aboutA = await inCwd(A, () => collectReview({ cwd: A, stages: ["adr"] }));
       const aboutB = await inCwd(A, () => collectReview({ cwd: B, stages: ["adr"] }));
