@@ -135,6 +135,9 @@ describe("collectReview honours cwd in every stage", () => {
     const A = baseProject();
     const B = baseProject();
     withAdr(A); // A has one accepted, enforcing ADR; B has none
+    // A clean file for the rule to check: a rule that matches no file is a gap, not a pass.
+    mkdirSync(join(A, "src"), { recursive: true });
+    writeFileSync(join(A, "src", "App.tsx"), "export const App = () => null;\n");
     try {
       const aboutA = await inCwd(A, () => collectReview({ cwd: A, stages: ["adr"] }));
       const aboutB = await inCwd(A, () => collectReview({ cwd: B, stages: ["adr"] }));
