@@ -226,15 +226,338 @@ function templateFailure(templatePath: string, keyCount: number, err: unknown): 
   };
 }
 
+/** What the pipeline has done so far: fixes made by kit and actions left for a human. */
+interface FixState {
+  fixed: number;
+  manual: HitlBlock[];
+}
+
+/** A manual action for a developer. Every block `kit fix` raises has the same owner. */
+function developerBlock(fields: Omit<HitlBlock, "owner">): HitlBlock {
+  return { ...fields, owner: "developer" };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Step 1: install the tools that `[tools]` declares and that are missing. */
+async function fixTools(config: kitConfig, state: FixState): Promise<void> {
+  if (!config.tools || Object.keys(config.tools).length === 0) return;
+  console.log(`${c.bold}[1/6] Tools${c.reset}`);
+  const missingTools = (await checkTools(config.tools)).filter((t) => !t.ok);
+
+  if (missingTools.length === 0) {
+    console.log(`${c.dim}All tools installed${c.reset}`);
+    console.log();
+    return;
+  }
+  console.log(`${c.dim}Installing ${missingTools.length} missing tool(s)...${c.reset}\n`);
+  for (const r of await installTools(config.tools)) {
+    if (r.action === "installed") {
+      console.log(
+        `  ${c.green}✓${c.reset} ${r.name}  ${c.green}installed${c.reset}  ${c.dim}${r.detail}${c.reset}`,
+      );
+      state.fixed++;
+    } else if (r.action === "failed") {
+      console.log(
+        `  ${c.red}✗${c.reset} ${r.name}  ${c.red}failed${c.reset}  ${c.dim}${r.detail}${c.reset}`,
+      );
+      state.manual.push(
+        developerBlock({
+          blocker: `${r.name} tool is not installable by kit`,
+          reason: "local tool setup",
+          steps: [r.detail, "Run `kit check --category tools`."],
+          respondWith: `${r.name} installed or intentionally unavailable`,
+          agentContinuesWith: "kit check --category tools",
+        }),
+      );
+    }
+  }
+  console.log();
+}
+
+/** Write `.kit/skills-lock.json` from the `[skills]` tables. */
+async function generateSkillsLock(config: kitConfig, cwd: string): Promise<void> {
+  const skills: Record<string, string> = {};
+  if (config.skills?.required) Object.assign(skills, config.skills.required);
+  if (config.skills?.optional) Object.assign(skills, config.skills.optional);
+
+  const kitMeta = await readkitMeta(cwd);
+  await updateSkillsLock(
+    skills,
+    kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined,
+    cwd,
+  );
+  console.log(`  ${c.green}✓${c.reset} Generated skills-lock.json`);
+}
+
+/** Step 2: generate the lock files that are missing. */
+async function fixLockFiles(config: kitConfig, cwd: string, state: FixState): Promise<void> {
+  console.log(`${c.bold}[2/6] Lock Files${c.reset}`);
+  const skillsLock = await readSkillsLock(cwd);
+  const cliLock = await readCliLock(cwd);
+
+  if (skillsLock && cliLock) {
+    console.log(`${c.dim}Lock files exist${c.reset}`);
+  } else {
+    console.log(`${c.dim}Generating missing lock files...${c.reset}\n`);
+    if (!skillsLock) {
+      await generateSkillsLock(config, cwd);
+      state.fixed++;
+    }
+    if (!cliLock && (await generateCliLock(config, cwd))) state.fixed++;
+  }
+  console.log();
+}
+
+/** Step 3: list the services that need a manual login. */
+async function fixServices(config: kitConfig, state: FixState): Promise<void> {
+  console.log(`${c.bold}[3/6] Services${c.reset}`);
+  if (!config.services || Object.keys(config.services).length === 0) {
+    console.log(`${c.dim}No services configured${c.reset}`);
+    console.log();
+    return;
+  }
+  const unauthenticated = (await checkServices(config.services)).filter((s) => !s.authenticated);
+  if (unauthenticated.length === 0) {
+    console.log(`${c.dim}All services authenticated${c.reset}`);
+  } else {
+    console.log(
+      `${c.yellow}${unauthenticated.length} service(s) require manual authentication${c.reset}\n`,
+    );
+    for (const s of unauthenticated) {
+      console.log(
+        `  ${c.yellow}!${c.reset} ${s.name}  ${c.yellow}not authenticated${c.reset}  ${c.dim}${s.output}${c.reset}`,
+      );
+      const block = hitlBlockForService(s, config);
+      if (block) state.manual.push(block);
+    }
+  }
+  console.log();
+}
+
+/** Step 4: generate `.env.template` when secret keys are declared and the template is missing. */
+async function fixSecretsTemplate(config: kitConfig, cwd: string, state: FixState): Promise<void> {
+  console.log(`${c.bold}[4/6] Secrets Template${c.reset}`);
+  // `template` is a repo-relative path in .kit.toml. Resolve against the governed
+  // project and create exclusively, so another writer cannot replace an absence probe.
+  const templateRel = config.secrets?.template;
+  const templatePath = templateRel ? resolve(cwd, templateRel) : undefined;
+  if (templatePath && config.secrets?.keys && Object.keys(config.secrets.keys).length > 0) {
+    const keyNames = Object.keys(config.secrets.keys);
+    try {
+      const template = await generateSecretsTemplate(config.secrets, cwd);
+      if (template?.written) {
+        console.log(
+          `  ${c.green}✓${c.reset} Generated ${templatePath}  ${c.dim}(${keyNames.length} keys)${c.reset}`,
+        );
+        state.fixed++;
+      } else {
+        console.log(`${c.dim}Template ${templatePath} exists${c.reset}`);
+      }
+    } catch (err: unknown) {
+      state.manual.push(templateFailure(templatePath, keyNames.length, err));
+    }
+  } else {
+    console.log(`${c.dim}No secrets template configured${c.reset}`);
+  }
+  console.log();
+}
+
+/** Step 5: make Git ignore `.env*`, `*.pem`, `id_rsa` and `.kit/elevation.json`. Idempotent. */
+async function fixGitignore(cwd: string, state: FixState): Promise<void> {
+  console.log(`${c.bold}[5/6] .gitignore${c.reset}`);
+  try {
+    const patch = await patchGitignore(cwd);
+    if (patch.written) {
+      console.log(`  ${c.green}✓${c.reset} Repaired .gitignore protection and verified with Git`);
+      state.fixed++;
+    } else {
+      console.log(`${c.dim}.gitignore already hardened${c.reset}`);
+    }
+  } catch (err: unknown) {
+    const msg = errorMessage(err);
+    console.log(`  ${c.red}✗${c.reset} .gitignore harden failed: ${msg}`);
+    state.manual.push(
+      developerBlock({
+        blocker: ".gitignore could not be hardened",
+        reason: msg,
+        steps: [
+          "Review Git availability, remaining ignore overrides, and already tracked sensitive files.",
+          "Run `kit check`.",
+        ],
+        respondWith: ".gitignore hardened",
+        agentContinuesWith: "kit check",
+      }),
+    );
+  }
+  console.log();
+}
+
+type HookResults = Awaited<ReturnType<typeof installHooks>>;
+
+/** Sort the install results into the groups the report prints. */
+function groupHookResults(hookResults: HookResults, configured: Set<string>) {
+  const isConfigured = (r: HookResults[number]) => configured.has(r.hookName);
+  const skipped = hookResults.filter((r) => r.action === "skipped" && isConfigured(r));
+  return {
+    installed: hookResults.filter((r) => r.action === "installed" && isConfigured(r)),
+    updated: hookResults.filter((r) => r.action === "updated" && isConfigured(r)),
+    auxiliary: hookResults.filter(
+      (r) => (r.action === "installed" || r.action === "updated") && !isConfigured(r),
+    ),
+    skipped,
+    satisfiedSkipped: skipped.filter((r) => r.satisfied),
+    blockedSkipped: skipped.filter((r) => !r.satisfied),
+    failed: hookResults.filter((r) => r.action === "failed"),
+  };
+}
+
+function hookNames(results: HookResults): string {
+  return results.map((r) => r.hookName).join(", ");
+}
+
+/** Print the hook install report and raise a manual action for each hook that kit could not place. */
+function reportHookResults(hookResults: HookResults, configured: Set<string>, state: FixState) {
+  const g = groupHookResults(hookResults, configured);
+  if (g.installed.length > 0) {
+    console.log(
+      `  ${c.green}✓${c.reset} Installed ${g.installed.length} hook(s): ${hookNames(g.installed)}`,
+    );
+    state.fixed++;
+  }
+  if (g.updated.length > 0) {
+    console.log(
+      `  ${c.dim}↻ Updated ${g.updated.length} existing hook(s): ${hookNames(g.updated)}${c.reset}`,
+    );
+  }
+  if (g.auxiliary.length > 0) {
+    console.log(`  ${c.dim}↻ Hook support installed/updated: ${hookNames(g.auxiliary)}${c.reset}`);
+  }
+  if (g.satisfiedSkipped.length > 0) {
+    console.log(
+      `  ${c.green}✓${c.reset} Externally managed hook(s) already satisfy config: ${hookNames(g.satisfiedSkipped)}`,
+    );
+  }
+  for (const s of g.blockedSkipped) {
+    console.log(`  ${c.yellow}!${c.reset} ${s.hookName}: ${s.detail}`);
+    state.manual.push(
+      developerBlock({
+        blocker: `${s.hookName} hook was left untouched`,
+        reason: "existing non-kit git hook",
+        steps: [s.detail, "Run `kit check --category hooks`."],
+        respondWith: `${s.hookName} hook includes the configured kit commands or is intentionally unmanaged`,
+        agentContinuesWith: "kit check --category hooks",
+      }),
+    );
+  }
+  for (const f of g.failed) {
+    console.log(`  ${c.red}✗${c.reset} ${f.hookName}: ${f.detail}`);
+    state.manual.push(
+      developerBlock({
+        blocker: `${f.hookName} hook could not be installed`,
+        reason: "local git hook setup",
+        steps: [f.detail, "Run `kit check --category hooks`."],
+        respondWith: `${f.hookName} hook installed or intentionally skipped`,
+        agentContinuesWith: "kit check --category hooks",
+      }),
+    );
+  }
+  const nothingToReport = [g.installed, g.updated, g.auxiliary, g.skipped, g.failed].every(
+    (group) => group.length === 0,
+  );
+  if (nothingToReport) console.log(`${c.dim}Hooks up to date${c.reset}`);
+}
+
+/**
+ * Step 6: install the git hooks that `[hooks]` declares. Reuses `installHooks()` from
+ * `kit hooks`, so the same bypass-detector pair lands too.
+ */
+async function fixHooks(config: kitConfig, cwd: string, state: FixState): Promise<void> {
+  console.log(`${c.bold}[6/6] Git Hooks${c.reset}`);
+  const hooks = config.hooks;
+  if (!hooks || Object.keys(hooks).length === 0) {
+    console.log(`${c.dim}No hooks configured in .kit.toml${c.reset}`);
+    console.log();
+    return;
+  }
+  try {
+    const hookResults = await installHooks(hooks, ".git", cwd);
+    const configured = new Set(
+      Object.entries(hooks)
+        .filter(([, commands]) => commands && commands.length > 0)
+        .map(([name]) => name),
+    );
+    reportHookResults(hookResults, configured, state);
+  } catch (err: unknown) {
+    console.log(`  ${c.red}✗${c.reset} Hooks install failed: ${errorMessage(err)}`);
+    state.manual.push(
+      developerBlock({
+        blocker: "git hooks could not be installed",
+        reason: "local git hook setup",
+        steps: [`Run \`kit hooks install\`.`, "Run `kit check --category hooks`."],
+        respondWith: "git hooks installed or intentionally skipped",
+        agentContinuesWith: "kit check --category hooks",
+      }),
+    );
+  }
+  console.log();
+}
+
+function printFixSummary(state: FixState): void {
+  console.log(`${c.bold}${c.cyan}Summary${c.reset}`);
+  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
+
+  if (state.fixed > 0) {
+    console.log(`  ${c.green}✓${c.reset} Fixed ${state.fixed} issue(s) automatically`);
+  }
+  if (state.manual.length > 0) {
+    console.log(`  ${c.yellow}!${c.reset} ${state.manual.length} issue(s) require human action:\n`);
+    console.log(formatHitlBlocks(state.manual));
+    console.log();
+    console.log(
+      `${c.dim}Run ${c.reset}${c.bold}kit check${c.reset}${c.dim} to verify status after manual fixes${c.reset}`,
+    );
+  } else if (state.fixed === 0) {
+    console.log(`  ${c.green}✓${c.reset} Nothing to fix — all checks passing`);
+  }
+  console.log();
+}
+
+/** The pipeline body. Returns false when any step left a manual action. */
+async function runFixPipeline(config: kitConfig, cwd: string): Promise<boolean> {
+  // Read-only mode: fix installs tools and writes .env.template / .gitignore.
+  // Refuse the whole pipeline up front + audit, so no sink runs (matches
+  // installHooks). withGovernance never consults read-only, so guard here.
+  const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite("fix", {}, { cwd });
+    console.log(`  ${c.yellow}!${c.reset} ${refusal.reason}`);
+    return false;
+  }
+
+  const state: FixState = { fixed: 0, manual: [] };
+  await fixTools(config, state);
+  await fixLockFiles(config, cwd, state);
+  await fixServices(config, state);
+  await fixSecretsTemplate(config, cwd, state);
+  await fixGitignore(cwd, state);
+  await fixHooks(config, cwd, state);
+
+  const deployFix = await fixDeploy(config, cwd);
+  state.fixed += deployFix.fixedCount;
+  state.manual.push(...deployFix.manualActions);
+
+  printFixSummary(state);
+  return state.manual.length === 0;
+}
+
 export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit fix${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   const config = await loadConfig(resolve(cwd, ".kit.toml"));
-
-  let fixedCount = 0;
-  let manualCount = 0;
-  const manualActions: HitlBlock[] = [];
 
   return await withGovernance(
     config,
@@ -255,308 +578,7 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
         fsWrites: ["skills-lock.json", "cli-lock.json", ".env.template", ".gitignore"],
       },
     },
-    async () => {
-      // Read-only mode: fix installs tools and writes .env.template / .gitignore.
-      // Refuse the whole pipeline up front + audit, so no sink runs (matches
-      // installHooks). withGovernance never consults read-only, so guard here.
-      const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
-      if (isReadOnlyMode()) {
-        const refusal = await refuseWrite("fix", {}, { cwd });
-        console.log(`  ${c.yellow}!${c.reset} ${refusal.reason}`);
-        return false;
-      }
-
-      // 1. Check and fix missing tools
-      if (config.tools && Object.keys(config.tools).length > 0) {
-        console.log(`${c.bold}[1/6] Tools${c.reset}`);
-        const toolResults = await checkTools(config.tools);
-        const missingTools = toolResults.filter((t) => !t.ok);
-
-        if (missingTools.length > 0) {
-          console.log(`${c.dim}Installing ${missingTools.length} missing tool(s)...${c.reset}\n`);
-          const installResults = await installTools(config.tools);
-
-          for (const r of installResults) {
-            if (r.action === "installed") {
-              const icon = `${c.green}✓${c.reset}`;
-              console.log(
-                `  ${icon} ${r.name}  ${c.green}installed${c.reset}  ${c.dim}${r.detail}${c.reset}`,
-              );
-              fixedCount++;
-            } else if (r.action === "failed") {
-              const icon = `${c.red}✗${c.reset}`;
-              console.log(
-                `  ${icon} ${r.name}  ${c.red}failed${c.reset}  ${c.dim}${r.detail}${c.reset}`,
-              );
-              manualActions.push({
-                blocker: `${r.name} tool is not installable by kit`,
-                owner: "developer",
-                reason: "local tool setup",
-                steps: [r.detail, "Run `kit check --category tools`."],
-                respondWith: `${r.name} installed or intentionally unavailable`,
-                agentContinuesWith: "kit check --category tools",
-              });
-              manualCount++;
-            }
-          }
-        } else {
-          console.log(`${c.dim}All tools installed${c.reset}`);
-        }
-        console.log();
-      }
-
-      // 2. Check and fix missing lock files
-      console.log(`${c.bold}[2/6] Lock Files${c.reset}`);
-      const skillsLock = await readSkillsLock(cwd);
-      const cliLock = await readCliLock(cwd);
-
-      if (!skillsLock || !cliLock) {
-        console.log(`${c.dim}Generating missing lock files...${c.reset}\n`);
-
-        // Generate skills lock
-        if (!skillsLock) {
-          const skills: Record<string, string> = {};
-          if (config.skills?.required) {
-            Object.assign(skills, config.skills.required);
-          }
-          if (config.skills?.optional) {
-            Object.assign(skills, config.skills.optional);
-          }
-
-          const kitMeta = await readkitMeta(cwd);
-          await updateSkillsLock(
-            skills,
-            kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined,
-            cwd,
-          );
-          console.log(`  ${c.green}✓${c.reset} Generated skills-lock.json`);
-          fixedCount++;
-        }
-
-        // Generate CLI lock
-        if (!cliLock && (await generateCliLock(config, cwd))) fixedCount++;
-      } else {
-        console.log(`${c.dim}Lock files exist${c.reset}`);
-      }
-      console.log();
-
-      // 3. Check services that need manual login
-      console.log(`${c.bold}[3/6] Services${c.reset}`);
-      if (config.services && Object.keys(config.services).length > 0) {
-        const serviceResults = await checkServices(config.services);
-        const unauthenticated = serviceResults.filter((s) => !s.authenticated);
-
-        if (unauthenticated.length > 0) {
-          console.log(
-            `${c.yellow}${unauthenticated.length} service(s) require manual authentication${c.reset}\n`,
-          );
-          for (const s of unauthenticated) {
-            console.log(
-              `  ${c.yellow}!${c.reset} ${s.name}  ${c.yellow}not authenticated${c.reset}  ${c.dim}${s.output}${c.reset}`,
-            );
-            const block = hitlBlockForService(s, config);
-            if (block) {
-              manualActions.push(block);
-              manualCount++;
-            }
-          }
-        } else {
-          console.log(`${c.dim}All services authenticated${c.reset}`);
-        }
-      } else {
-        console.log(`${c.dim}No services configured${c.reset}`);
-      }
-      console.log();
-
-      // 4. Generate .env.template if secrets keys configured but template missing
-      console.log(`${c.bold}[4/6] Secrets Template${c.reset}`);
-      // `template` is a repo-relative path in .kit.toml. Resolve against the governed
-      // project and create exclusively, so another writer cannot replace an absence probe.
-      const templateRel = config.secrets?.template;
-      const templatePath = templateRel ? resolve(cwd, templateRel) : undefined;
-      if (templatePath && config.secrets?.keys && Object.keys(config.secrets.keys).length > 0) {
-        const keyNames = Object.keys(config.secrets.keys);
-        try {
-          const template = await generateSecretsTemplate(config.secrets, cwd);
-          if (template?.written) {
-            console.log(
-              `  ${c.green}✓${c.reset} Generated ${templatePath}  ${c.dim}(${keyNames.length} keys)${c.reset}`,
-            );
-            fixedCount++;
-          } else {
-            console.log(`${c.dim}Template ${templatePath} exists${c.reset}`);
-          }
-        } catch (err: unknown) {
-          manualActions.push(templateFailure(templatePath, keyNames.length, err));
-          manualCount++;
-        }
-      } else {
-        console.log(`${c.dim}No secrets template configured${c.reset}`);
-      }
-      console.log();
-
-      // 5. Harden .gitignore — ensure .env*, *.pem, id_rsa, .kit/elevation.json
-      //    are ignored. Idempotent: only appends what's missing.
-      console.log(`${c.bold}[5/6] .gitignore${c.reset}`);
-      try {
-        const patch = await patchGitignore(cwd);
-        if (!patch.written) {
-          console.log(`${c.dim}.gitignore already hardened${c.reset}`);
-        } else {
-          console.log(
-            `  ${c.green}✓${c.reset} Repaired .gitignore protection and verified with Git`,
-          );
-          fixedCount++;
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.log(`  ${c.red}✗${c.reset} .gitignore harden failed: ${msg}`);
-        manualActions.push({
-          blocker: ".gitignore could not be hardened",
-          owner: "developer",
-          reason: msg,
-          steps: [
-            "Review Git availability, remaining ignore overrides, and already tracked sensitive files.",
-            "Run `kit check`.",
-          ],
-          respondWith: ".gitignore hardened",
-          agentContinuesWith: "kit check",
-        });
-        manualCount++;
-      }
-      console.log();
-
-      // 6. Install git hooks if configured but not present. Reuses cmdHooks's
-      //    installHooks() — same bypass-detector pair lands too.
-      console.log(`${c.bold}[6/6] Git Hooks${c.reset}`);
-      if (config.hooks && Object.keys(config.hooks).length > 0) {
-        try {
-          const hookResults = await installHooks(config.hooks, ".git", cwd);
-          const configuredHookNames = new Set(
-            Object.entries(config.hooks)
-              .filter(([, commands]) => commands && commands.length > 0)
-              .map(([name]) => name),
-          );
-          const installed = hookResults.filter(
-            (r) => r.action === "installed" && configuredHookNames.has(r.hookName),
-          );
-          const updated = hookResults.filter(
-            (r) => r.action === "updated" && configuredHookNames.has(r.hookName),
-          );
-          const auxiliary = hookResults.filter(
-            (r) =>
-              (r.action === "installed" || r.action === "updated") &&
-              !configuredHookNames.has(r.hookName),
-          );
-          const skipped = hookResults.filter(
-            (r) => r.action === "skipped" && configuredHookNames.has(r.hookName),
-          );
-          const satisfiedSkipped = skipped.filter((r) => r.satisfied);
-          const blockedSkipped = skipped.filter((r) => !r.satisfied);
-          const failed = hookResults.filter((r) => r.action === "failed");
-          if (installed.length > 0) {
-            console.log(
-              `  ${c.green}✓${c.reset} Installed ${installed.length} hook(s): ${installed.map((r) => r.hookName).join(", ")}`,
-            );
-            fixedCount++;
-          }
-          if (updated.length > 0) {
-            console.log(
-              `  ${c.dim}↻ Updated ${updated.length} existing hook(s): ${updated.map((r) => r.hookName).join(", ")}${c.reset}`,
-            );
-          }
-          if (auxiliary.length > 0) {
-            console.log(
-              `  ${c.dim}↻ Hook support installed/updated: ${auxiliary.map((r) => r.hookName).join(", ")}${c.reset}`,
-            );
-          }
-          if (satisfiedSkipped.length > 0) {
-            console.log(
-              `  ${c.green}✓${c.reset} Externally managed hook(s) already satisfy config: ${satisfiedSkipped.map((r) => r.hookName).join(", ")}`,
-            );
-          }
-          if (blockedSkipped.length > 0) {
-            for (const s of blockedSkipped) {
-              console.log(`  ${c.yellow}!${c.reset} ${s.hookName}: ${s.detail}`);
-              manualActions.push({
-                blocker: `${s.hookName} hook was left untouched`,
-                owner: "developer",
-                reason: "existing non-kit git hook",
-                steps: [s.detail, "Run `kit check --category hooks`."],
-                respondWith: `${s.hookName} hook includes the configured kit commands or is intentionally unmanaged`,
-                agentContinuesWith: "kit check --category hooks",
-              });
-              manualCount++;
-            }
-          }
-          if (failed.length > 0) {
-            for (const f of failed) {
-              console.log(`  ${c.red}✗${c.reset} ${f.hookName}: ${f.detail}`);
-              manualActions.push({
-                blocker: `${f.hookName} hook could not be installed`,
-                owner: "developer",
-                reason: "local git hook setup",
-                steps: [f.detail, "Run `kit check --category hooks`."],
-                respondWith: `${f.hookName} hook installed or intentionally skipped`,
-                agentContinuesWith: "kit check --category hooks",
-              });
-              manualCount++;
-            }
-          }
-          if (
-            installed.length === 0 &&
-            updated.length === 0 &&
-            auxiliary.length === 0 &&
-            skipped.length === 0 &&
-            failed.length === 0
-          ) {
-            console.log(`${c.dim}Hooks up to date${c.reset}`);
-          }
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.log(`  ${c.red}✗${c.reset} Hooks install failed: ${msg}`);
-          manualActions.push({
-            blocker: "git hooks could not be installed",
-            owner: "developer",
-            reason: "local git hook setup",
-            steps: [`Run \`kit hooks install\`.`, "Run `kit check --category hooks`."],
-            respondWith: "git hooks installed or intentionally skipped",
-            agentContinuesWith: "kit check --category hooks",
-          });
-          manualCount++;
-        }
-      } else {
-        console.log(`${c.dim}No hooks configured in .kit.toml${c.reset}`);
-      }
-      console.log();
-
-      const deployFix = await fixDeploy(config, cwd);
-      fixedCount += deployFix.fixedCount;
-      manualActions.push(...deployFix.manualActions);
-      manualCount += deployFix.manualActions.length;
-
-      // Summary
-      console.log(`${c.bold}${c.cyan}Summary${c.reset}`);
-      console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
-
-      if (fixedCount > 0) {
-        console.log(`  ${c.green}✓${c.reset} Fixed ${fixedCount} issue(s) automatically`);
-      }
-
-      if (manualCount > 0) {
-        console.log(`  ${c.yellow}!${c.reset} ${manualCount} issue(s) require human action:\n`);
-        console.log(formatHitlBlocks(manualActions));
-        console.log();
-        console.log(
-          `${c.dim}Run ${c.reset}${c.bold}kit check${c.reset}${c.dim} to verify status after manual fixes${c.reset}`,
-        );
-      } else if (fixedCount === 0) {
-        console.log(`  ${c.green}✓${c.reset} Nothing to fix — all checks passing`);
-      }
-
-      console.log();
-      return manualCount === 0;
-    },
+    () => runFixPipeline(config, cwd),
     // Audit the fix in the tree being fixed, not in whatever directory the process sits in.
     { cwd },
   );
