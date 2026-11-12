@@ -184,9 +184,8 @@ export function pickBackendOpts(
       opts.project = m[2];
     }
   }
-  // envFallback (migrate/rotate flows): fall back to the platform's standard env
-  // vars when the .kit.toml key doesn't pin a value. Never clobber a value
-  // already derived from the 1Password ref above.
+  // envFallback (migrate/rotate flows): use the platform's standard env vars when .kit.toml pins
+  // nothing. Never clobber a value derived from the 1Password ref above.
   if (key?.azure_vault) opts.vault = key.azure_vault;
   else if (envFallback && !opts.vault && process.env.AZURE_KEYVAULT_NAME)
     opts.vault = process.env.AZURE_KEYVAULT_NAME;
@@ -239,10 +238,7 @@ async function previewRotation(
   return preview;
 }
 
-/**
- * An explicit scoped-key-mint on a project that still uses legacy JWT keys needs --force. This is
- * the gate that would have prevented the 2026-06-03 prod break. True means refused.
- */
+/** Explicit scoped-key-mint on a legacy-JWT project needs --force (the 2026-06-03 prod break). True = refused. */
 function refusesLegacyScopedMint(
   preview: SupabasePreview,
   mode: RotateMode,
@@ -308,8 +304,7 @@ async function confirmRotation(mode: RotateMode): Promise<boolean> {
   const confirmMsg = roll
     ? `Confirm jwt-secret-roll (HARD CUTOVER) [y/N, auto-no in 15s]: `
     : `Mint new scoped key? [Y/n, auto-yes in 10s]: `;
-  // The roll is irreversible and its prompt promises "auto-no": fail closed on walk-away/pipe.
-  // Scoped-key mint is additive, so it auto-yes.
+  // The roll is irreversible ("auto-no": fail closed on walk-away/pipe); the mint is additive ("auto-yes").
   const ok = await promptConfirm(confirmMsg, roll ? 15_000 : 10_000, !roll);
   if (!ok && roll) console.log(`${c.dim}Aborted.${c.reset}`);
   return ok || !roll;
@@ -359,6 +354,40 @@ async function storeRotatedValue(keyName: string, newValue: string): Promise<boo
   return true;
 }
 
+/** Lazy-imports the workspace plugin so kit core boots fine without it. */
+async function loadSupabasePlugin(): Promise<SupabasePlugin | null> {
+  const supabase = await import("sandstream-kit-plugin-supabase").catch(() => null);
+  if (supabase) return supabase;
+  console.error(
+    `${c.red}sandstream-kit-plugin-supabase not installed. Run ${c.bold}npm install sandstream-kit-plugin-supabase${c.reset}${c.red} or build the workspace.${c.reset}`,
+  );
+  return null;
+}
+
+/** Calls the plugin and returns the new key or JWT secret; null (after the error) on failure. */
+async function rotateKey(
+  supabase: SupabasePlugin,
+  projectRef: string,
+  mode: RotateMode,
+): Promise<string | null> {
+  const outcome = await supabase.rotateSupabaseKey({ projectRef, mode });
+  if (!outcome.ok || !outcome.result) {
+    console.error(`${c.red}✗ ${outcome.error ?? "rotation failed"}${c.reset}`);
+    return null;
+  }
+  const newValue = outcome.result.newKey ?? outcome.result.newJwtSecret;
+  if (!newValue) {
+    console.error(
+      `${c.red}✗ Rotation completed but no key was returned in the response. Check the Supabase Dashboard.${c.reset}`,
+    );
+    return null;
+  }
+  console.log(
+    `  ${c.green}✓${c.reset} ${mode} succeeded.  ${c.dim}new value is ${newValue.length} chars${c.reset}`,
+  );
+  return newValue;
+}
+
 async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit secrets rotate --via supabase-mgmt-api${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
@@ -372,14 +401,8 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
   if (isSigningKeyMode(parsed)) return await cmdRotateSupabaseSigningKey(projectRef, parsed, args);
   const explicitMode = parsed !== undefined;
 
-  // Lazy-import the workspace plugin so kit core boots fine without it.
-  const supabase = await import("sandstream-kit-plugin-supabase").catch(() => null);
-  if (!supabase) {
-    console.error(
-      `${c.red}sandstream-kit-plugin-supabase not installed. Run ${c.bold}npm install sandstream-kit-plugin-supabase${c.reset}${c.red} or build the workspace.${c.reset}`,
-    );
-    return false;
-  }
+  const supabase = await loadSupabasePlugin();
+  if (!supabase) return false;
 
   const preview = await previewRotation(supabase, projectRef);
   if (!preview) return false;
@@ -399,21 +422,8 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
   if (!(await confirmRotation(mode))) return false;
   if (!(await policyAllowsRotation(mode))) return false;
 
-  const outcome = await supabase.rotateSupabaseKey({ projectRef, mode });
-  if (!outcome.ok || !outcome.result) {
-    console.error(`${c.red}✗ ${outcome.error ?? "rotation failed"}${c.reset}`);
-    return false;
-  }
-  const newValue = outcome.result.newKey ?? outcome.result.newJwtSecret;
-  if (!newValue) {
-    console.error(
-      `${c.red}✗ Rotation completed but no key was returned in the response. Check the Supabase Dashboard.${c.reset}`,
-    );
-    return false;
-  }
-  console.log(
-    `  ${c.green}✓${c.reset} ${mode} succeeded.  ${c.dim}new value is ${newValue.length} chars${c.reset}`,
-  );
+  const newValue = await rotateKey(supabase, projectRef, mode);
+  if (!newValue) return false;
   return await storeRotatedValue(keyName, newValue);
 }
 
@@ -431,12 +441,9 @@ export async function cmdSecretsRotate(): Promise<boolean> {
   }
 
   const explicitValue = flagValue(args, "--value");
-  // `--random` is an OPTIONAL-value flag: bare means "generate", `--random 32` / `--random=32`
-  // means a length. So presence and value are read separately — `flagValue` alone would treat the
-  // next token as the length even when it is the following flag, and the digit test is what keeps
-  // `--random --dry-run` meaning "generate", not "length --dry-run".
-  // Presence cannot go through `hasFlag`: it compares whole tokens, so `--random=32` would not
-  // register as present at all and the length would be silently dropped.
+  // `--random` takes an OPTIONAL value: bare means "generate", `--random 32` / `--random=32` a length.
+  // Presence and value are read separately: the digit test keeps `--random --dry-run` meaning
+  // "generate", and `hasFlag` compares whole tokens, so it would drop `--random=32`.
   const randomPresent = args.some((a) => a === "--random" || a.startsWith("--random="));
   let randomFlag: number | true | undefined;
   if (randomPresent) {
@@ -453,10 +460,8 @@ export async function cmdSecretsRotate(): Promise<boolean> {
   }
 
   // ── R3: service-native playbook ──────────────────────────────────────────
-  // When --from-cli is set, print the provider-specific rotation steps
-  // BEFORE asking for --value. Useful as a guided workflow: the user
-  // (or an authorized agent) runs the provider CLI, copies the new
-  // value, then re-runs `kit secrets rotate <KEY> --value <new>`.
+  // --from-cli prints the provider's rotation steps BEFORE asking for --value: run the provider
+  // CLI, copy the new value, then re-run `kit secrets rotate <KEY> --value <new>`.
   if (fromCli) {
     const playbook = buildPlaybook(keyName);
     console.log(`${c.bold}${c.cyan}kit secrets rotate --from-cli${c.reset}`);
@@ -524,8 +529,7 @@ export async function cmdSecretsRotate(): Promise<boolean> {
     return false;
   }
 
-  // Build the same backend-options the migrate flow uses so we land in the
-  // right vault / region / project / Azure vault.
+  // Same backend options as the migrate flow: vault, region, project, Azure vault.
   const backendOpts = pickBackendOpts(config.secrets, keyName, { envFallback: true });
 
   const writeResult = await writeSecretToBackend(plan.store, plan.key, value, backendOpts);

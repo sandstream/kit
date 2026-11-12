@@ -294,6 +294,10 @@ describe("secrets rotate --via supabase-mgmt-api: preview and mode", { skip: POS
     assert.match(r.err, /jwt-secret-roll invalidates EVERY existing token/);
     assert.match(r.err, /jwt-secret-roll is legacy/);
   });
+});
+
+describe("secrets rotate --via supabase-mgmt-api: legacy-JWT refusal", { skip: POSIX_ONLY }, () => {
+  const fx = useFixture();
 
   it("refuses scoped-key-mint on a legacy-JWT project without --force", () => {
     const r = run(fx(), {
@@ -413,6 +417,10 @@ describe("secrets rotate --via supabase-mgmt-api: rotation", { skip: POSIX_ONLY 
     assert.equal(r.status, 1);
     assert.match(r.err, /Rotation completed but no key was returned/);
   });
+});
+
+describe("secrets rotate --via supabase-mgmt-api: vault output", { skip: POSIX_ONLY }, () => {
+  const fx = useFixture();
 
   it("prints the new value once when no vault is configured", () => {
     const r = run(fx(), {
@@ -441,6 +449,10 @@ describe("secrets rotate --via supabase-mgmt-api: rotation", { skip: POSIX_ONLY 
     assert.equal(r.status, 0);
     assert.ok(r.out.split("\n").includes(NEW_KEY));
   });
+});
+
+describe("secrets rotate --via supabase-mgmt-api: vault write", { skip: POSIX_ONLY }, () => {
+  const fx = useFixture();
 
   it("uses newJwtSecret when the plugin returns no newKey", () => {
     const r = run(fx(), {
