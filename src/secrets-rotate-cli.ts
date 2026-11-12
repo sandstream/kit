@@ -158,13 +158,7 @@ function resolveConfigPath(): string {
   return resolve(process.cwd(), ".kit.toml");
 }
 
-/**
- * `kit secrets rotate` CLI orchestration — extracted from cli.ts
- * (codebase-review follow-up). cmdSecretsRotate is the dispatch entry;
- * cmdSecretsRotateSupabaseMgmt handles the fully-automated Supabase
- * Mgmt-API path; pickBackendOpts maps .kit.toml key-config to
- * backend-write options.
- */
+/** `kit secrets rotate` orchestration: cmdSecretsRotate dispatches; pickBackendOpts maps key-config to write options. */
 export function pickBackendOpts(
   secrets: {
     keys?: Record<
@@ -209,46 +203,30 @@ export function pickBackendOpts(
   return opts;
 }
 
-async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Promise<boolean> {
-  console.log(`${c.bold}${c.cyan}kit secrets rotate --via supabase-mgmt-api${c.reset}`);
-  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
+type SupabasePlugin = typeof import("sandstream-kit-plugin-supabase");
+type SupabasePreview = Awaited<ReturnType<SupabasePlugin["previewSupabaseRotation"]>>;
+type RotateMode = "scoped-key-mint" | "jwt-secret-roll";
 
-  // Project ref: --project <ref> flag or SUPABASE_PROJECT_REF env var.
+/** Project ref from `--project <ref>` or SUPABASE_PROJECT_REF; null (after the error) when missing. */
+function readProjectRef(args: string[]): string | null {
   const projectRef = flagValue(args, "--project") ?? process.env.SUPABASE_PROJECT_REF;
-  if (!projectRef) {
-    console.error(`${c.red}--project <ref> required (or set SUPABASE_PROJECT_REF).${c.reset}`);
-    console.error(
-      `${c.dim}Find your project ref at https://supabase.com/dashboard/project/_/settings/general (URL contains the ref).${c.reset}`,
-    );
-    return false;
-  }
+  if (projectRef) return projectRef;
+  console.error(`${c.red}--project <ref> required (or set SUPABASE_PROJECT_REF).${c.reset}`);
+  console.error(
+    `${c.dim}Find your project ref at https://supabase.com/dashboard/project/_/settings/general (URL contains the ref).${c.reset}`,
+  );
+  return null;
+}
 
-  // Rotation mode: explicit --mode, otherwise auto-detect from project state.
-  const parsed = parseSupabaseMode(flagValue(args, "--mode"));
-  if (parsed === "invalid") return false;
-  if (isSigningKeyMode(parsed)) return await cmdRotateSupabaseSigningKey(projectRef, parsed, args);
-  let mode = parsed;
-  const explicitMode = mode !== undefined;
-
-  const dryRun = args.includes("--dry-run");
-  const force = args.includes("--force");
-
-  // Lazy-import the workspace plugin so kit core boots fine without it.
-  const supabase = await import("sandstream-kit-plugin-supabase").catch(() => null);
-  if (!supabase) {
-    console.error(
-      `${c.red}sandstream-kit-plugin-supabase not installed. Run ${c.bold}npm install sandstream-kit-plugin-supabase${c.reset}${c.red} or build the workspace.${c.reset}`,
-    );
-    return false;
-  }
-
-  // Preview pass — confirms the PAT works AND detects which mode is
-  // compatible. Today's incident was caused by minting a scoped key in a
-  // project that PostgREST still treats as JWT-only.
+/** Preview pass: confirms the PAT works and detects which mode the project supports. */
+async function previewRotation(
+  supabase: SupabasePlugin,
+  projectRef: string,
+): Promise<SupabasePreview | null> {
   const preview = await supabase.previewSupabaseRotation({ projectRef });
   if (!preview.ok) {
     console.error(`${c.red}✗ Supabase Management API: ${preview.error}${c.reset}`);
-    return false;
+    return null;
   }
   console.log(
     `${c.dim}PAT verified. Project has ${preview.existingKeyCount} API key(s).${c.reset}`,
@@ -258,133 +236,96 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
       `${c.dim}Key mode: scoped=${preview.keyMode.supportsScopedKeys}, legacy-jwt=${preview.keyMode.supportsLegacyJwt}${c.reset}`,
     );
   }
+  return preview;
+}
 
-  // Default to the recommended mode when the user didn't pin one.
-  if (!mode) {
-    mode = (preview.recommendedMode ?? "scoped-key-mint") as "scoped-key-mint" | "jwt-secret-roll";
-  }
-  console.log(
-    `${c.dim}Mode: ${c.bold}${mode}${c.reset}${c.dim}${explicitMode ? "" : " (auto)"}${c.reset}`,
+/**
+ * An explicit scoped-key-mint on a project that still uses legacy JWT keys needs --force. This is
+ * the gate that would have prevented the 2026-06-03 prod break. True means refused.
+ */
+function refusesLegacyScopedMint(
+  preview: SupabasePreview,
+  mode: RotateMode,
+  explicitMode: boolean,
+  force: boolean,
+): boolean {
+  const keyMode = preview.keyMode;
+  if (!explicitMode || !keyMode || mode !== "scoped-key-mint") return false;
+  if (keyMode.supportsScopedKeys || !keyMode.supportsLegacyJwt) return false;
+  console.error(
+    `${c.red}✗ Refusing scoped-key-mint: project still uses legacy JWT keys.${c.reset}`,
   );
-
-  // If the explicit mode conflicts with what the project supports, warn
-  // loudly and require --force. This is the gate that would have prevented
-  // the 2026-06-03 prod break.
-  if (
-    explicitMode &&
-    preview.keyMode &&
-    mode === "scoped-key-mint" &&
-    !preview.keyMode.supportsScopedKeys &&
-    preview.keyMode.supportsLegacyJwt
-  ) {
+  console.error(
+    `${c.dim}A scoped key minted now would be treated as anon by PostgREST and break every service_role call.${c.reset}`,
+  );
+  console.error(
+    `${c.dim}Recommended: ${c.bold}--mode signing-key-cutover${c.reset}${c.dim} (legacy: --mode jwt-secret-roll) or migrate the project to scoped keys first.${c.reset}`,
+  );
+  if (!force) {
     console.error(
-      `${c.red}✗ Refusing scoped-key-mint: project still uses legacy JWT keys.${c.reset}`,
+      `${c.dim}Override with ${c.bold}--force${c.reset}${c.dim} if you know what you're doing.${c.reset}\n`,
     );
-    console.error(
-      `${c.dim}A scoped key minted now would be treated as anon by PostgREST and break every service_role call.${c.reset}`,
-    );
-    console.error(
-      `${c.dim}Recommended: ${c.bold}--mode signing-key-cutover${c.reset}${c.dim} (legacy: --mode jwt-secret-roll) or migrate the project to scoped keys first.${c.reset}`,
-    );
-    if (!force) {
-      console.error(
-        `${c.dim}Override with ${c.bold}--force${c.reset}${c.dim} if you know what you're doing.${c.reset}\n`,
-      );
-      return false;
-    }
-    console.error(
-      `${c.yellow}--force set; proceeding with scoped-key-mint despite incompatibility.${c.reset}\n`,
-    );
+    return true;
   }
+  console.error(
+    `${c.yellow}--force set; proceeding with scoped-key-mint despite incompatibility.${c.reset}\n`,
+  );
+  return false;
+}
 
+function printModeWarnings(
+  preview: SupabasePreview,
+  mode: RotateMode,
+  explicitMode: boolean,
+): void {
   if (preview.warning && !explicitMode) {
     console.log(`${c.yellow}⚠ ${preview.warning}${c.reset}`);
   }
-
   if (mode === "jwt-secret-roll") {
     console.warn(
       `${c.yellow}⚠ jwt-secret-roll invalidates EVERY existing token (anon, service_role, signed URLs, active sessions).${c.reset}`,
     );
     console.warn(`${c.yellow}⚠ ${JWT_ROLL_LEGACY_NOTICE}${c.reset}`);
   }
-  console.log();
+}
 
-  if (dryRun) {
-    console.log(`${c.dim}--dry-run: not rotating. Remove flag to proceed.${c.reset}\n`);
-    return true;
-  }
-
-  // S12 elevation required for rotation. jwt-secret-roll is a hard cutover
-  // — one elevation = one rotation. Other modes (scoped-key-mint with
-  // rollback) keep the standard 15-min TTL.
-  // Derive the scope from the mode so the irreversible cutover requires its own
-  // distinct elevation ("rotate-jwt-cutover") and can't be satisfied by a marker
-  // minted for the reversible scoped-key-mint (scope "rotate"). Single source of
-  // truth = elevation-scopes.ts; never hard-code the scope string here.
+/** S12 elevation. The scope comes from the mode (elevation-scopes.ts), so the one-shot cutover needs its own. */
+async function elevateForRotation(mode: RotateMode): Promise<boolean> {
   const rotateScope = scopeFor("rotate", mode).scope;
   const elev =
     mode === "jwt-secret-roll"
       ? await consumeElevation(rotateScope)
       : await requireElevation(rotateScope);
-  if (!elev.ok) {
-    console.error(`${c.red}✗ ${elev.reason}${c.reset}`);
-    return false;
-  }
+  if (elev.ok) return true;
+  console.error(`${c.red}✗ ${elev.reason}${c.reset}`);
+  return false;
+}
 
-  // Interactive confirmation for jwt-secret-roll (destructive); a YES prompt
-  // for scoped-key-mint is enough since old tokens stay live.
-  if (!isNonInteractive()) {
-    const confirmMsg =
-      mode === "jwt-secret-roll"
-        ? `Confirm jwt-secret-roll (HARD CUTOVER) [y/N, auto-no in 15s]: `
-        : `Mint new scoped key? [Y/n, auto-yes in 10s]: `;
-    // jwt-secret-roll is an irreversible HARD CUTOVER and its prompt promises
-    // "auto-no" — fail closed on walk-away/pipe. Scoped-key mint is additive → auto-yes.
-    const ok = await promptConfirm(
-      confirmMsg,
-      mode === "jwt-secret-roll" ? 15_000 : 10_000,
-      mode !== "jwt-secret-roll",
-    );
-    if (!ok && mode === "jwt-secret-roll") {
-      console.log(`${c.dim}Aborted.${c.reset}`);
-      return false;
-    }
-  }
+/** False only when the operator declines the destructive jwt-secret-roll. */
+async function confirmRotation(mode: RotateMode): Promise<boolean> {
+  if (isNonInteractive()) return true;
+  const roll = mode === "jwt-secret-roll";
+  const confirmMsg = roll
+    ? `Confirm jwt-secret-roll (HARD CUTOVER) [y/N, auto-no in 15s]: `
+    : `Mint new scoped key? [Y/n, auto-yes in 10s]: `;
+  // The roll is irreversible and its prompt promises "auto-no": fail closed on walk-away/pipe.
+  // Scoped-key mint is additive, so it auto-yes.
+  const ok = await promptConfirm(confirmMsg, roll ? 15_000 : 10_000, !roll);
+  if (!ok && roll) console.log(`${c.dim}Aborted.${c.reset}`);
+  return ok || !roll;
+}
 
-  // `[policy.agent_writes.supabase]` — narrowing only, same contract as propagation. The op name
-  // mirrors the `--mode` the operator typed, so the two modes are pre-approved separately: a repo
-  // that allows `scoped_key_mint` has NOT allowed the roll that invalidates every live token.
-  const policyOp = supabaseRotationOp(mode);
-  // The config is loaded further down for the vault write; the gate has to run BEFORE the vendor
-  // API call, so it reads its own copy here rather than moving the later load up and changing the
-  // order of unrelated work.
+/** `[policy.agent_writes.supabase]` narrows only. The op mirrors `--mode`: allowing the mint does not allow the roll. */
+async function policyAllowsRotation(mode: RotateMode): Promise<boolean> {
   const rotatePolicy = (await loadConfig(resolveConfigPath()).catch(() => null))?.policy;
-  const policyRefusal = await enforcePolicy(rotatePolicy, "supabase", policyOp);
-  if (policyRefusal) {
-    console.error(`${c.red}✗ refused by [policy.agent_writes]: ${policyRefusal.reason}${c.reset}`);
-    return false;
-  }
+  const refusal = await enforcePolicy(rotatePolicy, "supabase", supabaseRotationOp(mode));
+  if (!refusal) return true;
+  console.error(`${c.red}✗ refused by [policy.agent_writes]: ${refusal.reason}${c.reset}`);
+  return false;
+}
 
-  const outcome = await supabase.rotateSupabaseKey({ projectRef, mode });
-  if (!outcome.ok || !outcome.result) {
-    console.error(`${c.red}✗ ${outcome.error ?? "rotation failed"}${c.reset}`);
-    return false;
-  }
-
-  const newValue = outcome.result.newKey ?? outcome.result.newJwtSecret;
-  if (!newValue) {
-    console.error(
-      `${c.red}✗ Rotation completed but no key was returned in the response. Check the Supabase Dashboard.${c.reset}`,
-    );
-    return false;
-  }
-
-  console.log(
-    `  ${c.green}✓${c.reset} ${mode} succeeded.  ${c.dim}new value is ${newValue.length} chars${c.reset}`,
-  );
-
-  // Wire through the existing vault-write path so the new value lands in
-  // the configured upstream vault and the placeholder logic stays consistent.
+/** Writes the new value through the vault-write path, or prints it once when no vault is set. */
+async function storeRotatedValue(keyName: string, newValue: string): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
   if (!config.secrets?.store || config.secrets.store === "env") {
     console.warn(
@@ -393,7 +334,6 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
     console.log(`${newValue}\n`);
     return true;
   }
-
   const writeResult = await writeSecretToBackend(
     config.secrets.store,
     keyName,
@@ -405,7 +345,6 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
     target: config.secrets.store,
     ok: writeResult.ok,
   });
-
   if (!writeResult.ok) {
     console.error(`${c.red}✗ vault write failed: ${writeResult.detail}${c.reset}`);
     console.error(
@@ -413,12 +352,69 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
     );
     return false;
   }
-
   console.log(`  ${c.green}✓${c.reset} wrote to vault (${config.secrets.store})`);
   console.log(
     `\n${c.dim}Next: re-run with ${c.bold}--propagate vercel,github${c.reset}${c.dim} to push to deploy targets.${c.reset}\n`,
   );
   return true;
+}
+
+async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Promise<boolean> {
+  console.log(`${c.bold}${c.cyan}kit secrets rotate --via supabase-mgmt-api${c.reset}`);
+  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
+
+  const projectRef = readProjectRef(args);
+  if (!projectRef) return false;
+
+  // Rotation mode: explicit --mode, otherwise auto-detect from project state.
+  const parsed = parseSupabaseMode(flagValue(args, "--mode"));
+  if (parsed === "invalid") return false;
+  if (isSigningKeyMode(parsed)) return await cmdRotateSupabaseSigningKey(projectRef, parsed, args);
+  const explicitMode = parsed !== undefined;
+
+  // Lazy-import the workspace plugin so kit core boots fine without it.
+  const supabase = await import("sandstream-kit-plugin-supabase").catch(() => null);
+  if (!supabase) {
+    console.error(
+      `${c.red}sandstream-kit-plugin-supabase not installed. Run ${c.bold}npm install sandstream-kit-plugin-supabase${c.reset}${c.red} or build the workspace.${c.reset}`,
+    );
+    return false;
+  }
+
+  const preview = await previewRotation(supabase, projectRef);
+  if (!preview) return false;
+  const mode: RotateMode = parsed ?? ((preview.recommendedMode ?? "scoped-key-mint") as RotateMode);
+  console.log(
+    `${c.dim}Mode: ${c.bold}${mode}${c.reset}${c.dim}${explicitMode ? "" : " (auto)"}${c.reset}`,
+  );
+  if (refusesLegacyScopedMint(preview, mode, explicitMode, args.includes("--force"))) return false;
+  printModeWarnings(preview, mode, explicitMode);
+  console.log();
+
+  if (args.includes("--dry-run")) {
+    console.log(`${c.dim}--dry-run: not rotating. Remove flag to proceed.${c.reset}\n`);
+    return true;
+  }
+  if (!(await elevateForRotation(mode))) return false;
+  if (!(await confirmRotation(mode))) return false;
+  if (!(await policyAllowsRotation(mode))) return false;
+
+  const outcome = await supabase.rotateSupabaseKey({ projectRef, mode });
+  if (!outcome.ok || !outcome.result) {
+    console.error(`${c.red}✗ ${outcome.error ?? "rotation failed"}${c.reset}`);
+    return false;
+  }
+  const newValue = outcome.result.newKey ?? outcome.result.newJwtSecret;
+  if (!newValue) {
+    console.error(
+      `${c.red}✗ Rotation completed but no key was returned in the response. Check the Supabase Dashboard.${c.reset}`,
+    );
+    return false;
+  }
+  console.log(
+    `  ${c.green}✓${c.reset} ${mode} succeeded.  ${c.dim}new value is ${newValue.length} chars${c.reset}`,
+  );
+  return await storeRotatedValue(keyName, newValue);
 }
 
 export async function cmdSecretsRotate(): Promise<boolean> {
