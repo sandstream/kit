@@ -194,7 +194,7 @@ describe("runStandardsGate — enforce", () => {
   });
 });
 
-describe("runStandardsGate — thresholds and baseline reach the checkers", { skip: !POSIX }, () => {
+describe("runStandardsGate — thresholds reach the checkers", { skip: !POSIX }, () => {
   it("the default file-size limit is 600 lines", async () => {
     const f = makeFixture();
     try {
@@ -237,7 +237,9 @@ describe("runStandardsGate — thresholds and baseline reach the checkers", { sk
       dropFixture(f);
     }
   });
+});
 
+describe("runStandardsGate — the baseline reaches the checkers", { skip: !POSIX }, () => {
   it("a baseline entry freezes the file at its size and growth is a fresh finding", async () => {
     const baseline = {
       version: 1,
