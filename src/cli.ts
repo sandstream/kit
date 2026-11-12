@@ -350,17 +350,12 @@ async function loadPolicyConfig(): Promise<{
   }
 }
 
-export async function main(): Promise<void> {
-  // Normalize leading Kit flags without moving them into the child's arguments.
-  const { args, ownArgs, command } = normalizeCommandArgs(process.argv.slice(2));
-  process.argv = [...process.argv.slice(0, 2), ...args];
-  if (answeredBeforePolicy(command, ownArgs, args)) return;
-  const flagCommand = command ?? "check";
-  const nonInteractive =
-    hasFlag(ownArgs, "--non-interactive") ||
-    process.env.CI === "true" ||
-    process.env.GITHUB_ACTIONS === "true";
-
+/**
+ * Read-only flag, project policy and their environment. Returns false when main must stop:
+ * the exit code is already set. Invalid configuration must not disable policy for handlers
+ * that do not reload it.
+ */
+async function applyReadOnlyAndPolicy(ownArgs: string[], flagCommand: string): Promise<boolean> {
   // Activate read-only mode early so subsequent code paths see the env var.
   // Honored gates: writeSecretToBackend, grantElevation, installHooks, and
   // every kit-plugin write surface (vercel env-set, github secret-put,
@@ -371,10 +366,9 @@ export async function main(): Promise<void> {
       `${c.red}invalid value for ${readOnly.flag}: "${readOnly.value}" (expected no value, or a truthy value: 1, true, yes, on)${c.reset}`,
     );
     process.exitCode = 2;
-    return;
+    return false;
   }
 
-  // Invalid configuration must not disable policy for handlers that do not reload it.
   const loaded = await loadPolicyConfig();
   if (loaded.invalid) {
     refuseBeforeDispatch(
@@ -382,7 +376,7 @@ export async function main(): Promise<void> {
       ownArgs,
       flagCommand,
     );
-    return;
+    return false;
   }
   const cfgForPolicy = loaded.config;
 
@@ -420,73 +414,154 @@ export async function main(): Promise<void> {
       ownArgs,
       flagCommand,
     );
-    return;
+    return false;
   }
+  return true;
+}
 
+/** Completions use a shell argument. Returns false for an unknown shell, exit code set. */
+function runCompletions(ownArgs: string[]): boolean {
+  const shell = ownArgs[1];
+  const script = generateCompletions(shell);
+  if (!script) {
+    console.error(`Unknown shell: ${shell}. Use: bash, zsh, fish`);
+    process.exitCode = 1;
+    return false;
+  }
+  process.stdout.write(script);
+  return true;
+}
+
+async function reportUnknownCommand(command: string): Promise<void> {
+  console.error(`Unknown command: ${command}`);
+  const { didYouMean } = await import("./utils/didYouMean.js");
+  const knownCommands = [
+    ...new Set(Object.keys(COMMAND_HELP).map((k) => k.split(" ")[0])),
+    "help",
+    "version",
+    "completions",
+  ];
+  const suggestions = didYouMean(command, knownCommands);
+  if (suggestions.length > 0) {
+    console.error(`Did you mean: ${suggestions.map((s) => `'${s}'`).join(", ")}?`);
+  }
+  console.error(`Run 'kit help' for a list of available commands.`);
+  process.exitCode = 1;
+}
+
+/**
+ * Run one registered handler behind the read-only floor. Returns undefined when the floor
+ * refused: the exit code is already set and main must stop.
+ */
+async function runRegisteredHandler(
+  resolved: string,
+  handler: () => boolean | Promise<boolean>,
+): Promise<boolean | undefined> {
+  emitDeprecationWarning(resolved);
+  // READ-ONLY FLOOR. The 11 in-module guards are honest but were not exhaustive: a sweep
+  // over the claim "read-only mode refuses every mutation" found `identity init` minting a
+  // private key, `policy init` creating the policy doc, `check-gitignore --fix` rewriting
+  // .gitignore and `upgrade` rewriting both lock files, all exit 0, none audited. The
+  // defect was that nothing ENUMERATED the write surface, so refusing here, once, from a
+  // declared table is what makes the claim checkable (see read-only-surface.ts).
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    const { matchWriteSurface } = await import("./read-only-surface.js");
+    const mutation = matchWriteSurface(process.argv);
+    if (mutation) {
+      const { refuseWrite } = await import("./read-only-mode.js");
+      const refusal = await refuseWrite(mutation.operation, { command: resolved });
+      console.error(`${c.red}✗ ${refusal.reason}${c.reset}`);
+      process.exitCode = 1;
+      return undefined;
+    }
+  }
+  // PreToolUse gates must fail CLOSED: an internal fault has to DENY (exit 2), never fall
+  // through to the generic catch (exit 1 = non-blocking = the op would proceed).
+  return GATE_VERBS.has(resolved) ? await runGateFailClosed(resolved, handler) : await handler();
+}
+
+/** Update and scanner-release notices. Never fails the command. */
+function startPostCommandNotices(): void {
+  checkForUpdate(KIT_VERSION)
+    .then((info) => {
+      if (info) printUpdateNotice(info);
+    })
+    .catch(() => {}); // never fail
+
+  // Pinned-scanner release notice. Same posture as the self-update check (shared
+  // suppression, 3s timeout, cached, never throws) and deliberately NOT a verdict:
+  // it only refreshes the cache the security check reads, and prints when a bump
+  // exists. Never auto-installs: the binary pin is a supply-chain control.
+  import("./bumblebee-update.js")
+    .then(async ({ checkForBumblebeeUpdate, formatBumblebeeNotice }) => {
+      const { BUMBLEBEE_VERSION } = await import("./bumblebee.js");
+      const info = await checkForBumblebeeUpdate(BUMBLEBEE_VERSION);
+      if (info) console.error(`  ${c.dim}╰─${c.reset} ${formatBumblebeeNotice(info)}`);
+    })
+    .catch(() => {}); // never fail
+}
+
+function reportMainError(err: unknown, ownArgs: string[]): void {
+  const code = err instanceof Error && "code" in err ? (err as { code?: string }).code : undefined;
+  const jsonMode = hasFlag(ownArgs, "--json");
+  if (code === "KIT_USAGE_ERROR") {
+    const message = err instanceof Error ? err.message : String(err);
+    if (jsonMode) console.log(JSON.stringify({ ok: false, error: message }));
+    console.error(`${c.red}${message}${c.reset}`);
+    process.exitCode = 2;
+  } else if (code === "ENOENT") {
+    // In --json mode emit a valid JSON error so consumers never get empty stdout.
+    if (jsonMode) console.log(JSON.stringify({ ok: false, error: `${KIT_FILE} not found` }));
+    console.error(`${c.red}Error: ${KIT_FILE} not found in ${process.cwd()}${c.reset}`);
+    console.error(
+      `${c.dim}Create a .kit.toml to define your project's tools, services, and secrets.${c.reset}`,
+    );
+    process.exitCode = 1;
+  } else if (code === "KIT_INVALID_CONFIG" || code === "KIT_INVALID_PROFILE") {
+    // A malformed .kit.toml OR .kit-profile.toml (bad TOML / failed schema validation) must
+    // fail CLOSED like a missing one: a clean error + exit 1, never an uncaught stack trace
+    // with empty --json stdout (a denial-of-verdict any dropped/edited file could cause). The
+    // profile commands (show/check/freeze/sign/verify) all propagate InvalidProfileError here.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (jsonMode) console.log(JSON.stringify({ ok: false, error: msg }));
+    console.error(`${c.red}${msg}${c.reset}`);
+    process.exitCode = 1;
+  } else {
+    reportUnexpectedCliError(err, ownArgs);
+  }
+}
+
+export async function main(): Promise<void> {
+  // Normalize leading Kit flags without moving them into the child's arguments.
+  const { args, ownArgs, command } = normalizeCommandArgs(process.argv.slice(2));
+  process.argv = [...process.argv.slice(0, 2), ...args];
+  if (answeredBeforePolicy(command, ownArgs, args)) return;
+  const flagCommand = command ?? "check";
+  const nonInteractive =
+    hasFlag(ownArgs, "--non-interactive") ||
+    process.env.CI === "true" ||
+    process.env.GITHUB_ACTIONS === "true";
+
+  if (!(await applyReadOnlyAndPolicy(ownArgs, flagCommand))) return;
   await showSkippedCommitBanner();
 
   try {
-    let ok: boolean;
-
-    // Completions use a shell argument. Other commands dispatch through the registry.
+    let ok: boolean | undefined;
     if (command === "completions") {
-      const shell = ownArgs[1];
-      const script = generateCompletions(shell);
-      if (!script) {
-        console.error(`Unknown shell: ${shell}. Use: bash, zsh, fish`);
-        process.exitCode = 1;
-        return;
-      }
-      process.stdout.write(script);
-      ok = true;
+      ok = runCompletions(ownArgs);
+      if (!ok) return;
     } else {
-      // no command → `check` (the prior `case undefined` behaviour).
+      // No command means `check` (the prior `case undefined` behaviour).
       // COMMANDS is the module-scope dispatch table (single source of truth for the
       // command surface; help coverage is verified against it in command-surface.test.ts).
-      const resolved = command ?? "check";
-      const handler = Object.hasOwn(COMMANDS, resolved) ? COMMANDS[resolved] : undefined;
-      if (handler) {
-        emitDeprecationWarning(resolved);
-        // READ-ONLY FLOOR. The 11 in-module guards are honest but were not exhaustive: a sweep
-        // over the claim "read-only mode refuses every mutation" found `identity init` minting a
-        // private key, `policy init` creating the policy doc, `check-gitignore --fix` rewriting
-        // .gitignore and `upgrade` rewriting both lock files — all exit 0, none audited. The
-        // defect was that nothing ENUMERATED the write surface, so refusing here, once, from a
-        // declared table is what makes the claim checkable (see read-only-surface.ts).
-        const { isReadOnlyMode } = await import("./read-only-mode.js");
-        if (isReadOnlyMode()) {
-          const { matchWriteSurface } = await import("./read-only-surface.js");
-          const mutation = matchWriteSurface(process.argv);
-          if (mutation) {
-            const { refuseWrite } = await import("./read-only-mode.js");
-            const refusal = await refuseWrite(mutation.operation, { command: resolved });
-            console.error(`${c.red}✗ ${refusal.reason}${c.reset}`);
-            process.exitCode = 1;
-            return;
-          }
-        }
-        // PreToolUse gates must fail CLOSED: an internal fault has to DENY (exit 2), never fall
-        // through to the generic catch below (exit 1 = non-blocking = the op would proceed).
-        ok = GATE_VERBS.has(resolved)
-          ? await runGateFailClosed(resolved, handler)
-          : await handler();
-      } else {
-        console.error(`Unknown command: ${command}`);
-        const { didYouMean } = await import("./utils/didYouMean.js");
-        const knownCommands = [
-          ...new Set(Object.keys(COMMAND_HELP).map((k) => k.split(" ")[0])),
-          "help",
-          "version",
-          "completions",
-        ];
-        const suggestions = didYouMean(command, knownCommands);
-        if (suggestions.length > 0) {
-          console.error(`Did you mean: ${suggestions.map((s) => `'${s}'`).join(", ")}?`);
-        }
-        console.error(`Run 'kit help' for a list of available commands.`);
-        process.exitCode = 1;
+      const handler = Object.hasOwn(COMMANDS, flagCommand) ? COMMANDS[flagCommand] : undefined;
+      if (!handler) {
+        await reportUnknownCommand(flagCommand);
         return;
       }
+      ok = await runRegisteredHandler(flagCommand, handler);
+      if (ok === undefined) return;
     }
 
     process.exitCode = ok ? 0 : process.exitCode || 1;
@@ -494,53 +569,10 @@ export async function main(): Promise<void> {
     // Non-interactive / CI / --json / local-only commands: no update check.
     // See postCommandNoticesAllowed.
     if (postCommandNoticesAllowed(command, hasFlag(ownArgs, "--json"), nonInteractive)) {
-      checkForUpdate(KIT_VERSION)
-        .then((info) => {
-          if (info) printUpdateNotice(info);
-        })
-        .catch(() => {}); // never fail
-
-      // Pinned-scanner release notice. Same posture as the self-update check (shared
-      // suppression, 3s timeout, cached, never throws) and deliberately NOT a verdict:
-      // it only refreshes the cache the security check reads, and prints when a bump
-      // exists. Never auto-installs — the binary pin is a supply-chain control.
-      import("./bumblebee-update.js")
-        .then(async ({ checkForBumblebeeUpdate, formatBumblebeeNotice }) => {
-          const { BUMBLEBEE_VERSION } = await import("./bumblebee.js");
-          const info = await checkForBumblebeeUpdate(BUMBLEBEE_VERSION);
-          if (info) console.error(`  ${c.dim}╰─${c.reset} ${formatBumblebeeNotice(info)}`);
-        })
-        .catch(() => {}); // never fail
+      startPostCommandNotices();
     }
   } catch (err: unknown) {
-    const code =
-      err instanceof Error && "code" in err ? (err as { code?: string }).code : undefined;
-    const jsonMode = hasFlag(ownArgs, "--json");
-    if (code === "KIT_USAGE_ERROR") {
-      const message = err instanceof Error ? err.message : String(err);
-      if (jsonMode) console.log(JSON.stringify({ ok: false, error: message }));
-      console.error(`${c.red}${message}${c.reset}`);
-      process.exitCode = 2;
-    } else if (code === "ENOENT") {
-      // In --json mode emit a valid JSON error so consumers never get empty stdout.
-      if (jsonMode) console.log(JSON.stringify({ ok: false, error: `${KIT_FILE} not found` }));
-      console.error(`${c.red}Error: ${KIT_FILE} not found in ${process.cwd()}${c.reset}`);
-      console.error(
-        `${c.dim}Create a .kit.toml to define your project's tools, services, and secrets.${c.reset}`,
-      );
-      process.exitCode = 1;
-    } else if (code === "KIT_INVALID_CONFIG" || code === "KIT_INVALID_PROFILE") {
-      // A malformed .kit.toml OR .kit-profile.toml (bad TOML / failed schema validation) must
-      // fail CLOSED like a missing one — a clean error + exit 1, never an uncaught stack trace
-      // with empty --json stdout (a denial-of-verdict any dropped/edited file could cause). The
-      // profile commands (show/check/freeze/sign/verify) all propagate InvalidProfileError here.
-      const msg = err instanceof Error ? err.message : String(err);
-      if (jsonMode) console.log(JSON.stringify({ ok: false, error: msg }));
-      console.error(`${c.red}${msg}${c.reset}`);
-      process.exitCode = 1;
-    } else {
-      reportUnexpectedCliError(err, ownArgs);
-    }
+    reportMainError(err, ownArgs);
   }
 }
 
