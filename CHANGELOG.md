@@ -19,6 +19,11 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+- **`kit security verify-pull` reports what a pull changed, without hiding gaps.** It compares the
+  dependency sections of every tracked `package.json` between two commits, masks recognized
+  credentials, keeps the sensitivity of a removed `.gitignore` entry before redaction, and reports
+  invalid refs, unreadable files, malformed manifests and non-UTF-8 paths as failures or incomplete
+  coverage instead of a clean result. See `docs/VERIFY_PULL.md`.
 - **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update

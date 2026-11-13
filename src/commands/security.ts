@@ -32,8 +32,7 @@ import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
 import { scanTranscripts } from "../scan-transcripts.js";
 import { sampleCosts } from "../cost-monitor.js";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "../check-gitignore.js";
-import { auditPull, defaultPullBase, reportSeverity } from "../post-pull-audit.js";
-import { pulledAgentFileLines } from "../pull-agent-files.js";
+import { cmdSecurityVerifyPull } from "./security-verify-pull.js";
 
 async function cmdSecurityPrescan(): Promise<boolean> {
   const root = process.argv[4];
@@ -586,115 +585,6 @@ async function cmdSecurityCosts(): Promise<boolean> {
     );
   }
   return allOk;
-}
-
-/** The base ref verify-pull audits from, and the header (with the fallback note when there is one). */
-async function verifyPullBase(
-  args: string[],
-  head: string,
-): Promise<{ base: string; header: string }> {
-  const named = flagValue(args, "--base");
-  const { base, fallback } = named
-    ? { base: named, fallback: false }
-    : await defaultPullBase(process.cwd());
-  let header = `${c.bold}${c.cyan}kit security verify-pull${c.reset}  ${c.dim}(${base} → ${head})${c.reset}`;
-  if (fallback)
-    header += `\n${c.dim}No usable ORIG_HEAD (set by git pull / merge), so only the last commit is audited. Name the pre-pull commit with --base to audit the whole pull.${c.reset}`;
-  return { base, header };
-}
-
-async function cmdSecurityVerifyPull(): Promise<boolean> {
-  // kit security verify-pull [--base <ref>] [--head <ref>] [--json]
-  const args = process.argv.slice(4);
-  const head = flagValue(args, "--head") ?? "HEAD";
-  const jsonMode = hasFlag(args, "--json");
-  const { base, header } = await verifyPullBase(args, head);
-
-  const report = await auditPull(process.cwd(), base, head);
-  const severity = reportSeverity(report);
-
-  if (jsonMode) {
-    console.log(JSON.stringify({ severity, ...report }, null, 2));
-    return severity !== "fail";
-  }
-
-  console.log(header);
-  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
-
-  if (report.changedFiles.length === 0) {
-    console.log(`${c.dim}No files changed in this range. Nothing to audit.${c.reset}\n`);
-    return true;
-  }
-
-  console.log(`${c.dim}${report.changedFiles.length} file(s) changed${c.reset}\n`);
-
-  if (report.newDependencies.length > 0) {
-    console.log(`${c.yellow}⚠ ${report.newDependencies.length} new dependency/-ies:${c.reset}`);
-    for (const dep of report.newDependencies) {
-      console.log(
-        `  ${c.yellow}•${c.reset} ${dep}  ${c.dim}→ run ${c.bold}kit triage npm ${dep}${c.reset}${c.dim} before installing${c.reset}`,
-      );
-    }
-    console.log();
-  }
-
-  if (report.removedGitignoreEntries.length > 0) {
-    const sensitive = report.removedGitignoreEntries.filter((l) =>
-      /\.env|\.pem|\.key|id_rsa/.test(l),
-    );
-    const severityIcon = sensitive.length > 0 ? `${c.red}✗` : `${c.yellow}⚠`;
-    console.log(
-      `${severityIcon}${c.reset} ${report.removedGitignoreEntries.length} .gitignore entry/-ies removed:`,
-    );
-    for (const line of report.removedGitignoreEntries) {
-      const hot = /\.env|\.pem|\.key|id_rsa/.test(line);
-      const tag = hot ? `${c.red}[sensitive]${c.reset}` : `${c.dim}[low]${c.reset}`;
-      console.log(`  ${hot ? c.red : c.yellow}•${c.reset} ${line}  ${tag}`);
-    }
-    console.log();
-  }
-
-  if (report.plaintextHits.length > 0) {
-    const total = report.plaintextHits.reduce((sum, h) => sum + h.findings.length, 0);
-    console.log(
-      `${c.red}✗ ${total} plaintext secret(s) introduced in ${report.plaintextHits.length} file(s):${c.reset}`,
-    );
-    for (const hit of report.plaintextHits.slice(0, 20)) {
-      const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
-      console.log(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
-    }
-    if (report.plaintextHits.length > 20) {
-      console.log(`  ${c.dim}… ${report.plaintextHits.length - 20} more${c.reset}`);
-    }
-    console.log();
-  }
-
-  if (report.allowlistChanged || report.policyChanged || report.kitTomlChanged) {
-    console.log(`${c.yellow}⚠ Security-policy files modified:${c.reset}`);
-    if (report.allowlistChanged) console.log(`  ${c.yellow}•${c.reset} .kit-allowlist.json`);
-    if (report.policyChanged) console.log(`  ${c.yellow}•${c.reset} .kit-policy.json`);
-    if (report.kitTomlChanged) console.log(`  ${c.yellow}•${c.reset} .kit.toml`);
-    console.log(
-      `${c.dim}  → run ${c.bold}kit security policy check${c.reset}${c.dim} to verify the new state.${c.reset}\n`,
-    );
-  }
-
-  for (const line of pulledAgentFileLines(report.agentFiles, c)) console.log(line);
-
-  if (severity === "ok") {
-    console.log(`${c.green}✓ No security concerns in this pull.${c.reset}\n`);
-    return true;
-  }
-  if (severity === "warn") {
-    console.log(
-      `${c.yellow}⚠ Pull contains items worth a second look — address before running install/deploy.${c.reset}\n`,
-    );
-    return true;
-  }
-  console.log(
-    `${c.red}✗ Pull contains security regressions — review before continuing.${c.reset}\n`,
-  );
-  return false;
 }
 
 async function cmdSecurityCheckGitignore(): Promise<boolean> {
