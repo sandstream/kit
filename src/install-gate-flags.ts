@@ -9,6 +9,8 @@
  * (`npm --prefix <dir> install x`, `nice -n 5 npm i x`, `timeout 600 npm i x`).
  */
 
+import { wrapperCommandStart } from "./install-gate-wrappers.js";
+
 /**
  * The command NAME as the shell would resolve it for matching: drop a leading `\`
  * (the standard alias-bypass, `\npm` runs the real npm) and take the basename
@@ -60,79 +62,9 @@ export const PREFIX_BINS = new Set([
   "flock",
 ]);
 
-/**
- * Bins the gate matches as argv0, plus wrappers. Used to find where a wrapper's own arguments
- * end: `nice -n 5 npm i x` and `sudo -u root npm i x` put a value after the wrapper's flag,
- * and `timeout 600` a positional. Skipping only the flags left `5` / `root` / `600` as argv0
- * and the install unseen (kit-research adversarial-battery-tier3, G05).
- */
-const COMMAND_BINS = new Set([
-  "npm",
-  "pnpm",
-  "yarn",
-  "bun",
-  "npx",
-  "bunx",
-  "pip",
-  "pip3",
-  "pipx",
-  "uv",
-  "uvx",
-  "python",
-  "python3",
-  "poetry",
-  "pdm",
-  "claude",
-  "sh",
-  "bash",
-  "zsh",
-  "dash",
-]);
-
-const startsCommand = (tok: string): boolean => {
-  const base = binBase(tok);
-  return COMMAND_BINS.has(base) || PREFIX_BINS.has(base) || /^[^\s=]+=/.test(tok);
-};
-
-/**
- * The flags of a wrapper that take a separate value. The value is consumed with its flag, so a
- * value named like a command (`sudo -u pip npm i x`, where `pip` is a user) is never read as the
- * command. A wrapper's other values (`timeout 60`, `chrt 10`, `flock <file>`) are positional and
- * are found by the scan in `skipWrapperArgs`.
- */
-const WRAPPER_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
-  sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-r", "-t", "-T", "-U", "-D", "-R"]),
-  doas: new Set(["-u", "-C"]),
-  env: new Set(["-u", "-C", "-S", "-P"]),
-  timeout: new Set(["-s", "-k"]),
-  nice: new Set(["-n"]),
-  ionice: new Set(["-c", "-n", "-p", "-P", "-u"]),
-  chrt: new Set([]),
-  taskset: new Set(["-p"]),
-  flock: new Set(["-w", "-E"]),
-  stdbuf: new Set(["-i", "-o", "-e"]),
-  setsid: new Set([]),
-};
-
-/**
- * Index of the first token after a wrapper's flags AND values. Values are skipped only when a
- * known command or wrapper follows them anywhere later in the segment, so `sudo vim x` still
- * reads `vim` as the command. The search has no cap: a cap let a wrapper with more values than
- * the cap hide the install behind them. A known command after an unrelated one
- * (`sudo echo npm i x`) is now read as the command, which fails closed.
- */
-export function skipWrapperArgs(tokens: string[], i: number): number {
-  const valueFlags = WRAPPER_VALUE_FLAGS[binBase(tokens[i - 1] ?? "")];
-  const flags = (k: number) => {
-    while (k < tokens.length && tokens[k].startsWith("-")) {
-      k += valueFlags?.has(tokens[k]) && k + 1 < tokens.length ? 2 : 1;
-    }
-    return k;
-  };
-  let k = flags(i);
-  const start = k;
-  while (k < tokens.length && !startsCommand(tokens[k])) k = flags(k + 1);
-  return k < tokens.length ? k : start;
+/** Consume only the wrapper's arguments. Never search its child's argument list. */
+export function skipWrapperArgs(tokens: string[], i: number, unverifiable: string[] = []): number {
+  return wrapperCommandStart(tokens, i, binBase(tokens[i - 1] ?? ""), unverifiable);
 }
 
 /**
@@ -159,12 +91,14 @@ const PIP_VALUE_FLAGS = [
   "--use-feature",
   "--use-deprecated",
 ];
+const UV_GLOBAL_VALUE_FLAGS = new Set(["--directory", "--project", "--cache-dir", "--color"]);
 const GLOBAL_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
   npm: new Set(["--prefix", "-C", "--loglevel", "--cache", "--workspace", "-w", "--location"]),
   pnpm: new Set(["-C", "--dir", "--filter", "-F", "--loglevel", "--reporter"]),
   yarn: new Set(["--cwd", "--modules-folder", "--cache-folder", "--mutex", "--network-timeout"]),
   bun: new Set(["--cwd"]),
-  uv: new Set(["--directory", "--project", "--cache-dir", "--color"]),
+  uv: UV_GLOBAL_VALUE_FLAGS,
+  uvx: UV_GLOBAL_VALUE_FLAGS,
   pip: new Set(PIP_VALUE_FLAGS),
   pip3: new Set(PIP_VALUE_FLAGS),
   pipx: new Set(["--python", "--log-dir"]),
@@ -180,7 +114,89 @@ const GLOBAL_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
 const CONFIG_FILE_FLAGS: Record<string, ReadonlySet<string>> = {
   pdm: new Set(["-c", "--config"]),
   uv: new Set(["--config-file"]),
+  uvx: new Set(["--config-file"]),
+  pipx: new Set(["--pip-args"]),
 };
+
+/** Name an option that can select an uninspected package source. Never return its value. */
+export function sourceConfigurationFlag(tokens: readonly string[]): string | null {
+  const flags = CONFIG_FILE_FLAGS[tokens[0]];
+  if (!flags) return null;
+  const positionals: string[] = [];
+  let uncertain = false;
+  for (let i = 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--") break;
+    const name = sourceOption(tokens[0], token, flags);
+    if (name) return name;
+    if (token.startsWith("-")) {
+      const width = managerOptionWidth(tokens[0], token);
+      uncertain ||= width < 0;
+      i += Math.max(width, 0);
+      continue;
+    }
+    positionals.push(token);
+    if (!uncertain && childCommandReached(tokens[0], positionals)) break;
+  }
+  return null;
+}
+
+function sourceOption(manager: string, token: string, flags: ReadonlySet<string>): string | null {
+  const name = token.split("=", 1)[0];
+  if (flags.has(name)) return name;
+  // PDM's -v, -q and -g take no value. A following -c consumes the rest of the group.
+  return manager === "pdm" && /^-[vqg]*c/.test(token) ? "-c" : null;
+}
+
+const RUNNER_VALUE_FLAGS = new Set([
+  "--python",
+  "-p",
+  "--with",
+  "--with-editable",
+  "--with-requirements",
+  "--from",
+  "--spec",
+  "--env-file",
+  "--index",
+  "--index-url",
+  "--extra-index-url",
+  "--default-index",
+  "--group",
+  "--no-group",
+  "--only-group",
+  "--extra",
+  "--no-extra",
+  "--package",
+]);
+
+const RUNNER_BOOLEAN_FLAGS = new Set([
+  "--offline",
+  "--no-sync",
+  "--frozen",
+  "--locked",
+  "--no-project",
+  "--isolated",
+  "--no-config",
+  "--no-cache",
+  "--no-progress",
+  "--quiet",
+  "--verbose",
+]);
+
+/** Unknown option arity cannot establish where the child's arguments start. */
+function managerOptionWidth(manager: string, token: string): number {
+  if (token.includes("=")) return 0;
+  if (GLOBAL_VALUE_FLAGS[manager]?.has(token) || RUNNER_VALUE_FLAGS.has(token)) return 1;
+  if (RUNNER_BOOLEAN_FLAGS.has(token) || /^-[vq]+$/.test(token)) return 0;
+  return -1;
+}
+
+/** A runner's first operand starts the child's arguments. Flags there belong to the child. */
+function childCommandReached(manager: string, pos: string[]): boolean {
+  if (manager === "uvx") return pos.length === 1;
+  if (pos[0] === "run") return pos.length === 2;
+  return manager === "uv" && pos[0] === "tool" && pos[1] === "run" && pos.length === 3;
+}
 
 /**
  * Package managers the fail-closed rule covers. One that has no entry above reads every option
@@ -242,6 +258,10 @@ export function hiddenVerb(
   positionals: (tokens: string[]) => string[],
   isValueFlag: (flag: string) => boolean,
 ): string | null {
+  const configFlag = sourceConfigurationFlag(tokens);
+  if (configFlag && tokens.some((token) => FETCH_VERB_RE.test(token) || token === "run")) {
+    return `global-option:${tokens[0]} ${configFlag} source-configuration`;
+  }
   const unknown = foldGlobalFlags(tokens, isValueFlag);
   if (!unknown) return null;
   const verbs = positionals(tokens);

@@ -31,6 +31,11 @@
   `ionice`, `chrt`, `taskset` and `flock` are stripped like `nice`. `env -i` and `sudo -i` are no
   longer read as a registry option. A registry option placed before `--prefix` is now caught as
   well. Found by kit-research's adversarial battery, tier 3 (rows G01 and G05).
+- **The install gate refuses unresolved command strings and package sources.** `env -S`,
+  short option groups, and source configuration can no longer hide a covered install or runner.
+  Wrapper options stop at the actual command. Runner child options remain separate from package source options.
+  Refusals explain the unsupported syntax and give a relevant next step.
+
 - **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
