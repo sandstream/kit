@@ -201,7 +201,7 @@ describe("secrets rotate --via supabase-mgmt-api: argument checks", { skip: POSI
     assert.equal(r.status, 1);
     assert.match(r.out, /kit secrets rotate --via supabase-mgmt-api/);
     assert.match(r.err, /--project <ref> required \(or set SUPABASE_PROJECT_REF\)\./);
-    assert.match(r.err, /supabase\.com\/dashboard\/project/);
+    assert.ok(r.err.includes("supabase.com/dashboard/project"));
     assert.deepEqual(r.calls, []);
   });
 
