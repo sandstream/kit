@@ -22,7 +22,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
-import { claudePluginInstall, ownerRepoArg } from "./install-gate-repos.js";
+import {
+  claudePluginInstall,
+  npmRunnerInvocation,
+  ownerRepoArg,
+  repoSourceArg,
+} from "./install-gate-repos.js";
 
 export { ownerRepoArg };
 
@@ -974,19 +979,17 @@ function repoFetchToShellRefs(command: string): string[] {
 }
 
 /**
- * When a RUNNER's fetched package is a known repo-fetcher, find the repo
- * argument among the args passed THROUGH to it (`skills add mattpocock/skills`)
- * and return it as a `github:` ref — additive to the wrapper package's own npm
- * ref, so both the installer AND its payload get triaged.
+ * Check all source arguments passed to a known repo installer.
+ * Keep unsupported sources as refusals, alongside the wrapper package and supported repositories.
  */
-function repoFetcherRef(pkgArg: string, throughArgs: string[]): string | null {
-  const bare = npmName(pkgArg);
-  if (!bare || !REPO_FETCHER_PACKAGES.has(bare)) return null;
+function repoFetcherSources(command: string, throughArgs: string[], probe: InstallProbe): void {
+  const bare = npmName(binBase(command));
+  if (!bare || !REPO_FETCHER_PACKAGES.has(bare)) return;
   for (const tok of throughArgs) {
-    const repo = ownerRepoArg(tok);
-    if (repo) return `github:${repo}`;
+    const source = repoSourceArg(tok);
+    if (source && "ref" in source) probe.refs.push(source.ref);
+    if (source && "unverifiable" in source) probe.unverifiable.push(source.unverifiable);
   }
-  return null;
 }
 
 /**
@@ -1003,6 +1006,44 @@ function resolveTargets(m: Matcher, args: string[], tokens: string[]): string[] 
   const replaceFlags = replacePackageFlags(tokens);
   if (m.pkgFlagOnly || hasExecCallFlag(tokens)) return [...replaceFlags, ...withFlags];
   return [...(replaceFlags.length ? replaceFlags : args.slice(0, 1)), ...withFlags];
+}
+
+/** Record the fetched package identities without using their order to infer the command. */
+function recordTargets(
+  m: Pick<Matcher, "scheme" | "toName">,
+  targets: string[],
+  probe: InstallProbe,
+): void {
+  for (const arg of targets) {
+    if (isLocalTarget(arg)) continue; // Local sources do not need registry triage.
+    const name = m.toName(arg);
+    if (name) {
+      // Keep a pinned version or tag in the reference.
+      const ver = m.scheme === "npm" ? npmVersion(arg) : pipVersion(arg);
+      probe.refs.push(`${m.scheme}:${name}${ver}`);
+    } else probe.unverifiable.push(arg); // Refuse targets without a registry identity.
+  }
+}
+
+function applyNpmRunner(
+  runner: NonNullable<ReturnType<typeof npmRunnerInvocation>>,
+  prefix: string[],
+  probe: InstallProbe,
+): void {
+  const refused = [...runner.unverifiable];
+  const redirect = sourceRedirect([...prefix, ...runner.optionTokens]);
+  if (redirect) refused.push(`alt-registry:${redirect}`);
+  if (runner.packages.length === 0 && prefix.some((t) => binBase(t) === "xargs")) {
+    refused.push("xargs-stdin-install");
+  }
+  if (runner.packages.length > 0 || refused.length > 0) probe.isInstall = true;
+  probe.unverifiable.push(...refused);
+  recordTargets({ scheme: "npm", toName: npmName }, runner.packages, probe);
+  repoFetcherSources(runner.argv[0] ?? "", runner.argv.slice(1), probe);
+  if (runner.shadowable) {
+    const bare = npmName(runner.packages[0]);
+    if (bare) probe.runnerBinCandidates.push(bare);
+  }
 }
 
 /** Apply one matched matcher to `probe`. Returns true when the segment was consumed. */
@@ -1047,21 +1088,12 @@ function applyMatcher(
   // (mark unverifiable) even if every name is reputable.
   const redirect = sourceRedirect(raw);
   if (redirect) probe.unverifiable.push(`alt-registry:${redirect}`);
-  for (const arg of targets) {
-    if (isLocalTarget(arg)) continue; // user's own code — nothing to triage
-    const name = m.toName(arg);
-    if (name) {
-      // Carry the pinned version/tag onto the ref so triage checks THAT version, not latest.
-      const ver = m.scheme === "npm" ? npmVersion(arg) : pipVersion(arg);
-      probe.refs.push(`${m.scheme}:${name}${ver}`);
-    } else probe.unverifiable.push(arg); // fail-closed: can't reduce to a ref
-  }
-  // A RUNNER fetching a known repo-installer package also triages the repo it
-  // was told to fetch — the args after the package name are what's PASSED
-  // THROUGH to it, exactly where an `add <owner>/<repo>` argument lives.
+  recordTargets(m, targets, probe);
+  // Package flags select available packages. The positional selects the invoked command.
+  // Inspect that command's sources regardless of package order or additional packages.
   if (m.single && m.scheme === "npm" && targets.length > 0) {
-    const repoRef = repoFetcherRef(targets[0], pos.slice(start + 1));
-    if (repoRef) probe.refs.push(repoRef);
+    const argv = pos.slice(start);
+    repoFetcherSources(argv[0] ?? "", argv.slice(1), probe);
   }
   // A plain `npx <name> …` positional (no -p/--package/--spec/--from replace-flag,
   // no `exec -c`) is what resolveTargets took targets[0] FROM — npx resolves that
@@ -1123,7 +1155,12 @@ function isApprovalNoop(tokens: string[], pos: string[]): boolean {
 
 /** Match one shell segment against the package-manager matchers, mutating `probe`. */
 function scanSegment(segment: string, probe: InstallProbe): void {
-  const raw = stripRedirections(stripInlineComment(segment).trim().split(/\s+/).filter(Boolean))
+  // Keep quoted whitespace inside its argument. Splitting it can turn an unsupported
+  // repository source into a different, apparently valid GitHub source.
+  const words = stripInlineComment(segment).match(
+    /(?:\\[\s\S]|[^\s'"\\]|'[^']*'|"(?:\\[\s\S]|[^"\\])*")+/g,
+  );
+  const raw = stripRedirections(words ?? [])
     .map(dequote)
     .filter(Boolean);
   const tokens = stripCommandPrefix(raw);
@@ -1132,6 +1169,11 @@ function scanSegment(segment: string, probe: InstallProbe): void {
 
   if (indirectInstall(tokens, probe) || claudePluginInstall(tokens, probe)) return;
 
+  const runner = npmRunnerInvocation(tokens);
+  if (runner) {
+    applyNpmRunner(runner, raw.slice(0, raw.length - tokens.length), probe);
+    return;
+  }
   const pos = compactPositionals(tokens);
   if (pos.length === 0) return;
 
@@ -1195,6 +1237,13 @@ function refIsBareName(ref: string, bare: string): boolean {
  * hides the defect rather than fixing it. So: name it, and give the fix.
  */
 export function explainUnverifiable(tokens: readonly string[]): string | null {
+  const sources = tokens.filter((t) => t.startsWith("repo-source:"));
+  if (sources.length > 0) {
+    return (
+      `unsupported repository source: ${sources.map((t) => t.slice("repo-source:".length)).join(", ")}. ` +
+      "The gate can verify only unambiguous GitHub repository sources. Refusing this install (fail-closed)."
+    );
+  }
   const substitution = tokens.find(
     (t) => t.startsWith("indirect-bin:`") || t.startsWith("indirect-bin:$("),
   );

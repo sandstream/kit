@@ -1100,7 +1100,7 @@ describe("install-gate — repo argument forms (#507)", () => {
       ["git@github.com:cursor/plugins", "cursor/plugins"],
       ["ssh://git@github.com/cursor/plugins.git", "cursor/plugins"],
       ["git+https://github.com/cursor/plugins.git", "cursor/plugins"],
-      ["https://gitlab.example.com/cursor/plugins", "cursor/plugins"],
+      ["https://gitlab.example.com/cursor/plugins", null],
       ["https://github.com/cursor/plugins/", "cursor/plugins"],
       // A deeper URL still names the repo that gets fetched.
       ["https://github.com/cursor/plugins/tree/main/unslop", "cursor/plugins"],
