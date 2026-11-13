@@ -19,6 +19,29 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+
+- **The install gate reads options before the subcommand, and a wrapper's own values.** Eleven
+  in-scope installs passed `kit gate-bash` with no output: `npm --prefix <dir> install x` (also
+  `npm -C`, `npm --loglevel silent`, `pnpm -C`/`--dir`, `yarn --cwd`, `bun --cwd`,
+  `uv --directory`), because the option's value read as the subcommand. The same happened with
+  `nice -n 5 npm i x` and `sudo -u root npm i x`, where the wrapper's value read as the command,
+  and with `timeout 600 npm i x`, because `timeout` was not on the wrapper list. Known options are
+  now read with their values. An unknown option before the subcommand that leaves no known verb in
+  its slot, with an install verb after it, blocks fail-closed (`global-option:`). `timeout`,
+  `ionice`, `chrt`, `taskset` and `flock` are stripped like `nice`. `env -i` and `sudo -i` are no
+  longer read as a registry option. A registry option placed before `--prefix` is now caught as
+  well. Found by kit-research's adversarial battery, tier 3 (rows G01 and G05).
+- **The install gate refuses unresolved command strings and package sources.** `env -S`,
+  short option groups, and source configuration can no longer hide a covered install or runner.
+  Wrapper options stop at the actual command. Runner child options remain separate from package source options.
+  Refusals explain the unsupported syntax and give a relevant next step.
+
+- **The install gate triages the repository source a runner passes through.** `npx skills add
+<source>` and the `dlx` and `bunx` forms check the source the invoked command receives, whatever
+  the package order and whatever wrapper (`sudo`, `env`, `nice`, `timeout`) sits in between. A
+  source that is not a plain GitHub repository, or that the shell expands (`$REPO`, a brace or a
+  command substitution), is refused. A shell given `-c` as the child of a repository installer is
+  refused too, because the gate cannot read its command line.
 - **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update

@@ -39,6 +39,7 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
       "src/commands/gate.ts",
       "src/hook-floor.ts",
       "src/install-gate.ts",
+      "src/install-gate-flags.ts",
     ],
     prefix: [
       "src/exec-broker/",

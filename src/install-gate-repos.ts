@@ -222,6 +222,11 @@ function rejectedSourceDisplay(source: string): string {
 /** Keep unsupported remote sources visible so the gate refuses them before triage. */
 export function repoSourceArg(source: string): { ref: string } | { unverifiable: string } | null {
   if (!source || source.startsWith("-") || source.startsWith("@")) return null;
+  // The shell expands these before the installer reads them, so the value that is fetched is not
+  // the text the gate sees. Check this before the local-path rule: `./$X` is not a fixed path.
+  if (/[$`{*?]/.test(source)) {
+    return { unverifiable: `repo-source:${rejectedSourceDisplay(source)}` };
+  }
   if (localRepoSource(source)) return null;
   const repo = ownerRepoArg(source);
   if (repo) return { ref: `github:${repo}` };
