@@ -90,3 +90,69 @@ describe("install gate — a wrapper's own values (G05)", () => {
     assert.equal(parseInstallCommand("nice -n 5 node build.js").isInstall, false);
   });
 });
+
+describe("install gate — review findings on the flag reader", () => {
+  it("fails closed when an unknown option may have swallowed a verb and a fetch verb follows", () => {
+    // `--frobnicate run` may be an option with the value `run`, and then `install evil-x` runs.
+    const p = parseInstallCommand("npm --frobnicate run install evil-x");
+    assert.equal(p.isInstall, true);
+    assert.deepEqual(p.unverifiable, ["global-option:npm --frobnicate run"]);
+  });
+
+  it("still lets an unknown option pass when its slot holds the fetch verb itself", () => {
+    assert.deepEqual(refsOf("npm --frobnicate install evil-x"), ["npm:evil-x"]);
+    assert.equal(parseInstallCommand("npm --frobnicate run build").isInstall, false);
+  });
+
+  const unknownOption = [
+    "pip --frobnicate thing install evil-x",
+    "pip3 --frobnicate thing install evil-x",
+    "pipx --frobnicate thing install evil-x",
+    "poetry --frobnicate thing add evil-x",
+    "pdm --frobnicate thing add evil-x",
+  ];
+  for (const cmd of unknownOption) {
+    it(`fails closed on an unknown option before the subcommand: ${cmd}`, () => {
+      const p = parseInstallCommand(cmd);
+      assert.equal(p.isInstall, true);
+      assert.equal(p.unverifiable.length, 1, p.unverifiable.join());
+      assert.match(p.unverifiable[0], /^global-option:/);
+    });
+  }
+
+  const knownValueOption = [
+    "pip --proxy http://proxy.local:3128 install evil-x",
+    "pip3 --cache-dir /tmp/c install evil-x",
+    "pip --python /usr/bin/python3 install evil-x",
+    "pipx --python 3.12 install evil-x",
+    "poetry -C /tmp/x add evil-x",
+    "pdm -p /tmp/x add evil-x",
+  ];
+  for (const cmd of knownValueOption) {
+    it(`reads a known value option and triages: ${cmd}`, () => {
+      const p = parseInstallCommand(cmd);
+      assert.equal(p.isInstall, true);
+      assert.deepEqual(p.unverifiable, []);
+      assert.deepEqual(p.refs.length, 1);
+    });
+  }
+
+  it("does not apply the fail-closed rule to a command that is not a package manager", () => {
+    assert.equal(parseInstallCommand("git --frobnicate thing install add").isInstall, false);
+    assert.equal(parseInstallCommand("make --frobnicate thing install").isInstall, false);
+  });
+
+  it("finds the command behind a wrapper however many values it takes", () => {
+    assert.deepEqual(refsOf("sudo -u root -g wheel -h host -p prompt npm i evil-x"), [
+      "npm:evil-x",
+    ]);
+    assert.deepEqual(refsOf("timeout -s KILL -k 5 60 npm i evil-x"), ["npm:evil-x"]);
+  });
+
+  it("still reads a wrapper that runs something else as not an install", () => {
+    assert.equal(
+      parseInstallCommand("sudo -u root -g wheel -h host -p prompt vim x").isInstall,
+      false,
+    );
+  });
+});

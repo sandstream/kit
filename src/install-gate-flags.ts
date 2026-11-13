@@ -89,9 +89,6 @@ const COMMAND_BINS = new Set([
   "dash",
 ]);
 
-/** Up to this many non-flag tokens after a wrapper are read as its values, when a command follows. */
-const MAX_WRAPPER_VALUES = 3;
-
 const startsCommand = (tok: string): boolean => {
   const base = binBase(tok);
   return COMMAND_BINS.has(base) || PREFIX_BINS.has(base) || /^[^\s=]+=/.test(tok);
@@ -99,8 +96,10 @@ const startsCommand = (tok: string): boolean => {
 
 /**
  * Index of the first token after a wrapper's flags AND values. Values are skipped only when a
- * known command or wrapper follows them within `MAX_WRAPPER_VALUES` tokens, so `sudo vim x`
- * still reads `vim` as the command.
+ * known command or wrapper follows them anywhere later in the segment, so `sudo vim x` still
+ * reads `vim` as the command. The search has no cap: a cap let a wrapper with more values than
+ * the cap hide the install behind them. A known command after an unrelated one
+ * (`sudo echo npm i x`) is now read as the command, which fails closed.
  */
 export function skipWrapperArgs(tokens: string[], i: number): number {
   const flags = (k: number) => {
@@ -109,9 +108,8 @@ export function skipWrapperArgs(tokens: string[], i: number): number {
   };
   let k = flags(i);
   const start = k;
-  for (let n = 0; n < MAX_WRAPPER_VALUES && k < tokens.length && !startsCommand(tokens[k]); n++)
-    k = flags(k + 1);
-  return k < tokens.length && startsCommand(tokens[k]) ? k : start;
+  while (k < tokens.length && !startsCommand(tokens[k])) k = flags(k + 1);
+  return k < tokens.length ? k : start;
 }
 
 /**
@@ -121,17 +119,55 @@ export function skipWrapperArgs(tokens: string[], i: number): number {
  * the install passed with no output (kit-research home-repo-pattern-vs-kit, 8 of 8 forms).
  * An option NOT listed here is handled fail-closed by `hiddenVerb`.
  */
+const PIP_VALUE_FLAGS = [
+  "--proxy",
+  "--cache-dir",
+  "--log",
+  "--timeout",
+  "--retries",
+  "--cert",
+  "--client-cert",
+  "--trusted-host",
+  "--exists-action",
+  "--python",
+  "--keyring-provider",
+  "--use-feature",
+  "--use-deprecated",
+];
 const GLOBAL_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
   npm: new Set(["--prefix", "-C", "--loglevel", "--cache", "--workspace", "-w", "--location"]),
   pnpm: new Set(["-C", "--dir", "--filter", "-F", "--loglevel", "--reporter"]),
   yarn: new Set(["--cwd", "--modules-folder", "--cache-folder", "--mutex", "--network-timeout"]),
   bun: new Set(["--cwd"]),
   uv: new Set(["--directory", "--project", "--cache-dir", "--config-file", "--color"]),
+  pip: new Set(PIP_VALUE_FLAGS),
+  pip3: new Set(PIP_VALUE_FLAGS),
+  pipx: new Set(["--python", "--pip-args", "--log-dir"]),
+  poetry: new Set(["-C", "--directory", "-P", "--project"]),
+  pdm: new Set(["-p", "--project", "-c", "--config"]),
 };
 
-/** Verbs a matcher reads in the subcommand slot (`npm <verb>`). */
-const SUBCOMMAND_VERB_RE =
-  /^(install|i|add|install-test|it|update|upgrade|ci|clean-install|exec|x|dlx|create|init|approve-scripts|install-scripts|approve-builds|global|pip|tool|run)$/;
+/**
+ * Package managers the fail-closed rule covers. One that has no entry above reads every option
+ * as unknown, which is the safe side. A command that is not a package manager is not covered:
+ * `git --foo bar install` is not an install.
+ */
+const MANAGER_BINS = new Set([
+  "npm",
+  "pnpm",
+  "yarn",
+  "bun",
+  "npx",
+  "bunx",
+  "pip",
+  "pip3",
+  "pipx",
+  "uv",
+  "uvx",
+  "poetry",
+  "pdm",
+]);
+
 /** Verbs that fetch a package, looked for after an ambiguous leading option. */
 const FETCH_VERB_RE =
   /^(install|i|add|install-test|it|update|upgrade|ci|clean-install|exec|x|dlx|create|init)$/;
@@ -142,8 +178,8 @@ const FETCH_VERB_RE =
  * followed by a non-flag token, which may have swallowed it as a value, or "".
  */
 function foldGlobalFlags(tokens: string[], isValueFlag: (flag: string) => boolean): string {
-  const known = GLOBAL_VALUE_FLAGS[tokens[0]];
-  if (!known) return "";
+  if (!MANAGER_BINS.has(tokens[0])) return "";
+  const known = GLOBAL_VALUE_FLAGS[tokens[0]] ?? new Set<string>();
   let unknown = "";
   let i = 1;
   for (; i < tokens.length && tokens[i].startsWith("-"); i++) {
@@ -161,7 +197,7 @@ function foldGlobalFlags(tokens: string[], isValueFlag: (flag: string) => boolea
 /**
  * Fail-closed on an option kit does not know, before the subcommand: `npm --foo bar install x`.
  * kit cannot tell whether `--foo` takes `bar` as its value, so when the subcommand slot holds no
- * known verb and a fetch verb follows, the install is unverifiable. Folds known options in
+ * fetch verb and a fetch verb follows, the install is unverifiable. Folds known options in
  * `tokens` in place either way. Returns the `global-option:` reason, or null.
  */
 export function hiddenVerb(
@@ -172,7 +208,10 @@ export function hiddenVerb(
   const unknown = foldGlobalFlags(tokens, isValueFlag);
   if (!unknown) return null;
   const verbs = positionals(tokens);
-  if (SUBCOMMAND_VERB_RE.test(verbs[1] ?? "") || !verbs.slice(2).some((t) => FETCH_VERB_RE.test(t)))
-    return null;
+  if (!verbs.slice(2).some((t) => FETCH_VERB_RE.test(t))) return null;
+  // The subcommand slot holds a fetch verb the matchers triage: the option took no value.
+  // Any other verb there (`run`, `tool`, ...) may be the option's value, and the fetch verb
+  // behind it the real command, so it is not safe.
+  if (FETCH_VERB_RE.test(verbs[1] ?? "")) return null;
   return `global-option:${tokens[0]} ${unknown} ${verbs[1]}`;
 }
