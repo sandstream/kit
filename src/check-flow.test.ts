@@ -41,6 +41,7 @@ function dropRepo(r: Repo): void {
 function check(r: Repo, args: string[], env: Record<string, string> = {}): Promise<CliResult> {
   return runCli(["check", ...args], r.root, {
     HOME: r.home,
+    USERPROFILE: r.home,
     KIT_NO_UPDATE_CHECK: "1",
     KIT_NO_HINTS: "1",
     CI: "",
