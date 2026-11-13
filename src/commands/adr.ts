@@ -243,7 +243,7 @@ export function collectAdrFindings(cwd: string): AdrFindings {
     }
     if (!adrIsEnforced(adr)) continue;
     enforcedCount++;
-    for (const v of evaluateAdr(adr, files, { packages })) {
+    for (const v of evaluateAdr(adr, files, { packages, adrFile: file })) {
       (v.kind === "gap" ? gaps : violations).push(v);
     }
   }
@@ -371,7 +371,7 @@ export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
   }
   const parts: string[] = [];
   if (liveViolations.length) parts.push(`${liveViolations.length} violation(s)`);
-  if (liveGaps.length) parts.push(`${liveGaps.length} unprovable rule(s) (unresolved imports)`);
+  if (liveGaps.length) parts.push(`${liveGaps.length} unprovable rule(s)`);
   console.log(
     `\n${c.red}${parts.join(" + ")} across ${enforcedCount} enforced ADR(s).${c.reset}${suffix}`,
   );
