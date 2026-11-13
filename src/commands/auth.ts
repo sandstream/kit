@@ -50,8 +50,13 @@ async function cmdAuthSetupTotp(): Promise<boolean> {
   } catch (err: unknown) {
     const msg = sanitizeDisplayText(err instanceof Error ? err.message : String(err));
     console.error(`${c.red}✗ ${msg}${c.reset}`);
+    const recovery =
+      err instanceof Error && "code" in err && err.code === "EISDIR"
+        ? "Move the directory aside and keep its contents. Then run `kit auth setup-totp` to enroll a new secret."
+        : "If the path is a directory, move the directory aside and keep its contents. " +
+          "Then run `kit auth setup-totp`. To replace a file or symlink, run `kit auth setup-totp --overwrite`.";
     console.error(
-      `${c.dim}If you intentionally want to replace the existing secret, re-run with ${c.bold}--overwrite${c.reset}${c.dim} (your old authenticator entry will stop working).${c.reset}\n`,
+      `${c.dim}${recovery} Your old authenticator entry will stop working.${c.reset}\n`,
     );
     return false;
   }

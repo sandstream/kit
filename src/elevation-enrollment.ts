@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { constants, type BigIntStats } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { sameIdentity } from "./utils/same-file.js";
 import { secureFileStrict } from "./utils/secure-perms.js";
 import { buildOtpAuthUri, generateBase32Secret, generateTotp } from "./elevation-totp.js";
 
@@ -77,12 +79,56 @@ export class TotpSecretUnusableError extends Error {
     super(
       `TOTP secret at ${filePath} is enrolled but unusable (${reason}). ` +
         `Elevation is refused so a broken file cannot remove the second factor. ` +
-        `Repair the file, or run \`kit auth setup-totp --overwrite\` to enroll a new secret.`,
+        `Repair the file, or replace a file or symlink with \`kit auth setup-totp --overwrite\`. ` +
+        `If the path is a directory, move the directory aside and keep its contents. ` +
+        `Then run \`kit auth setup-totp\` to enroll a new secret. ` +
+        `If you enroll a new secret, your old authenticator entry will stop working.`,
       options,
     );
     this.name = "TotpSecretUnusableError";
     this.filePath = filePath;
   }
+}
+
+/** Read only the observed regular file, without following a replacement symlink. */
+async function readObservedTotpFile(filePath: string, entry: BigIntStats): Promise<string> {
+  const { lstat, open } = await import("node:fs/promises");
+  // Reject symlink replacement and avoid blocking on a replacement FIFO.
+  const file = await open(
+    filePath,
+    constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const opened = await file.stat({ bigint: true });
+    const current = await lstat(filePath, { bigint: true });
+    // Windows has no O_NOFOLLOW. Check the entry and handle before reading.
+    if (
+      !opened.isFile() ||
+      !current.isFile() ||
+      !sameIdentity(entry, opened) ||
+      !sameIdentity(current, opened)
+    ) {
+      throw new TotpSecretUnusableError(filePath, "the file changed before it could be read");
+    }
+    return await file.readFile("utf-8");
+  } finally {
+    await file.close();
+  }
+}
+
+/** Preserve the verifier's supported encoding, but require at least one key byte. */
+function usableTotpFileSecret(content: string, filePath: string): string {
+  const secret = content.trim();
+  if (!secret) throw new TotpSecretUnusableError(filePath, "the file is empty");
+  // Match the verifier's normalization. Fewer than two symbols decode to zero key bytes.
+  if (secret.toUpperCase().replace(/=+$/, "").replace(/\s+/g, "").length < 2)
+    throw new TotpSecretUnusableError(filePath, "the secret contains no key bytes");
+  try {
+    generateTotp(secret);
+  } catch (error) {
+    throw new TotpSecretUnusableError(filePath, "invalid base32 secret", { cause: error });
+  }
+  return secret;
 }
 
 /**
@@ -92,22 +138,26 @@ export class TotpSecretUnusableError extends Error {
  *   3. undefined, only when no file exists (not enrolled). The caller then falls
  *      back to the yes-prompt.
  *
- * A file that exists but is unreadable, empty, whitespace-only or a directory throws
+ * An unreadable, invalid or nonregular file, including a symlink, throws
  * `TotpSecretUnusableError`. It is not the same as "not enrolled".
  */
 export async function resolveTotpSecret(): Promise<string | undefined> {
   if (process.env.KIT_TOTP_SECRET) return process.env.KIT_TOTP_SECRET;
   const filePath = totpFilePath();
-  const { readFile } = await import("node:fs/promises");
+  const { lstat } = await import("node:fs/promises");
+  let enrolled = false;
   let content: string;
   try {
-    content = await readFile(filePath, "utf-8");
+    const entry = await lstat(filePath, { bigint: true });
+    enrolled = true;
+    if (!entry.isFile()) throw new TotpSecretUnusableError(filePath, "not a regular file");
+    content = await readObservedTotpFile(filePath, entry);
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    if (!enrolled && error instanceof Error && "code" in error && error.code === "ENOENT")
+      return undefined;
+    if (error instanceof TotpSecretUnusableError) throw error;
     const code = error instanceof Error && "code" in error ? String(error.code) : "read failed";
     throw new TotpSecretUnusableError(filePath, code, { cause: error });
   }
-  const secret = content.trim();
-  if (!secret) throw new TotpSecretUnusableError(filePath, "the file is empty");
-  return secret;
+  return usableTotpFileSecret(content, filePath);
 }
