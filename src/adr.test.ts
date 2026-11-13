@@ -88,7 +88,10 @@ describe("evaluateAdr", () => {
   });
 
   it("ignores files outside the glob", () => {
-    const v = evaluateAdr(adr, [{ path: "src/service/db.ts", content: "import x from 'pg'" }]);
+    const v = evaluateAdr(adr, [
+      { path: "src/service/db.ts", content: "import x from 'pg'" },
+      { path: "src/web/clean.ts", content: "export const ok = 1;" },
+    ]);
     assert.equal(v.length, 0);
   });
 
@@ -153,7 +156,10 @@ describe("require_pattern", () => {
   });
 
   it("ignores files outside the glob", () => {
-    const v = evaluateAdr(adr, [{ path: "src/lib/util.ts", content: "no wrapper here" }]);
+    const v = evaluateAdr(adr, [
+      { path: "src/lib/util.ts", content: "no wrapper here" },
+      { path: "src/web/handler.ts", content: "import { withGovernance } from '../gov.js'\n" },
+    ]);
     assert.equal(v.length, 0);
   });
 });
@@ -522,5 +528,62 @@ describe("parseAdr — enforced_by", () => {
 
   it("yields nothing rather than a guess for a shape it does not understand", () => {
     assert.deepEqual(parseAdr(withFrontmatter("enforced_by: src/a.test.ts\n"))?.enforcedBy, []);
+  });
+});
+
+/**
+ * A rule that checks nothing used to print "no new violations". kit-research
+ * `ddd-ubiquitous-language-vs-kit` measured three ways to write one. Each is a gap now.
+ */
+describe("evaluateAdr — a rule that checks nothing is a gap, never a pass", () => {
+  const vocab = (pattern: string, paths: string) =>
+    parseAdr(`---
+id: ADR-0042
+title: One name for the install gate
+status: accepted
+---
+
+\`\`\`toml kit-enforce
+[[forbid_pattern]]
+pattern = "${pattern}"
+paths = "${paths}"
+message = "use the glossary term: install gate"
+\`\`\`
+`)!;
+  const files = [{ path: "src/a.ts", content: "// the bash gate\nexport const x = 1;\n" }];
+  const opts = { adrFile: "docs/adr/0042-vocabulary.md" };
+
+  it("still flags the word when the rule can run", () => {
+    const v = evaluateAdr(vocab("bash gate", "src/**/*.ts"), files, opts);
+    assert.equal(v.length, 1);
+    assert.equal(v[0].kind, "violation");
+  });
+
+  it("a glob that selects no file it reads (docs/**/*.md) is a gap on the ADR file", () => {
+    const v = evaluateAdr(vocab("bash gate", "docs/**/*.md"), files, opts);
+    assert.equal(v.length, 1);
+    assert.equal(v[0].kind, "gap");
+    assert.equal(v[0].file, "docs/adr/0042-vocabulary.md");
+    assert.match(v[0].message, /matches no file .* checks nothing/);
+  });
+
+  it("a mistyped glob is a gap", () => {
+    const v = evaluateAdr(vocab("bash gate", "srcc/**/*.ts"), files, opts);
+    assert.deepEqual(
+      v.map((x) => x.kind),
+      ["gap"],
+    );
+  });
+
+  it("an invalid regular expression is a gap, not a silent skip", () => {
+    const v = evaluateAdr(vocab("(?i)bash gate", "src/**/*.ts"), files, opts);
+    assert.equal(v.length, 1);
+    assert.equal(v[0].kind, "gap");
+    assert.match(v[0].message, /not a valid JavaScript regular expression/);
+  });
+
+  it("cites the ADR id when no ADR file is given", () => {
+    const v = evaluateAdr(vocab("bash gate", "docs/**/*.md"), files);
+    assert.equal(v[0].file, "ADR-0042");
   });
 });
