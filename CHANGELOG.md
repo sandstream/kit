@@ -19,6 +19,10 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+- **`kit audit verify --json` prints one document, and read-only mode writes no audit event.** The
+  report holds the chain, signature and anchor results without event payloads or external receipt
+  tokens. Activating read-only mode no longer appends an audit event, so a read does not change the
+  log it is verifying.
 - **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update

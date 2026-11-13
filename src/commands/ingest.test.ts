@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -214,27 +214,13 @@ syncBuiltinESMExports();
     assert.deepEqual(fixture.snapshot(), before);
   });
 
-  it(`${format}: records only global audit artifacts when read-only mode activates`, () => {
+  it(`${format}: preserves all files when read-only mode activates`, () => {
     const file = report(data);
     const before = fixture.snapshot();
     const result = fixture.run(["ingest", format, file, "--read-only", "--json"]);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).count, count);
-    const after = fixture.snapshot();
-    // Snapshot keys use the native separator, so build them with join.
-    delete after[join("project", ".kit-audit.jsonl")];
-    // Expected: audit activation needs its persistent coordination file. No report or home writes are allowed.
-    const lock = lstatSync(join(fixture.cwd, ".kit-audit.jsonl.lock.sqlite"));
-    assert.ok(lock.isFile());
-    assert.equal(lock.nlink, 1);
-    delete after[join("project", ".kit-audit.jsonl.lock.sqlite")];
-    assert.deepEqual(after, before);
-    const events = readFileSync(join(fixture.cwd, ".kit-audit.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.equal(events.length, 1);
-    assert.equal(events[0].operation, "read-only-mode-activated");
+    assert.deepEqual(fixture.snapshot(), before);
   });
 
   for (const data of format === "sarif"

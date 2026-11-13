@@ -1,6 +1,7 @@
 // `kit audit` commands — extracted from cli.ts (split step 4).
 import { readSecretAuditEvents, groupBySecret, summarize, exposureAt } from "../audit-secrets.js";
-import { readAuditLog } from "../audit.js";
+import { readAuditLog, type ChainVerifyResult, type SignatureVerifyResult } from "../audit.js";
+import type { AnchorVerifyResult, AnchorVerdict } from "../audit-anchor.js";
 import { resolve } from "node:path";
 import { printAuditTable } from "../output.js";
 import { loadConfig } from "../config.js";
@@ -228,12 +229,27 @@ async function cmdAuditVerifyAll(
   return report.ok;
 }
 
-/** Verify the HMAC anchor and its external receipt, then print the verdict. */
+/** Diagnostic summaries contain no event payloads or external receipt tokens. */
+interface AuditVerifyReport {
+  ok: boolean;
+  logPath: string;
+  chain: ChainVerifyResult | null;
+  signatures: (SignatureVerifyResult & { revoked: number }) | null;
+  anchor: (Omit<AnchorVerifyResult, "externalReceipt"> & { verdict: AnchorVerdict }) | null;
+  reason?: string;
+}
+
+function printAuditVerifyReport(report: AuditVerifyReport): boolean {
+  console.log(JSON.stringify(report, null, 2));
+  return report.ok;
+}
+
+/** Verify the anchor and its external receipt. Text output is optional. */
 async function verifyAnchorStage(
   logPath: string,
   content: string,
-  opts: { strict: boolean; requireExternal: boolean },
-): Promise<boolean> {
+  opts: { strict: boolean; requireExternal: boolean; jsonMode: boolean },
+): Promise<NonNullable<AuditVerifyReport["anchor"]>> {
   const {
     readAnchorRecord,
     tryReadAuditAnchorKey,
@@ -255,14 +271,18 @@ async function verifyAnchorStage(
     machineHasAnchors,
     requireExternal: opts.requireExternal,
   });
-  if (verdict.level === "ok") {
-    console.log(`${c.green}✓ ${verdict.message}${c.reset}`);
-  } else if (verdict.level === "warn") {
-    console.warn(`${c.yellow}! ${verdict.message}${c.reset}`);
-  } else {
-    console.error(`${c.red}✗ HMAC anchor FAILED: ${verdict.message}${c.reset}`);
+  if (!opts.jsonMode) {
+    if (verdict.level === "ok") {
+      console.log(`${c.green}✓ ${verdict.message}${c.reset}`);
+    } else if (verdict.level === "warn") {
+      console.warn(`${c.yellow}! ${verdict.message}${c.reset}`);
+    } else {
+      console.error(`${c.red}✗ HMAC anchor FAILED: ${verdict.message}${c.reset}`);
+    }
   }
-  return verdict.ok;
+  // Receipt tokens are evidence inputs, not diagnostic output.
+  const { externalReceipt: _receipt, ...summary } = a;
+  return { ...summary, verdict };
 }
 
 /**
@@ -281,6 +301,7 @@ async function cmdAuditVerify(): Promise<boolean> {
   const { verifyAuditChain } = await import("../audit.js");
   const { readFile } = await import("node:fs/promises");
   const args = process.argv.slice(3);
+  const jsonMode = hasFlag(args, "--json");
   const strictFlag = hasFlag(args, "--strict");
   const requireExternal = hasFlag(args, "--require-external");
   let requireAnchor = false;
@@ -293,9 +314,16 @@ async function cmdAuditVerify(): Promise<boolean> {
   // The union view answers for the machine, so it must run BEFORE this function
   // resolves a cwd-relative log — "no log here" is not an answer to "--all".
   if (hasFlag(args, "--all")) {
-    return cmdAuditVerifyAll(strictFlag || requireAnchor, hasFlag(args, "--json"), requireExternal);
+    return cmdAuditVerifyAll(strictFlag || requireAnchor, jsonMode, requireExternal);
   }
   const logPath = await resolveAuditLogPath();
+  const report: AuditVerifyReport = {
+    ok: false,
+    logPath,
+    chain: null,
+    signatures: null,
+    anchor: null,
+  };
   let content: string;
   try {
     content = await readFile(logPath, "utf-8");
@@ -307,6 +335,11 @@ async function cmdAuditVerify(): Promise<boolean> {
     const { hasAnyAnchoredLogs } = await import("../audit-anchor.js");
     const failClosed =
       strictFlag || requireAnchor || requireExternal || (await hasAnyAnchoredLogs());
+    if (jsonMode) {
+      report.ok = !failClosed;
+      report.reason = "audit log unavailable; nothing verified";
+      return printAuditVerifyReport(report);
+    }
     if (failClosed) {
       console.error(
         `${c.red}✗ no audit log at ${logPath} — refusing to report verified under strict / require_anchor / a machine that has anchored logs. An erased trail is a tamper signal, not a pass.${c.reset}`,
@@ -321,14 +354,45 @@ async function cmdAuditVerify(): Promise<boolean> {
     return true;
   }
   const r = verifyAuditChain(content);
+  report.chain = r;
   if (!r.ok) {
+    if (jsonMode) return printAuditVerifyReport(report);
     console.error(
       `${c.red}✗ audit chain BROKEN at entry ${r.brokenAt}: ${r.reason}${c.reset}  ${c.dim}(verified ${r.entries} entries before the break)${c.reset}`,
     );
     return false;
   }
-  console.log(`${c.green}✓ audit chain intact${c.reset}  ${c.dim}${r.entries} entries${c.reset}`);
+  if (!jsonMode)
+    console.log(`${c.green}✓ audit chain intact${c.reset}  ${c.dim}${r.entries} entries${c.reset}`);
 
+  report.signatures = await verifySignatureStage(content, jsonMode);
+  if (!report.signatures.ok) return jsonMode ? printAuditVerifyReport(report) : false;
+  report.anchor = await verifyAnchorStage(logPath, content, {
+    strict: strictFlag || requireAnchor,
+    requireExternal,
+    jsonMode,
+  });
+  report.ok = report.anchor.verdict.ok;
+  return jsonMode ? printAuditVerifyReport(report) : report.ok;
+}
+
+function printSignatureSummary(s: SignatureVerifyResult): void {
+  if (s.invalid > 0) {
+    console.error(
+      `${c.red}✗ ${s.invalid} signed entr${s.invalid === 1 ? "y has" : "ies have"} an INVALID signature (forged/tampered)${c.reset}`,
+    );
+  }
+  const parts = [`${s.verified}/${s.signed} signatures verified`];
+  if (s.unverifiable > 0) parts.push(`${s.unverifiable} from unknown key(s)`);
+  if (s.unsigned > 0) parts.push(`${s.unsigned} unsigned`);
+  const icon = s.ok ? `${c.green}✓` : `${c.red}✗`;
+  console.log(`${icon} identity signatures${c.reset}  ${c.dim}${parts.join(", ")}${c.reset}`);
+}
+
+async function verifySignatureStage(
+  content: string,
+  jsonMode: boolean,
+): Promise<NonNullable<AuditVerifyReport["signatures"]>> {
   // Identity-signature layer (orthogonal to the chain): proves WHO produced each
   // entry, not just that nothing was edited. Best-effort attribution — entries
   // signed by a locally-known key verify; unsigned (legacy/keyless) and entries
@@ -340,17 +404,9 @@ async function cmdAuditVerify(): Promise<boolean> {
   const { policySignersMap } = await import("../policy-trust.js");
   const trust = localPublicKeys();
   const s = verifyAuditSignatures(content, (kid) => trust.get(kid) ?? null);
+  let revokedSigs = 0;
   if (s.signed > 0) {
-    if (s.invalid > 0) {
-      console.error(
-        `${c.red}✗ ${s.invalid} signed entr${s.invalid === 1 ? "y has" : "ies have"} an INVALID signature (forged/tampered)${c.reset}`,
-      );
-    }
-    const parts = [`${s.verified}/${s.signed} signatures verified`];
-    if (s.unverifiable > 0) parts.push(`${s.unverifiable} from unknown key(s)`);
-    if (s.unsigned > 0) parts.push(`${s.unsigned} unsigned`);
-    const icon = s.ok ? `${c.green}✓` : `${c.red}✗`;
-    console.log(`${icon} identity signatures${c.reset}  ${c.dim}${parts.join(", ")}${c.reset}`);
+    if (!jsonMode) printSignatureSummary(s);
     // Revocation note (kit panic): entries signed by a now-revoked key are still
     // valid HISTORICAL evidence (the signature was good when made), but that key
     // is no longer trusted for NEW signatures. Surface it; don't fail on it.
@@ -363,34 +419,28 @@ async function cmdAuditVerify(): Promise<boolean> {
       new Map([...trust, ...orgSigners]),
       new Set([...localRevocationAuthorities(), ...orgSigners.keys()]),
     );
-    if (revoked.size > 0) {
-      let revokedSigs = 0;
-      for (const line of content.split("\n")) {
-        if (!line.trim()) continue;
-        try {
-          const o = JSON.parse(line) as { kid?: unknown };
-          if (typeof o.kid === "string" && revoked.has(o.kid)) revokedSigs++;
-        } catch {
-          /* chain verifier already covers unparseable lines */
-        }
-      }
-      if (revokedSigs > 0) {
-        console.warn(
-          `${c.yellow}! ${revokedSigs} entr${revokedSigs === 1 ? "y" : "ies"} signed by a REVOKED key${c.reset} ${c.dim}(valid as history; key no longer trusted for new signatures — kit panic)${c.reset}`,
-        );
+    if (revoked.size === 0) return { ...s, revoked: 0 };
+    for (const line of content.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const o = JSON.parse(line) as { kid?: unknown };
+        if (typeof o.kid === "string" && revoked.has(o.kid)) revokedSigs++;
+      } catch {
+        /* chain verifier already covers unparseable lines */
       }
     }
-    if (!s.ok) return false;
-  } else if (s.unsigned > 0) {
+    if (!jsonMode && revokedSigs > 0) {
+      console.warn(
+        `${c.yellow}! ${revokedSigs} entr${revokedSigs === 1 ? "y" : "ies"} signed by a REVOKED key${c.reset} ${c.dim}(valid as history; key no longer trusted for new signatures — kit panic)${c.reset}`,
+      );
+    }
+  } else if (!jsonMode && s.unsigned > 0) {
     console.log(
       `${c.dim}· no identity signatures (${s.unsigned} keyless entries — run \`kit identity\` to start signing)${c.reset}`,
     );
   }
 
-  return verifyAnchorStage(logPath, content, {
-    strict: strictFlag || requireAnchor,
-    requireExternal,
-  });
+  return { ...s, revoked: revokedSigs };
 }
 
 /**
