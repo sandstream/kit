@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+### Fixed
+
+- **`kit adr check` no longer passes a rule that checks nothing.** A `forbid_pattern` or `require_pattern`
+  rule printed _"no new violations"_ when its `paths` glob selected no file the gate reads (it reads
+  code files only, so a rule over `docs/**/*.md` matched nothing), when the glob was invalid, or when
+  the regex was invalid (`(?i)…` is not JavaScript syntax). `kit adr list` still said _"enforced"_.
+  Each case is now a gap on the ADR file, _"… — this rule checks nothing"_, which fails the gate like
+  any other gap. kit's own enforced ADRs all match real files and are unaffected. Found by kit-research
+  `ddd-ubiquitous-language-vs-kit`.
+
+- **`kit gha-audit` reads a trigger written as a flow map, and flags a `workflow_run` that runs after
+  downloading the triggering run's artifact.** `on: { pull_request_target: { types: [opened] } }`
+  read as no trigger, so `gh pr checkout` and `make` under it passed with no pwn-request row and no
+  2026-12-02 row. A `workflow_run` job that downloads an artifact of the run that triggered it
+  (`actions/download-artifact` with `run-id: ${{ github.event.workflow_run.id }}`,
+  `dawidd6/action-download-artifact`, or `gh run download` of that id) and then has a `run:` step now
+  gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
+  says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
+  tier 3 (rows W08 and W12).
+- **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
+  prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
+  environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
+  notice) and the inline codes in `kit login` now share one rule.
+
 ### Security
 
 - **`kit auth elevate` refuses when the TOTP file is enrolled but unusable.** A `~/.kit/totp-secret`

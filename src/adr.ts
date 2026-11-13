@@ -277,6 +277,8 @@ export interface EvaluateAdrOptions {
   maxPackageDepth?: number;
   /** Hard cap on distinct files one walk may visit before it reports a gap. */
   maxNodes?: number;
+  /** The ADR's own file, cited by a finding about the rule itself (a rule that checks nothing). */
+  adrFile?: string;
 }
 
 const DEFAULT_MAX_PACKAGE_DEPTH = 3;
@@ -305,12 +307,13 @@ function createWalkContext(files: AdrSourceFile[], opts: EvaluateAdrOptions): Ad
   };
 }
 
-function matchRuleFiles(paths: string, files: AdrSourceFile[]): AdrSourceFile[] {
+/** The files a rule's glob selects, or null when the glob itself is invalid. */
+function matchRuleFiles(paths: string, files: AdrSourceFile[]): AdrSourceFile[] | null {
   try {
     const matcher = globToRegExp(paths);
     return files.filter((file) => matcher.test(file.path.replaceAll("\\", "/")));
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -380,16 +383,44 @@ function evaluateForbidImport(
   return violations;
 }
 
+/**
+ * Why a rule cannot check anything, or null when it can. A rule with an invalid glob or
+ * regex, or a glob that selects no file `adr check` reads, used to produce no finding and
+ * so a green "no new violations" for a decision nothing enforced. kit-research
+ * `ddd-ubiquitous-language-vs-kit` measured all three. Each is now a gap, which fails the
+ * gate and is never presented as a pass.
+ */
+function uncheckableReason(
+  rule: AdrRule,
+  matched: AdrSourceFile[] | null,
+  matcher: RegExp | null,
+  source: string,
+): string | null {
+  if (!matched) return `paths "${rule.paths}" is not a valid glob`;
+  if (!matcher) return `/${source}/ is not a valid JavaScript regular expression`;
+  if (matched.length === 0)
+    return `paths "${rule.paths}" matches no file that adr check reads (it reads code files only)`;
+  return null;
+}
+
 function evaluateRule(
   adrId: string,
   rule: AdrRule,
   files: AdrSourceFile[],
   ctx: AdrImportWalkContext,
+  adrFile: string,
 ): AdrViolation[] {
-  const matched = matchRuleFiles(rule.paths, files);
+  const found = matchRuleFiles(rule.paths, files);
   const source = rule.type === "forbid-import" ? rule.import : rule.pattern;
   const matcher = safeRegExp(source);
-  if (!matcher) return [];
+  const reason = uncheckableReason(rule, found, matcher, source);
+  if (reason || !found || !matcher) {
+    const message = `${reason} — this rule checks nothing`;
+    return [
+      { adrId, file: adrFile, line: 1, rule: rule.type, detail: source, message, kind: "gap" },
+    ];
+  }
+  const matched = found;
   return rule.type === "forbid-import"
     ? evaluateForbidImport(adrId, rule, matched, matcher, ctx)
     : matched.flatMap((file) => evaluatePatternRule(adrId, rule, file, matcher));
@@ -407,7 +438,8 @@ export function evaluateAdr(
 ): AdrViolation[] {
   if (adr.status !== "accepted") return [];
   const walkCtx = createWalkContext(files, opts);
-  return adr.rules.flatMap((rule) => evaluateRule(adr.id, rule, files, walkCtx));
+  const adrFile = opts.adrFile ?? adr.id;
+  return adr.rules.flatMap((rule) => evaluateRule(adr.id, rule, files, walkCtx, adrFile));
 }
 
 function safeRegExp(src: string): RegExp | null {
