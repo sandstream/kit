@@ -156,3 +156,36 @@ describe("install gate — review findings on the flag reader", () => {
     );
   });
 });
+
+describe("install gate — second review of the flag reader", () => {
+  it("does not treat a runner or initiator verb in the slot as proof that an option took no value", () => {
+    // `--frobnicate exec` may be an option with the value `exec`; `install evil-x` then runs.
+    const p = parseInstallCommand("npm --frobnicate exec install evil-x");
+    assert.equal(p.isInstall, true);
+    assert.deepEqual(p.unverifiable, ["global-option:npm --frobnicate exec"]);
+  });
+
+  it("reads the value of a wrapper's own option as a value, even when it is named like a command", () => {
+    // The user of `sudo -u` here is called `pip`; the command is `npm i evil-x`.
+    assert.deepEqual(refsOf("sudo -u pip npm i evil-x"), ["npm:evil-x"]);
+    assert.deepEqual(refsOf("env -u pip npm i evil-x"), ["npm:evil-x"]);
+    assert.deepEqual(refsOf("sudo -g python3 -h uv npm i evil-x"), ["npm:evil-x"]);
+  });
+
+  const redirectingOptions = [
+    "pdm -c /tmp/evil.toml add evil-x",
+    "pdm --config /tmp/evil.toml add evil-x",
+    "pipx --pip-args foo install evil-x",
+    "uv --config-file /tmp/evil.toml pip install evil-x",
+  ];
+  for (const cmd of redirectingOptions) {
+    it(`fails closed on an option that can carry a registry: ${cmd}`, () => {
+      const p = parseInstallCommand(cmd);
+      assert.equal(p.isInstall, true);
+      assert.ok(
+        p.unverifiable.some((u) => u.startsWith("global-option:")),
+        p.unverifiable.join(),
+      );
+    });
+  }
+});

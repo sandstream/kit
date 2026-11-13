@@ -95,6 +95,26 @@ const startsCommand = (tok: string): boolean => {
 };
 
 /**
+ * The flags of a wrapper that take a separate value. The value is consumed with its flag, so a
+ * value named like a command (`sudo -u pip npm i x`, where `pip` is a user) is never read as the
+ * command. A wrapper's other values (`timeout 60`, `chrt 10`, `flock <file>`) are positional and
+ * are found by the scan in `skipWrapperArgs`.
+ */
+const WRAPPER_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
+  sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-r", "-t", "-T", "-U", "-D", "-R"]),
+  doas: new Set(["-u", "-C"]),
+  env: new Set(["-u", "-C", "-S", "-P"]),
+  timeout: new Set(["-s", "-k"]),
+  nice: new Set(["-n"]),
+  ionice: new Set(["-c", "-n", "-p", "-P", "-u"]),
+  chrt: new Set([]),
+  taskset: new Set(["-p"]),
+  flock: new Set(["-w", "-E"]),
+  stdbuf: new Set(["-i", "-o", "-e"]),
+  setsid: new Set([]),
+};
+
+/**
  * Index of the first token after a wrapper's flags AND values. Values are skipped only when a
  * known command or wrapper follows them anywhere later in the segment, so `sudo vim x` still
  * reads `vim` as the command. The search has no cap: a cap let a wrapper with more values than
@@ -102,8 +122,11 @@ const startsCommand = (tok: string): boolean => {
  * (`sudo echo npm i x`) is now read as the command, which fails closed.
  */
 export function skipWrapperArgs(tokens: string[], i: number): number {
+  const valueFlags = WRAPPER_VALUE_FLAGS[binBase(tokens[i - 1] ?? "")];
   const flags = (k: number) => {
-    while (k < tokens.length && tokens[k].startsWith("-")) k++;
+    while (k < tokens.length && tokens[k].startsWith("-")) {
+      k += valueFlags?.has(tokens[k]) && k + 1 < tokens.length ? 2 : 1;
+    }
     return k;
   };
   let k = flags(i);
@@ -117,7 +140,9 @@ export function skipWrapperArgs(tokens: string[], i: number): number {
  * (`npm --prefix <dir> install x`). Only the separate form needs listing: `--prefix=<dir>`
  * is one token and is dropped as a flag. Without this, the value read as the subcommand and
  * the install passed with no output (kit-research home-repo-pattern-vs-kit, 8 of 8 forms).
- * An option NOT listed here is handled fail-closed by `hiddenVerb`.
+ * An option NOT listed here is handled fail-closed by `hiddenVerb`. An option that can carry a
+ * registry or a config file (`uv --config-file`, `pdm -c`, `pipx --pip-args`) is left out on
+ * purpose: folding it would hide its value from the registry-redirect reader.
  */
 const PIP_VALUE_FLAGS = [
   "--proxy",
@@ -139,12 +164,22 @@ const GLOBAL_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
   pnpm: new Set(["-C", "--dir", "--filter", "-F", "--loglevel", "--reporter"]),
   yarn: new Set(["--cwd", "--modules-folder", "--cache-folder", "--mutex", "--network-timeout"]),
   bun: new Set(["--cwd"]),
-  uv: new Set(["--directory", "--project", "--cache-dir", "--config-file", "--color"]),
+  uv: new Set(["--directory", "--project", "--cache-dir", "--color"]),
   pip: new Set(PIP_VALUE_FLAGS),
   pip3: new Set(PIP_VALUE_FLAGS),
-  pipx: new Set(["--python", "--pip-args", "--log-dir"]),
+  pipx: new Set(["--python", "--log-dir"]),
   poetry: new Set(["-C", "--directory", "-P", "--project"]),
-  pdm: new Set(["-p", "--project", "-c", "--config"]),
+  pdm: new Set(["-p", "--project"]),
+};
+
+/**
+ * Options that name a config file, where the gate's generic reader would take `-c <value>` as a
+ * constraints file (pip's meaning). For these managers the file may set the registry, so the
+ * option stays unknown and the rule fails closed.
+ */
+const CONFIG_FILE_FLAGS: Record<string, ReadonlySet<string>> = {
+  pdm: new Set(["-c", "--config"]),
+  uv: new Set(["--config-file"]),
 };
 
 /**
@@ -168,6 +203,8 @@ const MANAGER_BINS = new Set([
   "pdm",
 ]);
 
+/** Verbs whose matcher triages every argument as a package: the only ones that clear an option. */
+const INSTALLER_VERB_RE = /^(install|i|add|install-test|it|update|upgrade|ci|clean-install)$/;
 /** Verbs that fetch a package, looked for after an ambiguous leading option. */
 const FETCH_VERB_RE =
   /^(install|i|add|install-test|it|update|upgrade|ci|clean-install|exec|x|dlx|create|init)$/;
@@ -187,7 +224,7 @@ function foldGlobalFlags(tokens: string[], isValueFlag: (flag: string) => boolea
     const next = tokens[i + 1];
     if (flag.includes("=") || next === undefined || next.startsWith("-")) continue;
     if (known.has(flag)) tokens.splice(i, 2, `${flag}=${next}`);
-    else if (isValueFlag(flag))
+    else if (isValueFlag(flag) && !CONFIG_FILE_FLAGS[tokens[0]]?.has(flag))
       i++; // its value; the caller's positional and redirect readers take the pair
     else if (!unknown) unknown = flag;
   }
@@ -208,10 +245,18 @@ export function hiddenVerb(
   const unknown = foldGlobalFlags(tokens, isValueFlag);
   if (!unknown) return null;
   const verbs = positionals(tokens);
+  // The caller's positional reader drops the file after a `-c`, so a config option is judged on
+  // every positional: a fetch verb anywhere makes the install unverifiable.
+  if (CONFIG_FILE_FLAGS[tokens[0]]?.has(unknown)) {
+    return verbs.some((t) => FETCH_VERB_RE.test(t))
+      ? `global-option:${tokens[0]} ${unknown} config-file`
+      : null;
+  }
   if (!verbs.slice(2).some((t) => FETCH_VERB_RE.test(t))) return null;
-  // The subcommand slot holds a fetch verb the matchers triage: the option took no value.
-  // Any other verb there (`run`, `tool`, ...) may be the option's value, and the fetch verb
-  // behind it the real command, so it is not safe.
-  if (FETCH_VERB_RE.test(verbs[1] ?? "")) return null;
+  // The subcommand slot holds an installer verb whose matcher triages every argument: the option
+  // took no value. Any other verb there (`run`, `tool`, and also the runners `exec`, `dlx`,
+  // `create`, `init`, which triage only their first argument) may be the option's value, and the
+  // fetch verb behind it the real command, so it is not safe.
+  if (INSTALLER_VERB_RE.test(verbs[1] ?? "")) return null;
   return `global-option:${tokens[0]} ${unknown} ${verbs[1]}`;
 }
