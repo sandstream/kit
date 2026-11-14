@@ -930,140 +930,140 @@ async function memSuggest(): Promise<boolean> {
   return true;
 }
 
-async function memSearch(): Promise<boolean> {
-  const jsonMode = hasFlag(process.argv, "--json");
-  // Extract positional query terms, skipping flags AND the value of space-form
-  // value-flags (`--limit 3` / `--project /p`) so "3" doesn't leak into the query.
-  const VALUE_FLAGS = new Set(["--limit", "--project"]);
-  const rawArgs = process.argv.slice(4);
+// Space-form value flags (`--limit 3`, `--project /p`) must not leak their value into the query.
+function searchQueryFromArgs(argv: string[]): string {
+  const valueFlags = new Set(["--limit", "--project"]);
+  const rawArgs = argv.slice(4);
   const terms: string[] = [];
   for (let i = 0; i < rawArgs.length; i++) {
     const a = rawArgs[i];
     if (a.startsWith("--")) {
-      if (VALUE_FLAGS.has(a)) i++; // consume the following value token
+      if (valueFlags.has(a)) i++; // consume the following value token
       continue;
     }
     terms.push(a);
   }
-  const query = terms.join(" ").trim();
-  if (!query) {
-    console.error(
-      `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N] [--fresh] [--brief]${c.reset}`,
-    );
-    return false;
-  }
+  return terms.join(" ").trim();
+}
+
+// Raw recall. Quarantined rows (high-confidence injection) stay out unless
+// --include-quarantined asks for them. --fresh adds recency-aware ranking.
+function searchRawMessages(query: string, projectPath: string | undefined): SearchHit[] {
   const limit = Number(flagValue(process.argv, "--limit") ?? "20") || 20;
-  const projectPath = hasFlag(process.argv, "--global")
-    ? undefined
-    : (flagValue(process.argv, "--project") ?? getCurrentProjectRoot());
-  // Quarantined (high-confidence injection) rows are excluded from recall by
-  // default so a poisoned line is never re-injected; --include-quarantined shows
-  // them (for inspection) — still badged as flagged in the render below.
   const includeQuarantined = hasFlag(process.argv, "--include-quarantined");
-  // --fresh: recency-aware ranking (RRF-fuse bm25 relevance + recency). Off by default so the
-  // relevance-first ordering is unchanged unless asked for.
   const recencyBoost = hasFlag(process.argv, "--fresh");
-  // --brief: progressive-disclosure recall (B3) — return the minimal sufficient
-  // slice (budget-bounded snippets) and report how many hits were withheld, instead
-  // of dumping every match. Never silently truncates.
-  const brief = hasFlag(process.argv, "--brief");
   const db = openMemoryDb();
   const hits = searchMessages(db, query, { limit, projectPath, includeQuarantined, recencyBoost });
-  // Record the recall (query_log) — best-effort; never let logging break search.
   try {
     recordQuery(db, { query, hitCount: hits.length, projectPath });
   } catch {
     // logging is non-critical
   }
   db.close();
+  return hits;
+}
 
-  // Curated shared tier (.kit/shared/memory.jsonl) — high-signal, team-reviewed
-  // decisions/conventions that travel with the repo. Always project-local (so
-  // `--global`, which widens the raw-recall scope across projects, still reads
-  // THIS repo's shared store). Fail-open: a missing/broken file never breaks search.
-  const sharedRoot = flagValue(process.argv, "--project") ?? getCurrentProjectRoot();
-  let shared: SharedEntry[] = [];
+// The curated tier is always project-local, also under --global. A missing or broken file never breaks search.
+function searchSharedTier(sharedRoot: string, query: string): SharedEntry[] {
   try {
-    shared = searchShared(sharedRoot, query);
+    return searchShared(sharedRoot, query);
   } catch {
-    // shared tier is best-effort context, never gates raw recall
+    return [];
   }
+}
+
+// Superseded and reversed matches stay visible with a badge and an age.
+function printSharedMatches(shared: SharedEntry[], sharedRoot: string): void {
+  const allShared = readShared(sharedRoot);
+  console.log(
+    `${c.bold}${shared.length}${c.reset} curated (shared) match(es) ${c.dim}— team decisions${c.reset}`,
+  );
+  for (const e of shared) {
+    const st = effectiveStatus(e, allShared);
+    const badge =
+      st === "active" ? "" : ` ${st === "reversed" ? c.red : c.yellow}[${st}]${c.reset}`;
+    const age = formatAge(e.ts);
+    const prov = `${e.area} · ${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}${age ? ` · ${age}` : ""}`;
+    // Recalled text goes back into the agent prompt: strip hidden chars, flag injection.
+    const title = sanitizeForPrompt(e.title);
+    console.log(
+      `  ${c.bold}[${e.kind}]${c.reset} ${title.text}${title.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}${badge} ${c.dim}— ${prov}${c.reset}`,
+    );
+    if (!e.body) continue;
+    const body = sanitizeForPrompt(e.body);
+    console.log(
+      `    ${c.dim}${body.text.replace(/\s+/g, " ").slice(0, 160)}${c.reset}${body.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}`,
+    );
+  }
+}
+
+type RecallLineHit = Pick<
+  SearchHit,
+  "timestamp" | "role" | "uuid" | "harness" | "cwd" | "gitBranch"
+>;
+
+function printRecallLine(h: RecallLineHit, text: string, maxChars?: number): void {
+  const s = sanitizeForPrompt(text);
+  const flat = s.text.replace(/\s+/g, " ");
+  const snippet = maxChars === undefined ? flat : flat.slice(0, maxChars);
+  console.log(
+    `  ${c.dim}${h.timestamp ?? "?"} ${recallOrigin(h)}${c.reset} ${c.bold}${h.role ?? h.uuid ?? ""}${c.reset}  ${snippet}${s.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}`,
+  );
+}
+
+// Progressive disclosure: the minimal sufficient slice and an explicit withheld count.
+function printBriefHits(hits: SearchHit[], scope: string): void {
+  const disc = progressiveDisclose(hits);
+  console.log(
+    `${c.bold}${disc.shown}${c.reset} of ${hits.length} match(es) ${scope} ${c.dim}— brief${c.reset}`,
+  );
+  for (const h of disc.hits) printRecallLine(h, h.snippet);
+  if (disc.withheld > 0) {
+    console.log(
+      `${c.dim}  … ${disc.withheld} more withheld (budget ${disc.budgetChars} chars) — drop --brief or raise --limit to expand${c.reset}`,
+    );
+  }
+}
+
+function printFullHits(hits: SearchHit[], scope: string): void {
+  console.log(`${c.bold}${hits.length}${c.reset} match(es) ${scope}`);
+  for (const h of hits) printRecallLine(h, h.content ?? "", 120);
+}
+
+async function memSearch(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const brief = hasFlag(process.argv, "--brief");
+  const query = searchQueryFromArgs(process.argv);
+  if (!query) {
+    console.error(
+      `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N] [--fresh] [--brief]${c.reset}`,
+    );
+    return false;
+  }
+  const projectPath = hasFlag(process.argv, "--global")
+    ? undefined
+    : (flagValue(process.argv, "--project") ?? getCurrentProjectRoot());
+  const hits = searchRawMessages(query, projectPath);
+  const sharedRoot = flagValue(process.argv, "--project") ?? getCurrentProjectRoot();
+  const shared = searchSharedTier(sharedRoot, query);
 
   if (jsonMode) {
-    console.log(
-      JSON.stringify(
-        brief ? { disclosure: progressiveDisclose(hits), shared } : { messages: hits, shared },
-      ),
-    );
+    const body = brief
+      ? { disclosure: progressiveDisclose(hits), shared }
+      : { messages: hits, shared };
+    console.log(JSON.stringify(body));
     return true;
   }
-
-  // Curated decisions first — they're the durable context, not a raw transcript
-  // line. Superseded/reversed matches are still shown (so "this was tried + undone"
-  // surfaces) but badged, with age — relevance stays the reader's call.
-  if (shared.length) {
-    const allShared = readShared(sharedRoot);
-    console.log(
-      `${c.bold}${shared.length}${c.reset} curated (shared) match(es) ${c.dim}— team decisions${c.reset}`,
-    );
-    for (const e of shared) {
-      const st = effectiveStatus(e, allShared);
-      const badge =
-        st === "active" ? "" : ` ${st === "reversed" ? c.red : c.yellow}[${st}]${c.reset}`;
-      const age = formatAge(e.ts);
-      const prov = `${e.area} · ${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}${age ? ` · ${age}` : ""}`;
-      // Recalled text is re-injected into the agent's prompt → sanitize + flag it
-      // (R2): strip hidden chars and badge any high-confidence injection pattern.
-      const title = sanitizeForPrompt(e.title);
-      console.log(
-        `  ${c.bold}[${e.kind}]${c.reset} ${title.text}${title.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}${badge} ${c.dim}— ${prov}${c.reset}`,
-      );
-      if (e.body) {
-        const body = sanitizeForPrompt(e.body);
-        console.log(
-          `    ${c.dim}${body.text.replace(/\s+/g, " ").slice(0, 160)}${c.reset}${body.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}`,
-        );
-      }
-    }
-  }
-
-  const scope = projectPath ? `${c.dim}in ${projectPath}${c.reset}` : `${c.dim}(global)${c.reset}`;
+  if (shared.length) printSharedMatches(shared, sharedRoot);
   if (!hits.length) {
-    if (shared.length) return true; // curated results already shown; raw recall empty
-    console.log(`${c.dim}no matches for "${query}" ${projectPath ?? "(global)"}${c.reset}`);
-    return true;
-  }
-  if (brief) {
-    // Progressive disclosure (B3): the minimal sufficient slice + an explicit
-    // withheld count (never a silent truncation).
-    const disc = progressiveDisclose(hits);
-    console.log(
-      `${c.bold}${disc.shown}${c.reset} of ${hits.length} match(es) ${scope} ${c.dim}— brief${c.reset}`,
-    );
-    for (const h of disc.hits) {
-      const s = sanitizeForPrompt(h.snippet);
-      const snippet = s.text.replace(/\s+/g, " ");
-      console.log(
-        `  ${c.dim}${h.timestamp ?? "?"} ${recallOrigin(h)}${c.reset} ${c.bold}${h.role ?? h.uuid ?? ""}${c.reset}  ${snippet}${s.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}`,
-      );
-    }
-    if (disc.withheld > 0) {
-      console.log(
-        `${c.dim}  … ${disc.withheld} more withheld (budget ${disc.budgetChars} chars) — drop --brief or raise --limit to expand${c.reset}`,
-      );
+    if (!shared.length) {
+      console.log(`${c.dim}no matches for "${query}" ${projectPath ?? "(global)"}${c.reset}`);
     }
     return true;
   }
-  console.log(`${c.bold}${hits.length}${c.reset} match(es) ${scope}`);
-  for (const h of hits) {
-    // Raw recalled transcript text goes back into the agent's prompt → sanitize
-    // (strip hidden chars) and flag high-confidence injection patterns (R2).
-    const s = sanitizeForPrompt(h.content ?? "");
-    const snippet = s.text.replace(/\s+/g, " ").slice(0, 120);
-    console.log(
-      `  ${c.dim}${h.timestamp ?? "?"} ${recallOrigin(h)}${c.reset} ${c.bold}${h.role ?? h.uuid ?? ""}${c.reset}  ${snippet}${s.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}`,
-    );
-  }
+  const scope = projectPath ? `${c.dim}in ${projectPath}${c.reset}` : `${c.dim}(global)${c.reset}`;
+  if (brief) printBriefHits(hits, scope);
+  else printFullHits(hits, scope);
   return true;
 }
 
