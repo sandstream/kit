@@ -229,6 +229,14 @@ describe("tool text and fields FastMCP emits (kit-research fastmcp-vs-kit)", () 
       );
     });
   }
+});
+
+describe("drift over the fields FastMCP emits", () => {
+  const base: McpToolDef = {
+    name: "forecast",
+    description: "Return the forecast for a city.",
+    inputSchema: { type: "object", properties: { city: { type: "string" } } },
+  };
 
   it("treats a flipped readOnlyHint or a widened output schema as a rug pull", () => {
     const hash = (extra: Record<string, unknown>) =>

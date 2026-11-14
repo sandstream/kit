@@ -165,29 +165,34 @@ export function analyzeMcpTools(tools: McpToolDef[]): {
 
 /** Recursively collect property-key paths from a JSON schema (for name-based checks). */
 function collectParamNames(schema: unknown, path = ""): string[] {
-  const out: string[] = [];
-  if (!schema || typeof schema !== "object") return out;
+  if (!schema || typeof schema !== "object") return [];
   const obj = schema as Record<string, unknown>;
+  const out: string[] = [];
   const props = obj.properties;
   if (props && typeof props === "object") {
     for (const [key, val] of Object.entries(props as Record<string, unknown>)) {
-      const p = path ? `${path}.${key}` : key;
-      out.push(p);
-      out.push(...collectParamNames(val, p));
+      const p = joinPath(path, key);
+      out.push(p, ...collectParamNames(val, p));
     }
   }
-  if (obj.items) out.push(...collectParamNames(obj.items, path ? `${path}[]` : "[]"));
+  for (const [child, childPath] of paramChildren(obj, path)) {
+    out.push(...collectParamNames(child, childPath));
+  }
+  return out;
+}
+
+/** Sub-schemas that hold parameters under the same name path: items, unions and `$defs`. */
+function paramChildren(obj: Record<string, unknown>, path: string): [unknown, string][] {
+  const out: [unknown, string][] = [];
+  if (obj.items) out.push([obj.items, path ? `${path}[]` : "[]"]);
   for (const key of SCHEMA_CHILD_LISTS) {
     const list = obj[key];
-    if (Array.isArray(list)) for (const val of list) out.push(...collectParamNames(val, path));
+    if (Array.isArray(list)) for (const val of list) out.push([val, path]);
   }
   for (const key of ["$defs", "definitions"]) {
     const map = obj[key];
-    if (map && typeof map === "object") {
-      for (const val of Object.values(map as Record<string, unknown>)) {
-        out.push(...collectParamNames(val, path));
-      }
-    }
+    if (!map || typeof map !== "object") continue;
+    for (const val of Object.values(map as Record<string, unknown>)) out.push([val, path]);
   }
   return out;
 }
