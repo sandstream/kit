@@ -113,6 +113,11 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+- **`kit security verify-pull` reports what a pull changed, without hiding gaps.** It compares the
+  dependency sections of every tracked `package.json` between two commits, masks recognized
+  credentials, keeps the sensitivity of a removed `.gitignore` entry before redaction, and reports
+  invalid refs, unreadable files, malformed manifests and non-UTF-8 paths as failures or incomplete
+  coverage instead of a clean result. See `docs/VERIFY_PULL.md`.
 
 - **The install gate reads options before the subcommand, and a wrapper's own values.** Eleven
   in-scope installs passed `kit gate-bash` with no output: `npm --prefix <dir> install x` (also
