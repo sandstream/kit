@@ -11,6 +11,14 @@
 
 ### Fixed
 
+- **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
+  approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
+  `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in
+  `docs/adr/` with the code and test that enforce them, `.kit-baseline.json`, `scripts/prepush*`,
+  `eslint.config.js`, `.semgrepignore` and `.kit-secretsignore` are now protected paths, so a change
+  to any of them needs the owner. Before, a pull request could edit the baseline or a lint
+  exclusion and pass every check it had just relaxed.
+
 - **The install gate reads installs run through Windows shells.** It recursed into `sh -c` and
   `bash -c`, but `cmd /c npm install x`, `powershell -c "npm install x"` and
   `pwsh -Command "pip install x"` passed silently, on a platform kit supports natively. It now reads
