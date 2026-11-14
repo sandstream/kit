@@ -17,6 +17,12 @@
   `npm config set dangerously-allow-all-scripts true` passed silently. These, `--no-ignore-scripts`
   and the matching `npm_config_*` variables are now refused, including inside `sh -c` and behind
   `sudo`. Found by kit-research `supply-chain-2026-fundamentals-vs-kit`.
+- **The install gate refuses commands that skip the git hooks.** `git commit --no-verify`,
+  `git -c core.hooksPath=/dev/null commit` and `HUSKY=0 git commit` passed `gate-bash` silently,
+  and the `-c` form left no skip record either. The gate now names and refuses `--no-verify` and
+  `commit -n` on hook-running subcommands, `core.hooksPath` overrides and changes, `HUSKY=0`, and
+  removing or disabling a hook file, including inside `sh -c` and behind `env`/`sudo`. Found by
+  kit-research `checks-in-harness-hooks-vs-kit`.
 - **Every gate deny is audited.** `gate-bash` and `gate-env` never wrote an audit entry when they
   refused, and the egress and fs gates wrote none in a repository without a `.kit.toml`. All four
   now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
