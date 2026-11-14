@@ -10,6 +10,7 @@
  */
 import type { SecurityCheckResult } from "../check-security.js";
 import type { RuleRef } from "../rules/catalog.js";
+import { ingestCloudflareAudit } from "./ingest-cloudflare-audit.js";
 
 type Severity = NonNullable<SecurityCheckResult["severity"]>;
 
@@ -186,15 +187,19 @@ export function parseOsv(json: string): SecurityCheckResult[] {
   return out;
 }
 
-export type IngestFormat = "sarif" | "osv";
+export type IngestFormat = "sarif" | "osv" | "cloudflare-audit";
 
 /** Dispatch to the right parser. Unknown format → []. Lenient: malformed input → []. */
 export function ingest(format: IngestFormat, json: string): SecurityCheckResult[] {
+  if (format === "cloudflare-audit") {
+    const outcome = ingestStrict(format, json);
+    return outcome.ok ? outcome.findings : [];
+  }
   return format === "sarif" ? parseSarif(json) : format === "osv" ? parseOsv(json) : [];
 }
 
 export type IngestOutcome =
-  { ok: true; findings: SecurityCheckResult[] } | { ok: false; reason: string };
+  { ok: true; findings: SecurityCheckResult[]; notes?: string[] } | { ok: false; reason: string };
 
 type FieldCheck = (value: unknown) => boolean;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -285,5 +290,6 @@ export function ingestStrict(format: IngestFormat, json: string): IngestOutcome 
       return { ok: false, reason: "invalid OSV report structure" };
     return { ok: true, findings: parseOsv(json) };
   }
+  if (format === "cloudflare-audit") return ingestCloudflareAudit(parsed);
   return { ok: false, reason: "unknown report format" };
 }

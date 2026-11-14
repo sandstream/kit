@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit ingest cloudflare-audit <findings.json>`** reads the findings file written by Cloudflare's
+  security-audit skill. A `confirmed` record becomes a failure at its own overall severity; a
+  `needs_validation` record becomes a `low` warning marked unverified; a `rejected` record is counted on
+  stderr and not imported. A record kit cannot read, or a repeated fingerprint, refuses the whole report
+  instead of reporting it clean. Offline and read-only, like the SARIF and OSV formats. Chosen by
+  kit-research `twelve-security-repos-list-vs-kit`.
+
 ### Fixed
 
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at

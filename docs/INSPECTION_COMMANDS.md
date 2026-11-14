@@ -108,7 +108,8 @@ Missing values, repeated flags, and flags from another auth subcommand fail befo
 
 ## External scanner reports
 
-Run `kit ingest sarif report.sarif` or `kit ingest osv report.json`.
+Run `kit ingest sarif report.sarif`, `kit ingest osv report.json`, or
+`kit ingest cloudflare-audit findings.json`.
 Add `--json` for structured output.
 Use `--` before a report filename that starts with a hyphen.
 
@@ -120,6 +121,14 @@ The scanner adapters use the same strict parser when they feed the security verd
 A successful import produces exit 0, including when the report contains findings with status `fail`.
 That exit code confirms a valid import. It does not certify the account or resolve a finding.
 Valid empty reports produce a count of zero.
+
+`cloudflare-audit` reads the `findings.json` that Cloudflare's security-audit skill writes and
+validates. kit checks only the fields it reads: the verdict, a unique fingerprint, the title, a source
+trace with files and positive lines, and the overall severity of a confirmed record. A `confirmed`
+record becomes a failure at its own overall severity (`informational` becomes `low`). A
+`needs_validation` record becomes a `low` warning whose detail starts with "unverified". A `rejected`
+record is counted in a note on stderr and not imported. The model judged these records; kit maps them
+and does not judge them again.
 Invalid JSON, invalid report structure, and read errors produce exit 1.
 JSON errors contain `ok: false` and `error`, not a successful empty finding list.
 
