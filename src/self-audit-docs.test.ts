@@ -696,6 +696,24 @@ describe("self-audit-docs — loadKnownEnvVars", () => {
     }
   });
 
+  it("counts a variable a bash script reads, as kit mcp web's wizard does", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-envvars-sh-"));
+    try {
+      mkdirSync(join(root, "scripts"), { recursive: true });
+      writeFileSync(
+        join(root, "scripts", "w.sh"),
+        'if [[ "${KIT_SH_OPT_IN:-}" == "1" ]]; then echo "$KIT_SH_PLAIN"; fi\n# KIT_SH_IN_COMMENT\n',
+        "utf-8",
+      );
+      const known = loadKnownEnvVars(root);
+      assert.ok(known.has("KIT_SH_OPT_IN"));
+      assert.ok(known.has("KIT_SH_PLAIN"));
+      assert.equal(known.has("KIT_SH_IN_COMMENT"), false, "a bare mention is not a read");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("kit's own tree knows the hardware mandate var, and not the misspelling", () => {
     // README, doctor's remediation hint and the NIST evidence map all documented
     // KIT_REQUIRE_HARDWARE; the variable the code reads is KIT_REQUIRE_HARDWARE_IDENTITY.

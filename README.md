@@ -572,9 +572,15 @@ Run `kit mcp web` in an interactive terminal. Its six-stage wizard connects the
 existing local stdio server through
 [OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels):
 no inbound port and no public kit endpoint. It verifies `tunnel-client`, opens
-the exact Platform and ChatGPT pages, configures `kit mcp`, runs `doctor`, and
-starts the tunnel. The runtime API key stays in process memory; keep the durable
-copy in your vault. Native Windows operators need Git Bash or WSL for the wizard.
+the exact Platform and ChatGPT pages, configures `kit mcp --read-only`, runs
+`doctor`, and starts the tunnel. The runtime API key stays in process memory; keep
+the durable copy in your vault. Native Windows operators need Git Bash or WSL for the wizard.
+
+Read-only is the default because whoever drives the ChatGPT session calls these
+tools, including text a web page injected into the chat. `kit_memory`, `kit_check`,
+`kit_review` and `kit_context` work; `kit_run`, `kit_fix`, `kit_init`, `kit_secrets`
+and `kit_triage` are refused. `KIT_MCP_WEB_ALLOW_WRITES=1 kit mcp web` opts in after
+a confirm. `kit_run` then runs any command with the project's `.env.local` loaded.
 
 This path is specifically for ChatGPT web. Claude Code uses local stdio below;
 kit does not expose a public remote HTTP endpoint for claude.ai connectors.
