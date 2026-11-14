@@ -17,6 +17,14 @@
   with `EISDIR`. The "use kit" support line and the command's help now list every rules file kit
   writes (Copilot, Gemini CLI and Augment were missing). Found by kit-research
   `harness-wars-vs-kit`.
+- **`kit rig` reports how many findings each run produced.** A finding on a defect target that
+  matches no planted defect is not a false positive, so a reviewer that flags every changed line
+  catches every planted defect, and only control runs priced that. Each config now prints
+  `volume  findings per run <mean> (<min>–<max>)  unmatched <n>`, so volume buying recall is visible
+  with or without controls. Found by kit-research `debate-agents-game-the-judge-vs-kit`.
+  When three or more configs were scored on the same holdout, the report also warns that choosing
+  among them spends the holdout (the chosen config's number is optimistic) and says to plant fresh
+  holdout defects. Found by kit-research `loop-written-harness-vs-kit-rig`.
 - **The OpenCode install gate also gates a tool named `shell`.** OpenCode's tool docs name the
   shell tool `shell`; kit's plugin returned early for any tool other than `bash`, so under that name
   `npm install <untriaged>` ran without a check. Found by kit-research `caniuse-agent-gates`.
@@ -106,6 +114,11 @@
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
   notice) and the inline codes in `kit login` now share one rule.
+
+- **The npm package leaves out Python bytecode.** The 7.4.0 tarball shipped
+  `skills/triage/scripts/__pycache__/*.pyc`, because CI runs the skill scripts before the publish
+  step and `files` includes all of `skills`. `skills/.npmignore` now leaves out `__pycache__/` and
+  `*.pyc`. The root `.npmignore` could not do it: npm ignores it when `package.json` has `files`.
 
 ## [7.4.0] - 2026-11-10
 

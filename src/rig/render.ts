@@ -48,6 +48,13 @@ function renderComparisons(result: RigResult): string[] {
   return lines.length > 0 ? ["Comparisons (recall, min/max overlap rule):", ...lines, ""] : [];
 }
 
+/** Findings per run and the unmatched count: volume buys recall that only controls price. */
+function volumeLine(v: NonNullable<RigResult["stats"][number]["volume"]>): string {
+  const f = v.findingsPerRun;
+  const perRun = f ? `${f.mean.toFixed(1)} (${f.min}–${f.max})` : "n/a";
+  return `findings per run ${perRun}  unmatched ${v.unmatched}`;
+}
+
 /** The full report for one adjudicated input. */
 export function renderReport(result: RigResult, otherInputs: string[]): string[] {
   const lines = [
@@ -62,6 +69,7 @@ export function renderReport(result: RigResult, otherInputs: string[]): string[]
       `  holdout  ${s.holdout.runs} run(s)  recall ${range(s.holdout.recall)}`,
       `  controls ${s.controls.runs} run(s)  flagged ${range(s.controls.falsePositiveRate)}`,
     );
+    if (s.volume) lines.push(`  volume   ${volumeLine(s.volume)}`);
     for (const [id, f] of Object.entries({ ...s.tune.perDefect, ...s.holdout.perDefect })) {
       lines.push(`    ${id.padEnd(12)} caught ${f.caught}/${f.reviewed}`);
     }
