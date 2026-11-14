@@ -559,6 +559,14 @@ _REPO_HOSTS = ("github.com",)
 _REPO_PATH_HOSTS = ("raw.githubusercontent.com", "codeload.github.com")
 
 
+def _is_local_path(t):
+    """A filesystem path rather than a repo reference: absolute, relative, home or a
+    drive letter, or an existing local checkout."""
+    if re.match(r"^(/|\\|\./|\.\./|~|[A-Za-z]:[\\/])", t) or t in (".", ".."):
+        return True
+    return os.path.isdir(os.path.join(t, ".git"))
+
+
 def _owner_repo(target):
     """Reduce a repo reference to `owner/repo`.
 
@@ -576,6 +584,14 @@ def _owner_repo(target):
     # credentials from it first (userinfo in an https target is a valid, if
     # unsupported-host, spelling of a private clone target).
     safe = _strip_userinfo(target)
+    if _is_local_path(t):
+        # `/home/user/kit` split on "/" used to become the GitHub repo `home/user`, and a
+        # PASS for that stranger's repo was recorded against the local path.
+        return None, (
+            f"'{safe}' is a local path, not a GitHub repo -- this probe checks repos "
+            "through the GitHub API. Pass owner/repo or a github.com URL; for a local "
+            "skill directory use `kit triage skill <dir>`"
+        )
     # scp-style `git@host:owner/repo` -> `host/owner/repo`, so one path below fits both.
     scp = re.match(r"^[\w.+-]+@([\w.-]+):(.+)$", t)
     if scp:
@@ -724,13 +740,13 @@ def triage_repo(rep):
             # caller to "set GITHUB_TOKEN and retry" — wrong advice when a token is already
             # set and the 403 came from a proxy, an SSO requirement, or a scope gap. GitHub
             # sends the quota in headers, so exhaustion is checkable rather than assumed.
-            rep.critical(_forbidden_reason(e, token_sent=bool(token)))
+            rep.critical(f"repo '{or_}': {_forbidden_reason(e, token_sent=bool(token))}")
         else:
-            rep.critical(f"GitHub API returned HTTP {e.code} (cannot verify)")
+            rep.critical(f"repo '{or_}': GitHub API returned HTTP {e.code} (cannot verify)")
         _declare_repo_probes_unavailable(rep)
         return
     except (urllib.error.URLError, TimeoutError, OSError):
-        rep.critical("could not reach GitHub (offline?) -- cannot verify")
+        rep.critical(f"repo '{or_}': could not reach GitHub (offline?) -- cannot verify")
         _declare_repo_probes_unavailable(rep)
         return
 

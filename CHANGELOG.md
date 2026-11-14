@@ -11,6 +11,13 @@
 
 ### Fixed
 
+- **`kit triage repo` no longer triages a stranger's repo for a local path.** `/home/user/kit` was
+  split on `/` into the GitHub repo `home/user`, and a PASS for that repo was recorded against the
+  path. Absolute, relative, `~`, drive-letter paths and existing local checkouts are now refused
+  with a pointer to `kit triage skill`, and every GitHub API error names the `owner/repo` it
+  queried. **`kit triage skill` parses the frontmatter** instead of searching the first 400
+  characters for `name:`: a `## name:` heading (a YAML comment) or a block that never closes no
+  longer passes. Found by kit-research `artex-vs-kit`.
 - **The egress gate reads a URL forwarded through an allowed host.** A fetch to an in-scope host
   that carries another URL (`https://mirror/fetch?url=https://elsewhere/`, encoded or not) was
   checked only against the mirror's host. The forwarded host is now extracted from the path, query
