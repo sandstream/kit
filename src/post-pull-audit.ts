@@ -1,91 +1,248 @@
 /**
- * Post-pull / post-merge security audit.
- *
- * After a `git pull` (or merge) brings in teammates' changes, surface
- * anything that should trigger a security review BEFORE the next
- * `npm install` / `pnpm install` / deploy:
- *
- *   1. **New dependencies** in `package.json` — each one should be
- *      run through `kit triage` before it lands on disk.
- *   2. **Removed `.gitignore` entries** — someone deleting `.env*` or
- *      `*.pem` from the ignore list opens a leak vector.
- *   3. **Plaintext secrets** introduced in any committed file across
- *      the diff range (same SECRET_PATTERNS as scan-staged).
- *   4. **`.kit-allowlist.json` / `.kit-policy.json` changes** —
- *      relaxed enforcement is worth a second look.
- *   5. **`.kit.toml [secrets.keys]` changes** — keys added / removed.
- *
- * Wraps the existing scanner helpers; this module only does the diff
- * collection + per-category dispatch.
+ * Inspect two commit snapshots after a pull or merge.
+ * Compare dependency specifications in all tracked package.json files, including nested manifests.
+ * Report root ignore and policy changes, agent files, and secrets in changed head blobs.
+ * Unreadable input makes inspection incomplete. Only a successful tree read can establish that a file is absent.
+ * This audit does not resolve lockfile dependencies, assess package safety, or enforce install restrictions.
  */
 
-import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
+import { isUtf8 } from "node:buffer";
+import { findSecrets, redactSecrets, type SecretFinding } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
 import { agentFilesIn } from "./pull-agent-files.js";
 
 export interface PullAuditReport {
   baseRef: string;
   headRef: string;
+  coverage: PullAuditCoverage;
+  errors: PullAuditError[];
+  dependencyChanges: DependencyChange[];
   newDependencies: string[];
   removedDependencies: string[];
   removedGitignoreEntries: string[];
+  /** Sensitivity is determined from original entries before report text is redacted. */
+  gitignoreRemovals: { entry: string; sensitive: boolean }[];
   newGitignoreEntries: string[];
   plaintextHits: { file: string; findings: SecretFinding[] }[];
   allowlistChanged: boolean;
   policyChanged: boolean;
   kitTomlChanged: boolean;
   changedFiles: string[];
+  /** Deleted paths have no head content to scan. Relevant manifest and policy removals still apply. */
+  removedFiles: string[];
   /** Added or changed files an agent or editor executes or obeys (hooks, MCP, tasks, instructions). */
   agentFiles: { file: string; kind: string }[];
 }
 
-interface PackageJson {
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
+export interface PullAuditCoverage {
+  status: "complete" | "incomplete";
+  fileScope: "known" | "unknown";
+  /** Completeness applies only to this scope, not package safety or install enforcement. */
+  scope: "tracked-manifests-and-changed-head-blobs";
+  /** Manifest paths in either tree. Errors identify any that could not be inspected. */
+  manifestFiles: string[];
+  lockfileDependencies: "not-inspected";
 }
 
-async function tryGitShow(ref: string, path: string, cwd: string): Promise<string | null> {
+const DEPENDENCY_SECTIONS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+] as const;
+type DependencySection = (typeof DEPENDENCY_SECTIONS)[number];
+
+export interface DependencyChange {
+  file: string;
+  section: DependencySection;
+  name: string;
+  kind: "added" | "removed" | "changed";
+  /** Specifications can be masked. Comparison happens before redaction. */
+  before: string | null;
+  after: string | null;
+}
+
+export interface PullAuditError {
+  code:
+    | "ref-unavailable"
+    | "git-read-failed"
+    | "invalid-path-encoding"
+    | "invalid-manifest"
+    | "unsupported-entry";
+  operation: "resolve-ref" | "list-tree" | "read-blob" | "parse-manifest";
+  ref: string;
+  file?: string;
+  message: string;
+}
+
+async function resolveCommit(
+  ref: string,
+  cwd: string,
+  report: PullAuditReport,
+): Promise<string | null> {
   try {
-    const { stdout } = await exec("git", ["show", `${ref}:${path}`], {
-      cwd,
-      timeout: 5_000,
-      maxBuffer: 5 * 1024 * 1024,
-    });
-    return stdout;
+    const { stdout } = await exec(
+      "git",
+      ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`],
+      {
+        cwd,
+        timeout: 5_000,
+      },
+    );
+    return stdout.trim();
   } catch {
+    report.coverage.status = "incomplete";
+    report.errors.push({
+      code: "ref-unavailable",
+      operation: "resolve-ref",
+      ref,
+      message: "Cannot resolve the requested commit. Check the ref and local Git repository.",
+    });
     return null;
   }
 }
 
-async function listChangedFiles(baseRef: string, headRef: string, cwd: string): Promise<string[]> {
+type PackageJson = Partial<Record<DependencySection, Record<string, string>>>;
+
+interface TreeEntry {
+  mode: string;
+  type: string;
+  oid: string;
+}
+
+type FileRead =
+  { status: "read"; content: string } | { status: "absent" } | { status: "unreadable" };
+
+interface Snapshot {
+  ref: string;
+  files: Map<string, TreeEntry>;
+  reads: Map<string, FileRead>;
+}
+
+function inspectionError(report: PullAuditReport, error: PullAuditError): void {
+  report.coverage.status = "incomplete";
+  report.errors.push(error);
+}
+
+async function snapshot(
+  ref: string,
+  cwd: string,
+  report: PullAuditReport,
+): Promise<Snapshot | null> {
   try {
-    const { stdout } = await exec(
-      "git",
-      ["diff", "--name-only", "--diff-filter=AM", "-z", baseRef, headRef],
-      { cwd, timeout: 10_000 },
-    );
-    return stdout.split("\0").filter(Boolean);
+    const { stdout } = await exec("git", ["ls-tree", "-r", "-z", "--full-tree", ref], {
+      cwd,
+      timeout: 10_000,
+      encoding: "buffer",
+    });
+    if (!isUtf8(stdout)) {
+      inspectionError(report, {
+        code: "invalid-path-encoding",
+        operation: "list-tree",
+        ref,
+        message:
+          "Git tree paths contain invalid UTF-8. File identity cannot be preserved; file scope is unknown.",
+      });
+      return null;
+    }
+    const files = new Map<string, TreeEntry>();
+    for (const record of stdout.toString("utf8").split("\0").filter(Boolean)) {
+      const match = /^(\d+) (\w+) ([a-f0-9]+)\t([\s\S]+)$/.exec(record);
+      if (!match) throw new Error("Invalid Git tree record");
+      const [, mode, type, oid, path] = match;
+      files.set(path, { mode, type, oid });
+    }
+    return { ref, files, reads: new Map() };
   } catch {
-    return [];
+    inspectionError(report, {
+      code: "git-read-failed",
+      operation: "list-tree",
+      ref,
+      message: "Cannot enumerate the commit tree. File scope is unknown.",
+    });
+    return null;
   }
 }
 
+async function readFile(
+  tree: Snapshot,
+  file: string,
+  cwd: string,
+  report: PullAuditReport,
+): Promise<FileRead> {
+  const cached = tree.reads.get(file);
+  if (cached) return cached;
+  const entry = tree.files.get(file);
+  if (!entry) return { status: "absent" };
+  let result: FileRead = { status: "unreadable" };
+  if (entry.type !== "blob") {
+    inspectionError(report, {
+      code: "unsupported-entry",
+      operation: "read-blob",
+      ref: tree.ref,
+      file,
+      message: "Cannot inspect this entry as a Git blob.",
+    });
+  } else {
+    try {
+      const { stdout } = await exec("git", ["cat-file", "blob", entry.oid], {
+        cwd,
+        timeout: 5_000,
+        maxBuffer: 5 * 1024 * 1024,
+      });
+      result = { status: "read", content: stdout };
+    } catch {
+      inspectionError(report, {
+        code: "git-read-failed",
+        operation: "read-blob",
+        ref: tree.ref,
+        file,
+        message: "Cannot read the tracked blob. Its content is unknown, not absent.",
+      });
+    }
+  }
+  // Cache failures to avoid duplicate errors without retaining all scanned blob contents.
+  if (result.status === "unreadable") tree.reads.set(file, result);
+  return result;
+}
+
+function fileChanged(file: string, before: Snapshot, after: Snapshot): boolean {
+  const b = before.files.get(file);
+  const a = after.files.get(file);
+  return b?.oid !== a?.oid || b?.mode !== a?.mode;
+}
+
 function diffDeps(
-  before: PackageJson | null,
-  after: PackageJson | null,
-): { added: string[]; removed: string[] } {
-  const beforeAll = new Set([
-    ...Object.keys(before?.dependencies ?? {}),
-    ...Object.keys(before?.devDependencies ?? {}),
-  ]);
-  const afterAll = new Set([
-    ...Object.keys(after?.dependencies ?? {}),
-    ...Object.keys(after?.devDependencies ?? {}),
-  ]);
-  return {
-    added: [...afterAll].filter((name) => !beforeAll.has(name)),
-    removed: [...beforeAll].filter((name) => !afterAll.has(name)),
-  };
+  file: string,
+  before: PackageJson,
+  after: PackageJson,
+  report: PullAuditReport,
+): void {
+  const beforeAll = new Set(
+    DEPENDENCY_SECTIONS.flatMap((section) => Object.keys(before[section] ?? {})),
+  );
+  const afterAll = new Set(
+    DEPENDENCY_SECTIONS.flatMap((section) => Object.keys(after[section] ?? {})),
+  );
+  report.newDependencies.push(...[...afterAll].filter((name) => !beforeAll.has(name)));
+  report.removedDependencies.push(...[...beforeAll].filter((name) => !afterAll.has(name)));
+  for (const section of DEPENDENCY_SECTIONS) {
+    const b = new Map(Object.entries(before[section] ?? {}));
+    const a = new Map(Object.entries(after[section] ?? {}));
+    for (const name of [...new Set([...b.keys(), ...a.keys()])].sort()) {
+      const oldSpec = b.get(name) ?? null;
+      const newSpec = a.get(name) ?? null;
+      if (oldSpec === newSpec) continue;
+      report.dependencyChanges.push({
+        file,
+        section,
+        name,
+        kind: oldSpec === null ? "added" : newSpec === null ? "removed" : "changed",
+        before: oldSpec,
+        after: newSpec,
+      });
+    }
+  }
 }
 
 function diffLines(
@@ -159,49 +316,101 @@ export async function defaultPullBase(
   return { base: "HEAD~1", fallback: true };
 }
 
-/** Dependencies `package.json` gained and lost between the two refs. A malformed file gives none. */
-async function dependencyChanges(
-  baseRef: string,
-  headRef: string,
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function readManifest(
+  tree: Snapshot,
+  file: string,
   cwd: string,
-): Promise<{ added: string[]; removed: string[] }> {
-  const beforePkg = await tryGitShow(baseRef, "package.json", cwd);
-  const afterPkg = await tryGitShow(headRef, "package.json", cwd);
-  try {
-    const before = beforePkg ? (JSON.parse(beforePkg) as PackageJson) : null;
-    const after = afterPkg ? (JSON.parse(afterPkg) as PackageJson) : null;
-    return diffDeps(before, after);
-  } catch {
-    return { added: [], removed: [] };
+  report: PullAuditReport,
+): Promise<PackageJson | undefined> {
+  const entry = tree.files.get(file);
+  if (entry && entry.mode !== "100644" && entry.mode !== "100755") {
+    inspectionError(report, {
+      code: "unsupported-entry",
+      operation: "parse-manifest",
+      ref: tree.ref,
+      file,
+      message: "The tracked manifest is not a regular file. Its dependencies cannot be inspected.",
+    });
+    return undefined;
   }
+  const read = await readFile(tree, file, cwd, report);
+  if (read.status === "unreadable") return undefined;
+  if (read.status === "absent") return {};
+  try {
+    // npm accepts a leading UTF-8 BOM. Remove only that marker before JSON validation.
+    const value: unknown = JSON.parse(read.content.replace(/^\uFEFF/, ""));
+    if (!isObject(value)) throw new Error("Expected a manifest object");
+    for (const section of DEPENDENCY_SECTIONS) {
+      if (!Object.hasOwn(value, section)) continue;
+      const dependencies = value[section];
+      if (
+        !isObject(dependencies) ||
+        Object.values(dependencies).some((spec) => typeof spec !== "string")
+      ) {
+        throw new Error("Expected a dependency map with string specifications");
+      }
+    }
+    return value as PackageJson;
+  } catch {
+    inspectionError(report, {
+      code: "invalid-manifest",
+      operation: "parse-manifest",
+      ref: tree.ref,
+      file,
+      message:
+        "Invalid manifest. Expected a JSON object with dependency maps containing string specifications.",
+    });
+    return undefined;
+  }
+}
+
+/** Compare dependencies only when both manifests can be inspected. */
+async function dependencyChanges(
+  base: Snapshot,
+  head: Snapshot,
+  cwd: string,
+  report: PullAuditReport,
+): Promise<void> {
+  report.coverage.manifestFiles = [...new Set([...base.files.keys(), ...head.files.keys()])]
+    .filter((file) => file === "package.json" || file.endsWith("/package.json"))
+    .sort();
+  for (const file of report.coverage.manifestFiles) {
+    const before = await readManifest(base, file, cwd, report);
+    const after = await readManifest(head, file, cwd, report);
+    if (before && after) diffDeps(file, before, after, report);
+  }
+  report.newDependencies = [...new Set(report.newDependencies)].sort();
+  report.removedDependencies = [...new Set(report.removedDependencies)].sort();
 }
 
 /** Plaintext secrets in the head version of each changed file. */
 async function plaintextHitsIn(
   changed: string[],
-  headRef: string,
+  head: Snapshot,
   cwd: string,
+  report: PullAuditReport,
 ): Promise<PullAuditReport["plaintextHits"]> {
   const hits: PullAuditReport["plaintextHits"] = [];
   for (const path of changed) {
-    const content = await tryGitShow(headRef, path, cwd);
-    if (!content) continue;
-    const findings = findSecrets(content);
+    const content = await readFile(head, path, cwd, report);
+    if (content.status !== "read") continue;
+    const findings = findSecrets(content.content);
     if (findings.length > 0) hits.push({ file: path, findings });
   }
   return hits;
 }
 
-/** Whether a file's content differs between the two refs; a missing file counts as empty. */
-async function fileChanged(
-  path: string,
-  baseRef: string,
-  headRef: string,
-  cwd: string,
-): Promise<boolean> {
-  const before = await tryGitShow(baseRef, path, cwd);
-  const after = await tryGitShow(headRef, path, cwd);
-  return (before ?? "") !== (after ?? "");
+/** Redact string values before JSON encoding so escaped quotes cannot hide credentials. */
+function redactReport(report: PullAuditReport): PullAuditReport {
+  return JSON.parse(
+    JSON.stringify(report, (_key, value: unknown) =>
+      typeof value === "string" ? redactSecrets(value) : value,
+    ),
+  ) as PullAuditReport;
 }
 
 export async function auditPull(
@@ -212,47 +421,75 @@ export async function auditPull(
   const report: PullAuditReport = {
     baseRef,
     headRef,
+    coverage: {
+      status: "complete",
+      fileScope: "unknown",
+      scope: "tracked-manifests-and-changed-head-blobs",
+      manifestFiles: [],
+      lockfileDependencies: "not-inspected",
+    },
+    errors: [],
+    dependencyChanges: [],
     newDependencies: [],
     removedDependencies: [],
     removedGitignoreEntries: [],
+    gitignoreRemovals: [],
     newGitignoreEntries: [],
     plaintextHits: [],
     allowlistChanged: false,
     policyChanged: false,
     kitTomlChanged: false,
     changedFiles: [],
+    removedFiles: [],
     agentFiles: [],
   };
 
-  const deps = await dependencyChanges(baseRef, headRef, cwd);
-  report.newDependencies = deps.added;
-  report.removedDependencies = deps.removed;
+  const base = await resolveCommit(baseRef, cwd, report);
+  const head = await resolveCommit(headRef, cwd, report);
+  if (!base || !head) return redactReport(report);
+  const before = await snapshot(base, cwd, report);
+  const after = await snapshot(head, cwd, report);
+  if (!before || !after) return redactReport(report);
+  report.coverage.fileScope = "known";
 
-  const giDiff = diffLines(
-    await tryGitShow(baseRef, ".gitignore", cwd),
-    await tryGitShow(headRef, ".gitignore", cwd),
-  );
-  report.newGitignoreEntries = giDiff.added;
-  report.removedGitignoreEntries = giDiff.removed;
+  await dependencyChanges(before, after, cwd, report);
 
-  report.changedFiles = await listChangedFiles(baseRef, headRef, cwd);
+  const beforeIgnore = await readFile(before, ".gitignore", cwd, report);
+  const afterIgnore = await readFile(after, ".gitignore", cwd, report);
+  if (beforeIgnore.status !== "unreadable" && afterIgnore.status !== "unreadable") {
+    const giDiff = diffLines(
+      beforeIgnore.status === "read" ? beforeIgnore.content : null,
+      afterIgnore.status === "read" ? afterIgnore.content : null,
+    );
+    report.newGitignoreEntries = giDiff.added;
+    report.removedGitignoreEntries = giDiff.removed;
+    report.gitignoreRemovals = giDiff.removed.map((entry) => ({
+      entry,
+      sensitive: /\.env|\.pem|\.key|id_rsa/.test(entry),
+    }));
+  }
+
+  report.changedFiles = [...after.files.keys()].filter((file) => fileChanged(file, before, after));
+  report.removedFiles = [...before.files.keys()].filter((file) => !after.files.has(file));
   report.agentFiles = agentFilesIn(report.changedFiles);
-  report.plaintextHits = await plaintextHitsIn(report.changedFiles, headRef, cwd);
+  report.plaintextHits = await plaintextHitsIn(report.changedFiles, after, cwd, report);
 
-  report.allowlistChanged = await fileChanged(".kit-allowlist.json", baseRef, headRef, cwd);
-  report.policyChanged = await fileChanged(".kit-policy.json", baseRef, headRef, cwd);
-  report.kitTomlChanged = await fileChanged(".kit.toml", baseRef, headRef, cwd);
+  report.allowlistChanged = fileChanged(".kit-allowlist.json", before, after);
+  report.policyChanged = fileChanged(".kit-policy.json", before, after);
+  report.kitTomlChanged = fileChanged(".kit.toml", before, after);
 
-  return report;
+  return redactReport(report);
 }
 
 export function reportSeverity(report: PullAuditReport): "ok" | "warn" | "fail" {
+  if (report.coverage.status === "incomplete" || report.errors.length > 0) return "fail";
   if (report.plaintextHits.length > 0) return "fail";
-  if (report.removedGitignoreEntries.some((l) => /\.env|\.pem|\.key|id_rsa/.test(l))) {
+  if (report.gitignoreRemovals.some((removal) => removal.sensitive)) {
     return "fail";
   }
   if (
     report.newDependencies.length > 0 ||
+    report.dependencyChanges.some((change) => change.kind !== "removed") ||
     report.allowlistChanged ||
     report.policyChanged ||
     report.agentFiles.length > 0

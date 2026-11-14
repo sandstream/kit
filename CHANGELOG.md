@@ -17,6 +17,12 @@
   with `EISDIR`. The "use kit" support line and the command's help now list every rules file kit
   writes (Copilot, Gemini CLI and Augment were missing). Found by kit-research
   `harness-wars-vs-kit`.
+- **The install gate refuses blanket install-script grants.** `npm install-scripts approve esbuild
+--all` triaged only `esbuild` while npm's `--all` approved every pending package, and
+  `npm install --dangerously-allow-all-scripts`, `npm config set ignore-scripts false` and
+  `npm config set dangerously-allow-all-scripts true` passed silently. These, `--no-ignore-scripts`
+  and the matching `npm_config_*` variables are now refused, including inside `sh -c` and behind
+  `sudo`. Found by kit-research `supply-chain-2026-fundamentals-vs-kit`.
 - **A planted agent hook fails `kit check`, in the project or the user directory.** The 2026 npm
   worms persisted with a `SessionStart` hook in `.claude/settings.json` running
   `node .claude/setup.mjs`. `kit check` never ran the agent-config audit, `kit agent-audit` read
@@ -159,6 +165,11 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+- **`kit security verify-pull` reports what a pull changed, without hiding gaps.** It compares the
+  dependency sections of every tracked `package.json` between two commits, masks recognized
+  credentials, keeps the sensitivity of a removed `.gitignore` entry before redaction, and reports
+  invalid refs, unreadable files, malformed manifests and non-UTF-8 paths as failures or incomplete
+  coverage instead of a clean result. See `docs/VERIFY_PULL.md`.
 - **`kit audit verify --json` prints one document, and read-only mode writes no audit event.** The
   report holds the chain, signature and anchor results without event payloads or external receipt
   tokens. Activating read-only mode no longer appends an audit event, so a read does not change the
