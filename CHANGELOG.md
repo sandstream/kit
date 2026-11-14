@@ -21,6 +21,15 @@
   `settings.json` hooks are audited. `kit check`'s install-script row no longer says npm skips
   dependency install scripts by default: only npm 12+ does. Found by kit-research
   `supply-chain-2026-fundamentals-vs-kit`.
+- **`kit triage mcp` reads every tool field a FastMCP server sends.** It scanned only the tool
+  description and `properties.*.description`. A server built with FastMCP 4 also sends a `title`,
+  `annotations`, an `outputSchema` derived from the return type, and dereferenced Pydantic schemas
+  where an `Optional[Model]` parameter is an `anyOf`. Poisoned text in any of these, in a string
+  `default` or `examples`, or in `$defs` passed. The drift hash also ignored annotations and the
+  output schema, so flipping `readOnlyHint` to true, which some clients use to auto-approve, was
+  not a rug pull. Both are covered now. A pin of a tool with none of these fields still matches; a
+  pin taken before this change is reported as `legacy-pin`, not as a rug pull. Found by
+  kit-research `fastmcp-vs-kit`.
 - **A CLI test that times out now says so.** `runCli` reported a child killed at its 30 s timeout as
   an ordinary exit 1, so a slow Windows run of `kit setup` read as a setup failure
   (sandstream/kit#813). The helper now appends `killed after N ms (timeout)`, and the two `kit setup`
