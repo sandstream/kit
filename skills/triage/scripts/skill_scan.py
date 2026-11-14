@@ -31,6 +31,13 @@ def _plugin_scan():
     return module
 
 
+def is_local_path(t):
+    """An absolute, relative, `~` or drive-letter path, or an existing local checkout: not a
+    GitHub `owner/repo`. `kit triage repo /home/user/kit` used to query the repo `home/user`."""
+    local = re.match(r"^(/|\\|\./|\.\./|~|[A-Za-z]:[\\/])", t) or t in (".", "..")
+    return bool(local) or os.path.isdir(os.path.join(t, ".git"))
+
+
 def _frontmatter_keys(text):
     """Top-level keys of the YAML frontmatter, or None when there is no closed block.
 

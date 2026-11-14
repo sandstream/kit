@@ -559,14 +559,6 @@ _REPO_HOSTS = ("github.com",)
 _REPO_PATH_HOSTS = ("raw.githubusercontent.com", "codeload.github.com")
 
 
-def _is_local_path(t):
-    """A filesystem path rather than a repo reference: absolute, relative, home or a
-    drive letter, or an existing local checkout."""
-    if re.match(r"^(/|\\|\./|\.\./|~|[A-Za-z]:[\\/])", t) or t in (".", ".."):
-        return True
-    return os.path.isdir(os.path.join(t, ".git"))
-
-
 def _owner_repo(target):
     """Reduce a repo reference to `owner/repo`.
 
@@ -584,14 +576,8 @@ def _owner_repo(target):
     # credentials from it first (userinfo in an https target is a valid, if
     # unsupported-host, spelling of a private clone target).
     safe = _strip_userinfo(target)
-    if _is_local_path(t):
-        # `/home/user/kit` split on "/" used to become the GitHub repo `home/user`, and a
-        # PASS for that stranger's repo was recorded against the local path.
-        return None, (
-            f"'{safe}' is a local path, not a GitHub repo -- this probe checks repos "
-            "through the GitHub API. Pass owner/repo or a github.com URL; for a local "
-            "skill directory use `kit triage skill <dir>`"
-        )
+    if _skill_scan().is_local_path(t):  # `/home/user/kit` once became the repo `home/user`
+        return None, f"'{safe}' is a local path, not a GitHub repo -- use `kit triage skill <dir>`"
     # scp-style `git@host:owner/repo` -> `host/owner/repo`, so one path below fits both.
     scp = re.match(r"^[\w.+-]+@([\w.-]+):(.+)$", t)
     if scp:
