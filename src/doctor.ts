@@ -605,7 +605,7 @@ export function agentEgressExposureStatus(g: { installGate: boolean; egressGate:
     return {
       status: "pass",
       detail:
-        "install/exec gate present and egress is scope-bound (gate-egress wired) — a spawned install/exec tool cannot reach off-scope hosts",
+        "install/exec gate present and egress is scope-bound (gate-egress wired) — off-scope hosts named in a command are refused. Not seen: hosts a script, DNS, SSH or `--resolve` reaches without naming them",
     };
   }
   return {
@@ -651,7 +651,7 @@ export function containmentPostureStatus(
   if (!installGateWired) {
     return {
       status: "skip",
-      detail: "no OS containment detected, and no install/exec capability wired here to contain",
+      detail: `${v.mechanism === "vm" ? `running in a VM (${v.details.join("; ")})` : "no OS containment detected"}, and no install/exec capability wired here to contain`,
     };
   }
   if (v.mechanism === "vm")

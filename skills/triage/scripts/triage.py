@@ -576,6 +576,8 @@ def _owner_repo(target):
     # credentials from it first (userinfo in an https target is a valid, if
     # unsupported-host, spelling of a private clone target).
     safe = _strip_userinfo(target)
+    if _skill_scan().is_local_path(t):  # `/home/user/kit` once became the repo `home/user`
+        return None, f"'{safe}' is a local path, not a GitHub repo -- use `kit triage skill <dir>`"
     # scp-style `git@host:owner/repo` -> `host/owner/repo`, so one path below fits both.
     scp = re.match(r"^[\w.+-]+@([\w.-]+):(.+)$", t)
     if scp:
@@ -724,13 +726,13 @@ def triage_repo(rep):
             # caller to "set GITHUB_TOKEN and retry" — wrong advice when a token is already
             # set and the 403 came from a proxy, an SSO requirement, or a scope gap. GitHub
             # sends the quota in headers, so exhaustion is checkable rather than assumed.
-            rep.critical(_forbidden_reason(e, token_sent=bool(token)))
+            rep.critical(f"repo '{or_}': {_forbidden_reason(e, token_sent=bool(token))}")
         else:
-            rep.critical(f"GitHub API returned HTTP {e.code} (cannot verify)")
+            rep.critical(f"repo '{or_}': GitHub API returned HTTP {e.code} (cannot verify)")
         _declare_repo_probes_unavailable(rep)
         return
     except (urllib.error.URLError, TimeoutError, OSError):
-        rep.critical("could not reach GitHub (offline?) -- cannot verify")
+        rep.critical(f"repo '{or_}': could not reach GitHub (offline?) -- cannot verify")
         _declare_repo_probes_unavailable(rep)
         return
 

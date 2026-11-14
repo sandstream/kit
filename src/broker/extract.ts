@@ -171,17 +171,38 @@ function extractFetchHosts(command: string, hosts: Set<string>): void {
   }
 }
 
+/**
+ * Add a URL's host, and the hosts of URLs nested in its path, query or fragment
+ * (`https://mirror/fetch?url=https://elsewhere/`, encoded or not). An allowed host that forwards a
+ * request is how agents left a sandbox with no direct internet (kit-research
+ * `gpt-6-astra-swarm-incident-vs-kit`), so a forwarded target is checked against the scope too.
+ * Bounded depth. A scheme-less host in a parameter is not seen.
+ */
+function addUrlHosts(raw: string, hosts: Set<string>, depth = 0): void {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return; // not a parseable URL after all — skip (conservative: never guess)
+  }
+  if (u.hostname) hosts.add(u.hostname.toLowerCase());
+  if (depth >= 2) return;
+  const rest = `${u.pathname}${u.search}${u.hash}`;
+  let decoded = rest;
+  try {
+    decoded = decodeURIComponent(rest);
+  } catch {
+    /* malformed escape: scan the raw text */
+  }
+  for (const text of new Set([rest, decoded])) {
+    for (const nested of text.match(URL_RE) ?? []) addUrlHosts(nested, hosts, depth + 1);
+  }
+}
+
 /** Unique, sorted, lowercased hostnames of every network target in a shell command. */
 export function extractHostsFromCommand(command: string): string[] {
   const hosts = new Set<string>();
-  for (const match of command.match(URL_RE) ?? []) {
-    try {
-      const u = new URL(match);
-      if (u.hostname) hosts.add(u.hostname.toLowerCase());
-    } catch {
-      /* not a parseable URL after all — skip (conservative: never guess) */
-    }
-  }
+  for (const match of command.match(URL_RE) ?? []) addUrlHosts(match, hosts);
   extractFetchHosts(command, hosts);
   return [...hosts].sort();
 }
@@ -190,22 +211,10 @@ export function extractHostsFromCommand(command: string): string[] {
 function extractArgumentUrls(arg: string, hosts: Set<string>): void {
   const start = arg.search(/https?:\/\//i);
   if (start < 0) return;
-  try {
-    // Complete argv values are URLs, not shell text. Keep IPv6 and userinfo intact.
-    const host = new URL(arg.slice(start)).hostname;
-    if (host) hosts.add(host.toLowerCase());
-    return;
-  } catch {
-    // Embedded code or prose can contain URLs without being a URL itself.
-  }
-  for (const match of arg.match(URL_RE) ?? []) {
-    try {
-      const host = new URL(match).hostname;
-      if (host) hosts.add(host.toLowerCase());
-    } catch {
-      // Ignore text that is not a URL.
-    }
-  }
+  // Complete argv values are URLs, not shell text. Keep IPv6 and userinfo intact.
+  if (URL.canParse(arg.slice(start))) return addUrlHosts(arg.slice(start), hosts);
+  // Embedded code or prose can contain URLs without being a URL itself.
+  for (const match of arg.match(URL_RE) ?? []) addUrlHosts(match, hosts);
 }
 
 /** Inspect the arguments that execute, independently of their display or shell quoting. */

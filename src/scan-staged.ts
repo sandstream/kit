@@ -58,8 +58,12 @@ export async function scanStagedFiles(cwd: string = process.cwd()): Promise<Stag
     return [];
   }
 
+  const gitlinks = await stagedGitlinks(cwd);
   const hits: StagedHit[] = [];
   for (const path of paths) {
+    // A gitlink (mode 160000) is a nested repo or submodule: the index holds a commit id, not a
+    // blob, so there is no content to read here. Its files are scanned by the hook of its own repo.
+    if (gitlinks.has(path)) continue;
     // Read the staged blob (`git show :file`) so a developer can't bypass
     // by un-staging the change after the hook fires.
     let content: string;
@@ -96,6 +100,25 @@ export async function scanStagedFiles(cwd: string = process.cwd()): Promise<Stag
     }
   }
   return hits;
+}
+
+/** The staged paths that are gitlinks (mode 160000): nested repos and submodules. */
+async function stagedGitlinks(cwd: string): Promise<Set<string>> {
+  try {
+    const { stdout } = await exec("git", ["ls-files", "--stage", "-z"], {
+      cwd,
+      timeout: 5_000,
+      maxBuffer: 25 * 1024 * 1024,
+    });
+    const links = new Set<string>();
+    for (const entry of stdout.split("\0")) {
+      const tab = entry.indexOf("\t");
+      if (tab > 0 && entry.startsWith("160000 ")) links.add(entry.slice(tab + 1));
+    }
+    return links;
+  } catch {
+    return new Set();
+  }
 }
 
 /**
