@@ -1,4 +1,4 @@
-# What kit is — enforcement *and* audit
+# What kit is — enforcement _and_ audit
 
 > **One line:** kit is a deterministic **meat grinder** that forces a specific, secure way
 > of building software through gates — and it also prints a **signed receipt** of what came
@@ -13,10 +13,11 @@ Gates that force the process **at the moment an action happens**, before anythin
 Deterministic, fail-closed, zero-LLM:
 
 - **PreToolUse gates** — `gate-bash`, `gate-env` block un-triaged installs and plaintext-secret
-  writes *before* they land.
+  writes _before_ they land.
 
   `gate-bash` reads the pending command as a shell would, which means it follows installs into
-  `$(…)`, backticks, `sh -c '…'`, process substitution and here-strings. **Here-document bodies are
+  `$(…)`, backticks, `sh -c '…'`, the Windows shells (`cmd /c …`, `powershell`/`pwsh -Command …`
+  and `-EncodedCommand`), process substitution and here-strings. **Here-document bodies are
   the one place it deliberately stops**: a body is data unless something executes it. Fed to a shell
   (`bash <<EOF`, `cat <<EOF | bash`), or written to a `*.sh`-shaped file, it is scanned as a script;
   otherwise it is text. The exception that keeps this honest: with an UNQUOTED delimiter (`<<EOF`,
@@ -35,12 +36,13 @@ Deterministic, fail-closed, zero-LLM:
   Named limitation: a body written to a file WITHOUT a shell-script extension and executed later is
   not visible to this gate. Neither is the easier spelling of the same bypass — a `Write` tool call,
   which `gate-bash` never sees (`gate-fs` covers writes only where a signed `[scope].fs` exists).
+
 - **Capture-time gates** — the memory write-gate (G1), install-gate, slopsquat scoring (G4).
 - **Commit/CI chokepoints** — `kit triage check-deps` + `kit triage check-skills` (pre-commit,
   wired by `kit setup --recommended`), branch-protected checks.
 - **`warn → enforce` ramp** — a new gate warns first, then fails once enforced.
 
-This is the "gravitation": you *can't* do X. It shapes **how** software gets built.
+This is the "gravitation": you _can't_ do X. It shapes **how** software gets built.
 
 ## Mode 2 — the receipt: audit (point-in-time + after-the-fact, evidential)
 
@@ -49,10 +51,10 @@ kit also **produces and verifies proof** — of what happened and what's covered
 - **Tamper-evident audit log** — `.kit-audit.jsonl`, HMAC-anchored, hash-chained, Ed25519-signed
   (`verifyAuditChain` / `verifyAuditSignatures`); see `docs/AUDIT_ATTESTATION.md`.
 - **`kit self-audit`** — deterministic check of kit's own source against its bug-classes.
-- **`kit coverage`** — an OWASP ASVS L2 *evidence map* for GRC (`--json`).
+- **`kit coverage`** — an OWASP ASVS L2 _evidence map_ for GRC (`--json`).
 - **`kit sbom`** — component inventory (incl. the agent toolchain, G5); **SARIF** emit feeds
   external audit tooling.
-- **verified-forget tombstones** (G1) — deletion you can *prove*; **triage logs** — proof a
+- **verified-forget tombstones** (G1) — deletion you can _prove_; **triage logs** — proof a
   dependency was evaluated.
 - **`kit check` / `check-security`** — point-in-time repo audit.
 - **`docs/STANDARDS.md`** — an honest map of which standards kit aligns to (and which it doesn't).
@@ -74,8 +76,8 @@ exists partly to keep its enforcement side honest.
 ## An honest boundary (same no-false-green spirit)
 
 As an audit tool kit is strong on **integrity evidence**, but its trust anchor is
-**machine-local**: everything is tamper-*evident* against someone who can write the log, not
-tamper-*resistant* against a same-UID principal who can read a `0600` file. Closing that gap
+**machine-local**: everything is tamper-_evident_ against someone who can write the log, not
+tamper-_resistant_ against a same-UID principal who can read a `0600` file. Closing that gap
 means a non-exportable signing key. kit supports one today through an external signer:
 `KIT_KEYSTORE=command` with `KIT_KEYSTORE_SIGN_CMD` and `KIT_KEYSTORE_PUBKEY`, for a TPM,
 HSM, enclave or YubiKey you drive yourself; `kit identity keystore` reports which backend

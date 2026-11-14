@@ -42,14 +42,10 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
     ],
   },
   permissions: {
-    exact: [
-      "src/agent-config.ts",
-      "src/commands/gate.ts",
-      "src/hook-floor.ts",
-      "src/install-gate.ts",
-      "src/install-gate-flags.ts",
-    ],
+    exact: ["src/agent-config.ts", "src/commands/gate.ts", "src/hook-floor.ts"],
     prefix: [
+      // Every module the install gate is built from, not only its entry file.
+      "src/install-gate",
       "src/exec-broker/",
       "src/read-only-",
       "src/policy",

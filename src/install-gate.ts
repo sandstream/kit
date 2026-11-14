@@ -33,6 +33,7 @@ import {
 
 import { explainUnverifiable } from "./install-gate-refusals.js";
 import { installScriptBypass, installScriptBypassReason } from "./install-gate-scripts.js";
+import { windowsShellBodies } from "./install-gate-shells.js";
 import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
 
 export { ownerRepoArg, explainUnverifiable };
@@ -303,7 +304,7 @@ export function splitHeredocs(command: string): { command: string; expansions: s
 }
 
 function nestedCommands(command: string): string[] {
-  const out: string[] = [];
+  const out: string[] = windowsShellBodies(command); // `cmd /c …`, `powershell -c …`
   for (const m of command.matchAll(/\$\(([^()]{1,2000})\)/g)) out.push(m[1]);
   for (const m of command.matchAll(/`([^`]{1,2000})`/g)) out.push(m[1]);
   // `sh -c '…'` / `bash -lc "…"` / `bash -euo pipefail -c $'…'` — the quoted arg to a SHELL's
