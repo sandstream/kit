@@ -8,7 +8,10 @@ import { auditRemoteRequiredReviews } from "./branch-protection-audit.js";
 import {
   approvalsFromClassic,
   approvalsFromRules,
+  callerBypass,
+  pullRequestRulesetIds,
   reviewRequirement,
+  withCallerBypass,
 } from "./branch-review-rules.js";
 
 const prRule = (n: unknown) => ({
@@ -96,5 +99,58 @@ describe("auditRemoteRequiredReviews", () => {
     assert.equal(noToken.didNotRun, true);
     assert.equal(gitlab.didNotRun, true);
     assert.equal(called, false);
+  });
+});
+
+describe("a required review the caller can bypass", () => {
+  const ruleset = (id: number, n: number) => ({ ...prRule(n), ruleset_id: id });
+
+  it("reads ruleset ids and only the bypass modes that skip the rule", () => {
+    assert.deepEqual(
+      pullRequestRulesetIds([{ type: "deletion", ruleset_id: 9 }, ruleset(7, 1), ruleset(7, 2)]),
+      [7],
+    );
+    assert.equal(
+      callerBypass({ current_user_can_bypass: "pull_requests_only" }),
+      "pull_requests_only",
+    );
+    assert.equal(callerBypass({ current_user_can_bypass: "always" }), "always");
+    assert.equal(callerBypass({ current_user_can_bypass: "never" }), null);
+    assert.equal(callerBypass({}), null);
+  });
+
+  it("downgrades a pass to a warning only when the caller can bypass", () => {
+    const pass = reviewRequirement("main", 1, null);
+    assert.equal(withCallerBypass(pass, "main", null), pass);
+    const row = withCallerBypass(pass, "main", "pull_requests_only");
+    assert.equal(row.status, "warn");
+    assert.equal(row.severity, "low");
+    assert.match(row.detail, /can bypass the required review \(pull_requests_only\)/);
+    const zero = reviewRequirement("main", 0, null);
+    assert.equal(withCallerBypass(zero, "main", "always"), zero);
+  });
+
+  it("asks GitHub whether this token's identity can bypass the pull-request ruleset", async () => {
+    // kit's own main: 1 approval required, and the agent's token belongs to an admin with a
+    // pull-request bypass, so "the owner merges protected PRs" bound only the agent's instructions.
+    const { urls, fetcher } = github({
+      "/repos/owner/repo": { status: 200, body: { default_branch: "main" } },
+      "/rules/branches/main": { status: 200, body: [ruleset(42, 1)] },
+      "/rulesets/42": { status: 200, body: { current_user_can_bypass: "pull_requests_only" } },
+    });
+    const row = await auditRemoteRequiredReviews("git@github.com:owner/repo.git", "t", fetcher);
+    assert.equal(row.status, "warn");
+    assert.match(row.detail, /main: the identity this token belongs to can bypass/);
+    assert.ok(urls.includes("https://api.github.com/repos/owner/repo/rulesets/42"));
+  });
+
+  it("still passes when GitHub says the caller cannot bypass", async () => {
+    const { fetcher } = github({
+      "/repos/owner/repo": { status: 200, body: { default_branch: "main" } },
+      "/rules/branches/main": { status: 200, body: [ruleset(42, 1)] },
+      "/rulesets/42": { status: 200, body: { current_user_can_bypass: "never" } },
+    });
+    const row = await auditRemoteRequiredReviews("git@github.com:owner/repo.git", "t", fetcher);
+    assert.equal(row.status, "pass");
   });
 });
