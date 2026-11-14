@@ -17,7 +17,9 @@ pull-request workflow finishes. Once every check on the head commit has finished
 
 - every check passed (`success`, `skipped` or `neutral`; a re-run counts by its newest result);
 - no changed file, including a rename's old path, is in a protected class of
-  `.github/kit-protected-paths.json` (release, `.github/`, secrets, permissions). The rules come
+  `.github/kit-protected-paths.json` (release, `.github/` and the gate's own code, secrets,
+  permissions). The gate's code is `scripts/agent-review-gate.mjs`, the two scripts it imports and
+  `src/review-protected-paths*`, so a change to what decides approval needs a person. The rules come
   from the default branch, never from the pull request;
 - the file list is complete, and the change is under 1,500 lines;
 - the default branch is not red: the newest `build-and-test` result on its head commit did not
