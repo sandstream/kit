@@ -21,6 +21,13 @@
   `settings.json` hooks are audited. `kit check`'s install-script row no longer says npm skips
   dependency install scripts by default: only npm 12+ does. Found by kit-research
   `supply-chain-2026-fundamentals-vs-kit`.
+- **The install gate reads installs run through Windows shells.** It recursed into `sh -c` and
+  `bash -c`, but `cmd /c npm install x`, `powershell -c "npm install x"` and
+  `pwsh -Command "pip install x"` passed silently, on a platform kit supports natively. It now reads
+  the command text of `cmd /c` and `/k`, of PowerShell's `-Command` and `-EncodedCommand` (any
+  prefix, `-` or `/`), and of Windows PowerShell's bare first argument. The new module, and every
+  other `src/install-gate*` module, is now a protected path. Found by kit-research
+  `clickfix-vs-kit-install-gate`.
 - **The review gate's own code is a protected path.** `.github/` was protected, but the scripts the
   gate's workflow runs were not: `scripts/agent-review-gate.mjs`, the two scripts it imports, and the
   `src/review-protected-paths*` classifier. #762 changed the gate's decision code and the gate approved
