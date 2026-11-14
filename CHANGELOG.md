@@ -20,6 +20,9 @@
   - Augment 1.x renamed its shell tool from `launch-process` to `bash`; the matcher is now
     `bash|launch-process`.
   Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
+- **The OpenCode install gate also gates a tool named `shell`.** OpenCode's tool docs name the
+  shell tool `shell`; kit's plugin returned early for any tool other than `bash`, so under that name
+  `npm install <untriaged>` ran without a check. Found by kit-research `caniuse-agent-gates`.
 
 - **`kit triage repo` no longer triages a stranger's repo for a local path.** `/home/user/kit` was
   split on `/` into the GitHub repo `home/user`, and a PASS for that repo was recorded against the
