@@ -22,6 +22,7 @@
  *
  * Pure analyzers (string in → findings out); `runAgentAudit` is the file-reading wrapper.
  */
+import { hookScriptRows } from "./agent-hook-scripts.js";
 import {
   closeSync,
   constants,
@@ -501,6 +502,7 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
         ),
       );
     }
+    out.push(...hookScriptRows(content, cwd, rel));
     for (const c of auditSettingsCommands(content)) {
       out.push(
         result(
