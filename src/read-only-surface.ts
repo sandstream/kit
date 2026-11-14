@@ -278,6 +278,19 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   { command: "security", subcommand: "clear-cache", operation: "security-clear-cache" },
   {
     command: "security",
+    subcommand: "incoming",
+    arguments: ["enroll", "stage", "approve", "reject", "retry", "rotate", "recover"],
+    operation: "security-incoming-write",
+  },
+  {
+    command: "security",
+    subcommand: "incoming",
+    argument: "request",
+    anyFlags: ["--out"],
+    operation: "security-incoming-request-out",
+  },
+  {
+    command: "security",
     subcommand: "check-gitignore",
     anyFlags: ["--fix"],
     operation: "check-gitignore-fix",

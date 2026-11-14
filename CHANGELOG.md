@@ -2,6 +2,16 @@
 
 ### Added
 
+- **`kit security incoming <enroll|status|stage|request|approve|reject|retry|rotate|recover>`** operates
+  an incoming-trust authority store. It binds a protected snapshot, the lockfile inventory and one
+  verified npm artifact per entry into a single candidate digest, and moves that candidate through
+  stage, request, approve, reject and retry. Signing stays outside kit: `approve` verifies an
+  approval that an external signer produced and records it. A forged signature is refused and the
+  state stays pending. `rotate` replaces the signers and returns the store to pending, so no old
+  approval survives. `recover` moves a damaged store aside and never deletes it. See docs/INCOMING_TRUST.md. This adds no launch
+  lock and no workload isolation: nothing runs the candidate yet. Native Windows and macOS are
+  unverified.
+
 - **`kit ingest cloudflare-audit <findings.json>`** reads the findings file written by Cloudflare's
   security-audit skill. A `confirmed` record becomes a failure at its own overall severity; a
   `needs_validation` record becomes a `low` warning marked unverified; a `rejected` record is counted on
@@ -19,7 +29,7 @@
     string); kit read neither, so the gate allowed the call. It now reads both.
   - Augment 1.x renamed its shell tool from `launch-process` to `bash`; the matcher is now
     `bash|launch-process`.
-  Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
+    Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
 - **`kit agent-config` writes Cline's block into `.clinerules/kit.md` when `.clinerules` is a
   folder.** Cline reads `.clinerules` as a file or a folder of rule files, and kit's own Cline gate
   creates the folder (`.clinerules/hooks/`). After that, every `kit agent-config` failed for Cline
