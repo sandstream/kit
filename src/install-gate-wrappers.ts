@@ -36,6 +36,7 @@ const BOOLEAN_FLAGS: Record<string, string> = {
 };
 
 const POSITIONAL_PREFIX = new Set(["timeout", "chrt", "taskset", "flock"]);
+const ASSIGNMENT_PREFIX = new Set(["env", "sudo"]);
 
 type Option = { width: number; reason?: string };
 
@@ -75,7 +76,7 @@ function wrapperOption(wrapper: string, token: string): Option {
 
 /** Return the actual command index or record why Kit cannot determine it. */
 function wrapperOptionsEnd(
-  tokens: string[],
+  tokens: readonly string[],
   start: number,
   wrapper: string,
   unverifiable: string[],
@@ -97,7 +98,7 @@ function wrapperOptionsEnd(
 }
 
 export function wrapperCommandStart(
-  tokens: string[],
+  tokens: readonly string[],
   start: number,
   wrapper: string,
   unverifiable: string[],
@@ -106,4 +107,23 @@ export function wrapperCommandStart(
   const command = Math.min(tokens.length, optionsEnd + Number(POSITIONAL_PREFIX.has(wrapper)));
   // flock also accepts its command option after the lock path.
   return wrapper === "flock" ? wrapperOptionsEnd(tokens, command, wrapper, unverifiable) : command;
+}
+
+/** Resolve a runner's literal wrapper chain using the same option boundaries as shell prefixes. */
+export function unwrapCommandWrappers(tokens: readonly string[]): {
+  argv: string[];
+  unverifiable: string[];
+} {
+  const unverifiable: string[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const wrapper = tokens[i].replace(/^\\+/, "").split("/").pop() ?? "";
+    if (!Object.hasOwn(BOOLEAN_FLAGS, wrapper)) break;
+    i = wrapperCommandStart(tokens, i + 1, wrapper, unverifiable);
+    // env and sudo accept assignments after options. Other children keep their own argv.
+    if (ASSIGNMENT_PREFIX.has(wrapper)) {
+      while (i < tokens.length && /^[^=]+=/.test(tokens[i])) i++;
+    }
+  }
+  return { argv: tokens.slice(i), unverifiable };
 }

@@ -123,6 +123,12 @@
   Wrapper options stop at the actual command. Runner child options remain separate from package source options.
   Refusals explain the unsupported syntax and give a relevant next step.
 
+- **The install gate triages the repository source a runner passes through.** `npx skills add
+<source>` and the `dlx` and `bunx` forms check the source the invoked command receives, whatever
+  the package order and whatever wrapper (`sudo`, `env`, `nice`, `timeout`) sits in between. A
+  source that is not a plain GitHub repository, or that the shell expands (`$REPO`, a brace or a
+  command substitution), is refused. A shell given `-c` as the child of a repository installer is
+  refused too, because the gate cannot read its command line.
 - **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
