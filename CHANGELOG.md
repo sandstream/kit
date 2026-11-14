@@ -11,6 +11,11 @@
 
 ### Fixed
 
+- **Every gate deny is audited.** `gate-bash` and `gate-env` never wrote an audit entry when they
+  refused, and the egress and fs gates wrote none in a repository without a `.kit.toml`. All four
+  now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
+  default governance when no `.kit.toml` exists. Found by kit-research
+  `gpt-6-astra-swarm-incident-vs-kit`.
 - **`kit triage mcp` reads every tool field a FastMCP server sends.** It scanned only the tool
   description and `properties.*.description`. A server built with FastMCP 4 also sends a `title`,
   `annotations`, an `outputSchema` derived from the return type, and dereferenced Pydantic schemas
