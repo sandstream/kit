@@ -45,6 +45,13 @@ function explainCarrier(tokens: readonly string[]): string | null {
 export function explainUnverifiable(tokens: readonly string[]): string | null {
   const carrier = explainCarrier(tokens);
   if (carrier) return carrier;
+  const sources = tokens.filter((t) => t.startsWith("repo-source:"));
+  if (sources.length > 0) {
+    return (
+      `unsupported repository source: ${sources.map((t) => t.slice("repo-source:".length)).join(", ")}. ` +
+      "The gate can verify only unambiguous GitHub repository sources. Refusing this install (fail-closed)."
+    );
+  }
   const substitution = tokens.find(
     (t) => t.startsWith("indirect-bin:`") || t.startsWith("indirect-bin:$("),
   );
