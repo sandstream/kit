@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanStagedFiles } from "./scan-staged.js";
@@ -107,6 +107,50 @@ describe("scanStagedFiles", () => {
     try {
       const hits = await scanStagedFiles(dir);
       assert.equal(hits.length, 0);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("scanStagedFiles: a staged gitlink", () => {
+  /** A repo with a nested repo that has one commit, so `git add inner` stages a gitlink (mode 160000). */
+  function repoWithNestedRepo(): string {
+    const dir = tmpGitRepo();
+    const inner = join(dir, "inner");
+    mkdirSync(inner);
+    execSync("git init -q", { cwd: inner });
+    execSync("git config user.email t@t", { cwd: inner });
+    execSync("git config user.name t", { cwd: inner });
+    writeFileSync(join(inner, "a.txt"), "hello\n");
+    execSync("git add a.txt && git commit -q -m first", { cwd: inner });
+    return dir;
+  }
+
+  it("does not block on a nested repo, which is scanned in its own repo", async () => {
+    const dir = repoWithNestedRepo();
+    try {
+      execSync("git add inner", { cwd: dir });
+      assert.match(execSync("git ls-files --stage inner", { cwd: dir }).toString(), /^160000 /);
+      assert.deepEqual(await scanStagedFiles(dir), []);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("still flags a secret staged next to the nested repo, and names only that file", async () => {
+    const dir = repoWithNestedRepo();
+    try {
+      writeFileSync(
+        join(dir, ".env"),
+        "STRIPE_SECRET_KEY=sk_te" + "st_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy\n",
+      );
+      execSync("git add inner .env", { cwd: dir });
+      const hits = await scanStagedFiles(dir);
+      assert.deepEqual(
+        hits.map((h) => h.file),
+        [".env"],
+      );
     } finally {
       rmTemp(dir);
     }

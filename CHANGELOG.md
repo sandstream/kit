@@ -16,6 +16,54 @@
   now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
   default governance when no `.kit.toml` exists. Found by kit-research
   `gpt-6-astra-swarm-incident-vs-kit`.
+- **`kit rig` reports how many findings each run produced.** A finding on a defect target that
+  matches no planted defect is not a false positive, so a reviewer that flags every changed line
+  catches every planted defect, and only control runs priced that. Each config now prints
+  `volume  findings per run <mean> (<min>–<max>)  unmatched <n>`, so volume buying recall is visible
+  with or without controls. Found by kit-research `debate-agents-game-the-judge-vs-kit`.
+  When three or more configs were scored on the same holdout, the report also warns that choosing
+  among them spends the holdout (the chosen config's number is optimistic) and says to plant fresh
+  holdout defects. Found by kit-research `loop-written-harness-vs-kit-rig`.
+- **The OpenCode install gate also gates a tool named `shell`.** OpenCode's tool docs name the
+  shell tool `shell`; kit's plugin returned early for any tool other than `bash`, so under that name
+  `npm install <untriaged>` ran without a check. Found by kit-research `caniuse-agent-gates`.
+
+- **`kit triage repo` no longer triages a stranger's repo for a local path.** `/home/user/kit` was
+  split on `/` into the GitHub repo `home/user`, and a PASS for that repo was recorded against the
+  path. Absolute, relative, `~`, drive-letter paths and existing local checkouts are now refused
+  with a pointer to `kit triage skill`, and every GitHub API error names the `owner/repo` it
+  queried. **`kit triage skill` parses the frontmatter** instead of searching the first 400
+  characters for `name:`: a `## name:` heading (a YAML comment) or a block that never closes no
+  longer passes. Found by kit-research `artex-vs-kit`.
+- **An approval prompt needs a person at a terminal.** `requestApproval` read its answer from
+  stdin with no terminal check, so `echo yes | kit …` was the agent approving its own production
+  write. It now denies when stdin or stdout is not a terminal. `CI=1` and other non-empty `CI`
+  values now count as non-interactive, not only `CI=true`. The `kit auth elevate` refusal no longer
+  names the `KIT_ELEVATED=1` escape hatch to the agent it just refused; it asks for a person.
+  Found by kit-research `out-of-loop-durable-agents-vs-kit-approvals`.
+- **A SARIF scan that stopped no longer reads as clean.** `kit ingest sarif` ignored
+  `invocations[].executionSuccessful`, so a run that failed with no results printed
+  "0 finding(s)", exit 0. That run is now refused, a stopped run with results carries a note that
+  the findings are partial, and a SARIF version other than 2.1.0 is refused. The `kit ingest` help
+  line now lists `cloudflare-audit`. Found by kit-research `openai-daybreak-red-team-vs-kit`.
+- **A moved ADR floor fails `kit adr check`, and every freeze is audited.** Setting an enforced
+  ADR's status to `superseded`, deleting it, or removing its `kit-enforce` block turned a red
+  `adr check` green with no signal. `kit adr freeze` (and `kit baseline freeze`) now records which
+  ADRs were enforced, and `adr check` reports each one that no longer is as a gap until it is
+  restored or a new freeze accepts the lower floor. Every baseline freeze also writes a
+  `baseline-freeze` audit event, so redefining "passing" leaves a record. Found by kit-research
+  `retro-skill-self-evolving-agents-vs-kit`.
+- **Three output corrections.** A `kit triage` cooling warning is now counted in the summary
+  (it printed above `Warnings: 0`). An unknown `kit triage` type now lists all 17 accepted types
+  (it listed 8, leaving out `gem`, `instructions`, `mcp`, `model` and `pkg`). `kit doctor` names a
+  detected VM in its containment row instead of saying "no OS containment detected". Found by
+  kit-research `supply-chain-2026-fundamentals-vs-kit`.
+- **The egress gate reads a URL forwarded through an allowed host.** A fetch to an in-scope host
+  that carries another URL (`https://mirror/fetch?url=https://elsewhere/`, encoded or not) was
+  checked only against the mirror's host. The forwarded host is now extracted from the path, query
+  and fragment and checked against the scope too. `kit doctor` no longer says a spawned tool
+  "cannot reach off-scope hosts": it says which hosts the gate sees and which it does not. Found by
+  kit-research `gpt-6-astra-swarm-incident-vs-kit`.
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
   the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
   the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
@@ -65,6 +113,11 @@
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
   notice) and the inline codes in `kit login` now share one rule.
+
+- **The npm package leaves out Python bytecode.** The 7.4.0 tarball shipped
+  `skills/triage/scripts/__pycache__/*.pyc`, because CI runs the skill scripts before the publish
+  step and `files` includes all of `skills`. `skills/.npmignore` now leaves out `__pycache__/` and
+  `*.pyc`. The root `.npmignore` could not do it: npm ignores it when `package.json` has `files`.
 
 ## [7.4.0] - 2026-11-10
 
