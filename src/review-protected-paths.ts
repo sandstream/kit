@@ -14,7 +14,15 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
     exact: ["package.json", "package-lock.json", "docs/RELEASING.md"],
     prefix: [".github/workflows/publish", "packages/"],
   },
-  github: { exact: [], prefix: [".github/"] },
+  // The review gate's own code: a change to what decides approval is approved by a person.
+  github: {
+    exact: [
+      "scripts/agent-review-gate.mjs",
+      "scripts/agent-model-review.mjs",
+      "scripts/github-app-token.mjs",
+    ],
+    prefix: [".github/", "src/review-protected-paths"],
+  },
   secrets: {
     exact: [
       "src/check-secrets.ts",
