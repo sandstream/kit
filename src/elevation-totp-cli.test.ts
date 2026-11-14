@@ -294,7 +294,7 @@ it("CLI explains directory recovery and preserves contents through enrollment an
     assert.match(overwrite.stderr, /old authenticator entry will stop working/);
 
     renameSync(path, moved);
-    assert.equal(existsSync(path), false);
+    assert.throws(() => openSync(path, "r"), { code: "ENOENT" });
     const setup = fixture.run(["auth", "setup-totp", "--account", "disposable-test"]);
     assert.equal(setup.status, 0, setup.stderr);
     // Open once and read through the descriptor, so the check and the read see the same file.
