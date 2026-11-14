@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **The install gate refuses commands that skip the git hooks.** `git commit --no-verify`,
+  `git -c core.hooksPath=/dev/null commit` and `HUSKY=0 git commit` passed `gate-bash` silently,
+  and the `-c` form left no skip record either. The gate now names and refuses `--no-verify` and
+  `commit -n` on hook-running subcommands, `core.hooksPath` overrides and changes, `HUSKY=0`, and
+  removing or disabling a hook file, including inside `sh -c` and behind `env`/`sudo`. Found by
+  kit-research `checks-in-harness-hooks-vs-kit`.
 - **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
   approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
   `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in
