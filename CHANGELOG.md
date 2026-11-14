@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **`kit rig` reports how many findings each run produced.** A finding on a defect target that
+  matches no planted defect is not a false positive, so a reviewer that flags every changed line
+  catches every planted defect, and only control runs priced that. Each config now prints
+  `volume  findings per run <mean> (<min>–<max>)  unmatched <n>`, so volume buying recall is visible
+  with or without controls. Found by kit-research `debate-agents-game-the-judge-vs-kit`.
+
 - **`kit triage repo` no longer triages a stranger's repo for a local path.** `/home/user/kit` was
   split on `/` into the GitHub repo `home/user`, and a PASS for that repo was recorded against the
   path. Absolute, relative, `~`, drive-letter paths and existing local checkouts are now refused

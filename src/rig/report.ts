@@ -4,7 +4,10 @@
  * Per config, and separately for the `tune` and `holdout` halves of the manifest:
  *  - recall per run (caught / defects reviewed in that run), as mean, min and max;
  *  - the false-positive rate per run (clean controls with any finding / controls reviewed);
- *  - how often each defect was caught across runs.
+ *  - how often each defect was caught across runs;
+ *  - how many findings each run produced, and how many matched no defect. Unmatched findings on a
+ *    defect target are not false positives, so volume (flag every changed line) would raise
+ *    recall at no visible cost; only controls price it. The count makes it visible either way.
  *
  * Comparing two configs is deliberately blunt and deterministic: a difference is called
  * "outside run-to-run spread" only when their [min, max] recall ranges do not overlap, and the
@@ -42,6 +45,8 @@ export interface ConfigStats {
   holdout: SplitStats;
   /** Clean-control runs are not split: a control belongs to neither half. */
   controls: { runs: number; falsePositiveRate: Spread | null };
+  /** Findings per run (all targets), and findings on defect targets that matched no defect. */
+  volume?: { findingsPerRun: Spread | null; unmatched: number };
 }
 
 export type Comparison =
@@ -97,6 +102,18 @@ function controlStats(outcomes: RunOutcome[]): ConfigStats["controls"] {
   return { runs: rates.length, falsePositiveRate: spread(rates) };
 }
 
+/** Every finding a run produced: caught, duplicates, unmatched, and false positives on controls. */
+function volumeStats(outcomes: RunOutcome[]): NonNullable<ConfigStats["volume"]> {
+  const perRun = [...groupByRun(outcomes).values()].map((runOutcomes) =>
+    runOutcomes.reduce(
+      (n, o) => n + o.caught.length + o.duplicates + o.unmatched + o.falsePositives,
+      0,
+    ),
+  );
+  const unmatched = outcomes.reduce((n, o) => n + o.unmatched, 0);
+  return { findingsPerRun: spread(perRun), unmatched };
+}
+
 /** Aggregate adjudicated runs per config. Configs and defects come out sorted. */
 export function aggregate(manifest: RigManifest, outcomes: RunOutcome[]): ConfigStats[] {
   const splitOf = new Map(manifest.defects.map((d) => [d.id, d.split]));
@@ -108,6 +125,7 @@ export function aggregate(manifest: RigManifest, outcomes: RunOutcome[]): Config
       tune: splitStats(mine, splitOf, "tune"),
       holdout: splitStats(mine, splitOf, "holdout"),
       controls: controlStats(mine),
+      volume: volumeStats(mine),
     };
   });
 }
