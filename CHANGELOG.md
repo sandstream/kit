@@ -11,6 +11,13 @@
 
 ### Fixed
 
+- **A moved ADR floor fails `kit adr check`, and every freeze is audited.** Setting an enforced
+  ADR's status to `superseded`, deleting it, or removing its `kit-enforce` block turned a red
+  `adr check` green with no signal. `kit adr freeze` (and `kit baseline freeze`) now records which
+  ADRs were enforced, and `adr check` reports each one that no longer is as a gap until it is
+  restored or a new freeze accepts the lower floor. Every baseline freeze also writes a
+  `baseline-freeze` audit event, so redefining "passing" leaves a record. Found by kit-research
+  `retro-skill-self-evolving-agents-vs-kit`.
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
   the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
   the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
