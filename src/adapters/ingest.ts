@@ -267,6 +267,35 @@ const osvResult = fields({
  * consolidated security verdict. Callers that gate on scanner health (e.g.
  * `kit scan`) must use this and treat `ok:false` as an error, not a pass.
  */
+/** A SARIF run whose invocation says it did not finish (`executionSuccessful: false`). */
+const stoppedRun = (run: unknown): boolean =>
+  isRecord(run) &&
+  Array.isArray(run.invocations) &&
+  run.invocations.some((i) => isRecord(i) && i.executionSuccessful === false);
+
+/**
+ * A SARIF log, validated. A scanner that stopped is not a scanner that found nothing: a stopped
+ * run with no results is refused, and findings from a log with a stopped run carry a note that
+ * they are partial (kit-research `openai-daybreak-red-team-vs-kit`). Only SARIF 2.1.0 is read.
+ */
+function sarifOutcome(parsed: unknown, json: string): IngestOutcome {
+  if (!isRecord(parsed) || !Array.isArray(parsed.runs))
+    return { ok: false, reason: "not a SARIF log (no `runs` array)" };
+  if (parsed.version !== undefined && parsed.version !== "2.1.0")
+    return { ok: false, reason: "unsupported SARIF version (kit reads SARIF 2.1.0)" };
+  if (!parsed.runs.every(sarifRun)) return { ok: false, reason: "invalid SARIF report structure" };
+  const findings = parseSarif(json);
+  const stopped = parsed.runs.filter(stoppedRun).length;
+  if (stopped === 0) return { ok: true, findings };
+  if (findings.length === 0)
+    return {
+      ok: false,
+      reason: `the scanner reports ${stopped} run(s) did not finish (executionSuccessful: false) and returned no results; that is not a clean scan`,
+    };
+  const note = `${stopped} SARIF run(s) did not finish (executionSuccessful: false); these findings are partial.`;
+  return { ok: true, findings, notes: [note] };
+}
+
 export function ingestStrict(format: IngestFormat, json: string): IngestOutcome {
   let parsed: unknown;
   try {
@@ -274,14 +303,7 @@ export function ingestStrict(format: IngestFormat, json: string): IngestOutcome 
   } catch {
     return { ok: false, reason: "output is not valid JSON" };
   }
-  if (format === "sarif") {
-    if (!isRecord(parsed) || !Array.isArray(parsed.runs)) {
-      return { ok: false, reason: "not a SARIF log (no `runs` array)" };
-    }
-    if (!parsed.runs.every(sarifRun))
-      return { ok: false, reason: "invalid SARIF report structure" };
-    return { ok: true, findings: parseSarif(json) };
-  }
+  if (format === "sarif") return sarifOutcome(parsed, json);
   if (format === "osv") {
     if (!isRecord(parsed) || !Array.isArray(parsed.results)) {
       return { ok: false, reason: "not an OSV report (no `results` array)" };

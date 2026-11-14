@@ -18,6 +18,11 @@
   writes (Copilot, Gemini CLI and Augment were missing). Found by kit-research
   `harness-wars-vs-kit`.
 
+- **A SARIF scan that stopped no longer reads as clean.** `kit ingest sarif` ignored
+  `invocations[].executionSuccessful`, so a run that failed with no results printed
+  "0 finding(s)", exit 0. That run is now refused, a stopped run with results carries a note that
+  the findings are partial, and a SARIF version other than 2.1.0 is refused. The `kit ingest` help
+  line now lists `cloudflare-audit`. Found by kit-research `openai-daybreak-red-team-vs-kit`.
 - **A moved ADR floor fails `kit adr check`, and every freeze is audited.** Setting an enforced
   ADR's status to `superseded`, deleting it, or removing its `kit-enforce` block turned a red
   `adr check` green with no signal. `kit adr freeze` (and `kit baseline freeze`) now records which

@@ -619,7 +619,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   ingest: {
     handler: cmdIngest,
     stability: "stable",
-    help: "Validate a local SARIF / OSV report and print normalized findings (kit ingest <sarif|osv> <file>)",
+    help: "Validate a local SARIF / OSV / Cloudflare audit report and print normalized findings (kit ingest <sarif|osv|cloudflare-audit> <file>)",
   },
   "supply-chain": {
     handler: cmdSupplyChain,
