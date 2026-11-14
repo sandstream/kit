@@ -11,6 +11,11 @@
 
 ### Fixed
 
+- **Every gate deny is audited.** `gate-bash` and `gate-env` never wrote an audit entry when they
+  refused, and the egress and fs gates wrote none in a repository without a `.kit.toml`. All four
+  now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
+  default governance when no `.kit.toml` exists. Found by kit-research
+  `gpt-6-astra-swarm-incident-vs-kit`.
 - **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
   approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
   `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in
