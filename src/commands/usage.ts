@@ -480,17 +480,17 @@ export function renderTab(facts: UsageFacts, tab: Tab, opts: { interactive: bool
   return lines.join("\n");
 }
 
-export async function cmdUsage(): Promise<boolean> {
-  const { gatherUsage } = await import("../usage-report.js");
-  const facts = gatherUsage();
-
+/**
+ * Run `--prove` when asked, then print the whole report as one document when `--json` or
+ * `--markdown` asks for it. Returns true when it printed, so the caller skips the boxed view.
+ */
+async function printDocument(facts: UsageFacts): Promise<boolean> {
   // The controls spawn real gate invocations, so they are opt-in: a dashboard that costs seconds
   // every time it opens is a dashboard nobody opens.
   if (hasFlag(process.argv, "--prove")) {
     const { proveFloor } = await import("../usage-prove.js");
     facts.proof = proveFloor(process.cwd(), { deep: hasFlag(process.argv, "--deep") });
   }
-
   if (hasFlag(process.argv, "--json")) {
     console.log(JSON.stringify(facts, null, 2));
     return true;
@@ -501,6 +501,14 @@ export async function cmdUsage(): Promise<boolean> {
     console.log(renderUsageMarkdown(facts));
     return true;
   }
+  return false;
+}
+
+export async function cmdUsage(): Promise<boolean> {
+  const { gatherUsage } = await import("../usage-report.js");
+  const facts = gatherUsage();
+
+  if (await printDocument(facts)) return true;
 
   const requested = (flagValue(process.argv, "--tab") ?? "").toLowerCase();
   if (requested && !TABS.includes(requested as Tab)) {

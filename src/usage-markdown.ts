@@ -15,8 +15,8 @@ function bar(part: number, whole: number): string {
   return "▰".repeat(filled) + "▱".repeat(10 - filled);
 }
 
-/** Escape a cell so a `|` in a name cannot break the table. */
-const cell = (s: string): string => s.replace(/\|/g, "\\|");
+/** Escape a cell so a `\` or `|` in a name cannot break the table: backslashes first. */
+const cell = (s: string): string => s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 
 function table(head: [string, string, string?], rows: string[][]): string[] {
   const cols = head.filter((h): h is string => h !== undefined);

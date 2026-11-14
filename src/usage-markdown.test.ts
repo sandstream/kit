@@ -47,6 +47,15 @@ describe("kit usage --markdown", () => {
     assert.match(md, /\*\*818\*\* audited operations · \*\*497\*\* refused/);
     assert.match(md, /\| `policy-check` \| 294 \| ▰▰▰▰▰▰▱▱▱▱ \|/);
     assert.match(md, /`odd\\\|name`/, "a | in a cell is escaped so the table holds");
+    const slash = renderUsageMarkdown({
+      ...facts,
+      floor: { ...facts.floor, byOperation: [["back\\|slash", 1]] },
+    });
+    assert.match(
+      slash,
+      /`back\\\\\\\|slash`/,
+      "a backslash is escaped before the pipe it precedes",
+    );
     assert.match(md, /⚠️ \*\*55\*\* commits bypassed the pre-commit hook/);
     assert.match(md, /_No saved check run\. Run `kit check` once\._/);
     assert.match(md, /Latest: `pip fastmcp-slim`/);
