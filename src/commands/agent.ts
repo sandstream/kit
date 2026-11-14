@@ -194,7 +194,7 @@ export async function cmdAgentConfig(): Promise<boolean> {
   console.log(
     `\n${c.bold}Agent support${c.reset} ${c.dim}(what kit wires up per agent):${c.reset}\n` +
       `  ${c.dim}· Memory index: Claude Code, Codex, Cursor, Cline, Gemini, Continue, Amazon Q, Kiro, Factory Droid, Aider, Antigravity, OpenCode${c.reset}\n` +
-      `  ${c.dim}· "use kit" rules block: Claude Code, Codex, Cursor, Cline, OpenCode${c.reset}\n` +
+      `  ${c.dim}· "use kit" rules block: Claude Code, Codex (+ OpenCode, Kiro, Factory Droid via AGENTS.md), Cursor, Cline, Copilot, Gemini CLI, Augment${c.reset}\n` +
       `  ${c.dim}· Config/secret audit (kit agent-audit): Claude Code, Codex, Cursor, OpenCode (+ generic .mcp.json)${c.reset}\n` +
       `  ${c.dim}· Permission allowlist: Claude Code · personal profile: Codex · auto-capture hooks: Claude Code, Codex${c.reset}\n` +
       `  ${c.dim}· Blocking install-gate: Claude Code, Codex, Amazon Q, Kiro, Factory Droid, Augment, Antigravity, Gemini CLI, Cursor (hooks), OpenCode (plugin), Cline (PreToolUse shim); Continue has no gate surface (#146)${c.reset}\n` +

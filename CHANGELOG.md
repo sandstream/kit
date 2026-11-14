@@ -11,6 +11,13 @@
 
 ### Fixed
 
+- **`kit agent-config` writes Cline's block into `.clinerules/kit.md` when `.clinerules` is a
+  folder.** Cline reads `.clinerules` as a file or a folder of rule files, and kit's own Cline gate
+  creates the folder (`.clinerules/hooks/`). After that, every `kit agent-config` failed for Cline
+  with `EISDIR`. The "use kit" support line and the command's help now list every rules file kit
+  writes (Copilot, Gemini CLI and Augment were missing). Found by kit-research
+  `harness-wars-vs-kit`.
+
 - **A moved ADR floor fails `kit adr check`, and every freeze is audited.** Setting an enforced
   ADR's status to `superseded`, deleting it, or removing its `kit-enforce` block turned a red
   `adr check` green with no signal. `kit adr freeze` (and `kit baseline freeze`) now records which
