@@ -22,7 +22,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
-import { claudePluginInstall, ownerRepoArg } from "./install-gate-repos.js";
+import {
+  claudePluginInstall,
+  npmRunnerInvocation,
+  ownerRepoArg,
+  repoSourceArg,
+} from "./install-gate-repos.js";
 import {
   binBase,
   hiddenVerb,
@@ -32,6 +37,7 @@ import {
 } from "./install-gate-flags.js";
 
 import { explainUnverifiable } from "./install-gate-refusals.js";
+import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { windowsShellBodies } from "./install-gate-shells.js";
 import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
 
@@ -725,12 +731,18 @@ export function parseInstallCommand(command: string): InstallProbe {
  * `-p/--package` detection read the FULL tokens/raw, so dropping flags here loses nothing.)
  */
 function compactPositionals(tokens: string[]): string[] {
+  return indexedPositionals(tokens).pos;
+}
+
+/** The positionals of `compactPositionals`, with the index each one has in `tokens`. */
+function indexedPositionals(tokens: string[]): { pos: string[]; at: number[] } {
   // `-r`/`-c`/`-e` requirement flags are PIP concepts whose value is a file, not a package.
   // Skipping their value only makes sense for a pip-family command — on an npm/yarn install
   // those aren't valueless flags, so eating the next token would drop a real package
   // (`npm i -e evil` must still gate `evil`). Source/package-value flags exist in both.
   const pipFamily = /^(pip|pip3|pipx|uv|uvx|poetry|pdm|python|python3)$/.test(tokens[0] ?? "");
   const pos: string[] = [];
+  const at: number[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
     if (tok.startsWith("#")) break;
@@ -739,8 +751,12 @@ function compactPositionals(tokens: string[]): string[] {
     // to the `-m <module>` positional shape so the pip matcher's fixed indices line up.
     if (pos.length === 1 && /^python3?$/.test(pos[0]) && /^-m(=?.+)?$/.test(tok)) {
       pos.push("-m");
+      at.push(i);
       const glued = tok.match(/^-m=?(.+)$/);
-      if (glued) pos.push(glued[1]);
+      if (glued) {
+        pos.push(glued[1]);
+        at.push(i);
+      }
       continue;
     }
     if (
@@ -753,8 +769,9 @@ function compactPositionals(tokens: string[]): string[] {
     }
     if (isFlag(tok)) continue; // drop option flag (can't shift the subcommand)
     pos.push(tok);
+    at.push(i);
   }
-  return pos;
+  return { pos, at };
 }
 
 /** Install/runner verbs — used to fail-close a command run through an unresolvable
@@ -919,20 +936,33 @@ function repoFetchToShellRefs(command: string): string[] {
   return [...new Set(refs)];
 }
 
+const SHELL_CHILDREN = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+
 /**
- * When a RUNNER's fetched package is a known repo-fetcher, find the repo
- * argument among the args passed THROUGH to it (`skills add mattpocock/skills`)
- * and return it as a `github:` ref — additive to the wrapper package's own npm
- * ref, so both the installer AND its payload get triaged.
+ * A shell child with `-c` runs a command line the gate does not read. When a repository installer
+ * is among the runner's packages, that line can call it with any source.
  */
-function repoFetcherRef(pkgArg: string, throughArgs: string[]): string | null {
-  const bare = npmName(pkgArg);
-  if (!bare || !REPO_FETCHER_PACKAGES.has(bare)) return null;
-  for (const tok of throughArgs) {
-    const repo = ownerRepoArg(tok);
-    if (repo) return `github:${repo}`;
+function shellChildRefusal(packages: readonly string[], argv: readonly string[]): string | null {
+  const shell = binBase(argv[0] ?? "");
+  if (!SHELL_CHILDREN.has(shell) || !argv.slice(1).some((t) => /^-[a-z]*c[a-z]*$/.test(t))) {
+    return null;
   }
-  return null;
+  const fetcher = packages.some((p) => REPO_FETCHER_PACKAGES.has(npmName(p) ?? ""));
+  return fetcher ? `wrapper-command:${shell} -c` : null;
+}
+
+/**
+ * Check all source arguments passed to a known repo installer.
+ * Keep unsupported sources as refusals, alongside the wrapper package and supported repositories.
+ */
+function repoFetcherSources(command: string, throughArgs: string[], probe: InstallProbe): void {
+  const bare = npmName(binBase(command));
+  if (!bare || !REPO_FETCHER_PACKAGES.has(bare)) return;
+  for (const tok of throughArgs) {
+    const source = repoSourceArg(tok);
+    if (source && "ref" in source) probe.refs.push(source.ref);
+    if (source && "unverifiable" in source) probe.unverifiable.push(source.unverifiable);
+  }
 }
 
 /**
@@ -949,6 +979,46 @@ function resolveTargets(m: Matcher, args: string[], tokens: string[]): string[] 
   const replaceFlags = replacePackageFlags(tokens);
   if (m.pkgFlagOnly || hasExecCallFlag(tokens)) return [...replaceFlags, ...withFlags];
   return [...(replaceFlags.length ? replaceFlags : args.slice(0, 1)), ...withFlags];
+}
+
+/** Record the fetched package identities without using their order to infer the command. */
+function recordTargets(
+  m: Pick<Matcher, "scheme" | "toName">,
+  targets: string[],
+  probe: InstallProbe,
+): void {
+  for (const arg of targets) {
+    if (isLocalTarget(arg)) continue; // Local sources do not need registry triage.
+    const name = m.toName(arg);
+    if (name) {
+      // Keep a pinned version or tag in the reference.
+      const ver = m.scheme === "npm" ? npmVersion(arg) : pipVersion(arg);
+      probe.refs.push(`${m.scheme}:${name}${ver}`);
+    } else probe.unverifiable.push(arg); // Refuse targets without a registry identity.
+  }
+}
+
+function applyNpmRunner(
+  runner: NonNullable<ReturnType<typeof npmRunnerInvocation>>,
+  prefix: string[],
+  probe: InstallProbe,
+): void {
+  const refused = [...runner.unverifiable];
+  const redirect = sourceRedirect([...prefix, ...runner.optionTokens], []); // npm and npx have no config-file flag
+  if (redirect) refused.push(`alt-registry:${redirect}`);
+  if (runner.packages.length === 0 && prefix.some((t) => binBase(t) === "xargs")) {
+    refused.push("xargs-stdin-install");
+  }
+  if (runner.packages.length > 0 || refused.length > 0) probe.isInstall = true;
+  probe.unverifiable.push(...refused);
+  recordTargets({ scheme: "npm", toName: npmName }, runner.packages, probe);
+  repoFetcherSources(runner.argv[0] ?? "", runner.argv.slice(1), probe);
+  const shell = shellChildRefusal(runner.packages, runner.argv);
+  if (shell) probe.unverifiable.push(shell);
+  if (runner.shadowable) {
+    const bare = npmName(runner.packages[0]);
+    if (bare) probe.runnerBinCandidates.push(bare);
+  }
 }
 
 /** Apply one matched matcher to `probe`. Returns true when the segment was consumed. */
@@ -993,21 +1063,17 @@ function applyMatcher(
   // (mark unverifiable) even if every name is reputable.
   const redirect = sourceRedirect(raw, tokens);
   if (redirect) probe.unverifiable.push(`alt-registry:${redirect}`);
-  for (const arg of targets) {
-    if (isLocalTarget(arg)) continue; // user's own code — nothing to triage
-    const name = m.toName(arg);
-    if (name) {
-      // Carry the pinned version/tag onto the ref so triage checks THAT version, not latest.
-      const ver = m.scheme === "npm" ? npmVersion(arg) : pipVersion(arg);
-      probe.refs.push(`${m.scheme}:${name}${ver}`);
-    } else probe.unverifiable.push(arg); // fail-closed: can't reduce to a ref
-  }
-  // A RUNNER fetching a known repo-installer package also triages the repo it
-  // was told to fetch — the args after the package name are what's PASSED
-  // THROUGH to it, exactly where an `add <owner>/<repo>` argument lives.
+  recordTargets(m, targets, probe);
+  // Package flags select available packages. The positional selects the invoked command.
+  // Inspect that command's sources regardless of package order or additional packages.
   if (m.single && m.scheme === "npm" && targets.length > 0) {
-    const repoRef = repoFetcherRef(targets[0], pos.slice(start + 1));
-    if (repoRef) probe.refs.push(repoRef);
+    // Resolve the wrapper chain first, as applyNpmRunner does: the invoked command is the child.
+    const from = indexedPositionals(tokens).at[start] ?? tokens.length;
+    const child = unwrapCommandWrappers(tokens.slice(from));
+    probe.unverifiable.push(...child.unverifiable);
+    repoFetcherSources(child.argv[0] ?? "", child.argv.slice(1), probe);
+    const shell = shellChildRefusal(targets, child.argv);
+    if (shell) probe.unverifiable.push(shell);
   }
   // A plain `npx <name> …` positional (no -p/--package/--spec/--from replace-flag,
   // no `exec -c`) is what resolveTargets took targets[0] FROM — npx resolves that
@@ -1084,13 +1150,18 @@ function scanSegment(segment: string, probe: InstallProbe): void {
   const cmdRaw = raw.filter((t, i) => i >= start || !t.startsWith("-"));
 
   if (indirectInstall(tokens, probe) || claudePluginInstall(tokens, probe)) return;
+  const runner = npmRunnerInvocation(tokens);
+  if (runner) {
+    applyNpmRunner(runner, raw.slice(0, raw.length - tokens.length), probe);
+    return;
+  }
+
   const hidden = hiddenVerb(tokens, compactPositionals, isValueFlag);
   if (hidden) {
     probe.isInstall = true;
     probe.unverifiable.push(hidden);
     return;
   }
-
   const pos = compactPositionals(tokens);
   if (pos.length === 0) return;
 

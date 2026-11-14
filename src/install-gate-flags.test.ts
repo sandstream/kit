@@ -162,7 +162,7 @@ describe("install gate — second review of the flag reader", () => {
     // `--frobnicate exec` may be an option with the value `exec`; `install evil-x` then runs.
     const p = parseInstallCommand("npm --frobnicate exec install evil-x");
     assert.equal(p.isInstall, true);
-    assert.deepEqual(p.unverifiable, ["global-option:npm --frobnicate exec"]);
+    assert.deepEqual(p.unverifiable, ["runner-option:--frobnicate"]);
   });
 
   it("reads the value of a wrapper's own option as a value, even when it is named like a command", () => {
