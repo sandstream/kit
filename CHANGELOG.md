@@ -18,6 +18,11 @@
   queried. **`kit triage skill` parses the frontmatter** instead of searching the first 400
   characters for `name:`: a `## name:` heading (a YAML comment) or a block that never closes no
   longer passes. Found by kit-research `artex-vs-kit`.
+- **Three output corrections.** A `kit triage` cooling warning is now counted in the summary
+  (it printed above `Warnings: 0`). An unknown `kit triage` type now lists all 17 accepted types
+  (it listed 8, leaving out `gem`, `instructions`, `mcp`, `model` and `pkg`). `kit doctor` names a
+  detected VM in its containment row instead of saying "no OS containment detected". Found by
+  kit-research `supply-chain-2026-fundamentals-vs-kit`.
 - **The egress gate reads a URL forwarded through an allowed host.** A fetch to an in-scope host
   that carries another URL (`https://mirror/fetch?url=https://elsewhere/`, encoded or not) was
   checked only against the mirror's host. The forwarded host is now extracted from the path, query
