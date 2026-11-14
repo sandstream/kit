@@ -21,6 +21,13 @@
     `bash|launch-process`.
   Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
 
+- **`kit triage repo` no longer triages a stranger's repo for a local path.** `/home/user/kit` was
+  split on `/` into the GitHub repo `home/user`, and a PASS for that repo was recorded against the
+  path. Absolute, relative, `~`, drive-letter paths and existing local checkouts are now refused
+  with a pointer to `kit triage skill`, and every GitHub API error names the `owner/repo` it
+  queried. **`kit triage skill` parses the frontmatter** instead of searching the first 400
+  characters for `name:`: a `## name:` heading (a YAML comment) or a block that never closes no
+  longer passes. Found by kit-research `artex-vs-kit`.
 - **An approval prompt needs a person at a terminal.** `requestApproval` read its answer from
   stdin with no terminal check, so `echo yes | kit …` was the agent approving its own production
   write. It now denies when stdin or stdout is not a terminal. `CI=1` and other non-empty `CI`
