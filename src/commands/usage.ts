@@ -46,6 +46,11 @@ function plain(s: string): string {
  * content is truncated rather than allowed to push the right border out: a ragged box reads as a
  * broken tool, and a report that looks broken does not get read.
  */
+/** Cut text to `max` visible columns, ending in "…" when anything was cut. */
+export function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`;
+}
+
 function line(left: string, right = ""): string {
   let l = left;
   let r = right;
@@ -54,9 +59,9 @@ function line(left: string, right = ""): string {
     const room = WIDTH - plain(r).length - 2;
     if (room <= 0) {
       r = "";
-      l = plain(l).slice(0, WIDTH - 1);
+      l = clip(plain(l), WIDTH - 1);
     } else {
-      l = plain(l).slice(0, room);
+      l = clip(plain(l), room);
     }
   }
   const pad = Math.max(1, WIDTH - plain(l).length - plain(r).length);
@@ -401,8 +406,9 @@ function renderProof(f: UsageFacts): string[] {
       : ctl.verdict === "inconclusive"
         ? `${c.dim}−${c.reset}`
         : `${c.red}✗${c.reset}`;
-    out.push(line(`${icon} ${ctl.name.slice(0, 44)}`));
-    out.push(line(`   ${c.dim}${ctl.observed.slice(0, 56)}${c.reset}`));
+    // The whole row is the control's name: cut only what the box cannot hold, and say so.
+    out.push(line(`${icon} ${clip(ctl.name, WIDTH - 2)}`));
+    out.push(line(`   ${c.dim}${clip(ctl.observed, WIDTH - 3)}${c.reset}`));
   }
   out.push(line(""));
   out.push(
