@@ -37,6 +37,7 @@ import {
 } from "./install-gate-flags.js";
 
 import { explainUnverifiable } from "./install-gate-refusals.js";
+import { installScriptBypass, installScriptBypassReason } from "./install-gate-scripts.js";
 import { gitHookBypass, hookBypassReason } from "./install-gate-hooks.js";
 import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { windowsShellBodies } from "./install-gate-shells.js";
@@ -1212,6 +1213,8 @@ export async function decideBashGate(
   deps?: GateDeps,
   cwd?: string,
 ): Promise<BashGateVerdict> {
+  const grant = installScriptBypass(command);
+  if (grant) return { block: true, reason: installScriptBypassReason(grant), checked: [] };
   const bypass = gitHookBypass(command);
   if (bypass) return { block: true, reason: hookBypassReason(bypass), checked: [] };
   const probe = parseInstallCommand(command);

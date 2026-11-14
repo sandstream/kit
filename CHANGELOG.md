@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **The install gate refuses blanket install-script grants.** `npm install-scripts approve esbuild
+--all` triaged only `esbuild` while npm's `--all` approved every pending package, and
+  `npm install --dangerously-allow-all-scripts`, `npm config set ignore-scripts false` and
+  `npm config set dangerously-allow-all-scripts true` passed silently. These, `--no-ignore-scripts`
+  and the matching `npm_config_*` variables are now refused, including inside `sh -c` and behind
+  `sudo`. Found by kit-research `supply-chain-2026-fundamentals-vs-kit`.
 - **A planted agent hook fails `kit check`, in the project or the user directory.** The 2026 npm
   worms persisted with a `SessionStart` hook in `.claude/settings.json` running
   `node .claude/setup.mjs`. `kit check` never ran the agent-config audit, `kit agent-audit` read
