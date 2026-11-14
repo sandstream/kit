@@ -11,6 +11,16 @@
 
 ### Fixed
 
+- **Three harness adapters now match their vendor's documented hook contract.**
+  - Antigravity's PreToolUse reply needs a stdout `decision` and its docs give exit codes no meaning;
+    the gate printed nothing and exited 2. Antigravity's hook now runs `gate-bash --format antigravity`,
+    which prints `{"decision":"deny"|"allow"}`. Re-running `kit agent-config` upgrades an existing hook.
+  - Copilot CLI's camelCase `preToolUse` carries the command in `toolArgs` (an object or a JSON
+    string); kit read neither, so the gate allowed the call. It now reads both.
+  - Augment 1.x renamed its shell tool from `launch-process` to `bash`; the matcher is now
+    `bash|launch-process`.
+  Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
+
 - **A SARIF scan that stopped no longer reads as clean.** `kit ingest sarif` ignored
   `invocations[].executionSuccessful`, so a run that failed with no results printed
   "0 finding(s)", exit 0. That run is now refused, a stopped run with results carries a note that

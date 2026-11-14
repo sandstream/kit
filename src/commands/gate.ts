@@ -24,7 +24,7 @@ export async function cmdGateBash(): Promise<boolean> {
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
     raw = Buffer.concat(chunks).toString("utf8");
   } catch {
-    return true; // no stdin / read error → do not block
+    return stdoutAllow(); // no stdin / read error → do not block
   }
   let payload: {
     tool_name?: string;
@@ -35,7 +35,7 @@ export async function cmdGateBash(): Promise<boolean> {
   try {
     payload = raw ? JSON.parse(raw) : {};
   } catch {
-    return true; // unparseable hook payload → do not block (avoid breaking the agent)
+    return stdoutAllow(); // unparseable hook payload → do not block (avoid breaking the agent)
   }
   // "Triage it first" is the right next step for a blocked PACKAGE, and nonsense for a refusal
   // about shell semantics — a double-quoted backtick is command substitution, not a package to
@@ -51,20 +51,13 @@ export async function cmdGateBash(): Promise<boolean> {
   const { decideBashGate, extractCommandFromHookPayload } = await import("../install-gate.js");
   const command = extractCommandFromHookPayload(payload);
   if (!command) {
-    return true; // no shell command in this tool call → allow
+    return stdoutAllow(); // no shell command in this tool call → allow
   }
   const verdict = await decideBashGate(command, undefined, process.cwd());
   if (verdict.block) {
-    // Cline blocks via a stdout JSON {cancel:true} contract (HookOutputSchema),
-    // NOT exit 2 — so `--format cline` emits that and exits 0; every other agent
+    // Cline and Antigravity read a stdout JSON verdict and exit 0; every other agent
     // uses the exit-2 PreToolUse deny.
-    if (gateFormat() === "cline") {
-      console.log(
-        JSON.stringify({
-          cancel: true,
-          errorMessage: `kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`,
-        }),
-      );
+    if (stdoutDeny(`kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`)) {
       return true;
     }
     const { writeSync } = await import("node:fs");
@@ -74,6 +67,25 @@ export async function cmdGateBash(): Promise<boolean> {
     );
     process.exit(2); // PreToolUse deny
   }
+  return stdoutAllow();
+}
+
+/**
+ * A deny on stdout for the harnesses whose contract is stdout JSON: Cline's `{cancel: true}`
+ * (HookOutputSchema), and Antigravity's required `decision` (its docs give no exit-code meaning).
+ */
+function stdoutDeny(message: string): boolean {
+  const format = gateFormat();
+  if (format === "cline") console.log(JSON.stringify({ cancel: true, errorMessage: message }));
+  else if (format === "antigravity")
+    console.log(JSON.stringify({ decision: "deny", reason: message }));
+  else return false;
+  return true;
+}
+
+/** Allow. Antigravity requires a `decision` on every PreToolUse reply. */
+function stdoutAllow(): boolean {
+  if (gateFormat() === "antigravity") console.log(JSON.stringify({ decision: "allow" }));
   return true;
 }
 

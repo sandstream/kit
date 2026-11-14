@@ -19,6 +19,7 @@
  * (#779) but `gem install` is not routed here yet: that is an owner decision. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
+import { toolArgsCommand } from "./install-gate-payload.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
@@ -1201,7 +1202,8 @@ export function extractCommandFromHookPayload(payload: unknown): string {
     p.preToolUse?.parameters?.command ??
     p.toolCall?.args?.CommandLine ??
     p.arguments?.command ??
-    p.command;
+    p.command ??
+    toolArgsCommand(payload);
   if (typeof raw === "string") return raw;
   if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string").join(" ");
   return "";
