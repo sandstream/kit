@@ -467,6 +467,7 @@ async function cmdTriageMcp(args: string[]): Promise<boolean> {
     new: `${c.dim}new server — no prior pin${c.reset}`,
     unchanged: `${c.green}✓ tool set unchanged since pin${c.reset}`,
     changed: `${c.red}✗ RUG-PULL: tool set changed since pin${c.reset}`,
+    "legacy-pin": `${c.yellow}! pin predates title, annotation and output-schema coverage — review them, then re-pin with --pin${c.reset}`,
     unknown: `${c.dim}drift unknown${c.reset}`,
   };
   console.log(`  ${driftMsg[result.drift]}`);
