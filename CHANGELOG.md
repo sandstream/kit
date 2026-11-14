@@ -16,6 +16,13 @@
   now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
   default governance when no `.kit.toml` exists. Found by kit-research
   `gpt-6-astra-swarm-incident-vs-kit`.
+- **`kit check` says when the identity running it can bypass the required review.** The
+  _default branch required reviews_ row passed at 1 approval and said bypass was not checked, but
+  GitHub reports `current_user_can_bypass` for the caller on each ruleset. When that identity can
+  skip the rule, the row now warns: an agent working under it merges without the review. Measured
+  on kit's own `main`, where agent sessions use the owner's admin identity and admins have a
+  pull-request bypass. Found by kit-research `spec-driven-human-holds-the-keys-vs-kit`.
+
 - **The install gate reads installs run through Windows shells.** It recursed into `sh -c` and
   `bash -c`, but `cmd /c npm install x`, `powershell -c "npm install x"` and
   `pwsh -Command "pip install x"` passed silently, on a platform kit supports natively. It now reads
