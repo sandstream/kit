@@ -135,6 +135,16 @@
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
   notice) and the inline codes in `kit login` now share one rule.
 
+### Security
+
+- **`kit auth elevate` refuses when TOTP enrollment is unusable.** An unreadable, empty, or whitespace-only
+  `~/.kit/totp-secret` previously allowed the YES prompt. A directory at that path also allowed the prompt.
+  Elevation now refuses these cases, malformed secrets, and symlinks, including dangling symlinks and symlinks to valid secrets.
+  Only an absent file permits the YES prompt when no environment secret is configured.
+  Repair the file, or use `kit auth setup-totp --overwrite` to replace a file or symlink.
+  Symlink replacement leaves the target unchanged. The overwrite option cannot replace a directory.
+  Both refusal messages explain directory recovery: move the directory aside, keep its contents, then run `kit auth setup-totp`.
+  A new secret makes the old authenticator entry stop working.
 - **The npm package leaves out Python bytecode.** The 7.4.0 tarball shipped
   `skills/triage/scripts/__pycache__/*.pyc`, because CI runs the skill scripts before the publish
   step and `files` includes all of `skills`. `skills/.npmignore` now leaves out `__pycache__/` and

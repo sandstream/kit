@@ -24,7 +24,12 @@ import { appendAuditEventDirect } from "./audit.js";
 import { secureFile } from "./utils/secure-perms.js";
 
 // Preserve the public API while encoding and enrollment have separate modules.
-export { enrollTotp, resolveTotpSecret, type EnrolledSecret } from "./elevation-enrollment.js";
+export {
+  enrollTotp,
+  resolveTotpSecret,
+  TotpSecretUnusableError,
+  type EnrolledSecret,
+} from "./elevation-enrollment.js";
 export {
   buildOtpAuthUri,
   generateBase32Secret,

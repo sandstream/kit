@@ -42,11 +42,19 @@ export function createCliContractFixture(config = "version = 1\n") {
   const home = join(root, "home");
   mkdirSync(cwd);
   mkdirSync(home);
+  // Windows creates the profile folders under USERPROFILE when a process first resolves them.
+  // Create them up front so a snapshot taken before the first CLI run matches one taken after it.
+  const roaming = join(home, "AppData", "Roaming");
+  const local = join(home, "AppData", "Local");
+  mkdirSync(roaming, { recursive: true });
+  mkdirSync(local, { recursive: true });
   writeFileSync(join(cwd, ".kit.toml"), config);
   const env: NodeJS.ProcessEnv = {
     PATH: dirname(process.execPath),
     HOME: home,
     USERPROFILE: home,
+    APPDATA: roaming,
+    LOCALAPPDATA: local,
     SystemRoot: process.env.SystemRoot,
     XDG_CONFIG_HOME: join(home, "config"),
     XDG_CACHE_HOME: join(home, "cache"),
