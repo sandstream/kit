@@ -17,6 +17,13 @@
   values now count as non-interactive, not only `CI=true`. The `kit auth elevate` refusal no longer
   names the `KIT_ELEVATED=1` escape hatch to the agent it just refused; it asks for a person.
   Found by kit-research `out-of-loop-durable-agents-vs-kit-approvals`.
+- **A moved ADR floor fails `kit adr check`, and every freeze is audited.** Setting an enforced
+  ADR's status to `superseded`, deleting it, or removing its `kit-enforce` block turned a red
+  `adr check` green with no signal. `kit adr freeze` (and `kit baseline freeze`) now records which
+  ADRs were enforced, and `adr check` reports each one that no longer is as a gap until it is
+  restored or a new freeze accepts the lower floor. Every baseline freeze also writes a
+  `baseline-freeze` audit event, so redefining "passing" leaves a record. Found by kit-research
+  `retro-skill-self-evolving-agents-vs-kit`.
 - **Three output corrections.** A `kit triage` cooling warning is now counted in the summary
   (it printed above `Warnings: 0`). An unknown `kit triage` type now lists all 17 accepted types
   (it listed 8, leaving out `gem`, `instructions`, `mcp`, `model` and `pkg`). `kit doctor` names a
