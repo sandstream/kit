@@ -25,6 +25,11 @@ Deterministic, fail-closed, zero-LLM:
   the body really runs and is still gated — a quoted delimiter expands nothing, so the identical
   body is inert.
 
+  It also refuses a blanket install-script grant: `npm approve-scripts <pkg> --all` (npm's `--all`
+  approves every pending package), `--dangerously-allow-all-scripts`, `--no-ignore-scripts`, and
+  `npm config set` or `npm_config_*` turning scripts back on. One package at a time,
+  `npm approve-scripts <pkg>`, is triaged like an install.
+
   `gate-bash` also refuses a command that skips the repository's git hooks: `--no-verify` (or
   `git commit -n`) on a hook-running subcommand, a `core.hooksPath` override or change, `HUSKY=0`,
   and deleting or disabling a hook file. kit's commit checks run in those hooks, and skipping them
