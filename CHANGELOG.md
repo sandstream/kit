@@ -17,6 +17,13 @@
   with `EISDIR`. The "use kit" support line and the command's help now list every rules file kit
   writes (Copilot, Gemini CLI and Augment were missing). Found by kit-research
   `harness-wars-vs-kit`.
+- **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
+  approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
+  `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in
+  `docs/adr/` with the code and test that enforce them, `.kit-baseline.json`, `scripts/prepush*`,
+  `eslint.config.js`, `.semgrepignore` and `.kit-secretsignore` are now protected paths, so a change
+  to any of them needs the owner. Before, a pull request could edit the baseline or a lint
+  exclusion and pass every check it had just relaxed.
 - **`kit check` says when the identity running it can bypass the required review.** The
   _default branch required reviews_ row passed at 1 approval and said bypass was not checked, but
   GitHub reports `current_user_can_bypass` for the caller on each ruleset. When that identity can

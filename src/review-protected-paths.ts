@@ -20,8 +20,22 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
       "scripts/agent-review-gate.mjs",
       "scripts/agent-model-review.mjs",
       "scripts/github-app-token.mjs",
+      // What the gates measure against: the frozen baseline, lint and scan exclusions, and the
+      // test that enforces ADR-0002's dependency floor.
+      ".kit-baseline.json",
+      "eslint.config.js",
+      ".semgrepignore",
+      "src/dependency-floor.test.ts",
     ],
-    prefix: [".github/", "src/review-protected-paths"],
+    prefix: [
+      ".github/",
+      "src/review-protected-paths",
+      // The local gate, and the architecture decisions with the code that enforces them.
+      "scripts/prepush",
+      "docs/adr/",
+      "src/adr",
+      "src/commands/adr",
+    ],
   },
   secrets: {
     exact: [
@@ -29,6 +43,7 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
       "src/audit-secrets.ts",
       "src/agent-audit.ts",
       "src/utils/redactSecrets.ts",
+      ".kit-secretsignore",
     ],
     prefix: [
       "src/secrets",
@@ -42,10 +57,21 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
     ],
   },
   permissions: {
-    exact: ["src/agent-config.ts", "src/commands/gate.ts", "src/hook-floor.ts"],
+    exact: [
+      "src/agent-config.ts",
+      "src/commands/gate.ts",
+      "src/hook-floor.ts",
+      "src/environment.ts",
+      "src/commands/auth.ts",
+    ],
     prefix: [
       // Every module the install gate is built from, not only its entry file.
       "src/install-gate",
+      "src/opencode-gate",
+      // Human approval and elevation, and the egress broker's gates.
+      "src/approval",
+      "src/elevation",
+      "src/broker/",
       "src/exec-broker/",
       "src/read-only-",
       "src/policy",
