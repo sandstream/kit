@@ -17,6 +17,16 @@
   `npm config set dangerously-allow-all-scripts true` passed silently. These, `--no-ignore-scripts`
   and the matching `npm_config_*` variables are now refused, including inside `sh -c` and behind
   `sudo`. Found by kit-research `supply-chain-2026-fundamentals-vs-kit`.
+- **A CLI test that times out now says so.** `runCli` reported a child killed at its 30 s timeout as
+  an ordinary exit 1, so a slow Windows run of `kit setup` read as a setup failure
+  (sandstream/kit#813). The helper now appends `killed after N ms (timeout)`, and the two `kit setup`
+  pipeline tests allow 90 s; the passing one had already taken 25.6 s on Windows.
+- **CLI contract snapshots ignore Windows' own cache folder.** kit runs PowerShell to set ACLs,
+  and PowerShell sometimes writes its startup-profile cache under the fixture's
+  `AppData\Local\Microsoft`. The "nothing changed" snapshot then failed
+  (`elevation-totp-cli`, Windows shard 1), on a file kit never writes. That folder is now left out;
+  any other change is still caught.
+
 - **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
   approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
   `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in
@@ -141,6 +151,16 @@
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
   notice) and the inline codes in `kit login` now share one rule.
 
+### Security
+
+- **`kit auth elevate` refuses when TOTP enrollment is unusable.** An unreadable, empty, or whitespace-only
+  `~/.kit/totp-secret` previously allowed the YES prompt. A directory at that path also allowed the prompt.
+  Elevation now refuses these cases, malformed secrets, and symlinks, including dangling symlinks and symlinks to valid secrets.
+  Only an absent file permits the YES prompt when no environment secret is configured.
+  Repair the file, or use `kit auth setup-totp --overwrite` to replace a file or symlink.
+  Symlink replacement leaves the target unchanged. The overwrite option cannot replace a directory.
+  Both refusal messages explain directory recovery: move the directory aside, keep its contents, then run `kit auth setup-totp`.
+  A new secret makes the old authenticator entry stop working.
 - **The npm package leaves out Python bytecode.** The 7.4.0 tarball shipped
   `skills/triage/scripts/__pycache__/*.pyc`, because CI runs the skill scripts before the publish
   step and `files` includes all of `skills`. `skills/.npmignore` now leaves out `__pycache__/` and
