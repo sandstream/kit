@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **The install gate refuses blanket install-script grants.** `npm install-scripts approve esbuild
+--all` triaged only `esbuild` while npm's `--all` approved every pending package, and
+  `npm install --dangerously-allow-all-scripts`, `npm config set ignore-scripts false` and
+  `npm config set dangerously-allow-all-scripts true` passed silently. These, `--no-ignore-scripts`
+  and the matching `npm_config_*` variables are now refused, including inside `sh -c` and behind
+  `sudo`. Found by kit-research `supply-chain-2026-fundamentals-vs-kit`.
 - **The egress gate reads a URL forwarded through an allowed host.** A fetch to an in-scope host
   that carries another URL (`https://mirror/fetch?url=https://elsewhere/`, encoded or not) was
   checked only against the mirror's host. The forwarded host is now extracted from the path, query
