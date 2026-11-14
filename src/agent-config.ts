@@ -1556,7 +1556,8 @@ export async function installInstallGateAugment(
     return { file, action: "unchanged", detail: "install-gate already wired" };
   }
   pre.push({
-    matcher: "launch-process",
+    // Auggie 1.x renamed launch-process to bash; the old name "still match[es] … for now".
+    matcher: "bash|launch-process",
     hooks: [{ type: "command", command: kitGateInvocation() }],
   });
   try {
@@ -1598,10 +1599,14 @@ export async function installInstallGateAntigravity(
   }
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
-  if (pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")))) {
+  // Antigravity reads a required stdout `decision`, so the gate runs with `--format antigravity`.
+  const desired = `${kitGateInvocation()} --format antigravity`;
+  const kitHook = pre.flatMap((g) => g.hooks ?? []).find((h) => h.command?.includes("gate-bash"));
+  if (kitHook?.command === desired) {
     return { file, action: "unchanged", detail: "install-gate already wired" };
   }
-  pre.push({ matcher: "run_command", hooks: [{ type: "command", command: kitGateInvocation() }] });
+  if (kitHook) kitHook.command = desired;
+  else pre.push({ matcher: "run_command", hooks: [{ type: "command", command: desired }] });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
