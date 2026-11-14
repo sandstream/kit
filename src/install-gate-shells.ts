@@ -24,9 +24,9 @@ function unquote(text: string): string {
   return t;
 }
 
-/** Everything after the first `/c` or `/k` among cmd's leading switches. `/s` quote rules: strip one pair. */
+/** Everything after the first `/c` or `/k` among cmd's leading switches, glued (`/q/c`) or not. `/s` quote rules: strip one pair. */
 function cmdBodies(rest: string): string[] {
-  const match = rest.match(/^((?:\s+\/(?![ck])[a-z](?::\S*)?)*)\s+\/[ck](.*)$/is);
+  const match = rest.match(/^((?:\s*\/(?![ck])[a-z](?::[^\s/]*)?)*)\s*\/[ck](.*)$/is);
   if (!match) return [];
   const body = match[2]!.trim();
   return body ? [body, unquote(body)] : [];

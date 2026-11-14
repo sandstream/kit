@@ -25,6 +25,15 @@ describe("install gate: Windows shells carry an install", () => {
     [`pwsh -EncodedCommand ${encoded("pip install gate-fixture")}`, "pip:gate-fixture"],
     ['cmd /c "echo ok && npm install gate-fixture"', "npm:gate-fixture"],
     ['echo start; powershell -c "npm i gate-fixture"', "npm:gate-fixture"],
+    // Found by mutation testing (kit-research mutation-testing-vs-kit-gates): each case kills a
+    // mutant that otherwise let the install through.
+    ['echo a;powershell -c "npm i gate-fixture"', "npm:gate-fixture"],
+    [`powershell -ec ${encoded("npm i gate-fixture")}`, "npm:gate-fixture"],
+    [`powershell -enc ${encoded("npm i gate-fixture1")}`, "npm:gate-fixture1"],
+    ["CMD /K npm i gate-fixture", "npm:gate-fixture"],
+    ["PowerShell.exe -ExecutionPolicy Bypass npm i gate-fixture", "npm:gate-fixture"],
+    ["cmd /q/c npm i gate-fixture", "npm:gate-fixture"],
+    ["cmd /e:on/c npm i gate-fixture", "npm:gate-fixture"],
   ];
   for (const [command, ref] of carriers) {
     it(`gates the install inside: ${command}`, () => {
