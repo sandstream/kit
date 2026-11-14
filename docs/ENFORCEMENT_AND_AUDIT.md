@@ -25,6 +25,11 @@ Deterministic, fail-closed, zero-LLM:
   the body really runs and is still gated — a quoted delimiter expands nothing, so the identical
   body is inert.
 
+  It also refuses a blanket install-script grant: `npm approve-scripts <pkg> --all` (npm's `--all`
+  approves every pending package), `--dangerously-allow-all-scripts`, `--no-ignore-scripts`, and
+  `npm config set` or `npm_config_*` turning scripts back on. One package at a time,
+  `npm approve-scripts <pkg>`, is triaged like an install.
+
   This is a correction, not a design note. Every line of a here-document used to be scanned as its
   own command, and the gate blocked kit's own PR description because the prose contained
   `` `npx tsc --noEmit` `` — a false block, which is what teaches people to reach for `--no-verify`.
