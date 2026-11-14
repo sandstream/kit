@@ -21,6 +21,12 @@
     `bash|launch-process`.
   Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
 
+- **An approval prompt needs a person at a terminal.** `requestApproval` read its answer from
+  stdin with no terminal check, so `echo yes | kit …` was the agent approving its own production
+  write. It now denies when stdin or stdout is not a terminal. `CI=1` and other non-empty `CI`
+  values now count as non-interactive, not only `CI=true`. The `kit auth elevate` refusal no longer
+  names the `KIT_ELEVATED=1` escape hatch to the agent it just refused; it asks for a person.
+  Found by kit-research `out-of-loop-durable-agents-vs-kit-approvals`.
 - **A SARIF scan that stopped no longer reads as clean.** `kit ingest sarif` ignored
   `invocations[].executionSuccessful`, so a run that failed with no results printed
   "0 finding(s)", exit 0. That run is now refused, a stopped run with results carries a note that
