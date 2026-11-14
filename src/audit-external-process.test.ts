@@ -366,6 +366,10 @@ test(
   },
 );
 
+/** Only the timeout case needs a short deadline. The others start two Node processes before they
+ *  exit or write, which can take longer than 700 ms on a loaded Windows runner. */
+const deadlineMs = (mode: string): number => (mode === "timeout" ? 700 : 5_000);
+
 for (const mode of ["timeout", "overflow", "nonzero", "inherited-pipes", "closed-pipes"] as const) {
   test(
     `cleans up a real child tree on ${mode}`,
@@ -408,7 +412,7 @@ for (const mode of ["timeout", "overflow", "nonzero", "inherited-pipes", "closed
     `);
       const start = Date.now();
       await assert.rejects(
-        runExternalProtocol(command, {}, { timeoutMs: 700, maxOutputBytes: 1024 }),
+        runExternalProtocol(command, {}, { timeoutMs: deadlineMs(mode), maxOutputBytes: 1024 }),
         mode === "timeout"
           ? /timeout/i
           : mode === "overflow"
@@ -417,7 +421,7 @@ for (const mode of ["timeout", "overflow", "nonzero", "inherited-pipes", "closed
               ? /nonzero/i
               : /lingering children/i,
       );
-      assert.ok(Date.now() - start < 3_000, "command and cleanup must be bounded");
+      assert.ok(Date.now() - start < deadlineMs(mode) + 2_300, "cleanup must be bounded");
       if (mode === "timeout") assert.ok(Date.now() - start >= 600, "must exercise the timeout");
       await assertStopped(parentPid());
       await assertStopped(childPid());
