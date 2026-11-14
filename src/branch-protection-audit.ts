@@ -9,7 +9,10 @@ import { resolveViaBackend } from "./secret-backends.js";
 import {
   approvalsFromClassic,
   approvalsFromRules,
+  callerBypass,
+  pullRequestRulesetIds,
   reviewRequirement,
+  withCallerBypass,
 } from "./branch-review-rules.js";
 
 export interface GitRemote {
@@ -104,6 +107,26 @@ function reviewsUnverified(detail: string): SecurityCheckResult {
   };
 }
 
+/** The first bypass mode GitHub reports for the caller on these rulesets, or null. */
+async function rulesetBypass(
+  base: string,
+  ids: number[],
+  token: string,
+  fetcher: Fetcher,
+): Promise<string | null> {
+  for (const id of ids) {
+    try {
+      const bypass = callerBypass(
+        await jsonValue(`${base}/rulesets/${id}`, token, "github.com", fetcher),
+      );
+      if (bypass) return bypass;
+    } catch {
+      // An unreadable ruleset leaves the row as the rules alone decide it.
+    }
+  }
+  return null;
+}
+
 /**
  * GitHub only: how many approvals the default branch requires. Rulesets are readable with read
  * access; classic protection's review settings need admin, so a 403 there stays unknown.
@@ -137,11 +160,13 @@ export async function auditRemoteRequiredReviews(
     } catch {
       classic = null;
     }
-    return reviewRequirement(
+    const row = reviewRequirement(
       project.default_branch,
       approvalsFromRules(rules),
       approvalsFromClassic(classic),
     );
+    const bypass = await rulesetBypass(base, pullRequestRulesetIds(rules), token, fetcher);
+    return withCallerBypass(row, project.default_branch, bypass);
   } catch {
     return reviewsUnverified("API request failed");
   }
