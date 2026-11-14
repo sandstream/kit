@@ -11,6 +11,16 @@
 
 ### Fixed
 
+- **`kit triage mcp` reads every tool field a FastMCP server sends.** It scanned only the tool
+  description and `properties.*.description`. A server built with FastMCP 4 also sends a `title`,
+  `annotations`, an `outputSchema` derived from the return type, and dereferenced Pydantic schemas
+  where an `Optional[Model]` parameter is an `anyOf`. Poisoned text in any of these, in a string
+  `default` or `examples`, or in `$defs` passed. The drift hash also ignored annotations and the
+  output schema, so flipping `readOnlyHint` to true, which some clients use to auto-approve, was
+  not a rug pull. Both are covered now. A pin of a tool with none of these fields still matches; a
+  pin taken before this change is reported as `legacy-pin`, not as a rug pull. Found by
+  kit-research `fastmcp-vs-kit`.
+
 - **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
   approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
   `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in

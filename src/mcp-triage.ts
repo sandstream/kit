@@ -21,6 +21,12 @@ export interface McpToolDef {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  /** Display name. Clients show it, and models read it. */
+  title?: string;
+  /** Structured-output schema (MCP 2025-06-18). FastMCP derives it from the return type. */
+  outputSchema?: unknown;
+  /** Behaviour hints such as `readOnlyHint`, which some clients use to auto-approve. */
+  annotations?: unknown;
 }
 
 export interface McpToolFinding {
@@ -31,7 +37,11 @@ export interface McpToolFinding {
   confidence: "high" | "heuristic";
 }
 
-export type McpDrift = "new" | "unchanged" | "changed" | "unknown";
+/**
+ * `legacy-pin`: the pin matches the tool set as kit hashed it before titles, annotations and
+ * output schemas were covered. The old fields are unchanged; the new ones are not yet pinned.
+ */
+export type McpDrift = "new" | "unchanged" | "changed" | "legacy-pin" | "unknown";
 
 export interface McpTriageResult {
   server: string;
@@ -43,23 +53,92 @@ export interface McpTriageResult {
   passed: boolean;
 }
 
-/** Recursively collect { path, text } for every `description` string in a JSON schema. */
-function collectSchemaDescriptions(schema: unknown, path = ""): { path: string; text: string }[] {
-  const out: { path: string; text: string }[] = [];
-  if (!schema || typeof schema !== "object") return out;
+const SCHEMA_TEXT_KEYS = ["description", "title", "default"] as const;
+const SCHEMA_CHILD_LISTS = ["anyOf", "oneOf", "allOf", "prefixItems"] as const;
+const SCHEMA_CHILD_MAPS = ["properties", "$defs", "definitions", "patternProperties"] as const;
+const MAX_SCHEMA_DEPTH = 32;
+
+/**
+ * Collect every string a client or model can read from a JSON schema: `description`,
+ * `title`, string `default`s and `examples`, through properties, items, unions
+ * (`anyOf`/`oneOf`/`allOf`) and `$defs`. Pydantic and FastMCP put nested models in unions
+ * (an `Optional[Model]` parameter) and in `$defs`, so a walk of `properties` alone misses them.
+ */
+function collectSchemaDescriptions(
+  schema: unknown,
+  path = "",
+  depth = 0,
+): { path: string; text: string }[] {
+  if (!schema || typeof schema !== "object" || depth > MAX_SCHEMA_DEPTH) return [];
   const obj = schema as Record<string, unknown>;
-  if (typeof obj.description === "string") {
-    out.push({ path: path || "schema", text: obj.description });
+  const out = ownSchemaTexts(obj, path);
+  for (const [child, childPath] of childSchemas(obj, path)) {
+    out.push(...collectSchemaDescriptions(child, childPath, depth + 1));
   }
-  const props = obj.properties;
-  if (props && typeof props === "object") {
-    for (const [key, val] of Object.entries(props as Record<string, unknown>)) {
-      out.push(...collectSchemaDescriptions(val, path ? `${path}.${key}` : key));
+  return out;
+}
+
+const joinPath = (path: string, suffix: string): string => (path ? `${path}.${suffix}` : suffix);
+
+/** The text fields of one schema node, without its children. */
+function ownSchemaTexts(
+  obj: Record<string, unknown>,
+  path: string,
+): { path: string; text: string }[] {
+  const out: { path: string; text: string }[] = [];
+  for (const key of SCHEMA_TEXT_KEYS) {
+    const v = obj[key];
+    if (typeof v !== "string") continue;
+    out.push({ path: key === "description" ? path || "schema" : joinPath(path, key), text: v });
+  }
+  const examples = Array.isArray(obj.examples) ? obj.examples : [];
+  for (const v of examples) {
+    if (typeof v === "string") out.push({ path: joinPath(path, "examples"), text: v });
+  }
+  return out;
+}
+
+/** The sub-schemas of one node, each with the path its findings are reported under. */
+function childSchemas(obj: Record<string, unknown>, path: string): [unknown, string][] {
+  const out: [unknown, string][] = [];
+  for (const key of SCHEMA_CHILD_MAPS) {
+    const map = obj[key];
+    if (!map || typeof map !== "object") continue;
+    for (const [name, val] of Object.entries(map as Record<string, unknown>)) {
+      out.push([
+        val,
+        key === "properties" ? joinPath(path, name) : joinPath(path, `${key}.${name}`),
+      ]);
     }
   }
-  // arrays / nested schemas
-  if (obj.items) out.push(...collectSchemaDescriptions(obj.items, path ? `${path}[]` : "[]"));
+  for (const key of SCHEMA_CHILD_LISTS) {
+    const list = obj[key];
+    if (Array.isArray(list))
+      list.forEach((val, i) => out.push([val, joinPath(path, `${key}[${i}]`)]));
+  }
+  if (obj.items) out.push([obj.items, path ? `${path}[]` : "[]"]);
+  if (obj.additionalProperties && typeof obj.additionalProperties === "object") {
+    out.push([obj.additionalProperties, joinPath(path, "additionalProperties")]);
+  }
   return out;
+}
+
+/** Every text field of one tool that a client or model reads, with where it came from. */
+function toolTexts(tool: McpToolDef): { field: string; text: string }[] {
+  const texts: { field: string; text: string }[] = [];
+  if (tool.description) texts.push({ field: "description", text: tool.description });
+  if (tool.title) texts.push({ field: "title", text: tool.title });
+  const ann = tool.annotations as Record<string, unknown> | undefined;
+  if (ann && typeof ann === "object" && typeof ann.title === "string") {
+    texts.push({ field: "annotations.title", text: ann.title });
+  }
+  for (const { path, text } of collectSchemaDescriptions(tool.inputSchema)) {
+    texts.push({ field: `param:${path}`, text });
+  }
+  for (const { path, text } of collectSchemaDescriptions(tool.outputSchema)) {
+    texts.push({ field: `output:${path}`, text });
+  }
+  return texts;
 }
 
 /**
@@ -75,24 +154,9 @@ export function analyzeMcpTools(tools: McpToolDef[]): {
   const findings: McpToolFinding[] = [];
   for (const tool of tools) {
     const name = tool.name || "(unnamed)";
-    if (tool.description) {
-      for (const f of findInjection(tool.description)) {
-        findings.push({
-          tool: name,
-          field: "description",
-          label: f.label,
-          confidence: f.confidence,
-        });
-      }
-    }
-    for (const { path, text } of collectSchemaDescriptions(tool.inputSchema)) {
+    for (const { field, text } of toolTexts(tool)) {
       for (const f of findInjection(text)) {
-        findings.push({
-          tool: name,
-          field: `param:${path}`,
-          label: f.label,
-          confidence: f.confidence,
-        });
+        findings.push({ tool: name, field, label: f.label, confidence: f.confidence });
       }
     }
   }
@@ -113,6 +177,18 @@ function collectParamNames(schema: unknown, path = ""): string[] {
     }
   }
   if (obj.items) out.push(...collectParamNames(obj.items, path ? `${path}[]` : "[]"));
+  for (const key of SCHEMA_CHILD_LISTS) {
+    const list = obj[key];
+    if (Array.isArray(list)) for (const val of list) out.push(...collectParamNames(val, path));
+  }
+  for (const key of ["$defs", "definitions"]) {
+    const map = obj[key];
+    if (map && typeof map === "object") {
+      for (const val of Object.values(map as Record<string, unknown>)) {
+        out.push(...collectParamNames(val, path));
+      }
+    }
+  }
   return out;
 }
 
@@ -179,13 +255,34 @@ export function checklistFindings(tools: McpToolDef[]): McpToolFinding[] {
   return findings;
 }
 
-/** Deterministic content hash of a tool set — order-independent, whitespace-exact. */
+/**
+ * Deterministic content hash of a tool set — order-independent, whitespace-exact. Title,
+ * annotations and output schema are hashed when present, so flipping `readOnlyHint` or
+ * widening an output schema is a rug pull. A tool with none of them hashes as it did before
+ * they were covered, so existing pins of such tools still match.
+ */
 export function hashToolset(tools: McpToolDef[]): string {
+  return hashCanonical(tools, true);
+}
+
+/** The hash before titles, annotations and output schemas were covered. */
+export function legacyHashToolset(tools: McpToolDef[]): string {
+  return hashCanonical(tools, false);
+}
+
+function hashCanonical(tools: McpToolDef[], extended: boolean): string {
   const canonical = tools
     .map((t) => ({
       name: t.name,
       description: t.description ?? "",
       inputSchema: stableStringify(t.inputSchema ?? null),
+      ...(extended && t.title !== undefined ? { title: t.title } : {}),
+      ...(extended && t.annotations !== undefined
+        ? { annotations: stableStringify(t.annotations) }
+        : {}),
+      ...(extended && t.outputSchema !== undefined
+        ? { outputSchema: stableStringify(t.outputSchema) }
+        : {}),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
   return createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
@@ -201,9 +298,14 @@ function stableStringify(value: unknown): string {
 }
 
 /** Compare a freshly computed hash against a pinned one. */
-export function classifyDrift(pinnedHash: string | undefined, currentHash: string): McpDrift {
+export function classifyDrift(
+  pinnedHash: string | undefined,
+  currentHash: string,
+  legacyHash?: string,
+): McpDrift {
   if (!pinnedHash) return "new";
-  return pinnedHash === currentHash ? "unchanged" : "changed";
+  if (pinnedHash === currentHash) return "unchanged";
+  return pinnedHash === legacyHash ? "legacy-pin" : "changed";
 }
 
 /**
@@ -219,7 +321,7 @@ export function triageMcpTools(
   // Poisoning findings (can be high-confidence → gate) + advisory MCP-checklist
   // findings (always heuristic → surfaced, never verdict-flipping).
   const findings = [...poisoning, ...checklistFindings(tools)];
-  const drift = classifyDrift(pinnedHash, toolsetHash);
+  const drift = classifyDrift(pinnedHash, toolsetHash, legacyHashToolset(tools));
   const hasHighPoisoning = findings.some((f) => f.confidence === "high");
   return {
     server,
@@ -243,6 +345,11 @@ export function extractToolDefs(manifest: unknown): McpToolDef[] {
       name: o.name,
       description: typeof o.description === "string" ? o.description : undefined,
       inputSchema: o.inputSchema ?? o.input_schema ?? o.parameters,
+      ...(typeof o.title === "string" ? { title: o.title } : {}),
+      ...((o.outputSchema ?? o.output_schema) !== undefined
+        ? { outputSchema: o.outputSchema ?? o.output_schema }
+        : {}),
+      ...(o.annotations !== undefined ? { annotations: o.annotations } : {}),
     };
   };
   if (Array.isArray(manifest)) {
