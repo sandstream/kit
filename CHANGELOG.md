@@ -15,6 +15,11 @@
   an ordinary exit 1, so a slow Windows run of `kit setup` read as a setup failure
   (sandstream/kit#813). The helper now appends `killed after N ms (timeout)`, and the two `kit setup`
   pipeline tests allow 90 s; the passing one had already taken 25.6 s on Windows.
+- **CLI contract snapshots ignore Windows' own cache folder.** kit runs PowerShell to set ACLs,
+  and PowerShell sometimes writes its startup-profile cache under the fixture's
+  `AppData\Local\Microsoft`. The "nothing changed" snapshot then failed
+  (`elevation-totp-cli`, Windows shard 1), on a file kit never writes. That folder is now left out;
+  any other change is still caught.
 
 - **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
   approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
