@@ -20,6 +20,16 @@
   - Augment 1.x renamed its shell tool from `launch-process` to `bash`; the matcher is now
     `bash|launch-process`.
   Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
+- **A planted agent hook fails `kit check`, in the project or the user directory.** The 2026 npm
+  worms persisted with a `SessionStart` hook in `.claude/settings.json` running
+  `node .claude/setup.mjs`. `kit check` never ran the agent-config audit, `kit agent-audit` read
+  only the command string (no malware shape) and not the file it runs, and, run from a project, it
+  did not read `~/.claude/settings.json` at all. `kit check --category security` now includes the
+  project and user-level agent audit; hook commands' project scripts are scanned for the same
+  malware shapes, a `SessionStart` hook running a project file is a warning, and the user-level
+  `settings.json` hooks are audited. `kit check`'s install-script row no longer says npm skips
+  dependency install scripts by default: only npm 12+ does. Found by kit-research
+  `supply-chain-2026-fundamentals-vs-kit`.
 - **The install gate refuses commands that skip the git hooks.** `git commit --no-verify`,
   `git -c core.hooksPath=/dev/null commit` and `HUSKY=0 git commit` passed `gate-bash` silently,
   and the `-c` form left no skip record either. The gate now names and refuses `--no-verify` and
