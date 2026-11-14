@@ -11,6 +11,11 @@
 
 ### Fixed
 
+- **A CLI test that times out now says so.** `runCli` reported a child killed at its 30 s timeout as
+  an ordinary exit 1, so a slow Windows run of `kit setup` read as a setup failure
+  (sandstream/kit#813). The helper now appends `killed after N ms (timeout)`, and the two `kit setup`
+  pipeline tests allow 90 s; the passing one had already taken 25.6 s on Windows.
+
 - **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
   approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
   `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in
