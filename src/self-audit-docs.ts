@@ -74,13 +74,8 @@ const ENV_READ_PATTERNS = [
   /["'`](KIT_[A-Z0-9_]{2,60})["'`]\s*[:=,;)\]]/g,
   /\b(KIT_[A-Z0-9_]{2,60})\s*[:=]/g,
 ];
-/** A bash script reads `$KIT_X` or `${KIT_X:-…}`. Only `.sh` files under scripts/ are read this way. */
-const SH_READ_PATTERN = /\$\{?(KIT_[A-Z0-9_]{2,60})\b/g;
-
-/**
- * Collect every `KIT_*` name the implementation (src/, and the scripts in scripts/) reads or
- * sets. Bash scripts count: `kit mcp web` is `scripts/chatgpt-web-wizard.sh`.
- */
+const SH_READ_PATTERNS = [/\$\{?(KIT_[A-Z0-9_]{2,60})\b/g]; // bash: $KIT_X or ${KIT_X:-…}
+/** Collect every `KIT_*` name src/ and scripts/ (npm scripts and bash, e.g. `kit mcp web`) read or set. */
 export function loadKnownEnvVars(repoRoot: string): Set<string> {
   const known = new Set<string>();
   function visit(dir: string): void {
@@ -103,8 +98,7 @@ export function loadKnownEnvVars(repoRoot: string): Set<string> {
       } catch {
         continue;
       }
-      const patterns = e.name.endsWith(".sh") ? [SH_READ_PATTERN] : ENV_READ_PATTERNS;
-      for (const re of patterns) {
+      for (const re of e.name.endsWith(".sh") ? SH_READ_PATTERNS : ENV_READ_PATTERNS) {
         for (const m of text.matchAll(re)) known.add(m[1]);
       }
     }
