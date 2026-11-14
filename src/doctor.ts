@@ -605,7 +605,7 @@ export function agentEgressExposureStatus(g: { installGate: boolean; egressGate:
     return {
       status: "pass",
       detail:
-        "install/exec gate present and egress is scope-bound (gate-egress wired) — a spawned install/exec tool cannot reach off-scope hosts",
+        "install/exec gate present and egress is scope-bound (gate-egress wired) — off-scope hosts named in a command are refused. Not seen: hosts a script, DNS, SSH or `--resolve` reaches without naming them",
     };
   }
   return {
