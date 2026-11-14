@@ -16,7 +16,7 @@ it("respects known global option arities around npm exec", async () => {
     for (const runner of [`npm ${options} exec`, `npm exec ${options}`, `npx ${options}`]) {
       for (const source of ["owner/repo", "https://foreign.example/owner/repo"]) {
         const command = `${runner} --package=skills -- skills add ${source}`;
-        const blocked = source.startsWith("https://foreign.example");
+        const blocked = source !== "owner/repo";
         const parsed = parseInstallCommand(command);
         assert.deepEqual(
           parsed.refs,
