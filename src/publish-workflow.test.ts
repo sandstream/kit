@@ -203,10 +203,12 @@ describe(
       writeFileSync(join(root, "package.json"), JSON.stringify({ name: "kit-fixture", version }));
       writeFileSync(join(root, "CHANGELOG.md"), changelog);
       mkdirSync(join(root, "scripts"));
-      writeFileSync(
-        join(root, "scripts", "changelog-section.mjs"),
-        readFileSync(join(REPO_ROOT, "scripts/changelog-section.mjs")),
-      );
+      for (const script of ["changelog-section.mjs", "changelog-fragments.mjs"]) {
+        writeFileSync(
+          join(root, "scripts", script),
+          readFileSync(join(REPO_ROOT, "scripts", script)),
+        );
+      }
       return root;
     };
 
@@ -244,6 +246,20 @@ describe(
         assert.equal(runScript(script, root, { TAG: "v1.2.3" }).status, 0, "a section must pass");
         const neutered = script.replace(/exit 1/g, "true");
         assert.equal(runScript(neutered, root, { TAG: "v1.2.4" }).status, 0, "the check bites");
+      } finally {
+        rmTemp(root);
+      }
+    });
+
+    it("refuses a tag while a changelog fragment is left unassembled", () => {
+      const root = fixture("1.2.3", "## [Unreleased]\n\n## [1.2.3]\n\n- documented\n");
+      try {
+        const script = stepScript("Verify the CHANGELOG documents this version");
+        mkdirSync(join(root, "changes"));
+        writeFileSync(join(root, "changes", "late-fix.md"), "### Fixed\n\n- **Late fix.**\n");
+        assert.notEqual(runScript(script, root, { TAG: "v1.2.3" }).status, 0, "a fragment is left");
+        const neutered = script.replace(/exit 1/g, "true");
+        assert.equal(runScript(neutered, root, { TAG: "v1.2.3" }).status, 0, "the check bites");
       } finally {
         rmTemp(root);
       }

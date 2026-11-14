@@ -38,6 +38,13 @@ CI runs Linux and Windows (`.github/workflows/windows.yml`, four shards plus `wi
 **No CI job runs macOS.** A macOS-specific path is unverified until someone runs it on a Mac, so
 say so in the PR instead of claiming it works.
 
+## Changelog entries are fragments
+
+Do not edit `CHANGELOG.md` in a pull request. Add `changes/<name>.md` with the entry under its
+`### Added` / `### Fixed` / … heading, exactly as it should appear under `## [Unreleased]`
+([`changes/README.md`](./changes/README.md)). Fragments never conflict; edits to the shared
+`[Unreleased]` lines conflicted with every other open branch on each merge.
+
 ## Before you push
 
 CI runs its steps in order and stops at the first red one, so a push used to show one failure at a
