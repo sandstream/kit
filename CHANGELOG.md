@@ -9,7 +9,7 @@
   approval that an external signer produced and records it. A forged signature is refused and the
   state stays pending. `rotate` replaces the signers and returns the store to pending, so no old
   approval survives. `recover` moves a damaged store aside and never deletes it. The archive inspection refuses entries whose
-  names collide after Unicode normalization or case folding, so a macOS or Windows extraction cannot
+  names collide after full Unicode case folding or normalization (including the long s and compatibility forms), so a macOS or Windows extraction cannot
   overwrite one entry with another. See docs/INCOMING_TRUST.md. This adds no launch
   lock and no workload isolation: nothing runs the candidate yet. Native Windows and macOS are
   unverified.

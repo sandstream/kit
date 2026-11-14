@@ -260,7 +260,10 @@ function normalizePath(value: string, directory: boolean, limit: number): string
  * key can overwrite each other on macOS or Windows, so they must not coexist in one archive.
  */
 function foldPath(path: string): string {
-  return path.normalize("NFC").toLowerCase();
+  // Lower, upper, lower again: one pass misses letters such as the long s, which lowers to itself but
+  // uppers to "S". Decomposed forms on both sides keep a mark that lowering split off from its letter
+  // equal to the composed spelling. Compatibility forms fold too, which only refuses more.
+  return path.normalize("NFKD").toLowerCase().toUpperCase().toLowerCase().normalize("NFKD");
 }
 
 function checkAncestors(exact: Map<string, string>): void {

@@ -56,6 +56,21 @@ describe("inspectNpmTarball path folding", () => {
     assert.equal(reason([manifest, { path: composed }, { path: decomposed }]), "path-conflict");
   });
 
+  it("refuses a long s and an s, which Unicode case folding treats as one letter", () => {
+    const entries = [manifest, { path: "package/s.js" }, { path: "package/\u017f.js" }];
+    assert.equal(reason(entries), "path-conflict");
+  });
+
+  it("refuses a letter with a combining mark against its composed form in another case", () => {
+    const entries = [manifest, { path: "package/J\u030c.js" }, { path: "package/\u01f0.js" }];
+    assert.equal(reason(entries), "path-conflict");
+  });
+
+  it("refuses names that differ only in a compatibility form", () => {
+    const entries = [manifest, { path: "package/a.js" }, { path: "package/\uff41.js" }];
+    assert.equal(reason(entries), "path-conflict");
+  });
+
   it("refuses a file and a directory that collide after case folding", () => {
     const entries = [manifest, { path: "package/lib", body: "x" }, { path: "package/LIB/a.js" }];
     assert.equal(reason(entries), "path-conflict");
