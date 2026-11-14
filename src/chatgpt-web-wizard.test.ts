@@ -20,10 +20,21 @@ describe("ChatGPT web MCP wizard", () => {
     assert.ok(source.includes("platform.openai.com/settings/organization/tunnels"));
     assert.ok(source.includes("chatgpt.com/plugins"));
     assert.match(source, /--sample sample_mcp_stdio_local/);
-    assert.match(source, /--mcp-command "\$KIT_BIN mcp"/);
+    assert.match(source, /--mcp-command "\$MCP_COMMAND"/);
     assert.match(source, /ask_secret CONTROL_PLANE_API_KEY/);
     assert.doesNotMatch(source, /write_env CONTROL_PLANE_API_KEY/);
     assert.doesNotMatch(source, /set_secret CONTROL_PLANE_API_KEY/);
+  });
+
+  it("exposes kit read-only unless the operator opts in and confirms", () => {
+    const source = readFileSync(WIZARD, "utf8");
+    // kit-research t3-connect-device-approval-vs-kit: through the tunnel, kit_run ran any command
+    // with .env.local loaded. The default command must carry --read-only.
+    assert.match(source, /^MCP_COMMAND="\$KIT_BIN mcp --read-only"$/m);
+    const optIn = source.indexOf('KIT_MCP_WEB_ALLOW_WRITES:-}" == "1"');
+    const writable = source.indexOf('MCP_COMMAND="$KIT_BIN mcp"\n');
+    assert.ok(optIn > 0 && writable > optIn, "the writable command is set only inside the opt-in");
+    assert.match(source.slice(optIn, writable), /confirm "Expose kit's write and command tools/);
   });
 
   it("does not report success until the human confirms a real ChatGPT tool call", () => {

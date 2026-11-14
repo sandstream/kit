@@ -239,14 +239,14 @@ required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
 
 ## MCP orchestrator
 
-| Command                                                | Purpose                                                                                                               |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `kit mcp` / `kit mcp list`                             | Show declared MCPs + auth status.                                                                                     |
-| `kit mcp status`                                       | Alias for `list`.                                                                                                     |
-| `kit mcp auth <name>`                                  | Show OAuth-flow guidance for vendor.                                                                                  |
-| `kit mcp set-token <name> [--from-env VAR \| --paste]` | Headless / paste-token install.                                                                                       |
-| `kit mcp clear <name>`                                 | Remove stored token.                                                                                                  |
-| `kit mcp web`                                          | Interactive ChatGPT-web setup through OpenAI Secure MCP Tunnel; keeps kit private and uses its existing stdio server. |
+| Command                                                | Purpose                                                                                                                                                                      |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kit mcp` / `kit mcp list`                             | Show declared MCPs + auth status.                                                                                                                                            |
+| `kit mcp status`                                       | Alias for `list`.                                                                                                                                                            |
+| `kit mcp auth <name>`                                  | Show OAuth-flow guidance for vendor.                                                                                                                                         |
+| `kit mcp set-token <name> [--from-env VAR \| --paste]` | Headless / paste-token install.                                                                                                                                              |
+| `kit mcp clear <name>`                                 | Remove stored token.                                                                                                                                                         |
+| `kit mcp web`                                          | Interactive ChatGPT-web setup through OpenAI Secure MCP Tunnel. Starts `kit mcp --read-only` (no `kit_run` or writes); `KIT_MCP_WEB_ALLOW_WRITES=1` opts in after a confirm. |
 
 ## Hooks
 

@@ -2,6 +2,17 @@
 
 ### Fixed
 
+- **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
+  the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
+  the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
+  tunnel now starts `kit mcp --read-only`: `kit_memory`, `kit_check`, `kit_review` and `kit_context`
+  work, and `kit_run`, `kit_fix`, `kit_init`, `kit_secrets` and `kit_triage` are refused.
+  `KIT_MCP_WEB_ALLOW_WRITES=1 kit mcp web` opts in after a confirm. Re-run the wizard to update an
+  existing tunnel profile.
+- **`kit mcp --read-only` starts the stdio server.** The first argument was read as the sub-command,
+  so the flag printed the usage text instead. The sub-command is now the first argument that is not a
+  flag.
+
 - **`kit adr check` no longer passes a rule that checks nothing.** A `forbid_pattern` or `require_pattern`
   rule printed _"no new violations"_ when its `paths` glob selected no file the gate reads (it reads
   code files only, so a rule over `docs/**/*.md` matched nothing), when the glob was invalid, or when
