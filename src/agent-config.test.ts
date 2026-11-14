@@ -978,7 +978,7 @@ describe("installInstallGateDroid", () => {
 });
 
 describe("installInstallGateAugment", () => {
-  it("writes a PreToolUse launch-process gate to .augment/settings.json, idempotently", async () => {
+  it("writes a PreToolUse bash|launch-process gate to .augment/settings.json, idempotently", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-auggate-"));
     try {
       mkdirSync(join(dir, ".augment"), { recursive: true });
@@ -987,8 +987,8 @@ describe("installInstallGateAugment", () => {
       const s = JSON.parse(readFileSync(join(dir, ".augment", "settings.json"), "utf-8"));
       const groups = s.hooks.PreToolUse;
       assert.ok(Array.isArray(groups) && groups.length === 1);
-      // the one adaptation: Augment's shell tool is "launch-process"
-      assert.equal(groups[0].matcher, "launch-process");
+      // Auggie 1.x calls the shell tool "bash"; 0.x called it "launch-process"
+      assert.equal(groups[0].matcher, "bash|launch-process");
       assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
 
       const r2 = await installInstallGateAugment(dir);
@@ -1033,7 +1033,7 @@ describe("installInstallGateAntigravity", () => {
       const groups = s.hooks.PreToolUse;
       assert.ok(Array.isArray(groups) && groups.length === 1);
       assert.equal(groups[0].matcher, "run_command");
-      assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+      assert.ok(groups[0].hooks[0].command.endsWith("gate-bash --format antigravity"));
 
       const r2 = await installInstallGateAntigravity(dir);
       assert.equal(r2.action, "unchanged");
