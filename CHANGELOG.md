@@ -11,6 +11,14 @@
 
 ### Fixed
 
+- **`kit rig` reports how many findings each run produced.** A finding on a defect target that
+  matches no planted defect is not a false positive, so a reviewer that flags every changed line
+  catches every planted defect, and only control runs priced that. Each config now prints
+  `volume  findings per run <mean> (<min>–<max>)  unmatched <n>`, so volume buying recall is visible
+  with or without controls. Found by kit-research `debate-agents-game-the-judge-vs-kit`.
+  When three or more configs were scored on the same holdout, the report also warns that choosing
+  among them spends the holdout (the chosen config's number is optimistic) and says to plant fresh
+  holdout defects. Found by kit-research `loop-written-harness-vs-kit-rig`.
 - **The OpenCode install gate also gates a tool named `shell`.** OpenCode's tool docs name the
   shell tool `shell`; kit's plugin returned early for any tool other than `bash`, so under that name
   `npm install <untriaged>` ran without a check. Found by kit-research `caniuse-agent-gates`.
