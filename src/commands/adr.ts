@@ -257,7 +257,38 @@ export function freezeAdrBaseline(baseline: Baseline, cwd: string): number {
   const gKeys = gaps.map(adrFindingKey);
   baselineSet(baseline, BASELINE_CATEGORY, "violations", vKeys);
   baselineSet(baseline, BASELINE_CATEGORY, "gaps", gKeys);
+  // The floor: which ADRs were enforced when the baseline was accepted. See floorMoved.
+  baselineSet(baseline, BASELINE_CATEGORY, "enforced", enforcedAdrIds(cwd));
   return vKeys.length + gKeys.length;
+}
+
+/** Ids of the ADRs enforced now, sorted. */
+function enforcedAdrIds(cwd: string): string[] {
+  return loadAdrs(cwd)
+    .filter(({ adr }) => adrIsEnforced(adr))
+    .map(({ adr }) => adr.id)
+    .sort();
+}
+
+/**
+ * An ADR enforced at the last freeze that is not enforced now: demoted (`status` changed),
+ * deleted, or its rules removed. Each of those turned a red `adr check` green with no signal
+ * (kit-research `retro-skill-self-evolving-agents-vs-kit`). It is a gap until the ADR is restored
+ * or a new `kit adr freeze` accepts the lower floor, and that baseline change is the record.
+ */
+function floorMoved(floor: string[], cwd: string): AdrViolation[] {
+  const now = new Set(enforcedAdrIds(cwd));
+  return floor
+    .filter((id) => !now.has(id))
+    .map((id) => ({
+      adrId: id,
+      file: ADR_DIRS[0]!,
+      line: 1,
+      rule: "require-pattern" as const,
+      detail: "floor moved",
+      message: `${id} was enforced at the last \`kit adr freeze\` and is not enforced now (demoted, deleted or its rules removed) — restore it, or re-freeze to accept the lower floor`,
+      kind: "gap" as const,
+    }));
 }
 
 /** Structured result of the ADR gate — what runAdrGate computes and every surface renders. */
@@ -281,7 +312,10 @@ export interface AdrGateResult {
  */
 export async function runAdrGate(cwd = process.cwd()): Promise<AdrGateResult> {
   const adrs = loadAdrs(cwd);
-  if (adrs.length === 0) {
+  const { loadBaselineForGate, baselineGet } = await import("../baseline.js");
+  const { baseline, ignored } = await loadBaselineForGate(cwd);
+  const moved = floorMoved(baselineGet(baseline, BASELINE_CATEGORY, "enforced"), cwd);
+  if (adrs.length === 0 && moved.length === 0) {
     return {
       ok: true,
       adrCount: 0,
@@ -293,8 +327,6 @@ export async function runAdrGate(cwd = process.cwd()): Promise<AdrGateResult> {
     };
   }
 
-  const { loadBaselineForGate, baselineGet } = await import("../baseline.js");
-  const { baseline, ignored } = await loadBaselineForGate(cwd);
   const frozen = new Set([
     ...baselineGet(baseline, BASELINE_CATEGORY, "violations"),
     ...baselineGet(baseline, BASELINE_CATEGORY, "gaps"),
@@ -302,10 +334,14 @@ export async function runAdrGate(cwd = process.cwd()): Promise<AdrGateResult> {
 
   const { enforcedCount, violations, gaps } = collectAdrFindings(cwd);
   const liveViolations = violations.filter((v) => !frozen.has(adrFindingKey(v)));
-  const liveGaps = gaps.filter((v) => !frozen.has(adrFindingKey(v)));
-  const suppressed = violations.length - liveViolations.length + (gaps.length - liveGaps.length);
-  // No enforced ADR ⇒ nothing to gate (documented, not enforced) — ok by definition.
-  const ok = enforcedCount === 0 || (liveViolations.length === 0 && liveGaps.length === 0);
+  const liveGaps = [...gaps.filter((v) => !frozen.has(adrFindingKey(v))), ...moved];
+  const suppressed =
+    violations.length - liveViolations.length + (gaps.length - liveGaps.length + moved.length);
+  // No enforced ADR ⇒ nothing to gate (documented, not enforced) — ok by definition, unless the
+  // floor moved: demoting every ADR must not be the way to a green check.
+  const ok =
+    (enforcedCount === 0 && moved.length === 0) ||
+    (liveViolations.length === 0 && liveGaps.length === 0);
   return {
     ok,
     adrCount: adrs.length,
@@ -332,7 +368,7 @@ export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
     suppressed,
     baselineIgnored,
   } = await runAdrGate(cwd);
-  if (adrCount === 0) {
+  if (adrCount === 0 && ok) {
     console.log(
       `${c.dim}No ADRs found in ${ADR_DIRS.join(" or ")}. Add one with a --- frontmatter (id/title/status) and a \`\`\`toml kit-enforce block.${c.reset}`,
     );
@@ -356,7 +392,7 @@ export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
     );
   }
 
-  if (enforcedCount === 0) {
+  if (enforcedCount === 0 && ok) {
     console.log(
       `${c.yellow}No accepted ADR carries an enforce block — nothing to gate (documented, not enforced).${c.reset}`,
     );

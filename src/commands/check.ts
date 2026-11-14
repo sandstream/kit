@@ -9,7 +9,7 @@
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue, envTruthy, unknownFlags, GLOBAL_FLAGS } from "../utils/flags.js";
-import { loadConfig } from "../config.js";
+import { loadConfig, type kitConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { withGovernance } from "../governance-middleware.js";
 import {
@@ -92,8 +92,21 @@ function rejectUnknownFlags(form: string, allowed: readonly string[]): boolean {
   return true;
 }
 
-export async function cmdCheck(): Promise<boolean> {
-  const jsonMode = hasFlag(process.argv, "--json");
+type CheckRun = Awaited<ReturnType<typeof runCheckGate>>;
+type Counted = { passed: number; failed: number; warnings: number; skipped: number };
+
+/** What the flags ask for: the dimensions to run and how strict the verdict is. */
+interface RunOptions {
+  categories: ReturnType<typeof parseCategoryFlag>["categories"];
+  lenient: boolean;
+  failOnWarning: boolean;
+}
+
+/**
+ * The two sub-handlers and the typo guard. Returns undefined when argv[3] is not a
+ * subcommand, so the default check runs; otherwise the handler's own verdict.
+ */
+async function routeSubcommand(): Promise<boolean | undefined> {
   // kit check verify-attestation <file> verifies a signed check receipt.
   if (process.argv[3] === "verify-attestation") {
     if (rejectUnknownFlags("kit check verify-attestation", VERIFY_FLAGS)) return false;
@@ -115,7 +128,12 @@ export async function cmdCheck(): Promise<boolean> {
     );
     return false;
   }
-  if (rejectUnknownFlags("kit check", CHECK_FLAGS)) return false;
+  return undefined;
+}
+
+/** Reads the flags of the default check. Returns undefined after it has printed a refusal. */
+function parseRunOptions(): RunOptions | undefined {
+  if (rejectUnknownFlags("kit check", CHECK_FLAGS)) return undefined;
 
   // --category narrows which dimensions run. An unrecognised value is an error, not
   // a silent full run — the previous behaviour, which made the flag a no-op wherever
@@ -127,18 +145,28 @@ export async function cmdCheck(): Promise<boolean> {
       `${c.red}unknown --category value${plural}: ${parsed.invalid.join(", ")}${c.reset}`,
     );
     console.error(`${c.dim}accepted: ${CHECK_CATEGORIES.join(" ")}${c.reset}`);
-    return false;
+    return undefined;
   }
-  const categories = parsed.categories;
 
   // Scanner-health strict by default (see cmdCi): a check that could not RUN fails;
   // --lenient / KIT_CI_LENIENT downgrades those to warnings. Finding-warns stay
   // warnings unless --fail-on-warning / --strict / KIT_CI_STRICT.
-  const lenient = hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT);
-  const failOnWarning =
-    hasFlag(process.argv, "--fail-on-warning") ||
-    hasFlag(process.argv, "--strict") ||
-    envTruthy(process.env.KIT_CI_STRICT);
+  return {
+    categories: parsed.categories,
+    lenient: hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT),
+    failOnWarning:
+      hasFlag(process.argv, "--fail-on-warning") ||
+      hasFlag(process.argv, "--strict") ||
+      envTruthy(process.env.KIT_CI_STRICT),
+  };
+}
+
+export async function cmdCheck(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const routed = await routeSubcommand();
+  if (routed !== undefined) return routed;
+  const options = parseRunOptions();
+  if (!options) return false;
   const config = await loadConfig(resolveConfigPath());
 
   return await withGovernance(
@@ -148,221 +176,217 @@ export async function cmdCheck(): Promise<boolean> {
       operationType: "read",
       metadata: {},
     },
-    async () => {
-      const live = !jsonMode;
-      if (live) stepHeader("Checks");
-      const step = <T>(label: string, fn: () => Promise<T>): Promise<T> =>
-        live ? runStep(label, fn) : fn();
-
-      await autoInstallScanners(config, live); // self-heal missing scanners before scanning
-      // Collection and verdict live in the shared core (check-run.ts), the SAME path the MCP
-      // `kit_check` tool and `kit review` use, so the surfaces never disagree on what runs or
-      // what "green" means. The CLI adds spinners (step), PAL sync, attestation and hints.
-      const run = await runCheckGate({
-        config,
-        enforceTests: hasFlag(process.argv, "--enforce-tests"),
-        online: hasFlag(process.argv, "--online"),
-        categories,
-        gate: { lenient, failOnWarning },
-        step,
-      });
-      const {
-        tools: toolResults,
-        services: serviceResults,
-        secrets: secretResults,
-        skills: skillResults,
-        hooks: hookResults,
-        webSearch: webSearchResult,
-        deploy: deployResults,
-        security: securityResults,
-        tests: testResults,
-        locks: lockResults,
-      } = run;
-      const allOk = run.ok;
-
-      // Track security findings in the PAL ledger (cross-session reminders +
-      // auto-close on a clean re-scan). Opt out with [memory] track_findings = false.
-      if (config.memory?.track_findings !== false) {
-        const r = await syncSecurityFindings(securityResults, run.scope);
-        if (!jsonMode && r && (r.added || r.closed.length || r.reopened)) {
-          const parts = [`+${r.added} tracked`];
-          if (r.reopened) parts.push(`${r.reopened} reopened`);
-          if (r.closed.length) parts.push(`−${r.closed.length} auto-closed`);
-          console.log(`${c.dim}PAL: ${parts.join(" · ")}${c.reset}`);
-        }
-      }
-
-      if (jsonMode) {
-        // One flattening, shared with `kit review`'s check stage (check-run.ts).
-        const checks: JsonCheck[] = checkRunToJsonChecks(run);
-
-        const summary = checks.reduce(
-          (acc, c) => {
-            if (c.status === "pass") acc.passed++;
-            else if (c.status === "fail") acc.failed++;
-            else if (c.status === "warn") acc.warnings++;
-            else acc.skipped++;
-            return acc;
-          },
-          { passed: 0, failed: 0, warnings: 0, skipped: 0 },
-        );
-
-        const output: JsonCheckOutput = {
-          ok: allOk,
-          checks,
-          summary,
-          ...(run.scope ? { scope: run.scope } : {}),
-        };
-        await maybeEmitCheckAttestation(
-          "check",
-          allOk,
-          summary,
-          securityResults.map((s) => ({ id: s.name, status: s.status })),
-          true, // quiet: never print to stdout in --json mode
-        );
-        console.log(JSON.stringify(output, null, 2));
-        return allOk;
-      }
-
-      printToolsTable(toolResults);
-      printServicesTable(serviceResults);
-      printSecretsTable(secretResults.templateExists, secretResults.keys);
-      printSkillsTable(skillResults);
-      printWebSearchStatus(webSearchResult);
-      printDeployTable(deployResults);
-      printLockTable(lockResults);
-      printUpstreamTable(run.upstream);
-
-      // Print hooks status if configured
-      if (hookResults.length > 0) {
-        console.log(`${c.cyan}Git Hooks${c.reset}`);
-        for (const r of hookResults) {
-          const icon = !r.installed
-            ? `${c.red}✗${c.reset}`
-            : !r.upToDate
-              ? `${c.yellow}!${c.reset}`
-              : `${c.green}✓${c.reset}`;
-          const status = !r.installed
-            ? `${c.red}not installed${c.reset}`
-            : !r.upToDate
-              ? `${c.yellow}outdated${c.reset}`
-              : `${c.green}up-to-date${c.reset}`;
-          console.log(`  ${icon} ${r.hookName}  ${status}  ${c.dim}${r.detail}${c.reset}`);
-        }
-        console.log();
-      }
-
-      printSecurityTable(securityResults);
-
-      // Render test-coverage results in the same compact style.
-      if (testResults.length > 0) {
-        console.log(`\n${c.bold}Tests${c.reset}`);
-        for (const r of testResults) {
-          const icon =
-            r.status === "pass"
-              ? `${c.green}✓${c.reset}`
-              : r.status === "fail"
-                ? `${c.red}✗${c.reset}`
-                : r.status === "warn"
-                  ? `${c.yellow}!${c.reset}`
-                  : `${c.dim}-${c.reset}`;
-          console.log(`  ${icon} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
-          if (r.files && r.files.length > 0) {
-            for (const f of r.files) console.log(`      ${c.dim}- ${f}${c.reset}`);
-          }
-        }
-        console.log();
-      }
-
-      printSummary(toolResults, serviceResults, secretResults.keys, securityResults, deployResults);
-      printHitlBlocks(
-        hitlBlocksFromCheckResults({
-          config,
-          services: serviceResults,
-          secrets: secretResults.keys,
-          security: securityResults,
-          deploy: deployResults,
-        }),
-      );
-
-      // What the verdict COVERS, counted from the checks that ran. Sibling to the
-      // partial-run line below and for the same reason: a scope the reader has to assume
-      // is a scope that gets assumed wrong. kit's surface is almost all static analysis,
-      // which is the tier that provably cannot distinguish AI-written code from
-      // human-written code (see EXECUTING_CATEGORIES) — so it says so rather than letting
-      // a green stand in for more than it checked.
-      {
-        const notice = tierNotice(checkRunToJsonChecks(run));
-        if (notice) console.log(`${c.dim}${notice}${c.reset}`);
-      }
-
-      // A narrowed run must say so next to its verdict. Without this line a
-      // `--category security` pass is visually identical to a full green.
-      if (run.scope) {
-        console.log(
-          `${c.yellow}partial run${c.reset} ${c.dim}— only ${run.scope.join(", ")} ran; ` +
-            `this verdict does NOT cover the other dimensions${c.reset}`,
-        );
-        console.log();
-      }
-
-      // Deterministic, marker-gated "smart" tip — surfaces a relevant opt-in
-      // capability (unsigned policy, unanchored audit log, missing trivy, …) at
-      // most once. Fail-soft; never affects the verdict. Silence with KIT_NO_HINTS.
-      for (const h of await collectHints(process.cwd())) {
-        console.log(`${c.dim}💡 tip: ${h.tip}${c.reset}`);
-      }
-
-      // Opt-in signed attestation receipt (text mode). Summary is over the
-      // security gates, consistent with scanners_ran; overall_ok is the whole
-      // check verdict. Emission is fail-soft and never changes the verdict.
-      {
-        const attSummary = securityResults.reduce(
-          (acc, s) => {
-            if (s.status === "pass") acc.passed++;
-            else if (s.status === "fail") acc.failed++;
-            else if (s.status === "warn") acc.warnings++;
-            else acc.skipped++;
-            return acc;
-          },
-          { passed: 0, failed: 0, warnings: 0, skipped: 0 },
-        );
-        await maybeEmitCheckAttestation(
-          "check",
-          allOk,
-          attSummary,
-          securityResults.map((s) => ({ id: s.name, status: s.status })),
-          false,
-        );
-      }
-
-      // Surface a stale kit (a newer published version) as a warn — a stale CLI
-      // can carry already-fixed bugs. Gated by [update].check; checkForUpdate
-      // also self-skips in CI and with KIT_NO_UPDATE_CHECK=1, and returns null
-      // when already on latest or the check fails.
-      if (config.update?.check !== false) {
-        const { checkForUpdate } = await import("../update-check.js");
-        const u = await checkForUpdate(KIT_VERSION);
-        if (u) {
-          if (config.update?.auto === true) {
-            // Opt-in auto-update — still WATERTIGHT: selfUpgrade triages kit's own
-            // package and installs ONLY on a triage PASS. Never installs on fail.
-            console.log(
-              `${c.yellow}! kit ${u.current} → ${u.latest} — auto-update on, triaging before install…${c.reset}`,
-            );
-            await selfUpgrade();
-          } else {
-            console.log(
-              `${c.yellow}! kit ${u.current} → ${u.latest} available${c.reset} ${c.dim}— run ${c.reset}${c.bold}kit upgrade --self${c.reset}${c.dim} (triages before installing)${c.reset}\n`,
-            );
-          }
-        }
-      }
-
-      return allOk;
-    },
+    () => runCheckAction(config, options, jsonMode),
   );
 }
+
+async function runCheckAction(
+  config: kitConfig,
+  options: RunOptions,
+  jsonMode: boolean,
+): Promise<boolean> {
+  const live = !jsonMode;
+  if (live) stepHeader("Checks");
+  const step = <T>(label: string, fn: () => Promise<T>): Promise<T> =>
+    live ? runStep(label, fn) : fn();
+
+  await autoInstallScanners(config, live); // self-heal missing scanners before scanning
+  // Collection and verdict live in the shared core (check-run.ts), the SAME path the MCP
+  // `kit_check` tool and `kit review` use, so the surfaces never disagree on what runs or
+  // what "green" means. The CLI adds spinners (step), PAL sync, attestation and hints.
+  const run = await runCheckGate({
+    config,
+    enforceTests: hasFlag(process.argv, "--enforce-tests"),
+    online: hasFlag(process.argv, "--online"),
+    categories: options.categories,
+    gate: { lenient: options.lenient, failOnWarning: options.failOnWarning },
+    step,
+  });
+  await trackFindings(config, run, jsonMode);
+  if (jsonMode) return printJsonRun(run);
+
+  printTables(run);
+  printVerdictNotes(config, run);
+  // Deterministic, marker-gated "smart" tip — surfaces a relevant opt-in
+  // capability (unsigned policy, unanchored audit log, missing trivy, …) at
+  // most once. Fail-soft; never affects the verdict. Silence with KIT_NO_HINTS.
+  for (const h of await collectHints(process.cwd())) {
+    console.log(`${c.dim}💡 tip: ${h.tip}${c.reset}`);
+  }
+  // Opt-in signed attestation receipt (text mode). Summary is over the
+  // security gates, consistent with scanners_ran; overall_ok is the whole
+  // check verdict. Emission is fail-soft and never changes the verdict.
+  await maybeEmitCheckAttestation(
+    "check",
+    run.ok,
+    countStatuses(run.security),
+    run.security.map((s) => ({ id: s.name, status: s.status })),
+    false,
+  );
+  await noticeStaleKit(config);
+  return run.ok;
+}
+
+function countStatuses(items: ReadonlyArray<{ status: string }>): Counted {
+  const acc: Counted = { passed: 0, failed: 0, warnings: 0, skipped: 0 };
+  for (const item of items) {
+    if (item.status === "pass") acc.passed++;
+    else if (item.status === "fail") acc.failed++;
+    else if (item.status === "warn") acc.warnings++;
+    else acc.skipped++;
+  }
+  return acc;
+}
+
+/**
+ * Track security findings in the PAL ledger (cross-session reminders +
+ * auto-close on a clean re-scan). Opt out with [memory] track_findings = false.
+ */
+async function trackFindings(config: kitConfig, run: CheckRun, jsonMode: boolean): Promise<void> {
+  if (config.memory?.track_findings === false) return;
+  const r = await syncSecurityFindings(run.security, run.scope);
+  if (!jsonMode && r && (r.added || r.closed.length || r.reopened)) {
+    const parts = [`+${r.added} tracked`];
+    if (r.reopened) parts.push(`${r.reopened} reopened`);
+    if (r.closed.length) parts.push(`−${r.closed.length} auto-closed`);
+    console.log(`${c.dim}PAL: ${parts.join(" · ")}${c.reset}`);
+  }
+}
+
+async function printJsonRun(run: CheckRun): Promise<boolean> {
+  // One flattening, shared with `kit review`'s check stage (check-run.ts).
+  const checks: JsonCheck[] = checkRunToJsonChecks(run);
+  const summary = countStatuses(checks);
+  const output: JsonCheckOutput = {
+    ok: run.ok,
+    checks,
+    summary,
+    ...(run.scope ? { scope: run.scope } : {}),
+  };
+  await maybeEmitCheckAttestation(
+    "check",
+    run.ok,
+    summary,
+    run.security.map((s) => ({ id: s.name, status: s.status })),
+    true, // quiet: never print to stdout in --json mode
+  );
+  console.log(JSON.stringify(output, null, 2));
+  return run.ok;
+}
+
+function printTables(run: CheckRun): void {
+  printToolsTable(run.tools);
+  printServicesTable(run.services);
+  printSecretsTable(run.secrets.templateExists, run.secrets.keys);
+  printSkillsTable(run.skills);
+  printWebSearchStatus(run.webSearch);
+  printDeployTable(run.deploy);
+  printLockTable(run.locks);
+  printUpstreamTable(run.upstream);
+  printHooksTable(run.hooks);
+  printSecurityTable(run.security);
+  printTestsTable(run.tests);
+}
+
+/** Print hooks status if configured. */
+function printHooksTable(hookResults: CheckRun["hooks"]): void {
+  if (hookResults.length === 0) return;
+  console.log(`${c.cyan}Git Hooks${c.reset}`);
+  for (const r of hookResults) {
+    const icon = !r.installed
+      ? `${c.red}✗${c.reset}`
+      : !r.upToDate
+        ? `${c.yellow}!${c.reset}`
+        : `${c.green}✓${c.reset}`;
+    const status = !r.installed
+      ? `${c.red}not installed${c.reset}`
+      : !r.upToDate
+        ? `${c.yellow}outdated${c.reset}`
+        : `${c.green}up-to-date${c.reset}`;
+    console.log(`  ${icon} ${r.hookName}  ${status}  ${c.dim}${r.detail}${c.reset}`);
+  }
+  console.log();
+}
+
+/** Render test-coverage results in the same compact style. */
+function printTestsTable(testResults: CheckRun["tests"]): void {
+  if (testResults.length === 0) return;
+  console.log(`\n${c.bold}Tests${c.reset}`);
+  for (const r of testResults) {
+    const icon =
+      r.status === "pass"
+        ? `${c.green}✓${c.reset}`
+        : r.status === "fail"
+          ? `${c.red}✗${c.reset}`
+          : r.status === "warn"
+            ? `${c.yellow}!${c.reset}`
+            : `${c.dim}-${c.reset}`;
+    console.log(`  ${icon} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
+    if (r.files && r.files.length > 0) {
+      for (const f of r.files) console.log(`      ${c.dim}- ${f}${c.reset}`);
+    }
+  }
+  console.log();
+}
+
+/** The summary, the human-action blocks, what the verdict covers and the partial-run line. */
+function printVerdictNotes(config: kitConfig, run: CheckRun): void {
+  printSummary(run.tools, run.services, run.secrets.keys, run.security, run.deploy);
+  printHitlBlocks(
+    hitlBlocksFromCheckResults({
+      config,
+      services: run.services,
+      secrets: run.secrets.keys,
+      security: run.security,
+      deploy: run.deploy,
+    }),
+  );
+
+  // What the verdict COVERS, counted from the checks that ran. Sibling to the
+  // partial-run line below and for the same reason: a scope the reader has to assume
+  // is a scope that gets assumed wrong. kit's surface is almost all static analysis,
+  // which is the tier that provably cannot distinguish AI-written code from
+  // human-written code (see EXECUTING_CATEGORIES) — so it says so rather than letting
+  // a green stand in for more than it checked.
+  const notice = tierNotice(checkRunToJsonChecks(run));
+  if (notice) console.log(`${c.dim}${notice}${c.reset}`);
+
+  // A narrowed run must say so next to its verdict. Without this line a
+  // `--category security` pass is visually identical to a full green.
+  if (run.scope) {
+    console.log(
+      `${c.yellow}partial run${c.reset} ${c.dim}— only ${run.scope.join(", ")} ran; ` +
+        `this verdict does NOT cover the other dimensions${c.reset}`,
+    );
+    console.log();
+  }
+}
+
+/**
+ * Surface a stale kit (a newer published version) as a warn — a stale CLI
+ * can carry already-fixed bugs. Gated by [update].check; checkForUpdate
+ * also self-skips in CI and with KIT_NO_UPDATE_CHECK=1, and returns null
+ * when already on latest or the check fails.
+ */
+async function noticeStaleKit(config: kitConfig): Promise<void> {
+  if (config.update?.check === false) return;
+  const { checkForUpdate } = await import("../update-check.js");
+  const u = await checkForUpdate(KIT_VERSION);
+  if (!u) return;
+  if (config.update?.auto === true) {
+    // Opt-in auto-update — still WATERTIGHT: selfUpgrade triages kit's own
+    // package and installs ONLY on a triage PASS. Never installs on fail.
+    console.log(
+      `${c.yellow}! kit ${u.current} → ${u.latest} — auto-update on, triaging before install…${c.reset}`,
+    );
+    await selfUpgrade();
+  } else {
+    console.log(
+      `${c.yellow}! kit ${u.current} → ${u.latest} available${c.reset} ${c.dim}— run ${c.reset}${c.bold}kit upgrade --self${c.reset}${c.dim} (triages before installing)${c.reset}\n`,
+    );
+  }
+}
+
 /**
  * `kit check compare <before.json> <after.json> [--json] [--fail-on-worse]`
  *
