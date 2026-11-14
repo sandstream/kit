@@ -319,7 +319,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
 - `kit coverage [--standard=<key>|all]`: Evidence maps against 8 pinned standards — OWASP **ASVS L2** · **LLM Top 10** · **Agentic Top 10** · **MCP Top 10** · NIST **SSDF 800-218A** · **NIST 800-53 Rev. 5** (control-family level) · **AIUC-1** · **GCP WAF Security** — showing which controls kit's deterministic checks auto-verify vs gap/manual/n-a (evidence maps, **not** compliance attestations; `--list-standards` to enumerate, `--json` for GRC tools)
 - `kit sentinel {run,install,status}`: Autonomous redline watcher (propose/apply guarded fixes)
-- `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV
+- `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV/Cloudflare audit
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive/manual) per service without logging in. See [service credential ownership](./docs/adr/0008-service-passkeys-and-tokens.md).
 - `kit secrets {set,migrate,rotate,propagate,onecli,validate}`: Secret lifecycle
 - `kit memory {index,search,stats,suggest,merge,save,threads,share,backup}`: Local-first, cross-harness second brain (per-harness `stats`, project recall, saved copilots) + `kit memory pal` pending-action ledger
