@@ -21,7 +21,13 @@
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
-import { auditConfigSecrets, auditHookBody, auditMcpStdio } from "./agent-audit.js";
+import {
+  auditConfigSecrets,
+  auditHookBody,
+  auditMcpStdio,
+  auditSettingsCommands,
+} from "./agent-audit.js";
+import { hookScriptRows } from "./agent-hook-scripts.js";
 import { readInstructionFile, scanInstructionText } from "./instruction-scan.js";
 
 export const USER_AGENT_DIRS = [
@@ -243,6 +249,27 @@ function instructionRows(
 }
 
 /**
+ * The hooks in `~/.claude/settings.json`, which Claude Code runs in every project. A worm that
+ * plants a `SessionStart` hook there survives cloning a fresh repo; run from a project, the audit
+ * did not read it (kit-research `supply-chain-2026-fundamentals-vs-kit`). Hook scripts resolve
+ * against `root`, the directory the agent starts in.
+ */
+function userSettingsRows(root: string, home: string): SecurityCheckResult[] {
+  const shown = "~/.claude/settings.json";
+  const body = readInstructionFile(join(home, ".claude", "settings.json"));
+  if (body === null) return [];
+  const rows: SecurityCheckResult[] = auditSettingsCommands(body).map((c) => ({
+    category: "exposure",
+    name: `malware-shaped command in ${shown} (${c.where})`,
+    status: "fail",
+    severity: "high",
+    detail: `${c.where} ${c.why} — this command runs in every project on this machine`,
+    suggestion: `review the ${c.where} command in ${shown}; it runs on every matching event`,
+  }));
+  return [...rows, ...hookScriptRows(body, root, shown)];
+}
+
+/**
  * Audit the user-level agent surfaces under `home`. When `root` is `home`, the project audit has
  * already read the Claude dirs, so only the Codex ones are read rather than reporting twice.
  */
@@ -254,7 +281,8 @@ export function runUserAgentAudit(
   const claude = !sameDir(root, home);
   const s = surfaces(home, env, claude);
   const instructions = instructionRows(home, env, claude);
-  const rows = [...s.rows, ...instructions.rows];
+  const settings = claude ? userSettingsRows(root, home) : [];
+  const rows = [...s.rows, ...instructions.rows, ...settings];
   if (rows.length === 0 && (s.scanned > 0 || instructions.read > 0)) {
     rows.push({
       category: "exposure",

@@ -4,7 +4,7 @@
  *
  *  - install-scripts : deps that run pre/post/install scripts (the classic malware
  *                      execution vector) — surfaced so they can be reviewed / run
- *                      with `--ignore-scripts` (npm's own default since v11).
+ *                      with `--ignore-scripts` (npm's own default since v12).
  *  - lockfile-drift  : a declared dependency missing from the lockfile, or a package
  *                      resolved from a NON-registry source (http/git/github tarball).
  *  - dep-confusion   : a dependency under one of your declared internal scopes that
