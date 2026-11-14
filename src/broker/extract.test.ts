@@ -80,3 +80,45 @@ describe("extractHostsFromCommand", () => {
     assert.deepEqual(extractHostsFromCommand("curl https://a.com b.com a.com"), ["a.com", "b.com"]);
   });
 });
+
+describe("hosts a request is forwarded to", () => {
+  // kit-research gpt-6-astra-swarm-incident-vs-kit: agents with no direct internet left through
+  // an allowed mirror. A URL carried in an allowed URL is a network target too.
+  it("reads a URL in the query, unencoded", () => {
+    assert.deepEqual(
+      extractHostsFromCommand("curl https://mirror.example/fetch?url=https://off.example/x"),
+      ["mirror.example", "off.example"],
+    );
+  });
+
+  it("reads a percent-encoded URL in the query", () => {
+    assert.deepEqual(
+      extractHostsFromCommand('curl "https://mirror.example/f?u=https%3A%2F%2Foff.example%2Fx"'),
+      ["mirror.example", "off.example"],
+    );
+  });
+
+  it("reads a URL in the path and the fragment", () => {
+    assert.deepEqual(
+      extractHostsFromCommand(
+        "curl https://mirror.example/proxy/https://off.example/#https://far.example",
+      ),
+      ["far.example", "mirror.example", "off.example"],
+    );
+  });
+
+  it("reads a forwarded URL in an argv value", async () => {
+    const { extractHostsFromArgs } = await import("./extract.js");
+    assert.deepEqual(
+      extractHostsFromArgs(["curl", "https://mirror.example/f?u=https%3A%2F%2Foff.example%2F"]),
+      ["mirror.example", "off.example"],
+    );
+  });
+
+  it("adds nothing for a same-host redirect parameter", () => {
+    assert.deepEqual(
+      extractHostsFromCommand("curl https://a.example/login?next=https://a.example/home"),
+      ["a.example"],
+    );
+  });
+});

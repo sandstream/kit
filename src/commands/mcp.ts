@@ -15,8 +15,12 @@ function runWebWizard(): boolean {
   return false;
 }
 
+/**
+ * The sub-command is the first word that is not a flag: `kit mcp --read-only` is the stdio server
+ * in read-only mode, not an unknown sub-command. Reading argv[3] printed the usage instead.
+ */
 export async function cmdMcp(): Promise<boolean> {
-  const sub = process.argv[3];
+  const sub = process.argv.slice(3).find((arg) => !arg.startsWith("-"));
 
   // An MCP client launches `kit mcp` and speaks the stdio transport — no
   // sub-command and a non-TTY stdin. Start the server in that case. Interactive

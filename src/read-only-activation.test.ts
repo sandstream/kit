@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -12,20 +12,25 @@ import {
 } from "./audit-concurrency.test-support.js";
 
 function snapshot(root: string): unknown[] {
-  return readdirSync(root)
-    .sort()
-    .map((name) => {
-      const path = join(root, name);
-      const stat = statSync(path);
-      return stat.isDirectory()
-        ? [name, snapshot(path)]
-        : [
-            name,
-            createHash("sha256").update(readFileSync(path)).digest("hex"),
-            stat.ino,
-            stat.mtimeMs,
-            stat.mode,
-          ];
+  return readdirSync(root, { withFileTypes: true })
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .map((entry) => {
+      const path = join(root, entry.name);
+      if (entry.isDirectory()) return [entry.name, snapshot(path)];
+      // Open once and read the metadata and the content through the same descriptor.
+      const fd = openSync(path, "r");
+      try {
+        const stat = fstatSync(fd);
+        return [
+          entry.name,
+          createHash("sha256").update(readFileSync(fd)).digest("hex"),
+          stat.ino,
+          stat.mtimeMs,
+          stat.mode,
+        ];
+      } finally {
+        closeSync(fd);
+      }
     });
 }
 

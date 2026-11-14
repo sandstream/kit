@@ -74,8 +74,8 @@ const ENV_READ_PATTERNS = [
   /["'`](KIT_[A-Z0-9_]{2,60})["'`]\s*[:=,;)\]]/g,
   /\b(KIT_[A-Z0-9_]{2,60})\s*[:=]/g,
 ];
-
-/** Collect every `KIT_*` name the implementation (src/, and the npm scripts in scripts/) reads or sets. */
+const SH_READ_PATTERNS = [/\$\{?(KIT_[A-Z0-9_]{2,60})\b/g]; // bash: $KIT_X or ${KIT_X:-…}
+/** Collect every `KIT_*` name src/ and scripts/ (npm scripts and bash, e.g. `kit mcp web`) read or set. */
 export function loadKnownEnvVars(repoRoot: string): Set<string> {
   const known = new Set<string>();
   function visit(dir: string): void {
@@ -91,14 +91,14 @@ export function loadKnownEnvVars(repoRoot: string): Set<string> {
         visit(join(dir, e.name));
         continue;
       }
-      if (!/\.(ts|mjs)$/.test(e.name) || /\.test\.(ts|mjs)$/.test(e.name)) continue;
+      if (!/\.(ts|mjs|sh)$/.test(e.name) || /\.test\.(ts|mjs)$/.test(e.name)) continue;
       let text;
       try {
         text = readFileSync(join(dir, e.name), "utf-8");
       } catch {
         continue;
       }
-      for (const re of ENV_READ_PATTERNS) {
+      for (const re of e.name.endsWith(".sh") ? SH_READ_PATTERNS : ENV_READ_PATTERNS) {
         for (const m of text.matchAll(re)) known.add(m[1]);
       }
     }

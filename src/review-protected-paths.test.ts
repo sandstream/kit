@@ -58,3 +58,19 @@ it("protects the secrets and policy command surfaces", () => {
   const unprotected = gaps.filter((path) => classifyProtectedPaths([path], rules).length === 0);
   assert.deepEqual(unprotected, []);
 });
+
+it("protects the review gate's own decision code, not only the workflow that runs it", () => {
+  // kit-research claude-code-review-at-anthropic-vs-kit: #762 changed the gate's decision code and
+  // the gate approved it without a person, because only `.github/` was protected.
+  const rules = loadProtectedPathRules(process.cwd());
+  const gateCode = [
+    "scripts/agent-review-gate.mjs",
+    "scripts/agent-model-review.mjs",
+    "scripts/github-app-token.mjs",
+    "src/review-protected-paths.ts",
+    "src/review-protected-paths-github.ts",
+  ];
+  const unprotected = gateCode.filter((path) => classifyProtectedPaths([path], rules).length === 0);
+  assert.deepEqual(unprotected, []);
+  assert.deepEqual(classifyProtectedPaths(["scripts/other.mjs"], rules), []);
+});
