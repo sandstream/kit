@@ -90,6 +90,19 @@ async function waitForRemoteApproval(
 /**
  * Request human approval for an operation
  */
+/**
+ * Why the yes/no prompt must not be shown, or null. A person answers at a terminal. Without one,
+ * stdin is whatever the caller piped in, and a piped `yes` is the agent approving itself
+ * (kit-research out-of-loop-durable-agents-vs-kit-approvals).
+ */
+function promptRefusal(): string | null {
+  if (isNonInteractive())
+    return "✗ Approval required but running in non-interactive mode — operation denied";
+  if (!process.stdin.isTTY || !process.stdout.isTTY)
+    return "✗ Approval required but no terminal is attached — operation denied";
+  return null;
+}
+
 export async function requestApproval(
   config: GovernanceConfig | undefined,
   request: ApprovalRequest,
@@ -168,16 +181,9 @@ export async function requestApproval(
     return false;
   }
 
-  // Non-interactive mode: skip CLI prompt and deny
-  if (isNonInteractive()) {
-    console.error("✗ Approval required but running in non-interactive mode — operation denied");
-    return false;
-  }
-
-  // A person answers at a terminal. Without one, stdin is whatever the caller piped in, and a
-  // piped `yes` is the agent approving itself (kit-research out-of-loop-durable-agents-vs-kit-approvals).
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("✗ Approval required but no terminal is attached — operation denied");
+  const refusal = promptRefusal(); // non-interactive or no terminal: deny, never prompt
+  if (refusal) {
+    console.error(refusal);
     return false;
   }
 
