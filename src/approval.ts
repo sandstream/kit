@@ -174,6 +174,13 @@ export async function requestApproval(
     return false;
   }
 
+  // A person answers at a terminal. Without one, stdin is whatever the caller piped in, and a
+  // piped `yes` is the agent approving itself (kit-research out-of-loop-durable-agents-vs-kit-approvals).
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("✗ Approval required but no terminal is attached — operation denied");
+    return false;
+  }
+
   // Fall back to CLI approval
   const rl = readline.createInterface({
     input: process.stdin,

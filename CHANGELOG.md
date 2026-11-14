@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **An approval prompt needs a person at a terminal.** `requestApproval` read its answer from
+  stdin with no terminal check, so `echo yes | kit …` was the agent approving its own production
+  write. It now denies when stdin or stdout is not a terminal. `CI=1` and other non-empty `CI`
+  values now count as non-interactive, not only `CI=true`. The `kit auth elevate` refusal no longer
+  names the `KIT_ELEVATED=1` escape hatch to the agent it just refused; it asks for a person.
+  Found by kit-research `out-of-loop-durable-agents-vs-kit-approvals`.
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
   the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
   the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
