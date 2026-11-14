@@ -141,7 +141,7 @@ describe("a required review the caller can bypass", () => {
     const row = await auditRemoteRequiredReviews("git@github.com:owner/repo.git", "t", fetcher);
     assert.equal(row.status, "warn");
     assert.match(row.detail, /main: the identity this token belongs to can bypass/);
-    assert.ok(urls.includes("https://api.github.com/repos/owner/repo/rulesets/42"));
+    assert.deepEqual(urls.slice(-1), ["https://api.github.com/repos/owner/repo/rulesets/42"]);
   });
 
   it("still passes when GitHub says the caller cannot bypass", async () => {
