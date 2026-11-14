@@ -11,6 +11,11 @@
 
 ### Fixed
 
+- **A SARIF scan that stopped no longer reads as clean.** `kit ingest sarif` ignored
+  `invocations[].executionSuccessful`, so a run that failed with no results printed
+  "0 finding(s)", exit 0. That run is now refused, a stopped run with results carries a note that
+  the findings are partial, and a SARIF version other than 2.1.0 is refused. The `kit ingest` help
+  line now lists `cloudflare-audit`. Found by kit-research `openai-daybreak-red-team-vs-kit`.
 - **The egress gate reads a URL forwarded through an allowed host.** A fetch to an in-scope host
   that carries another URL (`https://mirror/fetch?url=https://elsewhere/`, encoded or not) was
   checked only against the mirror's host. The forwarded host is now extracted from the path, query

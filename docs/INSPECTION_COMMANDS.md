@@ -121,6 +121,9 @@ The scanner adapters use the same strict parser when they feed the security verd
 A successful import produces exit 0, including when the report contains findings with status `fail`.
 That exit code confirms a valid import. It does not certify the account or resolve a finding.
 Valid empty reports produce a count of zero.
+A SARIF run that reports `executionSuccessful: false` is not an empty report: with no results it
+is refused, and with results the findings are printed with a note that they are partial. Only
+SARIF 2.1.0 is read.
 
 `cloudflare-audit` reads the `findings.json` that Cloudflare's security-audit skill writes and
 validates. kit checks only the fields it reads: the verdict, a unique fingerprint, the title, a source
