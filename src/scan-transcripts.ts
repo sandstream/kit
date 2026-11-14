@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { resolve, join, basename } from "node:path";
 import { homedir } from "node:os";
 import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
 
@@ -27,7 +27,14 @@ export interface TranscriptHit {
 }
 
 const SCANNABLE_EXTS = new Set([".jsonl", ".md", ".json", ".txt", ".log"]);
-const SKIP_DIRS = new Set(["node_modules", ".git", "tool-results"]);
+const SKIP_DIRS = new Set(["node_modules", ".git", "tool-results", ".next"]);
+/**
+ * Claude Code puts each sub-agent's git worktree in `<repo>/.claude/worktrees/`. It is a copy of
+ * the repo, not a transcript, and the repo's own files are covered by the secrets scan. Only that
+ * folder under a `.claude` directory is skipped.
+ */
+const isAgentWorktrees = (dir: string, name: string): boolean =>
+  name === "worktrees" && basename(dir) === ".claude";
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MiB
 
 async function dirExists(path: string): Promise<boolean> {
@@ -48,7 +55,7 @@ async function walk(dir: string, out: string[], depth = 0, maxDepth = 6): Promis
     return;
   }
   for (const ent of entries) {
-    if (SKIP_DIRS.has(ent.name)) continue;
+    if (SKIP_DIRS.has(ent.name) || isAgentWorktrees(dir, ent.name)) continue;
     const full = join(dir, ent.name);
     if (ent.isDirectory()) {
       await walk(full, out, depth + 1, maxDepth);

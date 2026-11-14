@@ -181,3 +181,37 @@ describe("LIMITS", () => {
     assert.match(LIMITS[2], /^Transfer is unproven/);
   });
 });
+
+describe("volume", () => {
+  it("counts findings per run and unmatched ones, so flooding is visible without controls", () => {
+    const flood: RunOutcome = { ...defect("F", "r1", "d1", true), duplicates: 4, unmatched: 95 };
+    const quiet = defect("Q", "r1", "d1", true);
+    const [f, q] = aggregate(MANIFEST, [flood, quiet]);
+    assert.deepEqual(f.tune.recall, q.tune.recall, "the same recall either way");
+    assert.deepEqual(f.volume, {
+      findingsPerRun: { mean: 100, min: 100, max: 100 },
+      unmatched: 95,
+    });
+    assert.deepEqual(q.volume, { findingsPerRun: { mean: 1, min: 1, max: 1 }, unmatched: 0 });
+    const withControl = aggregate(MANIFEST, [quiet, control("Q", "r1", 2)]);
+    assert.deepEqual(withControl[0].volume?.findingsPerRun, { mean: 3, min: 3, max: 3 });
+  });
+});
+
+describe("a spent holdout", () => {
+  it("warns once three or more configs were scored on the same holdout", () => {
+    const two = aggregate(MANIFEST, [
+      defect("A", "r1", "h1", true),
+      defect("B", "r1", "h1", false),
+    ]);
+    assert.ok(!splitWarnings(two).some((w) => w.includes("same holdout")));
+    const three = aggregate(MANIFEST, [
+      defect("A", "r1", "h1", true),
+      defect("B", "r1", "h1", false),
+      defect("C", "r1", "h1", true),
+    ]);
+    assert.ok(
+      splitWarnings(three).some((w) => w.startsWith("3 configs were scored on the same holdout")),
+    );
+  });
+});

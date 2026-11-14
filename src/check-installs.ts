@@ -228,6 +228,29 @@ export interface InstallFacts {
   assess: (version: string) => RuntimeAssessment;
   /** The release line this project declares, when it declares one. */
   projectMajor: number | null;
+  /** Absolute paths of the Node binaries that the project's git hooks run. */
+  hookNodes?: string[];
+}
+
+const HOOK_NODE = /^\s*"?(\/[^\s"]*\/node)"?\s+"?\//;
+
+/** The Node binaries a generated git hook calls: a line that starts with an absolute `.../node`. */
+export function hookNodePaths(text: string): string[] {
+  const found: string[] = [];
+  for (const line of text.split("\n")) {
+    const path = HOOK_NODE.exec(line)?.[1];
+    if (path && !found.includes(path)) found.push(path);
+  }
+  return found;
+}
+
+/** Whether a hook runs this install: its binary sits in the install's folder. */
+function runByHook(e: InstallEntry, hookNodes: string[]): boolean {
+  const dir = posix(e.dir);
+  return hookNodes.some((raw) => {
+    const path = posix(raw);
+    return e.manager === "system" ? path === `${dir}/bin/node` : inside(path, dir);
+  });
 }
 
 const BAD = new Set<RuntimeAssessment["verdict"]>(["end of life", "security release available"]);
@@ -270,6 +293,7 @@ function unusedBad(f: InstallFacts): InstallEntry[] {
   const winnerVersion = f.winner?.version ?? null;
   return f.installs.filter((e) => {
     if (e.version === winnerVersion) return false;
+    if (runByHook(e, f.hookNodes ?? [])) return false;
     if (f.projectMajor !== null && triple(e.version)?.[0] === f.projectMajor) return false;
     return BAD.has(f.assess(e.version).verdict);
   });
@@ -305,6 +329,30 @@ function winnerFailure(f: InstallFacts, winner: Winner, verdict: RuntimeAssessme
   };
 }
 
+/** Installs that are end of life or lack a security release and that a git hook still runs. */
+function hookRunBad(f: InstallFacts): InstallEntry[] {
+  const winnerVersion = f.winner?.version ?? null;
+  return f.installs.filter(
+    (e) =>
+      e.version !== winnerVersion &&
+      runByHook(e, f.hookNodes ?? []) &&
+      BAD.has(f.assess(e.version).verdict),
+  );
+}
+
+function hookFailure(hooked: InstallEntry[], unused: InstallEntry[]): SecurityCheckResult {
+  const rest = unused.length > 0 ? `; ${unused.length} more unused: ${listing(unused)}` : "";
+  return {
+    ...base,
+    status: "warn",
+    severity: "low",
+    hasFindings: true,
+    detail: `git hooks run ${listing(hooked)}, which is end of life or lacks a security release${rest}`,
+    suggestion:
+      "rewrite the git hooks to use a supported Node before removing it, or commits stop working",
+  };
+}
+
 /** The verdict for one machine. Pure. */
 export function judgeInstalls(f: InstallFacts): SecurityCheckResult {
   const { installs, winner } = f;
@@ -333,6 +381,8 @@ export function judgeInstalls(f: InstallFacts): SecurityCheckResult {
   const verdict = f.assess(winner.version).verdict;
   if (BAD.has(verdict)) return winnerFailure(f, winner, verdict);
   if (verdict === "unknown") return unverified("no release data for the Node on PATH");
+  const hooked = hookRunBad(f);
+  if (hooked.length > 0) return hookFailure(hooked, unusedBad(f));
   const unused = unusedBad(f);
   if (unused.length > 0) {
     const n = unused.length;
@@ -361,6 +411,8 @@ export interface InstallDeps {
   realpath: (path: string) => string;
   detectNode: (root: string) => { declared: string | null } | null;
   readInstalled: (spec: RuntimeSpec, root: string) => Promise<string | null>;
+  /** The Node binaries the project's git hooks run. */
+  hookNodes: (root: string) => string[];
   lookup: (
     service: UpstreamService,
     opts: { cacheOnly: boolean; ttlMs: number },
@@ -368,6 +420,18 @@ export interface InstallDeps {
   /** Replaces the lookup-based assessment. For tests. */
   assess?: (version: string) => RuntimeAssessment;
   online: boolean;
+}
+
+/** Reads the hook files of the repo. A missing or unreadable file is no evidence, so it gives nothing. */
+function readHookNodes(root: string): string[] {
+  const dir = join(root, ".git", "hooks");
+  try {
+    return readdirSync(dir)
+      .filter((name) => !name.endsWith(".sample"))
+      .flatMap((name) => hookNodePaths(readFileSync(join(dir, name), "utf8")));
+  } catch {
+    return [];
+  }
 }
 
 function defaultDeps(online: boolean | undefined): InstallDeps {
@@ -391,6 +455,7 @@ function defaultDeps(online: boolean | undefined): InstallDeps {
     },
     detectNode: (root) => detectRuntimes(root).find((r) => r.id === "node") ?? null,
     readInstalled: readInstalledVersion,
+    hookNodes: readHookNodes,
     lookup: (service, opts) => lookupUpstream(service, opts),
     online: online === true,
   };
@@ -441,6 +506,7 @@ export async function checkRuntimeInstalls(
       winner: await winnerOf(root, d, spec),
       assess,
       projectMajor: majorOf(detected.declared),
+      hookNodes: d.hookNodes(root),
     }),
   ];
 }
