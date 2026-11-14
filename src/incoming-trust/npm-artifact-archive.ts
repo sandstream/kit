@@ -255,7 +255,16 @@ function normalizePath(value: string, directory: boolean, limit: number): string
   return value;
 }
 
-function checkAncestors(entries: Map<string, string>): void {
+/**
+ * The key a case-insensitive or normalizing filesystem would give a path. Two entries that share a
+ * key can overwrite each other on macOS or Windows, so they must not coexist in one archive.
+ */
+function foldPath(path: string): string {
+  return path.normalize("NFC").toLowerCase();
+}
+
+function checkAncestors(exact: Map<string, string>): void {
+  const entries = new Map([...exact].map(([path, type]) => [foldPath(path), type] as const));
   const paths = [...entries.keys()].sort();
   for (const [path, type] of entries) {
     if (type !== "0") continue;
@@ -294,10 +303,17 @@ function checkEntryShape(header: Header): void {
   if (header.type === "5" && header.size !== 0) fail("unsupported", "directory-body");
 }
 
-function registerEntry(entries: Map<string, string>, header: Header): void {
+function registerEntry(
+  entries: Map<string, string>,
+  folded: Map<string, string>,
+  header: Header,
+): void {
   if (entries.has(header.path)) {
     fail("rejected", entries.get(header.path) === header.type ? "path-duplicate" : "path-conflict");
   }
+  const key = foldPath(header.path);
+  if (folded.has(key)) fail("rejected", "path-conflict");
+  folded.set(key, header.path);
   entries.set(header.path, header.type);
 }
 
@@ -322,6 +338,7 @@ function inspectTar(tar: Buffer, limits: NpmArchiveLimits): NpmArchiveResult {
   let manifestBytes: Buffer | undefined;
   let terminated = false;
   const entries = new Map<string, string>();
+  const folded = new Map<string, string>();
   const global: Pax = new Map();
   let local: Pax = new Map();
   let localPending = false;
@@ -356,7 +373,7 @@ function inspectTar(tar: Buffer, limits: NpmArchiveLimits): NpmArchiveResult {
     const entryRoot = header.path.split("/")[0];
     if (root && root !== entryRoot) fail("rejected", "multiple-roots");
     root = entryRoot;
-    registerEntry(entries, header);
+    registerEntry(entries, folded, header);
     manifestBytes = manifestFor(tar, offset, header, root, limits) ?? manifestBytes;
     offset = end;
   }
