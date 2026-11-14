@@ -32,6 +32,7 @@ import {
 } from "./install-gate-flags.js";
 
 import { explainUnverifiable } from "./install-gate-refusals.js";
+import { gitHookBypass, hookBypassReason } from "./install-gate-hooks.js";
 import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
 
 export { ownerRepoArg, explainUnverifiable };
@@ -1139,6 +1140,8 @@ export async function decideBashGate(
   deps?: GateDeps,
   cwd?: string,
 ): Promise<BashGateVerdict> {
+  const bypass = gitHookBypass(command);
+  if (bypass) return { block: true, reason: hookBypassReason(bypass), checked: [] };
   const probe = parseInstallCommand(command);
   if (!probe.isInstall) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };

@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **The install gate refuses commands that skip the git hooks.** `git commit --no-verify`,
+  `git -c core.hooksPath=/dev/null commit` and `HUSKY=0 git commit` passed `gate-bash` silently,
+  and the `-c` form left no skip record either. The gate now names and refuses `--no-verify` and
+  `commit -n` on hook-running subcommands, `core.hooksPath` overrides and changes, `HUSKY=0`, and
+  removing or disabling a hook file, including inside `sh -c` and behind `env`/`sudo`. Found by
+  kit-research `checks-in-harness-hooks-vs-kit`.
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
   the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
   the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
