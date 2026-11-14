@@ -23,6 +23,7 @@ export async function runCli(
   args: string[],
   cwd: string,
   env: Record<string, string> = {},
+  timeoutMs = 30_000,
 ): Promise<CliResult> {
   // Commands such as `kit setup` install lifecycle hooks. Keep those writes in
   // the disposable fixture instead of touching the developer's real agent config.
@@ -41,15 +42,17 @@ export async function runCli(
         KIT_MEMORY_DB: join(agentStateDir, "memory.db"),
         ...env,
       },
-      timeout: 30_000,
+      timeout: timeoutMs,
     });
     return { exitCode: 0, stdout: stdout ?? "", stderr: stderr ?? "" };
   } catch (err: unknown) {
-    const e = err as { code?: number; stdout?: string; stderr?: string };
+    const e = err as { code?: number; killed?: boolean; stdout?: string; stderr?: string };
+    // A killed child has no exit code. Say so, or a timeout reads as an ordinary exit 1.
+    const killed = e.killed ? `\n[runCli] killed after ${timeoutMs} ms (timeout)` : "";
     return {
       exitCode: typeof e.code === "number" ? e.code : 1,
       stdout: e.stdout ?? "",
-      stderr: e.stderr ?? "",
+      stderr: (e.stderr ?? "") + killed,
     };
   }
 }

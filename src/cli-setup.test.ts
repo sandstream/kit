@@ -9,6 +9,9 @@ import { GITIGNORE_CONTENT, runCli } from "./cli-run.test-support.js";
 import { FIXTURE_CONFIG_SECRET, FIXTURE_FULL_PIPELINE } from "./cli-fixtures.test-support.js";
 
 const exec = promisify(execFile);
+// `kit setup` runs the whole pipeline, including a security scan. On Windows CI one run took
+// 25.6 s and the next was killed at the 30 s default (sandstream/kit#813), so allow more.
+const SETUP_TIMEOUT_MS = 90_000;
 
 describe("kit setup", () => {
   let tempDir: string;
@@ -35,7 +38,7 @@ describe("kit setup", () => {
   it("runs all 6 pipeline steps with config-sourced secrets", async () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_CONFIG_SECRET, "utf-8");
 
-    const result = await runCli(["setup"], tempDir, fixtureEnv);
+    const result = await runCli(["setup"], tempDir, fixtureEnv, SETUP_TIMEOUT_MS);
 
     // All steps should complete
     assert.ok(
@@ -49,7 +52,7 @@ describe("kit setup", () => {
   it("completes setup pipeline with node tool + config secrets", async () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_FULL_PIPELINE, "utf-8");
 
-    const result = await runCli(["setup"], tempDir, fixtureEnv);
+    const result = await runCli(["setup"], tempDir, fixtureEnv, SETUP_TIMEOUT_MS);
 
     // node is already installed so install step should pass
     assert.ok(result.stdout.includes("[1/6]"), "should show step 1");
