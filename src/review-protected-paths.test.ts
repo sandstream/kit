@@ -74,3 +74,35 @@ it("protects the review gate's own decision code, not only the workflow that run
   assert.deepEqual(unprotected, []);
   assert.deepEqual(classifyProtectedPaths(["scripts/other.mjs"], rules), []);
 });
+
+it("protects the guardrails an agent could otherwise loosen in a pull request", () => {
+  // Each of these decides what a gate allows, or what a gate measures against. A pull request that
+  // edited one could pass every check by loosening the check.
+  const rules = loadProtectedPathRules(process.cwd());
+  const guardrails = [
+    "src/approval.ts",
+    "src/approval-tokens.ts",
+    "src/elevation.ts",
+    "src/elevation-totp.ts",
+    "src/environment.ts",
+    "src/commands/auth.ts",
+    "src/broker/gates.ts",
+    "src/opencode-gate.ts",
+    "docs/adr/0001-zero-llm-core.md",
+    "src/adr.ts",
+    "src/adr-derive.ts",
+    "src/commands/adr.ts",
+    "src/dependency-floor.test.ts",
+    ".kit-baseline.json",
+    "scripts/prepush.mjs",
+    "scripts/prepush-lib.mjs",
+    "eslint.config.js",
+    ".semgrepignore",
+    ".kit-secretsignore",
+  ];
+  const unprotected = guardrails.filter(
+    (path) => classifyProtectedPaths([path], rules).length === 0,
+  );
+  assert.deepEqual(unprotected, []);
+  assert.deepEqual(classifyProtectedPaths(["src/environment-report.ts"], rules), []);
+});

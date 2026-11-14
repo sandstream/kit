@@ -19,7 +19,10 @@ pull-request workflow finishes. Once every check on the head commit has finished
 - no changed file, including a rename's old path, is in a protected class of
   `.github/kit-protected-paths.json` (release, `.github/` and the gate's own code, secrets,
   permissions). The gate's code is `scripts/agent-review-gate.mjs`, the two scripts it imports and
-  `src/review-protected-paths*`, so a change to what decides approval needs a person. The rules come
+  `src/review-protected-paths*`, so a change to what decides approval needs a person. So are the
+  guardrails a pull request could otherwise loosen to pass: approval and elevation, the egress
+  broker and OpenCode gates, `docs/adr/` with the code that enforces it, `.kit-baseline.json`,
+  `scripts/prepush*`, `eslint.config.js`, `.semgrepignore` and `.kit-secretsignore`. The rules come
   from the default branch, never from the pull request;
 - the file list is complete, and the change is under 1,500 lines;
 - the default branch is not red: the newest `build-and-test` result on its head commit did not

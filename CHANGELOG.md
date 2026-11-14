@@ -11,6 +11,44 @@
 
 ### Fixed
 
+- **Every gate deny is audited.** `gate-bash` and `gate-env` never wrote an audit entry when they
+  refused, and the egress and fs gates wrote none in a repository without a `.kit.toml`. All four
+  now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
+  default governance when no `.kit.toml` exists. Found by kit-research
+  `gpt-6-astra-swarm-incident-vs-kit`.
+- **`kit triage mcp` reads every tool field a FastMCP server sends.** It scanned only the tool
+  description and `properties.*.description`. A server built with FastMCP 4 also sends a `title`,
+  `annotations`, an `outputSchema` derived from the return type, and dereferenced Pydantic schemas
+  where an `Optional[Model]` parameter is an `anyOf`. Poisoned text in any of these, in a string
+  `default` or `examples`, or in `$defs` passed. The drift hash also ignored annotations and the
+  output schema, so flipping `readOnlyHint` to true, which some clients use to auto-approve, was
+  not a rug pull. Both are covered now. A pin of a tool with none of these fields still matches; a
+  pin taken before this change is reported as `legacy-pin`, not as a rug pull. Found by
+  kit-research `fastmcp-vs-kit`.
+- **A CLI test that times out now says so.** `runCli` reported a child killed at its 30 s timeout as
+  an ordinary exit 1, so a slow Windows run of `kit setup` read as a setup failure
+  (sandstream/kit#813). The helper now appends `killed after N ms (timeout)`, and the two `kit setup`
+  pipeline tests allow 90 s; the passing one had already taken 25.6 s on Windows.
+- **CLI contract snapshots ignore Windows' own cache folder.** kit runs PowerShell to set ACLs,
+  and PowerShell sometimes writes its startup-profile cache under the fixture's
+  `AppData\Local\Microsoft`. The "nothing changed" snapshot then failed
+  (`elevation-totp-cli`, Windows shard 1), on a file kit never writes. That folder is now left out;
+  any other change is still caught.
+
+- **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
+  approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
+  `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in
+  `docs/adr/` with the code and test that enforce them, `.kit-baseline.json`, `scripts/prepush*`,
+  `eslint.config.js`, `.semgrepignore` and `.kit-secretsignore` are now protected paths, so a change
+  to any of them needs the owner. Before, a pull request could edit the baseline or a lint
+  exclusion and pass every check it had just relaxed.
+- **`kit check` says when the identity running it can bypass the required review.** The
+  _default branch required reviews_ row passed at 1 approval and said bypass was not checked, but
+  GitHub reports `current_user_can_bypass` for the caller on each ruleset. When that identity can
+  skip the rule, the row now warns: an agent working under it merges without the review. Measured
+  on kit's own `main`, where agent sessions use the owner's admin identity and admins have a
+  pull-request bypass. Found by kit-research `spec-driven-human-holds-the-keys-vs-kit`.
+
 - **The install gate reads installs run through Windows shells.** It recursed into `sh -c` and
   `bash -c`, but `cmd /c npm install x`, `powershell -c "npm install x"` and
   `pwsh -Command "pip install x"` passed silently, on a platform kit supports natively. It now reads
@@ -104,6 +142,10 @@
   credentials, keeps the sensitivity of a removed `.gitignore` entry before redaction, and reports
   invalid refs, unreadable files, malformed manifests and non-UTF-8 paths as failures or incomplete
   coverage instead of a clean result. See `docs/VERIFY_PULL.md`.
+- **`kit audit verify --json` prints one document, and read-only mode writes no audit event.** The
+  report holds the chain, signature and anchor results without event payloads or external receipt
+  tokens. Activating read-only mode no longer appends an audit event, so a read does not change the
+  log it is verifying.
 
 - **The install gate reads options before the subcommand, and a wrapper's own values.** Eleven
   in-scope installs passed `kit gate-bash` with no output: `npm --prefix <dir> install x` (also
@@ -121,11 +163,27 @@
   Wrapper options stop at the actual command. Runner child options remain separate from package source options.
   Refusals explain the unsupported syntax and give a relevant next step.
 
+- **The install gate triages the repository source a runner passes through.** `npx skills add
+<source>` and the `dlx` and `bunx` forms check the source the invoked command receives, whatever
+  the package order and whatever wrapper (`sudo`, `env`, `nice`, `timeout`) sits in between. A
+  source that is not a plain GitHub repository, or that the shell expands (`$REPO`, a brace or a
+  command substitution), is refused. A shell given `-c` as the child of a repository installer is
+  refused too, because the gate cannot read its command line.
 - **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
   notice) and the inline codes in `kit login` now share one rule.
 
+### Security
+
+- **`kit auth elevate` refuses when TOTP enrollment is unusable.** An unreadable, empty, or whitespace-only
+  `~/.kit/totp-secret` previously allowed the YES prompt. A directory at that path also allowed the prompt.
+  Elevation now refuses these cases, malformed secrets, and symlinks, including dangling symlinks and symlinks to valid secrets.
+  Only an absent file permits the YES prompt when no environment secret is configured.
+  Repair the file, or use `kit auth setup-totp --overwrite` to replace a file or symlink.
+  Symlink replacement leaves the target unchanged. The overwrite option cannot replace a directory.
+  Both refusal messages explain directory recovery: move the directory aside, keep its contents, then run `kit auth setup-totp`.
+  A new secret makes the old authenticator entry stop working.
 - **The npm package leaves out Python bytecode.** The 7.4.0 tarball shipped
   `skills/triage/scripts/__pycache__/*.pyc`, because CI runs the skill scripts before the publish
   step and `files` includes all of `skills`. `skills/.npmignore` now leaves out `__pycache__/` and
