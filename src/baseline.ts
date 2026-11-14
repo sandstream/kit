@@ -137,4 +137,7 @@ export async function saveBaseline(baseline: Baseline, cwd = process.cwd()): Pro
   baseline.generated = new Date().toISOString();
   const path = resolve(cwd, BASELINE_FILE);
   await writeFile(path, JSON.stringify(baseline, null, 2) + "\n", "utf-8");
+  // Every caller is a freeze: record that the floor moved (see floor-audit.ts).
+  const { auditFloorFreeze } = await import("./floor-audit.js");
+  await auditFloorFreeze(Object.keys(baseline.categories), cwd);
 }

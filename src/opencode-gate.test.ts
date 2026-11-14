@@ -107,6 +107,34 @@ it("preserves the failed gate process as the blocking error cause", async () => 
     rmTemp(dir);
   }
 });
+it("gates the shell tool under both of OpenCode's names, bash and shell", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "kit-ocgate-shell-"));
+  try {
+    await withTempHome(async (home) => {
+      mkdirSync(join(dir, ".opencode"), { recursive: true });
+      const wrapper = join(home, ".kit", "bin", process.platform === "win32" ? "kit.cmd" : "kit");
+      mkdirSync(join(wrapper, ".."), { recursive: true });
+      if (process.platform === "win32") {
+        writeFileSync(wrapper, "@echo off\r\necho fixture denied 1>&2\r\nexit /b 2\r\n");
+      } else {
+        writeFileSync(wrapper, '#!/bin/sh\nprintf "fixture denied\\n" >&2\nexit 2\n');
+        chmodSync(wrapper, 0o755);
+      }
+      await installInstallGateOpenCode(dir);
+      const pluginPath = join(dir, ".opencode", "plugin", "kit-install-gate.js");
+      const hooks = await (await import(pathToFileURL(pluginPath).href)).kitInstallGate();
+      for (const tool of ["bash", "shell"]) {
+        await assert.rejects(
+          hooks["tool.execute.before"]({ tool }, { args: { command: "npm install x" } }),
+          /kit install-gate blocked/,
+          tool,
+        );
+      }
+    });
+  } finally {
+    rmTemp(dir);
+  }
+});
 it(
   "runs native Windows OpenCode gate for allow and deny",
   { skip: process.platform !== "win32" },

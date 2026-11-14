@@ -31,6 +31,33 @@ def _plugin_scan():
     return module
 
 
+def is_local_path(t):
+    """An absolute, relative, `~` or drive-letter path, or an existing local checkout: not a
+    GitHub `owner/repo`. `kit triage repo /home/user/kit` used to query the repo `home/user`."""
+    local = re.match(r"^(/|\\|\./|\.\./|~|[A-Za-z]:[\\/])", t) or t in (".", "..")
+    return bool(local) or os.path.isdir(os.path.join(t, ".git"))
+
+
+def _frontmatter_keys(text):
+    """Top-level keys of the YAML frontmatter, or None when there is no closed block.
+
+    A substring test (`"name:" in text[:400]`) accepted a Markdown heading `## name: x`, which
+    is a YAML comment, and a block that never closed (kit-research `artex-vs-kit`). Only an
+    unindented `key:` line between the opening and closing `---` counts.
+    """
+    lines = text.lstrip("\ufeff").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    keys = set()
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return keys
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:", line)
+        if m:
+            keys.add(m.group(1))
+    return None
+
+
 def triage_local_skill(rep):
     """Validate a local skill (a SKILL.md or its directory). False when the target is not local."""
     target = rep.target
@@ -47,12 +74,13 @@ def triage_local_skill(rep):
     except OSError as e:
         rep.critical(f"cannot read skill at '{path}': {e}")
         return True
-    head = text[:400]
-    if not head.lstrip().startswith("---"):
+    keys = _frontmatter_keys(text)
+    if keys is None:
         rep.critical("SKILL.md has no YAML frontmatter (--- ... ---)")
-    if "name:" not in head:
+        keys = set()
+    if "name" not in keys:
         rep.warn("frontmatter missing 'name:'")
-    if "description:" not in head:
+    if "description" not in keys:
         rep.warn("frontmatter missing 'description:'")
     _secrets_in(rep, "skill body", text)
     if path != target:

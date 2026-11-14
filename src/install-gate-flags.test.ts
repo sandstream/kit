@@ -189,3 +189,19 @@ describe("install gate — second review of the flag reader", () => {
     });
   }
 });
+
+describe("install gate — cases found by mutation testing", () => {
+  // kit-research mutation-testing-vs-kit-gates: each case kills a mutant that let the install
+  // through while every existing test still passed.
+  it("reads an install behind doas", () => {
+    assert.deepEqual(refsOf("doas npm i evil-x"), ["npm:evil-x"]);
+  });
+
+  for (const verb of ["exec", "x", "dlx", "create", "init"]) {
+    it(`fails closed when an unknown option precedes the fetch verb ${verb}`, () => {
+      const p = parseInstallCommand(`npm --foo bar ${verb} evil-x`);
+      assert.equal(p.isInstall, true);
+      assert.deepEqual(p.unverifiable, ["global-option:npm --foo bar"]);
+    });
+  }
+});

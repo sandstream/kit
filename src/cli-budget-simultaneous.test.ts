@@ -31,7 +31,8 @@ let arrived = false;
 fs.openSync = function (...args) {
   if (!arrived && args[0] === ${JSON.stringify(lock)}) {
     arrived = true;
-    fs.writeFileSync(process.env.KIT_TEST_BUDGET_READY, String(process.pid));
+    const ready = process.env.KIT_TEST_BUDGET_READY; // renamed in whole: the test polls existsSync
+    fs.writeFileSync(ready + ".tmp", String(process.pid)); fs.renameSync(ready + ".tmp", ready);
     const sleeper = new Int32Array(new SharedArrayBuffer(4));
     const deadline = performance.now() + 10000;
     while (!fs.existsSync(${JSON.stringify(release)})) {

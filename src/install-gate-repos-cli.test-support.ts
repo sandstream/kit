@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
 const triage = new URL("./triage.js", import.meta.url).href;
@@ -45,7 +45,7 @@ mock.module(${JSON.stringify(triage)}, {
       [
         "--experimental-test-module-mocks",
         "--import",
-        preload,
+        pathToFileURL(preload).href,
         cli,
         "gate-bash",
         ...(format ? ["--format", format] : []),

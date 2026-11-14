@@ -319,7 +319,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
 - `kit coverage [--standard=<key>|all]`: Evidence maps against 8 pinned standards — OWASP **ASVS L2** · **LLM Top 10** · **Agentic Top 10** · **MCP Top 10** · NIST **SSDF 800-218A** · **NIST 800-53 Rev. 5** (control-family level) · **AIUC-1** · **GCP WAF Security** — showing which controls kit's deterministic checks auto-verify vs gap/manual/n-a (evidence maps, **not** compliance attestations; `--list-standards` to enumerate, `--json` for GRC tools)
 - `kit sentinel {run,install,status}`: Autonomous redline watcher (propose/apply guarded fixes)
-- `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV
+- `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV/Cloudflare audit
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive/manual) per service without logging in. See [service credential ownership](./docs/adr/0008-service-passkeys-and-tokens.md).
 - `kit secrets {set,migrate,rotate,propagate,onecli,validate}`: Secret lifecycle
 - `kit memory {index,search,stats,suggest,merge,save,threads,share,backup}`: Local-first, cross-harness second brain (per-harness `stats`, project recall, saved copilots) + `kit memory pal` pending-action ledger
@@ -572,9 +572,15 @@ Run `kit mcp web` in an interactive terminal. Its six-stage wizard connects the
 existing local stdio server through
 [OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels):
 no inbound port and no public kit endpoint. It verifies `tunnel-client`, opens
-the exact Platform and ChatGPT pages, configures `kit mcp`, runs `doctor`, and
-starts the tunnel. The runtime API key stays in process memory; keep the durable
-copy in your vault. Native Windows operators need Git Bash or WSL for the wizard.
+the exact Platform and ChatGPT pages, configures `kit mcp --read-only`, runs
+`doctor`, and starts the tunnel. The runtime API key stays in process memory; keep
+the durable copy in your vault. Native Windows operators need Git Bash or WSL for the wizard.
+
+Read-only is the default because whoever drives the ChatGPT session calls these
+tools, including text a web page injected into the chat. `kit_memory`, `kit_check`,
+`kit_review` and `kit_context` work; `kit_run`, `kit_fix`, `kit_init`, `kit_secrets`
+and `kit_triage` are refused. `KIT_MCP_WEB_ALLOW_WRITES=1 kit mcp web` opts in after
+a confirm. `kit_run` then runs any command with the project's `.env.local` loaded.
 
 This path is specifically for ChatGPT web. Claude Code uses local stdio below;
 kit does not expose a public remote HTTP endpoint for claude.ai connectors.

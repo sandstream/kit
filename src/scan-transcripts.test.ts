@@ -81,3 +81,40 @@ describe("scanTranscripts", () => {
     }
   });
 });
+
+describe("scanTranscripts: copies of the repo are not transcripts", () => {
+  const KEY = "STRIPE_SECRET_KEY=sk_te" + "st_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy\n";
+
+  it("skips Claude Code's sub-agent worktrees and Next.js build output", async () => {
+    const dir = makeRepo();
+    try {
+      const copy = join(dir, ".claude", "worktrees", "agent-a1b2c3");
+      mkdirSync(join(copy, "docs"), { recursive: true });
+      mkdirSync(join(copy, ".next"), { recursive: true });
+      writeFileSync(join(copy, "docs", "setup.md"), KEY);
+      writeFileSync(join(copy, ".next", "routes-manifest.json"), KEY);
+      mkdirSync(join(dir, ".next"), { recursive: true });
+      writeFileSync(join(dir, ".claude", "keep.md"), "# notes\n");
+      assert.deepEqual(await scanTranscripts(dir), []);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("still flags a credential next to the worktrees folder, and names only that file", async () => {
+    const dir = makeRepo();
+    try {
+      const copy = join(dir, ".claude", "worktrees", "agent-a1b2c3");
+      mkdirSync(copy, { recursive: true });
+      writeFileSync(join(copy, "setup.md"), KEY);
+      writeFileSync(join(dir, ".claude", "session.jsonl"), KEY);
+      const hits = await scanTranscripts(dir);
+      assert.deepEqual(
+        hits.map((h) => h.file),
+        [join(dir, ".claude", "session.jsonl")],
+      );
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});

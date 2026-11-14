@@ -14,7 +14,15 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
     exact: ["package.json", "package-lock.json", "docs/RELEASING.md"],
     prefix: [".github/workflows/publish", "packages/"],
   },
-  github: { exact: [], prefix: [".github/"] },
+  // The review gate's own code: a change to what decides approval is approved by a person.
+  github: {
+    exact: [
+      "scripts/agent-review-gate.mjs",
+      "scripts/agent-model-review.mjs",
+      "scripts/github-app-token.mjs",
+    ],
+    prefix: [".github/", "src/review-protected-paths"],
+  },
   secrets: {
     exact: [
       "src/check-secrets.ts",
@@ -34,14 +42,10 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
     ],
   },
   permissions: {
-    exact: [
-      "src/agent-config.ts",
-      "src/commands/gate.ts",
-      "src/hook-floor.ts",
-      "src/install-gate.ts",
-      "src/install-gate-flags.ts",
-    ],
+    exact: ["src/agent-config.ts", "src/commands/gate.ts", "src/hook-floor.ts"],
     prefix: [
+      // Every module the install gate is built from, not only its entry file.
+      "src/install-gate",
       "src/exec-broker/",
       "src/read-only-",
       "src/policy",

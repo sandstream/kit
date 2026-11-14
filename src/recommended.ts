@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 import type { kitConfig, HooksConfig } from "./config.js";
 import { installMemoryHooks, installCodexMemoryHooks } from "./memory/install.js";
 import { installHooks, type HookInstallResult } from "./hooks.js";
+import { ensureKitWrapper } from "./kit-wrapper.js";
+import { isReadOnlyMode } from "./read-only-mode.js";
 
 export interface RecommendedResult {
   memory: {
@@ -12,12 +14,19 @@ export interface RecommendedResult {
 }
 
 /**
- * Absolute self-invocation of kit for embedding in a generated git hook —
- * same reasoning as the memory-hook installer: git hooks may run in a shell
- * whose PATH lacks the npm global bin, so a bare `kit` can fail. Resolved from
- * the running process (`node <cli.js>`); falls back to bare `kit`.
+ * How a generated git hook calls kit. A hook runs in a shell whose PATH may lack the npm global
+ * bin, so a bare `kit` can fail. Baking `<node> <cli.js>` into the hook fixed that but pinned the
+ * hook to one Node and one kit path for good: when Node was replaced or kit moved, the hook broke
+ * and nothing rewrote it. The managed wrapper (`~/.kit/bin/kit`) is the one stable path that kit
+ * refreshes, so the hook calls `kit` and `installHooks` rewrites that to the wrapper.
+ * Native Windows cannot run the POSIX wrapper, and read-only mode may not write it: both keep the
+ * absolute `<node> <cli.js>` form. Falls back to bare `kit`.
  */
 function kitInvocation(): string {
+  if (process.platform !== "win32" && !isReadOnlyMode()) {
+    const wrapper = ensureKitWrapper();
+    if (wrapper.action !== "unmanaged" && wrapper.action !== "skipped") return "kit";
+  }
   const entry = process.argv[1];
   return entry ? `${process.execPath} ${resolve(entry)}` : "kit";
 }
