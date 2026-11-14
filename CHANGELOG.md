@@ -17,6 +17,13 @@
   `commit -n` on hook-running subcommands, `core.hooksPath` overrides and changes, `HUSKY=0`, and
   removing or disabling a hook file, including inside `sh -c` and behind `env`/`sudo`. Found by
   kit-research `checks-in-harness-hooks-vs-kit`.
+- **`kit check` says when the identity running it can bypass the required review.** The
+  _default branch required reviews_ row passed at 1 approval and said bypass was not checked, but
+  GitHub reports `current_user_can_bypass` for the caller on each ruleset. When that identity can
+  skip the rule, the row now warns: an agent working under it merges without the review. Measured
+  on kit's own `main`, where agent sessions use the owner's admin identity and admins have a
+  pull-request bypass. Found by kit-research `spec-driven-human-holds-the-keys-vs-kit`.
+
 - **The install gate reads installs run through Windows shells.** It recursed into `sh -c` and
   `bash -c`, but `cmd /c npm install x`, `powershell -c "npm install x"` and
   `pwsh -Command "pip install x"` passed silently, on a platform kit supports natively. It now reads

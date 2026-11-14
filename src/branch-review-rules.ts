@@ -82,3 +82,47 @@ export function reviewRequirement(
       "read token, so whether admins can skip the rule is not checked",
   };
 }
+
+/** Ids of the rulesets whose pull-request rule applies to the branch, at most five. */
+export function pullRequestRulesetIds(rules: unknown): number[] {
+  if (!Array.isArray(rules)) return [];
+  const ids = rules
+    .map(record)
+    .filter((r) => r?.type === "pull_request")
+    .map((r) => count(r?.ruleset_id))
+    .filter((id): id is number => id !== null && id > 0);
+  return [...new Set(ids)].slice(0, 5);
+}
+
+const BYPASS_MODES = new Set(["always", "pull_requests_only"]);
+
+/** `current_user_can_bypass` from `GET /repos/{o}/{r}/rulesets/{id}`, when the caller may skip it. */
+export function callerBypass(ruleset: unknown): string | null {
+  const mode = record(ruleset)?.current_user_can_bypass;
+  return typeof mode === "string" && BYPASS_MODES.has(mode) ? mode : null;
+}
+
+/**
+ * A required review binds nobody who can bypass it. GitHub tells the caller whether it can; when
+ * an agent works under the same identity (the owner's token, as is common), the agent merges
+ * without the review the rule asks for.
+ */
+export function withCallerBypass(
+  row: SecurityCheckResult,
+  branch: string,
+  bypass: string | null,
+): SecurityCheckResult {
+  if (bypass === null || row.status !== "pass") return row;
+  return {
+    category: "exposure",
+    name: NAME,
+    status: "warn",
+    severity: "low",
+    detail:
+      `${branch}: the identity this token belongs to can bypass the required review ` +
+      `(${bypass}). An agent working under this identity merges without that review`,
+    suggestion:
+      "give agents an identity of their own (a GitHub App or machine user) that is not on the " +
+      "ruleset's bypass list, so the required review binds them",
+  };
+}
