@@ -495,6 +495,12 @@ export async function cmdUsage(): Promise<boolean> {
     console.log(JSON.stringify(facts, null, 2));
     return true;
   }
+  // Headings and tables for a phone, a chat or a PR comment, where the 66-column box wraps.
+  if (hasFlag(process.argv, "--markdown")) {
+    const { renderUsageMarkdown } = await import("../usage-markdown.js");
+    console.log(renderUsageMarkdown(facts));
+    return true;
+  }
 
   const requested = (flagValue(process.argv, "--tab") ?? "").toLowerCase();
   if (requested && !TABS.includes(requested as Tab)) {
