@@ -747,7 +747,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   "agent-config": {
     handler: cmdAgentConfig,
     stability: "stable",
-    help: "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md",
+    help: "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md / GEMINI.md / .augment-guidelines",
   },
   "worktree-gates": {
     handler: cmdWorktreeGates,

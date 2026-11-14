@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **`kit agent-config` writes Cline's block into `.clinerules/kit.md` when `.clinerules` is a
+  folder.** Cline reads `.clinerules` as a file or a folder of rule files, and kit's own Cline gate
+  creates the folder (`.clinerules/hooks/`). After that, every `kit agent-config` failed for Cline
+  with `EISDIR`. The "use kit" support line and the command's help now list every rules file kit
+  writes (Copilot, Gemini CLI and Augment were missing). Found by kit-research
+  `harness-wars-vs-kit`.
 - **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
   approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
   `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in

@@ -9,7 +9,7 @@ import {
   stat,
   lstat,
 } from "node:fs/promises";
-import { constants, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { constants, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
@@ -311,6 +311,19 @@ export interface WriteAgentConfigOptions {
 }
 
 /**
+ * The file the block goes in. Cline reads `.clinerules` as one file or as a folder of rule files,
+ * and kit's own Cline gate creates the folder (`.clinerules/hooks/`), so a folder gets `kit.md`.
+ */
+export function rulesFileIn(cwd: string, file: string): string {
+  try {
+    if (statSync(resolve(cwd, file)).isDirectory()) return join(file, "kit.md");
+  } catch {
+    // absent: the file is created
+  }
+  return file;
+}
+
+/**
  * Write the managed kit block into each detected agent's rules file.
  * Read-only mode refuses + audits before any write.
  */
@@ -328,7 +341,8 @@ export async function writeAgentConfig(
   const chosen = targets ?? detectAgentTargets(cwd);
   const results: AgentConfigResult[] = [];
 
-  for (const t of chosen) {
+  for (const target of chosen) {
+    const t = { ...target, file: rulesFileIn(cwd, target.file) };
     const path = resolve(cwd, t.file);
     let existing: string;
     try {
