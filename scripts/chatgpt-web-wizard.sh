@@ -236,6 +236,24 @@ fi
 
 stage "Initialize local stdio profile"
 say "tunnel-client will launch the exact kit binary shown in stage 1 with the mcp subcommand."
+# Read-only by default. Whoever drives the ChatGPT session (a workspace member, or text a web
+# page injected into the chat) calls these tools; kit_run would run any command with the
+# project's .env.local loaded. kit-research t3-connect-device-approval-vs-kit measured it.
+MCP_COMMAND="$KIT_BIN mcp --read-only"
+if [[ "${KIT_MCP_WEB_ALLOW_WRITES:-}" == "1" ]]; then
+  warn "KIT_MCP_WEB_ALLOW_WRITES=1: ChatGPT will be able to call kit_run, kit_fix, kit_init and kit_secrets."
+  warn "kit_run executes any command on this machine with the project's .env.local loaded."
+  if confirm "Expose kit's write and command tools to ChatGPT?"; then
+    MCP_COMMAND="$KIT_BIN mcp"
+  else
+    note "Keeping read-only."
+  fi
+fi
+step "MCP command: $MCP_COMMAND"
+if [[ "$MCP_COMMAND" == *"--read-only" ]]; then
+  note "Read-only: kit_memory, kit_check, kit_review and kit_context work; kit_run, kit_fix, kit_init, kit_secrets and kit_triage are refused."
+  note "To allow them, re-run with KIT_MCP_WEB_ALLOW_WRITES=1 kit mcp web."
+fi
 printf '  %sProfile name [kit-local-stdio]:%s ' "$BOLD" "$RESET"
 read -r TUNNEL_PROFILE || true
 TUNNEL_PROFILE=${TUNNEL_PROFILE:-kit-local-stdio}
@@ -252,7 +270,7 @@ tunnel-client init \
   --sample sample_mcp_stdio_local \
   --profile "$TUNNEL_PROFILE" \
   --tunnel-id "$TUNNEL_ID" \
-  --mcp-command "$KIT_BIN mcp"
+  --mcp-command "$MCP_COMMAND"
 
 stage "Verify and start"
 step "Running tunnel-client doctor before exposing any tool."

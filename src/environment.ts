@@ -142,7 +142,9 @@ export function isNonInteractive(): boolean {
     if (process.stdout.isTTY) warnNonInteractiveOnce("env-var");
     return true;
   }
-  if (process.env.CI === "true") return true;
+  // CI providers set CI=true, CI=1 or another value; only an empty, "0" or "false" CI is off.
+  const ci = process.env.CI?.trim().toLowerCase();
+  if (ci && ci !== "0" && ci !== "false") return true;
   return false;
 }
 

@@ -241,3 +241,42 @@ describe("parseSarif / parseOsv — non-object JSON honors the 'malformed → []
     }
   });
 });
+
+describe("ingestStrict: a SARIF scan that did not finish", () => {
+  // kit-research openai-daybreak-red-team-vs-kit: `executionSuccessful: false` with no results
+  // read as "0 finding(s)", exit 0, the false clean ingestStrict exists to prevent.
+  const run = (executionSuccessful: boolean, results: unknown[]) => ({
+    tool: { driver: { name: "fixture-scanner" } },
+    invocations: [{ executionSuccessful }],
+    results,
+  });
+  const result = { ruleId: "R1", message: { text: "fixture" } };
+
+  it("refuses a stopped run with no results", () => {
+    const outcome = ingestStrict(
+      "sarif",
+      JSON.stringify({ version: "2.1.0", runs: [run(false, [])] }),
+    );
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) assert.match(outcome.reason, /did not finish .* not a clean scan/);
+  });
+
+  it("keeps the findings of a stopped run, with a note that they are partial", () => {
+    const outcome = ingestStrict("sarif", JSON.stringify({ runs: [run(false, [result])] }));
+    assert.ok(outcome.ok);
+    assert.equal(outcome.findings.length, 1);
+    assert.deepEqual(outcome.notes, [
+      "1 SARIF run(s) did not finish (executionSuccessful: false); these findings are partial.",
+    ]);
+  });
+
+  it("reads a finished empty run as clean, as before", () => {
+    const outcome = ingestStrict("sarif", JSON.stringify({ runs: [run(true, [])] }));
+    assert.deepEqual(outcome, { ok: true, findings: [] });
+  });
+
+  it("refuses a SARIF version kit does not read", () => {
+    const outcome = ingestStrict("sarif", JSON.stringify({ version: "9.9.9", runs: [] }));
+    assert.equal(outcome.ok, false);
+  });
+});

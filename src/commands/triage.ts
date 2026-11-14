@@ -48,6 +48,27 @@ const PIP_AND_GEM_HELP = [
   "  kit triage gem <name>[@version]      Evaluate a RubyGems release (cooling, OSV malicious, history); install-time code not read",
 ].join("\n");
 
+/** Every type `kit triage` accepts, for the unknown-type message (several dispatch before it). */
+const TRIAGE_TYPES = [
+  "npm",
+  "pip",
+  "gem",
+  "brew",
+  "docker",
+  "repo",
+  "skill",
+  "mcp",
+  "model",
+  "instructions",
+  "pkg",
+  "plugin",
+  "vault-config",
+  "all",
+  "tools",
+  "check-deps",
+  "check-skills",
+];
+
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
   const sandbox = hasFlag(args, "--sandbox");
@@ -125,7 +146,7 @@ export async function cmdTriage(): Promise<boolean> {
   const validTypes = ["docker", "npm", "pip", "brew", "repo", "skill", "all", "tools"];
   if (!validTypes.includes(type)) {
     console.error(`${c.red}Unknown triage type: ${type}${c.reset}`);
-    console.error(`Valid types: ${validTypes.join(", ")}`);
+    console.error(`Valid types: ${TRIAGE_TYPES.join(", ")}`);
     return false;
   }
 

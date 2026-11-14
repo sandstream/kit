@@ -13,21 +13,32 @@
  * the existing `gateInstall` and returns a block/allow verdict. Pure + injectable
  * (no I/O here); the CLI wires it to stdin/exit-codes.
  *
- * Scope: the ecosystems kit can actually triage — npm (npm/pnpm/yarn/bun + npx)
- * and PyPI (pip/pip3/pipx/uv). Ecosystems kit has no triage for (cargo/go/gem/
- * brew) are passed through, NOT blocked, so the gate stays usable; that is an
- * honest scope limit, documented as such. Within scope it is FAIL-CLOSED: an
+ * Scope: npm (npm/pnpm/yarn/bun + npx) and PyPI (pip/pip3/pipx/uv). Other
+ * ecosystems (cargo/go/gem/brew) pass through when the command is explicit. Unknown wrapper
+ * options and command strings are refused before ecosystem detection. `kit triage gem` exists
+ * (#779) but `gem install` is not routed here yet: that is an owner decision. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
 import { claudePluginInstall, ownerRepoArg } from "./install-gate-repos.js";
+import {
+  binBase,
+  hiddenVerb,
+  PREFIX_BINS,
+  skipWrapperArgs,
+  sourceConfigurationFlag,
+} from "./install-gate-flags.js";
 
-export { ownerRepoArg };
+import { explainUnverifiable } from "./install-gate-refusals.js";
+import { windowsShellBodies } from "./install-gate-shells.js";
+import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
+
+export { ownerRepoArg, explainUnverifiable };
 
 export interface InstallProbe {
-  /** A package-manager add/install in a covered ecosystem was detected. */
+  /** A covered install or an unresolved command carrier requires a gate decision. */
   isInstall: boolean;
   /** kit triage refs to gate, e.g. ["npm:express", "pip:requests"]. */
   refs: string[];
@@ -45,21 +56,6 @@ export interface InstallProbe {
    */
   runnerBinCandidates: string[];
 }
-
-/** Shell operators that separate independent commands in one Bash string. */
-// Command separators. Includes single `&` (job-control background) and `|&` so an
-// install placed AFTER a background/`&` op is still its own segment — `: & npm i
-// evil` and `true |& npm i evil` previously left the install non-leading and unseen.
-// NO surrounding `\s*`: padding the separator with `\s*` makes String.split O(N²) on a
-// long whitespace run (each start position greedily consumes the run, fails, backtracks) —
-// a hot-path DoS on a whitespace-padded command. `scanSegment` trims each segment, so the
-// split output is byte-identical without the padding, and matching is linear.
-// `&` splits ONLY as a job-control separator — not inside redirections: `2>&1`
-// (preceded by `>`) and `&>` / `&>>` (followed by `>`) are I/O plumbing, and
-// splitting there shears the command into garbage segments ("2>" reached the
-// package matcher and fail-closed legitimate installs). Fixed-length
-// lookaround — no backtracking, so the O(N²) padding note above still holds.
-const SEGMENT_SPLIT = /&&|\|\||;|\||(?<!>)&(?!>)|\n/;
 
 // Leading shell keywords / grouping tokens that precede a real command without
 // changing it. Stripped like PREFIX_BINS so `then npm i evil` / `{ npm i evil; }` /
@@ -146,62 +142,11 @@ function withPackageFlags(rest: string[]): string[] {
  * A backslash-escaped quote (`\"`) is a literal quote in an unquoted word, so keep it.
  */
 function dequote(tok: string): string {
-  // Protect an escaped quote as a NON-quote marker BEFORE stripping unescaped quotes —
-  // the old `\x00$1` kept the quote char, so step 2's quote-strip removed it and step 3's
-  // restore never matched, leaking a bare `\x00` into the token (and into block-reason
-  // strings). The marker carries the quote type so it restores exactly.
-  return tok
-    .replace(/\\(['"])/g, (_, q) => (q === '"' ? "\x00D" : "\x00S"))
-    .replace(/['"]/g, "")
-    .replace(/\x00D/g, '"')
-    .replace(/\x00S/g, "'");
+  return shellWordValue(tok);
 }
-
-/**
- * The command NAME as the shell would resolve it for matching: drop a leading `\`
- * (the standard alias-bypass, `\npm` runs the real npm) and take the basename
- * (`/usr/bin/npm`, `./node_modules/.bin/pnpm` → `npm`/`pnpm`). Without this the exact
- * `t[0] === "npm"` matchers were defeated by any absolute/relative path or `\` escape.
- */
-function binBase(tok: string): string {
-  const noEsc = tok.replace(/^\\+/, "");
-  const base = noEsc.split("/").pop();
-  const resolved = base && base.length > 0 ? base : noEsc;
-  // Strip a trailing `@version` — corepack's `pnpm@9` / `yarn@1.22.19` dispatch syntax leaves
-  // that as argv0 after the wrapper is stripped, so `t[0] === "pnpm"` never matched. Only bin
-  // names flow through binBase (never package args), so a scoped/versioned package like
-  // `@scope/pkg@1` is unaffected.
-  return resolved.replace(/@.+$/, "");
-}
-
-/**
- * Wrapper binaries that prefix a real command without changing what it is
- * (`env FOO=bar npm i x`, `sudo npm i x`). We strip a leading run of these plus
- * any `VAR=value` env assignments so the matcher sees the actual package manager.
- * A bare `VAR=value npm i evil` would otherwise tokenize to t[0]="VAR=value" and
- * defeat every matcher — a full gate bypass.
- */
-const PREFIX_BINS = new Set([
-  "env",
-  "sudo",
-  "command",
-  "builtin",
-  "exec",
-  "nice",
-  "time",
-  "nohup",
-  "doas",
-  "setsid",
-  "stdbuf",
-  // corepack ships with Node and dispatches to the pinned package manager, so
-  // `corepack pnpm add evil` really runs `pnpm add evil`. It's a pure wrapper; stripping
-  // it exposes the real manager. Its own subcommands (enable/install/use) reduce to a
-  // bare verb no matcher claims, so no false positive.
-  "corepack",
-]);
 
 /** Drop leading wrapper bins + `VAR=value` env assignments, returning the real argv. */
-function stripCommandPrefix(tokens: string[]): string[] {
+function stripCommandPrefix(tokens: string[], unverifiable?: string[]): string[] {
   let i = 0;
   while (i < tokens.length) {
     const t = tokens[i];
@@ -217,8 +162,7 @@ function stripCommandPrefix(tokens: string[]): string[] {
     // backslash-qualified wrapper (`/usr/bin/sudo`, `\command`) is still stripped.
     const base = binBase(t);
     if (PREFIX_BINS.has(base)) {
-      i++;
-      while (i < tokens.length && tokens[i].startsWith("-")) i++; // skip the wrapper's own flags
+      i = skipWrapperArgs(tokens, i + 1, unverifiable);
       continue;
     }
     // Leading shell keyword / grouping token (then/do/{/eval/…) → skip; also handle
@@ -359,7 +303,7 @@ export function splitHeredocs(command: string): { command: string; expansions: s
 }
 
 function nestedCommands(command: string): string[] {
-  const out: string[] = [];
+  const out: string[] = windowsShellBodies(command); // `cmd /c …`, `powershell -c …`
   for (const m of command.matchAll(/\$\(([^()]{1,2000})\)/g)) out.push(m[1]);
   for (const m of command.matchAll(/`([^`]{1,2000})`/g)) out.push(m[1]);
   // `sh -c '…'` / `bash -lc "…"` / `bash -euo pipefail -c $'…'` — the quoted arg to a SHELL's
@@ -460,13 +404,15 @@ const REQUIREMENT_FLAG_RE = /^(-r|--requirement|-e|--editable|-c|--constraint)$/
 // keep `sometool` as the first positional). Long forms only; `-p`/glued `=` are handled
 // elsewhere (short -p is ambiguous across installers; `--x=v` is one token, auto-dropped).
 const VALUE_PKG_FLAG_RE = /^(--package|--spec|--from|--with)$/i;
+const isValueFlag = (flag: string) => SOURCE_FLAG_RE.test(flag) || VALUE_PKG_FLAG_RE.test(flag);
 
 /** Cut an unquoted trailing `# comment` (one starting a word) before tokenizing, so a
  *  comment's words aren't triaged as packages / mistaken for a registry redirect. A `#`
  *  glued inside a token (`https://x#frag`, `pkg#tag`) is NOT a comment and is kept. */
 function stripInlineComment(segment: string): string {
-  const m = segment.match(/(?:^|\s)#/);
-  return m ? segment.slice(0, m.index) : segment;
+  const words = shellWords(segment);
+  const comment = words.findIndex((word) => word.startsWith("#"));
+  return (comment < 0 ? words : words.slice(0, comment)).join(" ");
 }
 const DEFAULT_SOURCE_RE =
   /^https?:\/\/(registry\.npmjs\.org|registry\.yarnpkg\.com|pypi\.org|files\.pythonhosted\.org)(\/|$)/i;
@@ -477,7 +423,9 @@ const DEFAULT_SOURCE_RE =
  * offending token, or null when none / only the known public default. A value
  * pointing at the canonical registry is benign; anything else → fail-closed.
  */
-function sourceRedirect(rawTokens: string[]): string | null {
+function sourceRedirect(rawTokens: string[], commandTokens: string[]): string | null {
+  const configFlag = sourceConfigurationFlag(commandTokens);
+  if (configFlag) return configFlag;
   for (let i = 0; i < rawTokens.length; i++) {
     const t = rawTokens[i];
     const env = t.match(/^([^\s=]+)=(.*)$/);
@@ -757,7 +705,7 @@ export function parseInstallCommand(command: string): InstallProbe {
         queue.push(nested);
       }
     }
-    for (const segment of cmd.split(SEGMENT_SPLIT)) scanSegment(segment, probe);
+    for (const segment of shellSegments(cmd)) scanSegment(segment, probe);
   }
 
   // De-dup (npm i a a, or a && a).
@@ -896,9 +844,7 @@ function repoRefsFromUrls(text: string): string[] {
 }
 
 function segmentShellTokens(segment: string): string[] {
-  const raw = stripRedirections(stripInlineComment(segment).trim().split(/\s+/).filter(Boolean))
-    .map(dequote)
-    .filter(Boolean);
+  const raw = stripRedirections(shellWords(stripInlineComment(segment))).map(dequote);
   const tokens = stripCommandPrefix(raw);
   if (tokens.length === 0) return tokens;
   tokens[0] = binBase(tokens[0]);
@@ -962,7 +908,7 @@ function repoFetchToShellRefs(command: string): string[] {
   for (const m of command.matchAll(FETCH_TO_SHELL_PIPE_RE)) refs.push(...repoRefsFromUrls(m[0]));
 
   const downloads = new Map<string, string[]>();
-  for (const segment of command.split(SEGMENT_SPLIT)) {
+  for (const segment of shellSegments(command)) {
     const tokens = segmentShellTokens(segment);
     if (tokens.length === 0) continue;
     const fetched = fetchDownload(tokens);
@@ -1035,7 +981,7 @@ function applyMatcher(
     // A bare reinstall of declared deps (`npm i`) is benign — UNLESS redirected at an
     // alternate registry/index (`npm i --registry evil`): the tarballs pulled are then
     // attacker-controlled even with no named package → block.
-    const bareRedirect = sourceRedirect(raw);
+    const bareRedirect = sourceRedirect(raw, tokens);
     if (bareRedirect) {
       probe.isInstall = true;
       probe.unverifiable.push(`alt-registry:${bareRedirect}`);
@@ -1045,7 +991,7 @@ function applyMatcher(
   probe.isInstall = true;
   // A registry/index redirect means the triaged NAME isn't what installs → fail-closed
   // (mark unverifiable) even if every name is reputable.
-  const redirect = sourceRedirect(raw);
+  const redirect = sourceRedirect(raw, tokens);
   if (redirect) probe.unverifiable.push(`alt-registry:${redirect}`);
   for (const arg of targets) {
     if (isLocalTarget(arg)) continue; // user's own code — nothing to triage
@@ -1123,14 +1069,27 @@ function isApprovalNoop(tokens: string[], pos: string[]): boolean {
 
 /** Match one shell segment against the package-manager matchers, mutating `probe`. */
 function scanSegment(segment: string, probe: InstallProbe): void {
-  const raw = stripRedirections(stripInlineComment(segment).trim().split(/\s+/).filter(Boolean))
-    .map(dequote)
-    .filter(Boolean);
-  const tokens = stripCommandPrefix(raw);
+  const raw = stripRedirections(shellWords(stripInlineComment(segment))).map(dequote);
+  const count = probe.unverifiable.length;
+  const tokens = stripCommandPrefix(raw, probe.unverifiable);
+  if (probe.unverifiable.length > count) {
+    probe.isInstall = true;
+    return;
+  }
   if (tokens.length === 0) return;
   tokens[0] = binBase(tokens[0]); // /usr/bin/npm, \npm, ./bin/pnpm → npm/pnpm
+  // A flag before the command is a wrapper's (`env -i`, `sudo -i`), never a registry option:
+  // drop those from the raw view the matchers read for redirects. Env assignments stay.
+  const start = raw.length - tokens.length;
+  const cmdRaw = raw.filter((t, i) => i >= start || !t.startsWith("-"));
 
   if (indirectInstall(tokens, probe) || claudePluginInstall(tokens, probe)) return;
+  const hidden = hiddenVerb(tokens, compactPositionals, isValueFlag);
+  if (hidden) {
+    probe.isInstall = true;
+    probe.unverifiable.push(hidden);
+    return;
+  }
 
   const pos = compactPositionals(tokens);
   if (pos.length === 0) return;
@@ -1141,7 +1100,7 @@ function scanSegment(segment: string, probe: InstallProbe): void {
   if (isApprovalNoop(tokens, pos)) return;
 
   for (const m of MATCHERS) {
-    if (applyMatcher(m, pos, tokens, raw, probe)) break; // one matcher per segment
+    if (applyMatcher(m, pos, tokens, cmdRaw, probe)) break; // one matcher per segment
   }
 }
 
@@ -1175,43 +1134,6 @@ function refIsBareName(ref: string, bare: string): boolean {
  * plain `npx <name>` ref that a local `node_modules/.bin/<name>` shadows — npx
  * runs that local binary, never touching the registry package of the same name.
  */
-/**
- * Explain an `indirect-bin:` refusal in terms of the HAZARD, not the machinery.
- *
- * The generic wording ("cannot reduce to a triage target … run `kit triage`") is accurate about
- * kit's internals and useless about the command, and it was read as a false positive: a
- * `git commit -m "… \`deployment:env:view\` …"` was blocked, and the operator concluded the gate
- * had mis-parsed a commit message. It had not. Backticks inside DOUBLE quotes are command
- * substitution, so that command never commits that text — the shell runs the backticked token
- * and splices its output in, silently deleting the words:
- *
- *     $ bash -c 'echo "... the permission `deployment:env:view` ..."'
- *     bash: deployment:env:view: command not found
- *     ... the permission  ...
- *
- * The gate caught a real silent corruption and got distrusted for it, because the message
- * described a triage target instead of the substitution. `kit triage` / `kit pkg` are nonsense
- * advice for this command, and following the workaround (write the message to a file, use `-F`)
- * hides the defect rather than fixing it. So: name it, and give the fix.
- */
-export function explainUnverifiable(tokens: readonly string[]): string | null {
-  const substitution = tokens.find(
-    (t) => t.startsWith("indirect-bin:`") || t.startsWith("indirect-bin:$("),
-  );
-  if (!substitution) return null;
-  const tok = substitution.slice("indirect-bin:".length);
-  const backtick = tok.startsWith("`");
-  return (
-    `${tok} is COMMAND SUBSTITUTION, not text: the shell runs it and splices its output into ` +
-    `the argument, so the characters you typed never reach the command` +
-    (backtick
-      ? ` (backticks substitute inside double quotes too — single quotes are literal).`
-      : `.`) +
-    ` If you meant it literally, use single quotes, or pass the text via a file ` +
-    `(e.g. \`git commit -F <file>\`). If you meant to run it, run it as its own command so ` +
-    `kit can see what installs.`
-  );
-}
 
 export async function decideBashGate(
   command: string,
