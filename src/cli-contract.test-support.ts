@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -10,14 +10,19 @@ const source = import.meta.url.endsWith(".ts");
 const cli = fileURLToPath(new URL(source ? "./cli.ts" : "./cli.js", import.meta.url));
 const loader = source ? ["--import", import.meta.resolve("tsx")] : [];
 
+// Windows' own caches under the fixture's LOCALAPPDATA. kit runs PowerShell to set ACLs
+// (src/utils/secure-perms.ts), and PowerShell sometimes writes its startup-profile cache there
+// (`Microsoft\Windows\PowerShell\StartupProfileData-NonInteractive`). kit never writes under
+// this folder, so it is left out of the "nothing changed" snapshot.
+const OS_CACHE = join("home", "AppData", "Local", "Microsoft");
+
 function snapshot(root: string): Record<string, string> {
   return Object.fromEntries(
-    readdirSync(root, { recursive: true, withFileTypes: true }).map((entry) => {
+    readdirSync(root, { recursive: true, withFileTypes: true }).flatMap((entry) => {
       const path = join(entry.parentPath, entry.name);
-      return [
-        relative(root, path),
-        entry.isDirectory() ? "directory" : readFileSync(path).toString("base64"),
-      ];
+      const rel = relative(root, path);
+      if (rel === OS_CACHE || rel.startsWith(OS_CACHE + sep)) return [];
+      return [[rel, entry.isDirectory() ? "directory" : readFileSync(path).toString("base64")]];
     }),
   );
 }
