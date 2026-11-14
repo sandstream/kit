@@ -106,6 +106,17 @@ Concurrent setup calls without `--overwrite` return one successful enrollment wi
 Kit publishes complete secret files. A failed competing setup cannot replace the winning credential.
 Missing values, repeated flags, and flags from another auth subcommand fail before policy activation.
 
+### TOTP recovery
+
+Elevation refuses an unreadable, empty, whitespace-only, or malformed secret file. It also refuses
+directories and symlinks, including dangling symlinks and symlinks to valid secrets. Only an absent
+enrollment file permits the YES prompt when no environment secret is configured.
+
+Repair the file, or run `kit auth setup-totp --overwrite` to replace a file or symlink. Symlink
+replacement leaves the target unchanged. A new secret makes the old authenticator entry stop working.
+The overwrite option cannot replace a directory. Move the directory aside and keep its contents.
+Then run `kit auth setup-totp` to enroll a new secret. Do not delete the directory as a recovery step.
+
 ## External scanner reports
 
 Run `kit ingest sarif report.sarif`, `kit ingest osv report.json`, or
