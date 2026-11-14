@@ -466,23 +466,15 @@ function printInitGaps(gaps: InitGap[]): void {
   console.log();
 }
 
-/**
- * Generate a `.kit.toml` when none exists: detect stack, surface plaintext
- * secrets, pick a secret backend, preview, and write. Returns "written" on
- * success, "abort-error" when config can't be generated (low-confidence +
- * non-interactive), or "abort-user" when the user declines the write.
- */
-async function generateConfigFile(
-  configPath: string,
-  nonInteractive: boolean,
-): Promise<"written" | "abort-error" | "abort-user"> {
-  console.log(`${c.yellow}No .kit.toml found.${c.reset}\n`);
+type Stack = Awaited<ReturnType<typeof detectStack>>;
+type Selection = ReturnType<typeof resolveInitServices>;
 
-  const detected = await runStep("detect project stack", () => detectStack(process.cwd()));
-  // Services: detection decides, the operator's known-services list only decides what we
-  // ASK about (~/.kit/defaults.toml [init] known_services). `--services a,b` answers on the
-  // command line — `--services ""` means none, which is why the flag's presence is tested
-  // rather than its truthiness.
+/**
+ * Services: detection decides, the operator's known-services list only decides what we ASK
+ * about (~/.kit/defaults.toml [init] known_services). `--services a,b` answers on the command
+ * line. `--services ""` means none, which is why the flag's presence is tested, not its truthiness.
+ */
+async function selectInitServices(detected: Stack, nonInteractive: boolean): Promise<Selection> {
   const servicesFlag = hasFlag(process.argv, "--services")
     ? (flagValue(process.argv, "--services") ?? "")
         .split(",")
@@ -500,10 +492,8 @@ async function generateConfigFile(
       `${c.yellow}!${c.reset} unknown service '${u}' — skipped (not in kit's service registry)`,
     );
   }
-
-  // Offer the known-but-absent ones to whoever is here to answer. At a terminal that is a
-  // prompt; anywhere else `promptMultiSelect` returns null and they stay a gap, because
-  // "nobody answered" must not become "yes".
+  // Offer the known-but-absent ones to whoever can answer. Without a terminal
+  // `promptMultiSelect` returns null and they stay a gap: "nobody answered" is not "yes".
   if (selection.offered.length > 0 && !nonInteractive) {
     const picked = await promptMultiSelect("Which services does this project use?", [
       ...selection.detected.map((s) => ({
@@ -517,7 +507,160 @@ async function generateConfigFile(
     if (picked) selection = resolveInitServices(detected, picked);
     console.log();
   }
+  return selection;
+}
 
+function printDetectedStack(stack: Selection["stack"]): void {
+  const detectedLabel = [
+    stack.language !== "unknown" ? stack.language : null,
+    stack.framework ?? null,
+    stack.services.length ? stack.services.join(", ") : null,
+  ]
+    .filter(Boolean)
+    .join(" / ");
+  if (stack.language === "unknown") {
+    console.log(`${c.dim}Could not detect project type — generating minimal config.${c.reset}\n`);
+    return;
+  }
+  console.log(
+    `  ${c.green}✓${c.reset} Detected: ${c.bold}${detectedLabel}${c.reset}  ${c.dim}(confidence: ${(stack.confidence * 100).toFixed(0)}%)${c.reset}`,
+  );
+  // P4: turn the confidence signal into a guard. Mis-detections cluster in the low band
+  // (~60%) while unambiguous stacks score 85–90%. Below 70%, say so and show how to correct it.
+  if (stack.confidence < 0.7) {
+    console.log(
+      `  ${c.yellow}!${c.reset} ${c.dim}Low confidence — if this is wrong, set the right language under ${c.reset}${c.bold}[project]${c.reset}${c.dim} in .kit.toml (a polyglot repo can carry several manifests).${c.reset}`,
+    );
+  }
+  console.log();
+}
+
+/** Surface obvious credentials in .env / package.json / scripts/ BEFORE the backend choice. */
+async function warnPlaintextSecrets(): Promise<void> {
+  const plaintextHits = await scanPlaintextSecrets(process.cwd());
+  if (plaintextHits.length === 0) return;
+  const totalFindings = plaintextHits.reduce((sum, h) => sum + h.findings.length, 0);
+  console.log(
+    `${c.red}⚠ Found ${totalFindings} plaintext secret(s) across ${plaintextHits.length} file(s):${c.reset}`,
+  );
+  for (const hit of plaintextHits) {
+    const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
+    console.log(`  ${c.dim}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
+  }
+  console.log(
+    `${c.yellow}These should be migrated to a vault. ` +
+      `Pick a secret backend below; we'll wire up the config now and you can run ` +
+      `${c.bold}kit secrets migrate${c.reset}${c.yellow} after.${c.reset}\n`,
+  );
+}
+
+/**
+ * Order of authority: an explicit --store flag, then a binding the repo already carries
+ * (.infisical.json / doppler.yaml), then a human at a real terminal. If none answered, the
+ * store stays UNDEFINED and `[secrets]` is not written: kit does not pick a vault for the
+ * user. It used to default to 1Password, and because `promptSelect` returns its `recommended`
+ * option without a TTY, agents and CI got op:// refs into a vault they never used.
+ */
+async function chooseSecretStore(nonInteractive: boolean): Promise<SecretsStore | undefined> {
+  const flagStore = flagValue(process.argv, "--store") as SecretsStore | undefined;
+  const detectedStore = await detectSecretStore(async (p) => existsSync(resolve(process.cwd(), p)));
+  let chosenStore: SecretsStore | undefined = flagStore ?? detectedStore ?? undefined;
+  if (!flagStore && detectedStore) {
+    console.log(
+      `  ${c.green}✓${c.reset} Detected ${c.bold}${detectedStore}${c.reset} config in repo — using it as the secret backend.\n`,
+    );
+  }
+  if (nonInteractive || flagStore) return chosenStore;
+  const opts = [
+    { value: "1password", label: "1Password", hint: "interactive signin via op CLI" },
+    { value: "infisical", label: "Infisical", hint: "self-hosted or cloud, token-based" },
+    { value: "vault", label: "HashiCorp Vault", hint: "KV v2 paths" },
+    { value: "aws-sm", label: "AWS Secrets Manager", hint: "IAM credentials required" },
+    { value: "gcp-sm", label: "GCP Secret Manager", hint: "gcloud auth required" },
+    { value: "azure-kv", label: "Azure Key Vault", hint: "az login required" },
+    { value: "doppler", label: "Doppler", hint: "doppler login required" },
+    { value: "bitwarden", label: "Bitwarden", hint: "bw login + unlock required" },
+    { value: "env", label: "env (no vault)", hint: "not recommended — use only for local dev" },
+  ].map((o) => ({ ...o, recommended: o.value === chosenStore }));
+  chosenStore = (await promptSelect("Secret backend?", opts)) as SecretsStore;
+  console.log();
+  return chosenStore;
+}
+
+/** Seed [secrets.keys] from an env template so the project's real contract is not lost. */
+function seedEnvTemplate(): { keys: string[]; file?: string } {
+  for (const f of [".env.example", ".env.template", ".env.sample"]) {
+    const p = resolve(process.cwd(), f);
+    if (!existsSync(p)) continue;
+    // Record WHICH file it was: `template` used to be hardcoded to `.env.template`.
+    const keys = parseEnvTemplateKeys(readFileSync(p, "utf-8"));
+    if (keys.length > 0) {
+      console.log(
+        `  ${c.green}✓${c.reset} Seeded ${keys.length} key(s) from ${c.bold}${f}${c.reset}\n`,
+      );
+    }
+    return { keys, file: f };
+  }
+  return { keys: [] };
+}
+
+/** package.json scripts are the candidate list on the setup.verify gap: only a reader knows which is safe. */
+function readPackageScripts(): string[] {
+  try {
+    const pkgPath = resolve(process.cwd(), "package.json");
+    if (!existsSync(pkgPath)) return [];
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { scripts?: Record<string, string> };
+    return Object.keys(pkg.scripts ?? {});
+  } catch {
+    return []; // Unreadable or non-JSON package.json: no candidates, the gap is still reported.
+  }
+}
+
+function printTomlPreview(tomlContent: string): void {
+  console.log(`${c.bold}Preview — .kit.toml${c.reset}\n`);
+  for (const line of tomlContent.split("\n")) {
+    if (line.trim() === "") {
+      console.log();
+    } else {
+      console.log(`  ${c.green}+${c.reset} ${line}`);
+    }
+  }
+  console.log();
+}
+
+/** Tell the user what `kit setup` will provision and what is still theirs (login is their account action). */
+function printVaultNote(chosenStore: SecretsStore | undefined): void {
+  const meta = vaultMeta(chosenStore);
+  if (!meta) return;
+  console.log(`  ${c.dim}Secret backend: ${c.reset}${c.bold}${meta.label}${c.reset}`);
+  if (meta.miseTool) {
+    console.log(
+      `    ${c.green}✓${c.reset} ${c.dim}${c.reset}${c.bold}kit setup${c.reset}${c.dim} will install its CLI via mise${c.reset}`,
+    );
+  }
+  if (meta.loginCmd) {
+    const steps = meta.initCmd ? `${meta.loginCmd} && ${meta.initCmd}` : meta.loginCmd;
+    console.log(
+      `    ${c.yellow}!${c.reset} ${c.dim}then authenticate (your account): ${c.reset}${c.bold}${steps}${c.reset}`,
+    );
+  }
+  console.log();
+}
+
+/**
+ * Generate a `.kit.toml` when none exists: detect stack, surface plaintext
+ * secrets, pick a secret backend, preview, and write. Returns "written" on
+ * success, "abort-error" when config can't be generated (low-confidence +
+ * non-interactive), or "abort-user" when the user declines the write.
+ */
+async function generateConfigFile(
+  configPath: string,
+  nonInteractive: boolean,
+): Promise<"written" | "abort-error" | "abort-user"> {
+  console.log(`${c.yellow}No .kit.toml found.${c.reset}\n`);
+
+  const detected = await runStep("detect project stack", () => detectStack(process.cwd()));
+  const selection = await selectInitServices(detected, nonInteractive);
   const { stack } = selection;
 
   if (stack.confidence < 0.3 && nonInteractive) {
@@ -528,134 +671,22 @@ async function generateConfigFile(
     return "abort-error";
   }
 
-  const detectedLabel = [
-    stack.language !== "unknown" ? stack.language : null,
-    stack.framework ?? null,
-    stack.services.length ? stack.services.join(", ") : null,
-  ]
-    .filter(Boolean)
-    .join(" / ");
+  printDetectedStack(stack);
+  await warnPlaintextSecrets();
+  const chosenStore = await chooseSecretStore(nonInteractive);
 
-  if (stack.language === "unknown") {
-    console.log(`${c.dim}Could not detect project type — generating minimal config.${c.reset}\n`);
-  } else {
-    console.log(
-      `  ${c.green}✓${c.reset} Detected: ${c.bold}${detectedLabel}${c.reset}  ${c.dim}(confidence: ${(stack.confidence * 100).toFixed(0)}%)${c.reset}`,
-    );
-    // P4 — turn the confidence signal into a guard. Mis-detections cluster in the low band
-    // (~60%) while unambiguous stacks score 85–90%; when we're below that, say so and show how
-    // to correct it, rather than committing a possibly-wrong language silently.
-    if (stack.confidence < 0.7) {
-      console.log(
-        `  ${c.yellow}!${c.reset} ${c.dim}Low confidence — if this is wrong, set the right language under ${c.reset}${c.bold}[project]${c.reset}${c.dim} in .kit.toml (a polyglot repo can carry several manifests).${c.reset}`,
-      );
-    }
-    console.log();
-  }
-
-  // ── Plaintext-secrets scan ─────────────────────────────────────────────
-  // Surface obvious credentials sitting in .env / package.json / scripts/
-  // BEFORE wiring up the vault, so the choice of backend is informed.
-  const plaintextHits = await scanPlaintextSecrets(process.cwd());
-  if (plaintextHits.length > 0) {
-    const totalFindings = plaintextHits.reduce((sum, h) => sum + h.findings.length, 0);
-    console.log(
-      `${c.red}⚠ Found ${totalFindings} plaintext secret(s) across ${plaintextHits.length} file(s):${c.reset}`,
-    );
-    for (const hit of plaintextHits) {
-      const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
-      console.log(`  ${c.dim}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
-    }
-    console.log(
-      `${c.yellow}These should be migrated to a vault. ` +
-        `Pick a secret backend below; we'll wire up the config now and you can run ` +
-        `${c.bold}kit secrets migrate${c.reset}${c.yellow} after.${c.reset}\n`,
-    );
-  }
-
-  // ── Secret-backend choice (interactive) ────────────────────────────────
-  // Respect a backend the repo is already bound to (.infisical.json / doppler.yaml);
-  // it becomes the default (and the non-interactive choice) instead of 1Password.
-  // Order of authority: an explicit --store flag, then a binding the repo already
-  // carries (.infisical.json / doppler.yaml), then a human at a real terminal. If
-  // none of those produced an answer the store stays UNDEFINED and `[secrets]` is
-  // not written — kit does not pick a vault on the user's behalf. It used to
-  // default to 1Password, and because `promptSelect` returns its `recommended`
-  // option when stdin is not a TTY, that default was applied silently to everyone
-  // running `kit init` from an agent or a CI job: op:// refs into a vault they
-  // never used, plus the op CLI in [tools] where `kit triage` blocks it.
-  const flagStore = flagValue(process.argv, "--store") as SecretsStore | undefined;
-  const detectedStore = await detectSecretStore(async (p) => existsSync(resolve(process.cwd(), p)));
-  let chosenStore: SecretsStore | undefined = flagStore ?? detectedStore ?? undefined;
-  if (!flagStore && detectedStore) {
-    console.log(
-      `  ${c.green}✓${c.reset} Detected ${c.bold}${detectedStore}${c.reset} config in repo — using it as the secret backend.\n`,
-    );
-  }
-  if (!nonInteractive && !flagStore) {
-    const opts = [
-      { value: "1password", label: "1Password", hint: "interactive signin via op CLI" },
-      { value: "infisical", label: "Infisical", hint: "self-hosted or cloud, token-based" },
-      { value: "vault", label: "HashiCorp Vault", hint: "KV v2 paths" },
-      { value: "aws-sm", label: "AWS Secrets Manager", hint: "IAM credentials required" },
-      { value: "gcp-sm", label: "GCP Secret Manager", hint: "gcloud auth required" },
-      { value: "azure-kv", label: "Azure Key Vault", hint: "az login required" },
-      { value: "doppler", label: "Doppler", hint: "doppler login required" },
-      { value: "bitwarden", label: "Bitwarden", hint: "bw login + unlock required" },
-      { value: "env", label: "env (no vault)", hint: "not recommended — use only for local dev" },
-    ].map((o) => ({ ...o, recommended: o.value === chosenStore }));
-    chosenStore = (await promptSelect("Secret backend?", opts)) as SecretsStore;
-    console.log();
-  }
-
-  // Detect a Dockerfile so generateToml can provision the trivy container/IaC
-  // scanner only where it applies.
-  const hasDockerfile =
-    existsSync(resolve(process.cwd(), "Dockerfile")) ||
-    existsSync(resolve(process.cwd(), "docker-compose.yml")) ||
-    existsSync(resolve(process.cwd(), "compose.yml"));
-
-  // Seed [secrets.keys] from an existing .env example so the project's real
-  // secret contract isn't lost to just the detected services' template keys.
-  let extraSecretKeys: string[] = [];
-  let envTemplateFile: string | undefined;
-  for (const f of [".env.example", ".env.template", ".env.sample"]) {
-    const p = resolve(process.cwd(), f);
-    if (existsSync(p)) {
-      // Record WHICH file it was: `template` used to be hardcoded to
-      // `.env.template`, pointing kit at a path most repos don't have.
-      envTemplateFile = f;
-      extraSecretKeys = parseEnvTemplateKeys(readFileSync(p, "utf-8"));
-      if (extraSecretKeys.length > 0) {
-        console.log(
-          `  ${c.green}✓${c.reset} Seeded ${extraSecretKeys.length} key(s) from ${c.bold}${f}${c.reset}\n`,
-        );
-      }
-      break;
-    }
-  }
-
-  // package.json scripts become the candidate list on the setup.verify gap — kit
-  // shows what it found and refuses to pick, because only a reader of the repo
-  // knows which script is safe to run as a gate.
-  let packageScripts: string[] = [];
-  try {
-    const pkgPath = resolve(process.cwd(), "package.json");
-    if (existsSync(pkgPath)) {
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as {
-        scripts?: Record<string, string>;
-      };
-      packageScripts = Object.keys(pkg.scripts ?? {});
-    }
-  } catch {
-    // Unreadable/!JSON package.json: no candidates, gap still reported.
-  }
+  // Detect a Dockerfile so generateToml can provision the trivy container/IaC scanner only where it applies.
+  const hasDockerfile = ["Dockerfile", "docker-compose.yml", "compose.yml"].some((f) =>
+    existsSync(resolve(process.cwd(), f)),
+  );
+  const envTemplate = seedEnvTemplate();
+  const packageScripts = readPackageScripts();
 
   const { toml: tomlContent, gaps } = generateToml(stack, {
     ...(chosenStore ? { secretsStore: chosenStore } : {}),
     hasDockerfile,
-    extraSecretKeys,
-    ...(envTemplateFile ? { envTemplateFile } : {}),
+    extraSecretKeys: envTemplate.keys,
+    ...(envTemplate.file ? { envTemplateFile: envTemplate.file } : {}),
     ...(flagValue(process.argv, "--verify")
       ? { verify: flagValue(process.argv, "--verify") as string }
       : {}),
@@ -665,17 +696,7 @@ async function generateConfigFile(
     ...(packageScripts.length ? { packageScripts } : {}),
   });
 
-  // Show diff preview
-  console.log(`${c.bold}Preview — .kit.toml${c.reset}\n`);
-  for (const line of tomlContent.split("\n")) {
-    if (line.trim() === "") {
-      console.log();
-    } else {
-      console.log(`  ${c.green}+${c.reset} ${line}`);
-    }
-  }
-  console.log();
-
+  printTomlPreview(tomlContent);
   if (!nonInteractive) {
     // Prompt with 5-second default-yes timeout
     const accepted = await promptConfirm("Write this config? [Y/n] (auto-yes in 5s): ", 5000);
@@ -703,27 +724,7 @@ async function generateConfigFile(
       : []),
     ...gaps,
   ]);
-
-  // Close the loop on the vault choice: tell the user exactly what `kit setup`
-  // will provision and what they still have to do themselves (login is their
-  // account action — kit guides it, never runs it).
-  const meta = vaultMeta(chosenStore);
-  if (meta) {
-    console.log(`  ${c.dim}Secret backend: ${c.reset}${c.bold}${meta.label}${c.reset}`);
-    if (meta.miseTool) {
-      console.log(
-        `    ${c.green}✓${c.reset} ${c.dim}${c.reset}${c.bold}kit setup${c.reset}${c.dim} will install its CLI via mise${c.reset}`,
-      );
-    }
-    if (meta.loginCmd) {
-      const steps = meta.initCmd ? `${meta.loginCmd} && ${meta.initCmd}` : meta.loginCmd;
-      console.log(
-        `    ${c.yellow}!${c.reset} ${c.dim}then authenticate (your account): ${c.reset}${c.bold}${steps}${c.reset}`,
-      );
-    }
-    console.log();
-  }
-
+  printVaultNote(chosenStore);
   return "written";
 }
 

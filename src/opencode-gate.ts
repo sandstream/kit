@@ -19,7 +19,8 @@ function gateArgv() {
 
 export const kitInstallGate = async () => ({
   "tool.execute.before": async (input, output) => {
-    if ((input?.tool ?? "") !== "bash") return;
+    // OpenCode's docs name the shell tool \`shell\`; older builds call it \`bash\`.
+    if (!["bash", "shell"].includes(input?.tool ?? "")) return;
     const command = output?.args?.command;
     if (typeof command !== "string" || command === "") return;
     try {
