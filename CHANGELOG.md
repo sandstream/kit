@@ -20,6 +20,11 @@
   - Augment 1.x renamed its shell tool from `launch-process` to `bash`; the matcher is now
     `bash|launch-process`.
   Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
+- **Every gate deny is audited.** `gate-bash` and `gate-env` never wrote an audit entry when they
+  refused, and the egress and fs gates wrote none in a repository without a `.kit.toml`. All four
+  now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
+  default governance when no `.kit.toml` exists. Found by kit-research
+  `gpt-6-astra-swarm-incident-vs-kit`.
 - **`kit triage mcp` reads every tool field a FastMCP server sends.** It scanned only the tool
   description and `properties.*.description`. A server built with FastMCP 4 also sends a `title`,
   `annotations`, an `outputSchema` derived from the return type, and dereferenced Pydantic schemas
@@ -141,6 +146,10 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+- **`kit audit verify --json` prints one document, and read-only mode writes no audit event.** The
+  report holds the chain, signature and anchor results without event payloads or external receipt
+  tokens. Activating read-only mode no longer appends an audit event, so a read does not change the
+  log it is verifying.
 
 - **The install gate reads options before the subcommand, and a wrapper's own values.** Eleven
   in-scope installs passed `kit gate-bash` with no output: `npm --prefix <dir> install x` (also
@@ -158,6 +167,12 @@
   Wrapper options stop at the actual command. Runner child options remain separate from package source options.
   Refusals explain the unsupported syntax and give a relevant next step.
 
+- **The install gate triages the repository source a runner passes through.** `npx skills add
+<source>` and the `dlx` and `bunx` forms check the source the invoked command receives, whatever
+  the package order and whatever wrapper (`sudo`, `env`, `nice`, `timeout`) sits in between. A
+  source that is not a plain GitHub repository, or that the shell expands (`$REPO`, a brace or a
+  command substitution), is refused. A shell given `-c` as the child of a repository installer is
+  refused too, because the gate cannot read its command line.
 - **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update

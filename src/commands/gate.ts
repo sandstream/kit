@@ -55,6 +55,7 @@ export async function cmdGateBash(): Promise<boolean> {
   }
   const verdict = await decideBashGate(command, undefined, process.cwd());
   if (verdict.block) {
+    await auditGateDeny("gate-bash", verdict.reason, sessionIdOf(payload));
     // Cline and Antigravity read a stdout JSON verdict and exit 0; every other agent
     // uses the exit-2 PreToolUse deny.
     if (stdoutDeny(`kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`)) {
@@ -114,6 +115,7 @@ export async function cmdGateEnv(): Promise<boolean> {
   if (!write) return true; // not a file write → allow
   const verdict = decideEnvWriteGate(write.filePath, write.text);
   if (verdict.block) {
+    await auditGateDeny("gate-env", verdict.reason ?? "secret write", sessionIdOf(payload));
     if (gateFormat() === "cline") {
       console.log(
         JSON.stringify({
@@ -194,7 +196,8 @@ export async function runGateFailClosed(
 }
 
 /**
- * Best-effort audit of a broker-gate deny (design §3.3: every deny leaves an audit entry).
+ * Best-effort audit of a gate deny (design §3.3: every deny leaves an audit entry), for every
+ * PreToolUse gate, with or without a .kit.toml.
  * Wrapped: a missing/unreadable .kit.toml or audit backend must never change the verdict —
  * the deny already happened, and deny is the safe outcome.
  */
@@ -204,8 +207,12 @@ async function auditGateDeny(gate: string, reason: string, sessionId?: string): 
     const { mergeGovernanceConfigAsync } = await import("../governance.js");
     const { logAuditEvent } = await import("../audit.js");
     const { resolve } = await import("node:path");
-    const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml"));
-    const gov = await mergeGovernanceConfigAsync(cfg.governance);
+    // No .kit.toml is not "no audit": a deny in an unconfigured repo is recorded with defaults.
+    const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml")).catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw err;
+    });
+    const gov = await mergeGovernanceConfigAsync(cfg?.governance);
     // The session_id join key lets `kit skill test --runtime` attribute this deny to the
     // skill run that was active when it fired (negative-control HELD evidence) — session-bounded,
     // not a global timestamp guess. Omitted from metadata when the harness gave no session.
