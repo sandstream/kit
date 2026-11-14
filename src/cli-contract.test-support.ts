@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -10,14 +10,19 @@ const source = import.meta.url.endsWith(".ts");
 const cli = fileURLToPath(new URL(source ? "./cli.ts" : "./cli.js", import.meta.url));
 const loader = source ? ["--import", import.meta.resolve("tsx")] : [];
 
+// Windows' own caches under the fixture's LOCALAPPDATA. kit runs PowerShell to set ACLs
+// (src/utils/secure-perms.ts), and PowerShell sometimes writes its startup-profile cache there
+// (`Microsoft\Windows\PowerShell\StartupProfileData-NonInteractive`). kit never writes under
+// this folder, so it is left out of the "nothing changed" snapshot.
+const OS_CACHE = join("home", "AppData", "Local", "Microsoft");
+
 function snapshot(root: string): Record<string, string> {
   return Object.fromEntries(
-    readdirSync(root, { recursive: true, withFileTypes: true }).map((entry) => {
+    readdirSync(root, { recursive: true, withFileTypes: true }).flatMap((entry) => {
       const path = join(entry.parentPath, entry.name);
-      return [
-        relative(root, path),
-        entry.isDirectory() ? "directory" : readFileSync(path).toString("base64"),
-      ];
+      const rel = relative(root, path);
+      if (rel === OS_CACHE || rel.startsWith(OS_CACHE + sep)) return [];
+      return [[rel, entry.isDirectory() ? "directory" : readFileSync(path).toString("base64")]];
     }),
   );
 }
@@ -42,11 +47,19 @@ export function createCliContractFixture(config = "version = 1\n") {
   const home = join(root, "home");
   mkdirSync(cwd);
   mkdirSync(home);
+  // Windows creates the profile folders under USERPROFILE when a process first resolves them.
+  // Create them up front so a snapshot taken before the first CLI run matches one taken after it.
+  const roaming = join(home, "AppData", "Roaming");
+  const local = join(home, "AppData", "Local");
+  mkdirSync(roaming, { recursive: true });
+  mkdirSync(local, { recursive: true });
   writeFileSync(join(cwd, ".kit.toml"), config);
   const env: NodeJS.ProcessEnv = {
     PATH: dirname(process.execPath),
     HOME: home,
     USERPROFILE: home,
+    APPDATA: roaming,
+    LOCALAPPDATA: local,
     SystemRoot: process.env.SystemRoot,
     XDG_CONFIG_HOME: join(home, "config"),
     XDG_CACHE_HOME: join(home, "cache"),

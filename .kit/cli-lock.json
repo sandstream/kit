@@ -48,6 +48,12 @@
       "source": "mise",
       "sourceDetail": "mise",
       "installedAt": "2026-10-19T13:16:45.335Z"
+    },
+    "npm:typescript": {
+      "version": "6.0.3",
+      "source": "mise",
+      "sourceDetail": "mise",
+      "installedAt": "2026-11-10T11:15:05.642Z"
     }
   }
 }
