@@ -11,6 +11,13 @@
 
 ### Fixed
 
+- **The install gate reads installs run through Windows shells.** It recursed into `sh -c` and
+  `bash -c`, but `cmd /c npm install x`, `powershell -c "npm install x"` and
+  `pwsh -Command "pip install x"` passed silently, on a platform kit supports natively. It now reads
+  the command text of `cmd /c` and `/k`, of PowerShell's `-Command` and `-EncodedCommand` (any
+  prefix, `-` or `/`), and of Windows PowerShell's bare first argument. The new module, and every
+  other `src/install-gate*` module, is now a protected path. Found by kit-research
+  `clickfix-vs-kit-install-gate`.
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
   the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
   the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
