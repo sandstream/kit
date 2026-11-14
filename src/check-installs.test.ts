@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 
 import {
   checkRuntimeInstalls,
+  hookNodePaths,
   classifyBinary,
   inventoryNodeInstalls,
   judgeInstalls,
@@ -362,6 +363,20 @@ describe("checkRuntimeInstalls", () => {
     assert.equal(rows[0].status, "fail");
   });
 
+  it("reads the Node that the project's git hooks run through the hookNodes dependency", async () => {
+    const rows = await checkRuntimeInstalls(
+      "/project",
+      deps({
+        inventory: () => [node("mise", "26.7.0"), node("system", "10.24.1", "/usr/local")],
+        winnerPath: () => "/h/.local/share/mise/installs/node/26.7.0/bin/node",
+        assess: (v: string) => (v === "26.7.0" ? good : bad("end of life")),
+        hookNodes: () => ["/usr/local/bin/node"],
+      }),
+    );
+    assert.equal(rows[0].status, "warn");
+    assert.match(rows[0].detail, /git hooks? run/);
+  });
+
   it("returns nothing for a project that does not use Node", async () => {
     const rows = await checkRuntimeInstalls("/project", deps({ detectNode: () => null }));
     assert.deepEqual(rows, []);
@@ -389,5 +404,58 @@ describe("checkRuntimeInstalls", () => {
     );
     assert.equal(asked, 1);
     assert.equal(rows[0].status, "pass");
+  });
+});
+
+describe("hookNodePaths", () => {
+  it("reads the Node that a generated git hook runs, and nothing else", () => {
+    const text = [
+      "#!/bin/sh",
+      "/usr/local/bin/node /home/u/.npm-global/bin/kit security scan-staged || exit 1",
+      '"/h/.local/share/mise/installs/node/22.23.5/bin/node" "/x/kit/dist/cli.js" adr check',
+      "echo /usr/bin/node-not-this",
+      "npm test",
+    ].join("\n");
+    assert.deepEqual(hookNodePaths(text), [
+      "/usr/local/bin/node",
+      "/h/.local/share/mise/installs/node/22.23.5/bin/node",
+    ]);
+  });
+  it("returns nothing for a hook with no absolute Node", () => {
+    assert.deepEqual(hookNodePaths("#!/bin/sh\nkit security scan-staged\n"), []);
+  });
+});
+
+describe("judgeInstalls: Node used by kit's git hooks", () => {
+  const sys = node("system", "10.24.1", "/usr/local");
+  const base = () =>
+    facts({
+      installs: [node("homebrew", "26.7.0"), sys],
+      winner: { manager: "homebrew", version: "26.7.0", shim: false },
+      assess: (v) => (v === "26.7.0" ? good : bad("end of life")),
+    });
+
+  it("does not call an install unused when a git hook runs it, and says so", () => {
+    const r = judgeInstalls({ ...base(), hookNodes: ["/usr/local/bin/node"] });
+    assert.equal(r.status, "warn");
+    assert.doesNotMatch(r.detail, /unused/);
+    assert.match(r.detail, /git hooks? run/);
+    assert.match(r.detail, /10\.24\.1/);
+    assert.doesNotMatch(r.suggestion ?? "", /remove it the way you installed it/);
+    assert.match(r.suggestion ?? "", /before removing/);
+  });
+
+  it("still calls it unused when no hook runs it", () => {
+    const r = judgeInstalls({ ...base(), hookNodes: [] });
+    assert.match(r.detail, /1 unused install is/);
+  });
+
+  it("a hook that runs a sound Node changes nothing", () => {
+    const r = judgeInstalls({
+      ...base(),
+      installs: [node("homebrew", "26.7.0", "/opt/homebrew/Cellar/node/26.7.0")],
+      hookNodes: ["/opt/homebrew/Cellar/node/26.7.0/bin/node"],
+    });
+    assert.equal(r.status, "pass");
   });
 });
