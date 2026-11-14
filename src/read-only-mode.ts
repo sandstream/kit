@@ -30,8 +30,8 @@ export function isReadOnlyMode(): boolean {
 
 /**
  * Activates read-only mode for this process and any child processes.
- * Idempotent. Called from main() after argv parsing or from
- * `.kit.toml`-policy loader.
+ * Idempotent. Changes process state only; audit files and anchors stay unchanged.
+ * Called from main() after argv parsing or from the `.kit.toml` policy loader.
  */
 export function activateReadOnlyMode(source: "flag" | "env" | "policy"): void {
   if (isReadOnlyMode()) return;
@@ -39,12 +39,6 @@ export function activateReadOnlyMode(source: "flag" | "env" | "policy"): void {
   process.stderr.write(
     `[kit] read-only mode active (source: ${source}) — all writes will be refused.\n`,
   );
-  void appendAuditEventDirect({
-    operation: "read-only-mode-activated",
-    environment: process.env.NODE_ENV ?? "unknown",
-    success: true,
-    metadata: { source },
-  });
 }
 
 /**

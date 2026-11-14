@@ -1,0 +1,50 @@
+/** Shared inputs for the public API and compiled CLI wrapper contracts. */
+export const RUNNER_WRAPPERS = [
+  "command",
+  "command -p --",
+  "sudo",
+  "sudo FLAG=1",
+  "sudo -u root FLAG=1 OTHER=2",
+  "sudo -- FLAG=1 env OTHER=2",
+  "/usr/bin/sudo -nu root",
+  "sudo --user=root",
+  "nice -n 5",
+  "nice --adjustment=5",
+  "env -i FLAG=1",
+  "env -- env FLAG=1",
+  "builtin command",
+  "exec -a fixture",
+  "nohup",
+  "doas -u root",
+  "setsid -f",
+  "stdbuf -oL",
+  "time -p",
+  "corepack",
+  "timeout -s TERM 5",
+  "ionice -c 3",
+  "chrt -f 10",
+  "taskset --cpu-list 0",
+  "flock -w 1 /tmp/fixture.lock",
+  "sudo -u root nice -n 5 env -- FLAG=1 command --",
+];
+
+export const AMBIGUOUS_RUNNER_WRAPPERS = [
+  ["command --unknown skills", "wrapper-option:command --unknown"],
+  ["sudo --unknown skills", "wrapper-option:sudo --unknown"],
+  ["nice --unknown skills", "wrapper-option:nice --unknown"],
+  ["env -S skills", "wrapper-command:env split-string"],
+  ["flock /tmp/fixture.lock -c skills", "wrapper-command:flock command"],
+];
+
+export const BENIGN_RUNNER_WRAPPERS = [
+  "sudo FLAG=skills other",
+  "sudo -u skills FLAG=1 other",
+  "command FLAG=1 skills",
+  "nice -n 5 FLAG=1 skills",
+  "sudo -u skills other",
+  "env -u skills other",
+  "exec -a skills other",
+  "flock skills other",
+  "command other --unknown skills",
+  "nice -n 5 other --unknown skills",
+];
