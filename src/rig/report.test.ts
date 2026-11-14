@@ -197,3 +197,21 @@ describe("volume", () => {
     assert.deepEqual(withControl[0].volume?.findingsPerRun, { mean: 3, min: 3, max: 3 });
   });
 });
+
+describe("a spent holdout", () => {
+  it("warns once three or more configs were scored on the same holdout", () => {
+    const two = aggregate(MANIFEST, [
+      defect("A", "r1", "h1", true),
+      defect("B", "r1", "h1", false),
+    ]);
+    assert.ok(!splitWarnings(two).some((w) => w.includes("same holdout")));
+    const three = aggregate(MANIFEST, [
+      defect("A", "r1", "h1", true),
+      defect("B", "r1", "h1", false),
+      defect("C", "r1", "h1", true),
+    ]);
+    assert.ok(
+      splitWarnings(three).some((w) => w.startsWith("3 configs were scored on the same holdout")),
+    );
+  });
+});

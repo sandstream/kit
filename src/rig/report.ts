@@ -25,6 +25,13 @@ export const LIMITS = [
 
 export const MIN_RUNS_TO_COMPARE = 3;
 
+/**
+ * A loop that proposes several candidates per round and keeps the one with the best holdout score
+ * (a self-improving harness, a prompt sweep) turns the holdout into a training signal. From this
+ * many configs on one holdout, the report says so. Two configs is the ordinary A/B the rig is for.
+ */
+export const HOLDOUT_SPENT_AT = 3;
+
 export interface Spread {
   mean: number;
   min: number;
@@ -158,6 +165,12 @@ export function splitWarnings(stats: ConfigStats[]): string[] {
     if (s.controls.runs === 0) {
       out.push(`config ${s.config}: no control runs, so false positives are unmeasured`);
     }
+  }
+  const onHoldout = stats.filter((s) => s.holdout.runs > 0).length;
+  if (onHoldout >= HOLDOUT_SPENT_AT) {
+    out.push(
+      `${onHoldout} configs were scored on the same holdout: choosing among them by holdout recall makes the holdout part of the selection, so the chosen config's holdout number is optimistic. Plant fresh holdout defects before the next comparison.`,
+    );
   }
   return out;
 }
