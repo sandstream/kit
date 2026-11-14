@@ -18,7 +18,7 @@ test("required external verification refuses a fabricated receipt without changi
       `assert.equal(await audit.appendAuditEventDirect(event("seed"), { cwd: project }), true);`,
     ),
   ]);
-  // Verify with read-only mode already active. A new activation has its own audit event.
+  // Exercise verification with read-only mode inherited from the caller.
   fixture.env.KIT_READ_ONLY = "1";
   const local = auditCli(fixture, ["verify", "--strict", "--read-only"]);
   assert.equal(local.status, 0, local.stdout + local.stderr);
@@ -63,10 +63,12 @@ test("real external signatures and current checkpoints verify repeatedly without
   assert.equal(sealed.status, 0, sealed.stdout + sealed.stderr);
   fixture.env.KIT_READ_ONLY = "1";
   const before = externalEvidence(fixture);
-  for (const flags of [[], [], ["--all", "--json"]]) {
+  for (const flags of [[], [], ["--all", "--json"], ["--json"]]) {
     const verified = auditCli(fixture, ["verify", "--require-external", "--strict", ...flags]);
     assert.equal(verified.status, 0, verified.stdout + verified.stderr);
-    if (flags.length) assert.equal(JSON.parse(verified.stdout).counts.verified, 1);
+    if (flags.includes("--all")) assert.equal(JSON.parse(verified.stdout).counts.verified, 1);
+    else if (flags.includes("--json"))
+      assert.equal(JSON.parse(verified.stdout).anchor.externalVerification.status, "verified");
     else assert.match(verified.stdout, /verified external anchor/);
     assert.deepEqual(externalEvidence(fixture), before);
   }
