@@ -45,7 +45,10 @@ for (const mode of ["api", "text", "json"] as const) {
       const report = await auditPull(dir, base, head);
       assert.equal(reportSeverity(report), "warn");
       assert.equal(report.coverage.status, "complete");
-      assert.deepEqual(report.coverage.manifestFiles, ["\u00e5/package.json", "\uFFFD/package.json"]);
+      assert.deepEqual(report.coverage.manifestFiles, [
+        "\u00e5/package.json",
+        "\uFFFD/package.json",
+      ]);
       assert.deepEqual(
         report.dependencyChanges.map((change) => [change.file, change.before, change.after]),
         [["\u00e5/package.json", "1.0.0", "2.0.0"]],
