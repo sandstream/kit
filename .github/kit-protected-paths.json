@@ -4,15 +4,15 @@
     "prefix": [".github/workflows/publish", "packages/"]
   },
   "github": {
-    "exact": ["scripts/agent-review-gate.mjs", "scripts/agent-model-review.mjs", "scripts/github-app-token.mjs"],
-    "prefix": [".github/", "src/review-protected-paths"]
+    "exact": ["scripts/agent-review-gate.mjs", "scripts/agent-model-review.mjs", "scripts/github-app-token.mjs", ".kit-baseline.json", "eslint.config.js", ".semgrepignore", "src/dependency-floor.test.ts"],
+    "prefix": [".github/", "src/review-protected-paths", "scripts/prepush", "docs/adr/", "src/adr", "src/commands/adr"]
   },
   "secrets": {
-    "exact": ["src/check-secrets.ts", "src/audit-secrets.ts", "src/agent-audit.ts", "src/utils/redactSecrets.ts"],
+    "exact": ["src/check-secrets.ts", "src/audit-secrets.ts", "src/agent-audit.ts", "src/utils/redactSecrets.ts", ".kit-secretsignore"],
     "prefix": ["src/secrets", "src/secret-", "src/check-secrets", "src/commands/secrets", "src/vault-", "src/keystore/", "src/audit-anchor", ".env"]
   },
   "permissions": {
-    "exact": ["src/agent-config.ts", "src/commands/gate.ts", "src/hook-floor.ts"],
-    "prefix": ["src/install-gate", "src/exec-broker/", "src/read-only-", "src/policy", "src/check-policy", "src/commands/policy", "src/governance", "src/rbac/"]
+    "exact": ["src/agent-config.ts", "src/commands/gate.ts", "src/hook-floor.ts", "src/environment.ts", "src/commands/auth.ts"],
+    "prefix": ["src/install-gate", "src/opencode-gate", "src/approval", "src/elevation", "src/broker/", "src/exec-broker/", "src/read-only-", "src/policy", "src/check-policy", "src/commands/policy", "src/governance", "src/rbac/"]
   }
 }
