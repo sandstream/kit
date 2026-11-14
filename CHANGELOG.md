@@ -18,6 +18,12 @@
   restored or a new freeze accepts the lower floor. Every baseline freeze also writes a
   `baseline-freeze` audit event, so redefining "passing" leaves a record. Found by kit-research
   `retro-skill-self-evolving-agents-vs-kit`.
+- **The egress gate reads a URL forwarded through an allowed host.** A fetch to an in-scope host
+  that carries another URL (`https://mirror/fetch?url=https://elsewhere/`, encoded or not) was
+  checked only against the mirror's host. The forwarded host is now extracted from the path, query
+  and fragment and checked against the scope too. `kit doctor` no longer says a spawned tool
+  "cannot reach off-scope hosts": it says which hosts the gate sees and which it does not. Found by
+  kit-research `gpt-6-astra-swarm-incident-vs-kit`.
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
   the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
   the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
