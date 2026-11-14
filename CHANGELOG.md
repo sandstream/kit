@@ -17,6 +17,12 @@
   with `EISDIR`. The "use kit" support line and the command's help now list every rules file kit
   writes (Copilot, Gemini CLI and Augment were missing). Found by kit-research
   `harness-wars-vs-kit`.
+- **The install gate refuses commands that skip the git hooks.** `git commit --no-verify`,
+  `git -c core.hooksPath=/dev/null commit` and `HUSKY=0 git commit` passed `gate-bash` silently,
+  and the `-c` form left no skip record either. The gate now names and refuses `--no-verify` and
+  `commit -n` on hook-running subcommands, `core.hooksPath` overrides and changes, `HUSKY=0`, and
+  removing or disabling a hook file, including inside `sh -c` and behind `env`/`sudo`. Found by
+  kit-research `checks-in-harness-hooks-vs-kit`.
 - **Every gate deny is audited.** `gate-bash` and `gate-env` never wrote an audit entry when they
   refused, and the egress and fs gates wrote none in a repository without a `.kit.toml`. All four
   now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
