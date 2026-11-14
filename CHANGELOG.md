@@ -101,6 +101,11 @@
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
   notice) and the inline codes in `kit login` now share one rule.
 
+- **The npm package leaves out Python bytecode.** The 7.4.0 tarball shipped
+  `skills/triage/scripts/__pycache__/*.pyc`, because CI runs the skill scripts before the publish
+  step and `files` includes all of `skills`. `skills/.npmignore` now leaves out `__pycache__/` and
+  `*.pyc`. The root `.npmignore` could not do it: npm ignores it when `package.json` has `files`.
+
 ## [7.4.0] - 2026-11-10
 
 A repo can now record two decisions that `kit check` used to warn about on every run: a copyleft
