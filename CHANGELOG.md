@@ -11,6 +11,10 @@
 
 ### Fixed
 
+- **The OpenCode install gate also gates a tool named `shell`.** OpenCode's tool docs name the
+  shell tool `shell`; kit's plugin returned early for any tool other than `bash`, so under that name
+  `npm install <untriaged>` ran without a check. Found by kit-research `caniuse-agent-gates`.
+
 - **A SARIF scan that stopped no longer reads as clean.** `kit ingest sarif` ignored
   `invocations[].executionSuccessful`, so a run that failed with no results printed
   "0 finding(s)", exit 0. That run is now refused, a stopped run with results carries a note that
