@@ -1105,7 +1105,7 @@ export async function checkAllowScripts(root: string): Promise<SecurityCheckResu
     return {
       ...base,
       status: "skip",
-      detail: "no install-script grant declared (npm skips dependency install scripts by default)",
+      detail: "no install-script grant (only npm 12+ skips dependency install scripts by default)",
     };
   }
   const declared = new Set([
@@ -2626,6 +2626,8 @@ async function appendProjectSecurityChecks(
   results.push(await checkDecisionLedger(root, governed?.decisions?.require === true));
   const { checkExternalFindings } = await import("./external-findings.js");
   results.push(...(await checkExternalFindings(root)));
+  const { checkAgentConfig } = await import("./check-agent-config.js");
+  results.push(...(await checkAgentConfig(root)));
   return escalateManifestSkips(results, scope);
 }
 

@@ -11,6 +11,16 @@
 
 ### Fixed
 
+- **A planted agent hook fails `kit check`, in the project or the user directory.** The 2026 npm
+  worms persisted with a `SessionStart` hook in `.claude/settings.json` running
+  `node .claude/setup.mjs`. `kit check` never ran the agent-config audit, `kit agent-audit` read
+  only the command string (no malware shape) and not the file it runs, and, run from a project, it
+  did not read `~/.claude/settings.json` at all. `kit check --category security` now includes the
+  project and user-level agent audit; hook commands' project scripts are scanned for the same
+  malware shapes, a `SessionStart` hook running a project file is a warning, and the user-level
+  `settings.json` hooks are audited. `kit check`'s install-script row no longer says npm skips
+  dependency install scripts by default: only npm 12+ does. Found by kit-research
+  `supply-chain-2026-fundamentals-vs-kit`.
 - **The review gate no longer lets a pull request loosen the guardrails it is checked by.** Human
   approval and elevation (`src/approval*`, `src/elevation*`, `src/environment.ts`,
   `src/commands/auth.ts`), the egress broker's and OpenCode's gates, the architecture decisions in
