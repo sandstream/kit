@@ -11,6 +11,11 @@
 
 ### Fixed
 
+- **Every gate deny is audited.** `gate-bash` and `gate-env` never wrote an audit entry when they
+  refused, and the egress and fs gates wrote none in a repository without a `.kit.toml`. All four
+  now record the deny (`phase: pretooluse-deny`, with the harness session id) and fall back to
+  default governance when no `.kit.toml` exists. Found by kit-research
+  `gpt-6-astra-swarm-incident-vs-kit`.
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
   the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
   the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
