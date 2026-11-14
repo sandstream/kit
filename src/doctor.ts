@@ -651,7 +651,7 @@ export function containmentPostureStatus(
   if (!installGateWired) {
     return {
       status: "skip",
-      detail: "no OS containment detected, and no install/exec capability wired here to contain",
+      detail: `${v.mechanism === "vm" ? `running in a VM (${v.details.join("; ")})` : "no OS containment detected"}, and no install/exec capability wired here to contain`,
     };
   }
   if (v.mechanism === "vm")
