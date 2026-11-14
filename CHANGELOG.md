@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **`kit agent-config` writes Cline's block into `.clinerules/kit.md` when `.clinerules` is a
+  folder.** Cline reads `.clinerules` as a file or a folder of rule files, and kit's own Cline gate
+  creates the folder (`.clinerules/hooks/`). After that, every `kit agent-config` failed for Cline
+  with `EISDIR`. The "use kit" support line and the command's help now list every rules file kit
+  writes (Copilot, Gemini CLI and Augment were missing). Found by kit-research
+  `harness-wars-vs-kit`.
 - **The install gate refuses blanket install-script grants.** `npm install-scripts approve esbuild
 --all` triaged only `esbuild` while npm's `--all` approved every pending package, and
   `npm install --dangerously-allow-all-scripts`, `npm config set ignore-scripts false` and
