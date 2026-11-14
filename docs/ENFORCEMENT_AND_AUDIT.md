@@ -25,6 +25,11 @@ Deterministic, fail-closed, zero-LLM:
   the body really runs and is still gated — a quoted delimiter expands nothing, so the identical
   body is inert.
 
+  `gate-bash` also refuses a command that skips the repository's git hooks: `--no-verify` (or
+  `git commit -n`) on a hook-running subcommand, a `core.hooksPath` override or change, `HUSKY=0`,
+  and deleting or disabling a hook file. kit's commit checks run in those hooks, and skipping them
+  is a person's decision. Reading `core.hooksPath` is allowed.
+
   This is a correction, not a design note. Every line of a here-document used to be scanned as its
   own command, and the gate blocked kit's own PR description because the prose contained
   `` `npx tsc --noEmit` `` — a false block, which is what teaches people to reach for `--no-verify`.
