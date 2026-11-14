@@ -2,6 +2,11 @@
 
 ### Fixed
 
+- **The review gate's own code is a protected path.** `.github/` was protected, but the scripts the
+  gate's workflow runs were not: `scripts/agent-review-gate.mjs`, the two scripts it imports, and the
+  `src/review-protected-paths*` classifier. #762 changed the gate's decision code and the gate approved
+  it without a person. A change to any of them now needs the owner. Found by kit-research
+  `claude-code-review-at-anthropic-vs-kit`.
 - **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
   the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
   the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
