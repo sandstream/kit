@@ -99,6 +99,10 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+- **`kit audit verify --json` prints one document, and read-only mode writes no audit event.** The
+  report holds the chain, signature and anchor results without event payloads or external receipt
+  tokens. Activating read-only mode no longer appends an audit event, so a read does not change the
+  log it is verifying.
 
 - **The install gate reads options before the subcommand, and a wrapper's own values.** Eleven
   in-scope installs passed `kit gate-bash` with no output: `npm --prefix <dir> install x` (also
