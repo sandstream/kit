@@ -94,7 +94,9 @@ describe("ingestCloudflareAudit", () => {
   it("accepts an empty report as a report that found nothing", () => {
     assert.deepEqual(ingestCloudflareAudit([]), { ok: true, findings: [], notes: [] });
   });
+});
 
+describe("ingestCloudflareAudit refusals", () => {
   const broken: Array<[string, unknown]> = [
     ["not an array", { findings: [] }],
     ["null record", [null]],
