@@ -16,6 +16,9 @@
   catches every planted defect, and only control runs priced that. Each config now prints
   `volume  findings per run <mean> (<min>–<max>)  unmatched <n>`, so volume buying recall is visible
   with or without controls. Found by kit-research `debate-agents-game-the-judge-vs-kit`.
+- **The OpenCode install gate also gates a tool named `shell`.** OpenCode's tool docs name the
+  shell tool `shell`; kit's plugin returned early for any tool other than `bash`, so under that name
+  `npm install <untriaged>` ran without a check. Found by kit-research `caniuse-agent-gates`.
 
 - **`kit triage repo` no longer triages a stranger's repo for a local path.** `/home/user/kit` was
   split on `/` into the GitHub repo `home/user`, and a PASS for that repo was recorded against the
