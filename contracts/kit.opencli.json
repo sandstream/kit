@@ -117,7 +117,7 @@
     },
     "agent-config": {
       "kind": "command",
-      "summary": "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md",
+      "summary": "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md / GEMINI.md / .augment-guidelines",
       "x-kit-accepted-flags": [
         "--broker-gate",
         "--env",
