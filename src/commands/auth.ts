@@ -173,7 +173,7 @@ async function cmdAuthElevate(): Promise<boolean> {
       `${c.red}✗ Elevation requires an interactive TTY. Cannot run from agent / CI.${c.reset}`,
     );
     console.error(
-      `${c.dim}For CI deploy jobs that legitimately need a destructive op, set ${c.bold}KIT_ELEVATED=1${c.reset}${c.dim} (and audit-log the use).${c.reset}\n`,
+      `${c.dim}Ask a person to run ${c.bold}kit auth elevate${c.reset}${c.dim} in their own terminal.${c.reset}\n`,
     );
     return false;
   }

@@ -428,3 +428,64 @@ for (const failure of ["missing", "directory", "permissions"] as const) {
     }
   });
 }
+
+const auditStep = (kind: string, file: string, line: number) => ({
+  kind,
+  file,
+  line,
+  scope: "fixture",
+  description: "fixture",
+});
+const cloudflareAudit = [
+  {
+    verdict: "confirmed",
+    fingerprint: "public-confirmed",
+    title: "Confirmed fixture",
+    trace: [auditStep("entrypoint", "src/a.ts", 1), auditStep("sink", "src/b.ts", 9)],
+    severity: { overall_severity: "critical" },
+  },
+  {
+    verdict: "needs_validation",
+    fingerprint: "public-unverified",
+    title: "Unverified fixture",
+    trace: [auditStep("entrypoint", "src/c.ts", 3)],
+  },
+  {
+    verdict: "rejected",
+    fingerprint: "public-rejected",
+    title: "Rejected fixture",
+    trace: [auditStep("sink", "src/d.ts", 4)],
+  },
+];
+
+it("cloudflare-audit: imports confirmed and unverified records and counts rejected ones", () => {
+  const file = report(cloudflareAudit);
+  const before = fixture.snapshot();
+  const result = fixture.run(["ingest", "cloudflare-audit", file, "--json"]);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.count, 2);
+  assert.deepEqual(
+    output.findings.map((f: { status: string; severity: string }) => [f.status, f.severity]),
+    [
+      ["fail", "critical"],
+      ["warn", "low"],
+    ],
+  );
+  assert.equal(output.findings[0].detail, "Confirmed fixture (src/b.ts:9)");
+  assert.doesNotMatch(result.stdout, /public-rejected/);
+  assert.match(result.stderr, /1 candidate\(s\) the audit rejected were counted, not ingested/);
+  assert.deepEqual(fixture.snapshot(), before);
+});
+
+it("cloudflare-audit: refuses a report kit cannot read instead of reporting it clean", () => {
+  const result = fixture.run([
+    "ingest",
+    "cloudflare-audit",
+    report([{ ...cloudflareAudit[0], severity: { overall_severity: "public-fixture-secret" } }]),
+    "--json",
+  ]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(JSON.parse(result.stdout).error, /invalid Cloudflare audit report/);
+  assert.doesNotMatch(result.stdout + result.stderr, /public-fixture-secret/);
+});

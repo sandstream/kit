@@ -1,6 +1,86 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit ingest cloudflare-audit <findings.json>`** reads the findings file written by Cloudflare's
+  security-audit skill. A `confirmed` record becomes a failure at its own overall severity; a
+  `needs_validation` record becomes a `low` warning marked unverified; a `rejected` record is counted on
+  stderr and not imported. A record kit cannot read, or a repeated fingerprint, refuses the whole report
+  instead of reporting it clean. Offline and read-only, like the SARIF and OSV formats. Chosen by
+  kit-research `twelve-security-repos-list-vs-kit`.
+
 ### Fixed
+
+- **The install gate reads installs run through Windows shells.** It recursed into `sh -c` and
+  `bash -c`, but `cmd /c npm install x`, `powershell -c "npm install x"` and
+  `pwsh -Command "pip install x"` passed silently, on a platform kit supports natively. It now reads
+  the command text of `cmd /c` and `/k`, of PowerShell's `-Command` and `-EncodedCommand` (any
+  prefix, `-` or `/`), and of Windows PowerShell's bare first argument. The new module, and every
+  other `src/install-gate*` module, is now a protected path. Found by kit-research
+  `clickfix-vs-kit-install-gate`.
+- **The review gate's own code is a protected path.** `.github/` was protected, but the scripts the
+  gate's workflow runs were not: `scripts/agent-review-gate.mjs`, the two scripts it imports, and the
+  `src/review-protected-paths*` classifier. #762 changed the gate's decision code and the gate approved
+  it without a person. A change to any of them now needs the owner. Found by kit-research
+  `claude-code-review-at-anthropic-vs-kit`.
+- **`kit rig` reports how many findings each run produced.** A finding on a defect target that
+  matches no planted defect is not a false positive, so a reviewer that flags every changed line
+  catches every planted defect, and only control runs priced that. Each config now prints
+  `volume  findings per run <mean> (<min>–<max>)  unmatched <n>`, so volume buying recall is visible
+  with or without controls. Found by kit-research `debate-agents-game-the-judge-vs-kit`.
+  When three or more configs were scored on the same holdout, the report also warns that choosing
+  among them spends the holdout (the chosen config's number is optimistic) and says to plant fresh
+  holdout defects. Found by kit-research `loop-written-harness-vs-kit-rig`.
+- **The OpenCode install gate also gates a tool named `shell`.** OpenCode's tool docs name the
+  shell tool `shell`; kit's plugin returned early for any tool other than `bash`, so under that name
+  `npm install <untriaged>` ran without a check. Found by kit-research `caniuse-agent-gates`.
+
+- **`kit triage repo` no longer triages a stranger's repo for a local path.** `/home/user/kit` was
+  split on `/` into the GitHub repo `home/user`, and a PASS for that repo was recorded against the
+  path. Absolute, relative, `~`, drive-letter paths and existing local checkouts are now refused
+  with a pointer to `kit triage skill`, and every GitHub API error names the `owner/repo` it
+  queried. **`kit triage skill` parses the frontmatter** instead of searching the first 400
+  characters for `name:`: a `## name:` heading (a YAML comment) or a block that never closes no
+  longer passes. Found by kit-research `artex-vs-kit`.
+- **An approval prompt needs a person at a terminal.** `requestApproval` read its answer from
+  stdin with no terminal check, so `echo yes | kit …` was the agent approving its own production
+  write. It now denies when stdin or stdout is not a terminal. `CI=1` and other non-empty `CI`
+  values now count as non-interactive, not only `CI=true`. The `kit auth elevate` refusal no longer
+  names the `KIT_ELEVATED=1` escape hatch to the agent it just refused; it asks for a person.
+  Found by kit-research `out-of-loop-durable-agents-vs-kit-approvals`.
+- **A SARIF scan that stopped no longer reads as clean.** `kit ingest sarif` ignored
+  `invocations[].executionSuccessful`, so a run that failed with no results printed
+  "0 finding(s)", exit 0. That run is now refused, a stopped run with results carries a note that
+  the findings are partial, and a SARIF version other than 2.1.0 is refused. The `kit ingest` help
+  line now lists `cloudflare-audit`. Found by kit-research `openai-daybreak-red-team-vs-kit`.
+- **A moved ADR floor fails `kit adr check`, and every freeze is audited.** Setting an enforced
+  ADR's status to `superseded`, deleting it, or removing its `kit-enforce` block turned a red
+  `adr check` green with no signal. `kit adr freeze` (and `kit baseline freeze`) now records which
+  ADRs were enforced, and `adr check` reports each one that no longer is as a gap until it is
+  restored or a new freeze accepts the lower floor. Every baseline freeze also writes a
+  `baseline-freeze` audit event, so redefining "passing" leaves a record. Found by kit-research
+  `retro-skill-self-evolving-agents-vs-kit`.
+- **Three output corrections.** A `kit triage` cooling warning is now counted in the summary
+  (it printed above `Warnings: 0`). An unknown `kit triage` type now lists all 17 accepted types
+  (it listed 8, leaving out `gem`, `instructions`, `mcp`, `model` and `pkg`). `kit doctor` names a
+  detected VM in its containment row instead of saying "no OS containment detected". Found by
+  kit-research `supply-chain-2026-fundamentals-vs-kit`.
+- **The egress gate reads a URL forwarded through an allowed host.** A fetch to an in-scope host
+  that carries another URL (`https://mirror/fetch?url=https://elsewhere/`, encoded or not) was
+  checked only against the mirror's host. The forwarded host is now extracted from the path, query
+  and fragment and checked against the scope too. `kit doctor` no longer says a spawned tool
+  "cannot reach off-scope hosts": it says which hosts the gate sees and which it does not. Found by
+  kit-research `gpt-6-astra-swarm-incident-vs-kit`.
+- **`kit mcp web` exposes kit read-only by default.** The wizard pointed OpenAI's Secure MCP Tunnel at
+  the full `kit mcp` server. Whoever drives the ChatGPT session, including text a web page injects into
+  the chat, could call `kit_run`, which runs any command with the project's `.env.local` loaded. The
+  tunnel now starts `kit mcp --read-only`: `kit_memory`, `kit_check`, `kit_review` and `kit_context`
+  work, and `kit_run`, `kit_fix`, `kit_init`, `kit_secrets` and `kit_triage` are refused.
+  `KIT_MCP_WEB_ALLOW_WRITES=1 kit mcp web` opts in after a confirm. Re-run the wizard to update an
+  existing tunnel profile.
+- **`kit mcp --read-only` starts the stdio server.** The first argument was read as the sub-command,
+  so the flag printed the usage text instead. The sub-command is now the first argument that is not a
+  flag.
 
 - **`kit adr check` no longer passes a rule that checks nothing.** A `forbid_pattern` or `require_pattern`
   rule printed _"no new violations"_ when its `paths` glob selected no file the gate reads (it reads
@@ -19,6 +99,23 @@
   gets a pwn-request row. When that run was a pull request's, the artifact is PR-controlled. The row
   says to check that the artifact is only read as data. Found by kit-research's adversarial battery,
   tier 3 (rows W08 and W12).
+
+- **The install gate reads options before the subcommand, and a wrapper's own values.** Eleven
+  in-scope installs passed `kit gate-bash` with no output: `npm --prefix <dir> install x` (also
+  `npm -C`, `npm --loglevel silent`, `pnpm -C`/`--dir`, `yarn --cwd`, `bun --cwd`,
+  `uv --directory`), because the option's value read as the subcommand. The same happened with
+  `nice -n 5 npm i x` and `sudo -u root npm i x`, where the wrapper's value read as the command,
+  and with `timeout 600 npm i x`, because `timeout` was not on the wrapper list. Known options are
+  now read with their values. An unknown option before the subcommand that leaves no known verb in
+  its slot, with an install verb after it, blocks fail-closed (`global-option:`). `timeout`,
+  `ionice`, `chrt`, `taskset` and `flock` are stripped like `nice`. `env -i` and `sudo -i` are no
+  longer read as a registry option. A registry option placed before `--prefix` is now caught as
+  well. Found by kit-research's adversarial battery, tier 3 (rows G01 and G05).
+- **The install gate refuses unresolved command strings and package sources.** `env -S`,
+  short option groups, and source configuration can no longer hide a covered install or runner.
+  Wrapper options stop at the actual command. Runner child options remain separate from package source options.
+  Refusals explain the unsupported syntax and give a relevant next step.
+
 - **kit honors `NO_COLOR`.** With `NO_COLOR` set to a non-empty value (https://no-color.org), kit
   prints no ANSI color codes. Before, output piped to a file or a log carried them whatever the
   environment said. The three color tables (`src/utils/colors.ts`, `src/output.ts`, the update
@@ -34,6 +131,10 @@
   Symlink replacement leaves the target unchanged. The overwrite option cannot replace a directory.
   Both refusal messages explain directory recovery: move the directory aside, keep its contents, then run `kit auth setup-totp`.
   A new secret makes the old authenticator entry stop working.
+- **The npm package leaves out Python bytecode.** The 7.4.0 tarball shipped
+  `skills/triage/scripts/__pycache__/*.pyc`, because CI runs the skill scripts before the publish
+  step and `files` includes all of `skills`. `skills/.npmignore` now leaves out `__pycache__/` and
+  `*.pyc`. The root `.npmignore` could not do it: npm ignores it when `package.json` has `files`.
 
 ## [7.4.0] - 2026-11-10
 

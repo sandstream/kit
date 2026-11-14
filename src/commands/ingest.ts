@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ingestStrict } from "../adapters/ingest.js";
+import { ingestStrict, type IngestFormat } from "../adapters/ingest.js";
 import { sanitizeDisplayText } from "../display-text.js";
 import { c } from "../utils/colors.js";
 import { GLOBAL_FLAGS, hasFlag } from "../utils/flags.js";
@@ -29,6 +29,10 @@ function ingestArguments(args: string[]): { jsonMode: boolean; positional: strin
   return { jsonMode, positional };
 }
 
+const FORMATS: readonly string[] = ["sarif", "osv", "cloudflare-audit"];
+const isIngestFormat = (value: string | undefined): value is IngestFormat =>
+  value !== undefined && FORMATS.includes(value);
+
 /** Read a scanner report without storage, scanner execution, or network access. */
 export async function cmdIngest(): Promise<boolean> {
   const { jsonMode, positional } = ingestArguments(process.argv.slice(3));
@@ -37,9 +41,9 @@ export async function cmdIngest(): Promise<boolean> {
     console.error(`${c.red}${error}${c.reset}`);
     return false;
   };
-  const usage = "usage: kit ingest <sarif|osv> <file> [--json]";
+  const usage = "usage: kit ingest <sarif|osv|cloudflare-audit> <file> [--json]";
   const [format, file] = positional;
-  if (positional.length !== 2 || (format !== "sarif" && format !== "osv")) return fail(usage);
+  if (positional.length !== 2 || !isIngestFormat(format)) return fail(usage);
 
   let json: string;
   try {
@@ -56,6 +60,7 @@ export async function cmdIngest(): Promise<boolean> {
     detail: sanitizeDisplayText(finding.detail),
   }));
   console.error("External scanner report. Findings do not verify the current account state.");
+  for (const note of outcome.notes ?? []) console.error(note);
 
   if (jsonMode) {
     console.log(JSON.stringify({ count: findings.length, findings }, null, 2));

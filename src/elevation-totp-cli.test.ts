@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   existsSync,
-  lstatSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   symlinkSync,
@@ -295,9 +297,16 @@ it("CLI explains directory recovery and preserves contents through enrollment an
     assert.equal(existsSync(path), false);
     const setup = fixture.run(["auth", "setup-totp", "--account", "disposable-test"]);
     assert.equal(setup.status, 0, setup.stderr);
-    assert.equal(lstatSync(path).isFile(), true);
+    // Open once and read through the descriptor, so the check and the read see the same file.
+    const secretFd = openSync(path, "r");
+    let secret: string;
+    try {
+      assert.equal(fstatSync(secretFd).isFile(), true);
+      secret = readFileSync(secretFd, "utf8").trim();
+    } finally {
+      closeSync(secretFd);
+    }
     assert.equal(readFileSync(join(moved, "keep.txt"), "utf8"), contents);
-    const secret = readFileSync(path, "utf8").trim();
     const accepted = await elevate(fixture, () => generateTotp(secret));
     assert.equal(accepted.code, 0, accepted.output);
     assert.match(accepted.output, /method=totp/);

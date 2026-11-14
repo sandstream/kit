@@ -351,7 +351,18 @@ export function withCoolingLines(output: string, result: CoolingResult): string 
   const block = `${result.lines.join("\n")}\n`;
   const merged =
     at < 0 ? `${output}\n${block}` : `${output.slice(0, at + 1)}${block}${output.slice(at + 1)}`;
-  return result.held ? merged.replace(/^TRIAGE PASSED$/m, "TRIAGE HELD: cooling period") : merged;
+  const counted = countCoolingWarnings(merged, result.lines);
+  return result.held ? counted.replace(/^TRIAGE PASSED$/m, "TRIAGE HELD: cooling period") : counted;
+}
+
+/**
+ * The summary's `Warnings: N` is triage.py's count, made before the cooling lines were added, so a
+ * cooling warning printed above `Warnings: 0` (kit-research `supply-chain-2026-fundamentals-vs-kit`).
+ */
+function countCoolingWarnings(output: string, lines: string[]): string {
+  const added = lines.filter((l) => l.includes("! WARNING:")).length;
+  if (added === 0) return output;
+  return output.replace(/^Warnings: (\d+)$/m, (_, n: string) => `Warnings: ${Number(n) + added}`);
 }
 
 /** The registry view the cooling check needs: published versions and their publish times. */

@@ -41,8 +41,8 @@ export async function cmdGateBash(): Promise<boolean> {
   // about shell semantics — a double-quoted backtick is command substitution, not a package to
   // triage. Appending it there is what made a correct block read as a mis-parse (#501), so the
   // advice follows the reason instead of being stapled to every refusal.
-  const triageAdvice = (reason: string, lead = " — "): string =>
-    /COMMAND SUBSTITUTION/.test(reason)
+  const triageAdvice = (reason: string, lead = ". "): string =>
+    /COMMAND SUBSTITUTION|UNVERIFIED COMMAND|UNVERIFIED SOURCE/.test(reason)
       ? ""
       : `${lead}Triage it first: \`kit triage …\`, or install via \`kit pkg <eco>:<name>\`.`;
 
@@ -70,7 +70,7 @@ export async function cmdGateBash(): Promise<boolean> {
     const { writeSync } = await import("node:fs");
     writeSync(
       2,
-      `kit install-gate: BLOCKED — ${verdict.reason}${triageAdvice(verdict.reason, "\n")}\n`,
+      `kit install-gate: BLOCKED: ${verdict.reason}${triageAdvice(verdict.reason, "\n")}\n`,
     );
     process.exit(2); // PreToolUse deny
   }
@@ -114,7 +114,7 @@ export async function cmdGateEnv(): Promise<boolean> {
     const { writeSync } = await import("node:fs");
     writeSync(
       2,
-      `kit env-gate: BLOCKED — ${verdict.reason}\nNever write secrets to .env* in plaintext. Resolve them with \`kit secrets\` (vault-backed), or use a placeholder in .env.example.\n`,
+      `kit env-gate: BLOCKED: ${verdict.reason}\nNever write secrets to .env* in plaintext. Resolve them with \`kit secrets\` (vault-backed), or use a placeholder in .env.example.\n`,
     );
     process.exit(2); // PreToolUse deny
   }
