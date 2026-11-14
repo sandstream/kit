@@ -4,8 +4,8 @@
     "prefix": [".github/workflows/publish", "packages/"]
   },
   "github": {
-    "exact": [],
-    "prefix": [".github/"]
+    "exact": ["scripts/agent-review-gate.mjs", "scripts/agent-model-review.mjs", "scripts/github-app-token.mjs"],
+    "prefix": [".github/", "src/review-protected-paths"]
   },
   "secrets": {
     "exact": ["src/check-secrets.ts", "src/audit-secrets.ts", "src/agent-audit.ts", "src/utils/redactSecrets.ts"],

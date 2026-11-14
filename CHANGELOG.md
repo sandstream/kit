@@ -17,6 +17,11 @@
   `commit -n` on hook-running subcommands, `core.hooksPath` overrides and changes, `HUSKY=0`, and
   removing or disabling a hook file, including inside `sh -c` and behind `env`/`sudo`. Found by
   kit-research `checks-in-harness-hooks-vs-kit`.
+- **The review gate's own code is a protected path.** `.github/` was protected, but the scripts the
+  gate's workflow runs were not: `scripts/agent-review-gate.mjs`, the two scripts it imports, and the
+  `src/review-protected-paths*` classifier. #762 changed the gate's decision code and the gate approved
+  it without a person. A change to any of them now needs the owner. Found by kit-research
+  `claude-code-review-at-anthropic-vs-kit`.
 - **`kit rig` reports how many findings each run produced.** A finding on a defect target that
   matches no planted defect is not a false positive, so a reviewer that flags every changed line
   catches every planted defect, and only control runs priced that. Each config now prints
