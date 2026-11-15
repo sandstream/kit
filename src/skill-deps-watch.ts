@@ -207,8 +207,31 @@ function npmrcNote(dir: string, roots: string[]): string | undefined {
   return `kit: skill "${printable(skillNameOf(dir, roots))}" has its own .npmrc, so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
 }
 
-const REMOTE_SPEC =
-  /^(?:git(?:\+[a-z]+)?:|github:|gitlab:|bitbucket:|gist:|https?:|ssh:)|^[\w.-]+\/[\w.-]+(?:#.*)?$/i;
+// Deny by default. Only what the registry serves passes: a semver range or a tag, or an `npm:` alias of
+// one. A colon, a slash or an `@` outside an alias (git+https, github:, owner/repo, git@host:path,
+// file:, link:, workspace:, a path) is something npm fetches from somewhere else.
+const RANGE_CHARS = "[A-Za-z0-9.^~<>=|*+\\- ]";
+const REGISTRY_RANGE = new RegExp(`^${RANGE_CHARS}{0,100}$`);
+const REGISTRY_ALIAS = new RegExp(
+  `^npm:(?:@[a-z0-9~][\\w.~-]*/)?[a-z0-9~][\\w.~-]*(?:@${RANGE_CHARS}{0,100})?$`,
+);
+const isRegistrySpec = (spec: unknown): boolean =>
+  typeof spec === "string" && (REGISTRY_RANGE.test(spec) || REGISTRY_ALIAS.test(spec));
+
+const DEPENDENCY_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+];
+
+/** True when any spec in the group is not a registry spec. Nested objects are `overrides`. */
+function groupHasOtherSource(group: unknown): boolean {
+  if (typeof group === "string") return !isRegistrySpec(group);
+  if (group === null || typeof group !== "object" || Array.isArray(group))
+    return group !== undefined;
+  return Object.values(group).some(groupHasOtherSource);
+}
 
 /** A dependency the npm registry does not serve makes `npm outdated` run git or fetch a URL. */
 function remoteDependencyNote(dir: string, roots: string[]): string | undefined {
@@ -217,19 +240,14 @@ function remoteDependencyNote(dir: string, roots: string[]): string | undefined 
       string,
       unknown
     >;
-    const remote = ["dependencies", "devDependencies", "optionalDependencies"].some((field) => {
-      const group = manifest[field];
-      return (
-        group !== null &&
-        typeof group === "object" &&
-        Object.values(group).some((spec) => typeof spec === "string" && REMOTE_SPEC.test(spec))
-      );
-    });
-    if (!remote) return undefined;
+    const other = [...DEPENDENCY_FIELDS, "overrides"].some((field) =>
+      groupHasOtherSource(manifest[field]),
+    );
+    if (!other) return undefined;
   } catch {
     return undefined; // an unreadable manifest is for npm to report
   }
-  return `kit: skill "${printable(skillNameOf(dir, roots))}" has a dependency from outside the npm registry (git or a URL), so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
+  return `kit: skill "${printable(skillNameOf(dir, roots))}" has a dependency from outside the npm registry (git, a URL or a path), so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
 }
 
 function safeLockHash(dir: string): string | undefined {

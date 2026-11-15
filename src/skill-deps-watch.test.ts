@@ -243,28 +243,74 @@ describe("watchSkillDeps does not trust a skill folder", () => {
     assert.ok(notes.every((n) => /\.npmrc/.test(n)));
     assert.ok(dir.length > 0);
   });
+});
 
-  it("does not run npm for a manifest with a git or URL dependency, and says so", () => {
+describe("watchSkillDeps and where a dependency comes from", () => {
+  const options = (skills: string) => ({ roots: [skills], cache: join(root(), "c.json") });
+  const manifestIn = (skills: string, name: string, manifest: unknown): void => {
+    const dir = skill(skills, name);
+    writeFileSync(join(dir, "package.json"), JSON.stringify(manifest));
+  };
+
+  it("does not run npm for a dependency the registry does not serve, and says so", () => {
     const skills = root();
-    for (const spec of [
+    const specs = [
       "git+https://example.invalid/x.git",
       "github:owner/repo",
       "owner/repo",
       "https://example.invalid/x.tgz",
       "ssh://git@example.invalid/x.git",
-    ]) {
-      const dir = skill(skills, `s${spec.length}`);
-      writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: { x: spec } }));
-    }
+      "git@example.invalid:owner/repo.git",
+      "file:../x",
+      "link:../x",
+      "workspace:*",
+      "./local",
+      "../local",
+      "~/local",
+      "/abs/local",
+      "npm:other@git+https://example.invalid/x.git",
+    ];
+    specs.forEach((spec, n) => manifestIn(skills, `s${n}`, { dependencies: { x: spec } }));
     const calls: string[] = [];
     const notes = watchSkillDeps(options(skills), deps(clean, calls));
     assert.deepEqual(calls, []);
-    assert.equal(notes.length, 5);
+    assert.equal(notes.length, specs.length);
     assert.ok(notes.every((n) => /outside the npm registry/.test(n)));
+  });
+
+  it("looks in every dependency field, including peerDependencies and overrides", () => {
+    const skills = root();
+    const remote = "git+https://example.invalid/x.git";
+    const manifests = [
+      { peerDependencies: { x: remote } },
+      { devDependencies: { x: remote } },
+      { optionalDependencies: { x: remote } },
+      { overrides: { x: remote } },
+      { overrides: { a: { b: { x: remote } } } },
+      { overrides: { a: { ".": remote } } },
+    ];
+    manifests.forEach((m, n) => manifestIn(skills, `m${n}`, m));
+    const calls: string[] = [];
+    const notes = watchSkillDeps(options(skills), deps(clean, calls));
+    assert.deepEqual(calls, []);
+    assert.equal(notes.length, manifests.length);
+  });
+
+  it("still checks a manifest whose specs are plain registry ranges, tags and aliases", () => {
+    const skills = root();
+    manifestIn(skills, "plain", {
+      dependencies: { a: "^1.2.3", b: "~1.2", c: ">=1 <2", d: "1.x", e: "*", f: "latest", g: "" },
+      peerDependencies: { h: "1 || 2" },
+      overrides: { i: "2.0.0", j: { k: "^3.0.0" } },
+      devDependencies: { l: "npm:real-pkg@^1.0.0", m: "next" },
+    });
+    const calls: string[] = [];
+    watchSkillDeps(options(skills), deps(clean, calls));
+    assert.equal(calls.length, 1);
   });
 });
 
-describe("watchSkillDeps does not trust what a skill folder says", () => {
+describe("watchSkillDeps does not print text from a skill folder", () => {
   const options = (skills: string) => ({ roots: [skills], cache: join(root(), "c.json") });
 
   it("drops package names and versions that are not valid, so no text reaches the agent", () => {
