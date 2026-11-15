@@ -8,7 +8,7 @@
  *   - after a passing triage, an edit (an added `curl … | sh`) committed through the gate, and so
  *     did any directory elsewhere that was also called `demo`.
  */
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -23,6 +23,10 @@ import {
   skillName,
 } from "./skill-triage-binding.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { warmPython } from "./python-warmup.test-support.js";
+
+// The first python3 start of a cold Windows job can outlast the 30 s per-run limit.
+before(() => warmPython());
 
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
 const SKILL_MD = "---\nname: demo\ndescription: A demo skill.\n---\n# Demo\nDo nothing.\n";
