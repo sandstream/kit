@@ -280,3 +280,16 @@ export function hiddenVerb(
   if (INSTALLER_VERB_RE.test(verbs[1] ?? "")) return null;
   return `global-option:${tokens[0]} ${unknown} ${verbs[1]}`;
 }
+
+/** `npm i -g`, `npm install --global`, `yarn global add`: not an install of this directory's manifest. */
+export function isGlobalInstall(tokens: string[]): boolean {
+  return tokens.some((t) => t === "-g" || t === "--global" || t === "global");
+}
+
+/** The flag whose next token names the install directory, per package manager. Not a package. */
+export function isDirectoryValueFlag(token: string, manager: string): boolean {
+  if (manager === "npm") return token === "--prefix" || token === "-C";
+  if (manager === "pnpm") return token === "--prefix" || token === "-C" || token === "--dir";
+  if (manager === "yarn" || manager === "bun") return token === "--cwd";
+  return false;
+}

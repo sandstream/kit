@@ -19,6 +19,7 @@
  * (#779) but `gem install` is not routed here yet: that is an owner decision. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
+import { checkBareInstall } from "./install-gate-bare.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -32,6 +33,8 @@ import {
 import {
   binBase,
   hiddenVerb,
+  isDirectoryValueFlag,
+  isGlobalInstall,
   PREFIX_BINS,
   skipWrapperArgs,
   sourceConfigurationFlag,
@@ -64,6 +67,12 @@ export interface InstallProbe {
    * abandoned `tsc` package is the motivating case).
    */
   runnerBinCandidates: string[];
+  /**
+   * A package-less npm, pnpm, yarn or bun install (`npm ci`, `yarn`, `npm update`): it fetches the
+   * manifest's declared dependencies. Not `isInstall`, because `guard` reads that flag. `decideBashGate`
+   * asks `checkBareInstall` about it when it knows the directory.
+   */
+  bareInstall: boolean;
 }
 
 // Leading shell keywords / grouping tokens that precede a real command without
@@ -558,6 +567,12 @@ function pipInstallerArgStart(t: string[]): number {
 }
 
 /** Recognized package-manager invocations, by leading-token shape. */
+/** yarn 1 `global add|install` takes its args at 3. `yarn` alone, or with only flags, is `yarn install`. */
+function yarnArgStart(t: string[]): number {
+  if (t[1] === "global" && /^(add|install)$/.test(t[2] ?? "")) return 3;
+  return t.length === 1 || t[1].startsWith("-") ? 1 : -1;
+}
+
 const MATCHERS: Matcher[] = [
   // npm install|i|add <pkg...>, pnpm add|install, yarn add, bun add  (INSTALLER: all args)
   {
@@ -579,8 +594,7 @@ const MATCHERS: Matcher[] = [
         /^(add|install|i|update|upgrade)$/.test(t[1] ?? "")
       )
         return 2;
-      // yarn 1 global add / yarn global install
-      if (bin === "yarn" && t[1] === "global" && /^(add|install)$/.test(t[2] ?? "")) return 3;
+      if (bin === "yarn") return yarnArgStart(t);
       return -1;
     },
   },
@@ -679,6 +693,7 @@ export function parseInstallCommand(command: string): InstallProbe {
     refs: [],
     unverifiable: [],
     runnerBinCandidates: [],
+    bareInstall: false,
   };
   if (!command || typeof command !== "string") return probe;
   for (const ref of repoFetchToShellRefs(command)) {
@@ -737,6 +752,16 @@ function compactPositionals(tokens: string[]): string[] {
   return indexedPositionals(tokens).pos;
 }
 
+/** A flag whose next token is its value, so neither is a package or a verb. */
+function skipsValue(tok: string, pipFamily: boolean, manager: string): boolean {
+  return (
+    SOURCE_FLAG_RE.test(tok) ||
+    VALUE_PKG_FLAG_RE.test(tok) ||
+    (pipFamily && REQUIREMENT_FLAG_RE.test(tok)) ||
+    isDirectoryValueFlag(tok, manager)
+  );
+}
+
 /** The positionals of `compactPositionals`, with the index each one has in `tokens`. */
 function indexedPositionals(tokens: string[]): { pos: string[]; at: number[] } {
   // `-r`/`-c`/`-e` requirement flags are PIP concepts whose value is a file, not a package.
@@ -762,11 +787,7 @@ function indexedPositionals(tokens: string[]): { pos: string[]; at: number[] } {
       }
       continue;
     }
-    if (
-      SOURCE_FLAG_RE.test(tok) ||
-      VALUE_PKG_FLAG_RE.test(tok) ||
-      (pipFamily && REQUIREMENT_FLAG_RE.test(tok))
-    ) {
+    if (skipsValue(tok, pipFamily, tokens[0] ?? "")) {
       i++; // skip the flag AND its value token
       continue;
     }
@@ -968,14 +989,6 @@ function repoFetcherSources(command: string, throughArgs: string[], probe: Insta
   }
 }
 
-/**
- * The packages a matched invocation actually FETCHES.
- *  - pkgFlagOnly (uv run) / exec -c call: the positional is a LOCAL script or shell string —
- *    only `--with`/`--package` flags fetch; the string is recursed elsewhere.
- *  - other runners: primary = replace-flags (`-p`/`--package`/`--spec`/`--from`) if present
- *    else the first positional, PLUS every `--with` (an extra fetched package).
- *  - installer: every positional is a package.
- */
 function resolveTargets(m: Matcher, args: string[], tokens: string[]): string[] {
   if (!m.single) return args;
   const withFlags = withPackageFlags(tokens);
@@ -1024,6 +1037,17 @@ function applyNpmRunner(
   }
 }
 
+/** Mark an npm-family installer that names no package, so it fetches the manifest's own dependencies. */
+function noteBareInstall(
+  m: Matcher,
+  tokens: string[],
+  targets: string[],
+  probe: InstallProbe,
+): void {
+  if (m.scheme !== "npm" || m.single || m.pkgFlagOnly || isGlobalInstall(tokens)) return;
+  if (targets.length === 0) probe.bareInstall = true;
+}
+
 /** Apply one matched matcher to `probe`. Returns true when the segment was consumed. */
 function applyMatcher(
   m: Matcher,
@@ -1059,6 +1083,7 @@ function applyMatcher(
       probe.isInstall = true;
       probe.unverifiable.push(`alt-registry:${bareRedirect}`);
     }
+    noteBareInstall(m, tokens, targets, probe);
     return true; // otherwise: bare reinstall / runner-or-uv-run with no fetched pkg — not an add
   }
   probe.isInstall = true;
@@ -1219,7 +1244,7 @@ export async function decideBashGate(
   const bypass = gitHookBypass(command);
   if (bypass) return { block: true, reason: hookBypassReason(bypass), checked: [] };
   const probe = parseInstallCommand(command);
-  if (!probe.isInstall) {
+  if (!probe.isInstall && !probe.bareInstall) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };
   }
   if (probe.unverifiable.length > 0) {
@@ -1234,6 +1259,10 @@ export async function decideBashGate(
         `cannot reduce to a triage target: ${probe.unverifiable.join(", ")} — run \`kit triage\` manually, or install via \`kit pkg\` (fail-closed)`,
       checked: [],
     };
+  }
+  if (probe.bareInstall && cwd) {
+    const bare = checkBareInstall(command, cwd);
+    if (bare.block) return { block: true, reason: bare.reason, checked: [] };
   }
   const shadowed = cwd ? probe.runnerBinCandidates.filter((name) => hasLocalBin(cwd, name)) : [];
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
