@@ -32,7 +32,6 @@ import {
 } from "./install-gate-repos.js";
 import {
   binBase,
-  directoryFlagValues,
   hiddenVerb,
   isGlobalInstall,
   PREFIX_BINS,
@@ -752,6 +751,16 @@ function compactPositionals(tokens: string[]): string[] {
   return indexedPositionals(tokens).pos;
 }
 
+/** A flag whose next token is its value, so neither is a package or a verb. */
+function skipsValue(tok: string, pipFamily: boolean, directoryFlags: boolean): boolean {
+  return (
+    SOURCE_FLAG_RE.test(tok) ||
+    VALUE_PKG_FLAG_RE.test(tok) ||
+    (pipFamily && REQUIREMENT_FLAG_RE.test(tok)) ||
+    (directoryFlags && (tok === "--prefix" || tok === "-C"))
+  );
+}
+
 /** The positionals of `compactPositionals`, with the index each one has in `tokens`. */
 function indexedPositionals(tokens: string[]): { pos: string[]; at: number[] } {
   // `-r`/`-c`/`-e` requirement flags are PIP concepts whose value is a file, not a package.
@@ -759,6 +768,9 @@ function indexedPositionals(tokens: string[]): { pos: string[]; at: number[] } {
   // those aren't valueless flags, so eating the next token would drop a real package
   // (`npm i -e evil` must still gate `evil`). Source/package-value flags exist in both.
   const pipFamily = /^(pip|pip3|pipx|uv|uvx|poetry|pdm|python|python3)$/.test(tokens[0] ?? "");
+  // `--prefix <dir>` and `-C <dir>` name where npm or pnpm installs, not a package. Dropping the
+  // value by position keeps a package of the same name (`npm i --prefix x x`) in the targets.
+  const directoryFlags = /^(npm|pnpm)$/.test(tokens[0] ?? "");
   const pos: string[] = [];
   const at: number[] = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -777,11 +789,7 @@ function indexedPositionals(tokens: string[]): { pos: string[]; at: number[] } {
       }
       continue;
     }
-    if (
-      SOURCE_FLAG_RE.test(tok) ||
-      VALUE_PKG_FLAG_RE.test(tok) ||
-      (pipFamily && REQUIREMENT_FLAG_RE.test(tok))
-    ) {
+    if (skipsValue(tok, pipFamily, directoryFlags)) {
       i++; // skip the flag AND its value token
       continue;
     }
@@ -983,23 +991,6 @@ function repoFetcherSources(command: string, throughArgs: string[], probe: Insta
   }
 }
 
-/** The positional targets of an installer, without the value of `--prefix <dir>` or `-C <dir>`: those
- *  name where npm installs, not a package to fetch. */
-function installTargets(m: Matcher, args: string[], tokens: string[]): string[] {
-  const targets = resolveTargets(m, args, tokens);
-  if (m.single) return targets;
-  const directories = directoryFlagValues(tokens);
-  return targets.filter((t) => !directories.includes(t));
-}
-
-/**
- * The packages a matched invocation actually FETCHES.
- *  - pkgFlagOnly (uv run) / exec -c call: the positional is a LOCAL script or shell string —
- *    only `--with`/`--package` flags fetch; the string is recursed elsewhere.
- *  - other runners: primary = replace-flags (`-p`/`--package`/`--spec`/`--from`) if present
- *    else the first positional, PLUS every `--with` (an extra fetched package).
- *  - installer: every positional is a package.
- */
 function resolveTargets(m: Matcher, args: string[], tokens: string[]): string[] {
   if (!m.single) return args;
   const withFlags = withPackageFlags(tokens);
@@ -1069,7 +1060,7 @@ function applyMatcher(
 ): boolean {
   const start = m.argStart(pos);
   if (start < 0) return false;
-  const targets = installTargets(m, pos.slice(start), tokens);
+  const targets = resolveTargets(m, pos.slice(start), tokens);
 
   if (targets.length === 0) {
     // A grant verb with no named operand approves whatever npm has pending — there is no

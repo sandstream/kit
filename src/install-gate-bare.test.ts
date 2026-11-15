@@ -244,3 +244,23 @@ describe("parseInstallCommand treats the value of --prefix and -C as a location,
     assert.equal(probe.bareInstall, false);
   });
 });
+
+describe("a package that shares its name with the --prefix or -C value is still triaged", () => {
+  it("triages the package, not only the directory", () => {
+    for (const command of [
+      "npm install --prefix evil evil",
+      "npm install -C evil evil",
+      "npm install evil --prefix evil",
+      "pnpm install -C evil evil",
+    ]) {
+      const probe = parseInstallCommand(command);
+      assert.deepEqual(probe.refs, ["npm:evil"], command);
+      assert.equal(probe.bareInstall, false, command);
+    }
+  });
+
+  it("leaves pip alone: -C is --config-settings there, and a package after it is still gated", () => {
+    const probe = parseInstallCommand("pip install -C evil evil");
+    assert.deepEqual(probe.refs, ["pip:evil"]);
+  });
+});
