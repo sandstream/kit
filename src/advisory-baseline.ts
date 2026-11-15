@@ -270,12 +270,12 @@ export interface AuditOutcome {
  * not the signal. The signal is whether the output parsed into advisories: no advisories AND no
  * parseable JSON means the audit did not run, and that must not read as a clean result.
  */
-export function runAudit(root: string, runner: AuditRunner): AuditOutcome {
+export function runAudit(root: string, runner: AuditRunner, timeoutMs = 180_000): AuditOutcome {
   const [bin, ...args] = runner.command;
   const r = spawnSync(bin, args, {
     cwd: root,
     encoding: "utf-8",
-    timeout: 180_000,
+    timeout: timeoutMs,
     env: { ...process.env, NO_COLOR: "1" },
   });
   if (r.error) return { advisories: [], error: r.error.message, manager: runner.manager };

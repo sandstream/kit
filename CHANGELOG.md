@@ -2,6 +2,15 @@
 
 ### Added
 
+- **`kit hooks context` now watches the npm dependencies that skills carry.** A skill may ship its own
+  `package.json` and `node_modules` (`~/.claude/skills/<name>/scripts`), and nothing updates those on
+  its own. At session start kit runs `npm audit` and `npm outdated` in each such folder (user skills and
+  `<project>/.claude/skills`) and prints one plain line per skill with a known vulnerability or a
+  dependency a major version behind. It is silent when all is well or when offline, asks the network at
+  most once a day per skill (cached in `~/.kit/skill-deps-watch.json` by lockfile hash), stops after a
+  15-second budget, and only reads: it never installs or updates. `KIT_SKILL_DEPS_WATCH=0` turns it
+  off. npm only for now (`package-lock.json`); pnpm, yarn and bun lockfiles are not read.
+
 - **`kit ingest cloudflare-audit <findings.json>`** reads the findings file written by Cloudflare's
   security-audit skill. A `confirmed` record becomes a failure at its own overall severity; a
   `needs_validation` record becomes a `low` warning marked unverified; a `rejected` record is counted on
@@ -19,7 +28,7 @@
     string); kit read neither, so the gate allowed the call. It now reads both.
   - Augment 1.x renamed its shell tool from `launch-process` to `bash`; the matcher is now
     `bash|launch-process`.
-  Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
+    Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
 - **`kit agent-config` writes Cline's block into `.clinerules/kit.md` when `.clinerules` is a
   folder.** Cline reads `.clinerules` as a file or a folder of rule files, and kit's own Cline gate
   creates the folder (`.clinerules/hooks/`). After that, every `kit agent-config` failed for Cline
