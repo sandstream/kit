@@ -602,7 +602,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   upgrade: ["--self"],
   upstream: ["--enforce", "--json"],
-  usage: ["--deep", "--json", "--prove", "--tab"],
+  usage: ["--deep", "--json", "--markdown", "--prove", "--tab"],
   "verify-provenance": ["--bundle", "--identity", "--issuer", "--offline", "--trusted-root"],
   watch: ["--force", "--hour", "--json", "--minute", "--no-pal", "--target"],
   whoami: ["--json"],

@@ -26,6 +26,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { warmPython } from "./python-warmup.test-support.js";
+
+// The first python3 start of a cold Windows job can outlast the 30 s per-run limit.
+before(() => warmPython());
 
 const exec = promisify(execFile);
 const TRIAGE_PY = resolve(

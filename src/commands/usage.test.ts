@@ -54,6 +54,18 @@ describe("renderTab", () => {
     }
   });
 
+  it("shows a control's whole name when the box has room, and marks a cut with an ellipsis", () => {
+    // Was: names were cut at 44 columns in a 66-column box, so a reader saw
+    // "env-write gate refuses a plaintext credentia" with nothing saying text was missing.
+    const name = "env-write gate refuses a plaintext credential in .env";
+    const proved = {
+      ...facts,
+      proof: { ok: true, controls: [{ name, ok: true, observed: "exit 2, blocked" }] },
+    } as typeof facts;
+    const rendered = renderTab(proved, "proof", { interactive: false });
+    assert.match(rendered, /refuses a plaintext credential in \.env/);
+  });
+
   it("tells the operator the proof has not been run rather than implying it passed", () => {
     const rendered = renderTab(facts, "proof", { interactive: false });
     assert.match(rendered, /not run/);

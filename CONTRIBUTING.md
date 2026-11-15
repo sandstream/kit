@@ -82,7 +82,9 @@ The kit CLI is automatically published to npm when a version tag is pushed:
 #    Bump a workspace only when its own code changes, as its own semver decision.
 npm version patch --no-git-tag-version  # or minor, major
 
-# 2. Update CHANGELOG.md (publish.yml verifies the version has an entry), commit, then tag.
+# 2. Assemble the changelog fragments into [Unreleased] (`node scripts/changelog-fragments.mjs
+#    assemble`), rename that section to the version, commit, then tag. publish.yml verifies the
+#    version has an entry and refuses the tag while any fragment under changes/ is left.
 #    The tag must be GPG-signed — publish.yml verifies the signature before it publishes.
 git tag -s vX.Y.Z -m "kit X.Y.Z"
 git push origin main --tags
@@ -181,6 +183,8 @@ tagging; [Releasing kit](docs/RELEASING.md) records the required settings.
 
 1. Create a branch: `git checkout -b feature/my-feature`
 2. Make changes and commit: `git commit -am "feat: add my feature"`
+   - Describe a user-visible change in a changelog fragment, `changes/<name>.md`, not in
+     `CHANGELOG.md` (see [`changes/README.md`](./changes/README.md)).
 3. Push: `git push origin feature/my-feature`
 4. Open a pull request with a clear description
 5. Address code review comments

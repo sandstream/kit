@@ -3447,12 +3447,13 @@
     },
     "usage": {
       "kind": "command",
-      "summary": "Tabbed report of what kit has recorded — coverage with its denominator, refusals, memory, triage — plus --prove, which runs the floor against inputs it must refuse",
+      "summary": "Tabbed report of what kit has recorded — coverage with its denominator, refusals, memory, triage — plus --prove, which runs the floor against inputs it must refuse, and --markdown for a phone or a chat",
       "x-kit-accepted-flags": [
         "--deep",
         "--env",
         "--help",
         "--json",
+        "--markdown",
         "--non-interactive",
         "--prove",
         "--read-only",

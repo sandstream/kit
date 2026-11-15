@@ -21,6 +21,7 @@
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import type { UsageFacts } from "../usage-report.js";
+import { WIDTH, bar, clip, line, num, plain, rule } from "../usage-box.js";
 
 const TABS = [
   "floor",
@@ -33,51 +34,6 @@ const TABS = [
   "proof",
 ] as const;
 type Tab = (typeof TABS)[number];
-
-const WIDTH = 66;
-
-/** Visible length: padding maths has to ignore the colour escapes, or the box comes out ragged. */
-function plain(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
-}
-
-/**
- * One row of the box, padded to exactly WIDTH visible columns between the borders. Overlong
- * content is truncated rather than allowed to push the right border out: a ragged box reads as a
- * broken tool, and a report that looks broken does not get read.
- */
-function line(left: string, right = ""): string {
-  let l = left;
-  let r = right;
-  if (plain(l).length + plain(r).length + 1 > WIDTH) {
-    // Trim the left side first — the right column is the number, which must stay exact.
-    const room = WIDTH - plain(r).length - 2;
-    if (room <= 0) {
-      r = "";
-      l = plain(l).slice(0, WIDTH - 1);
-    } else {
-      l = plain(l).slice(0, room);
-    }
-  }
-  const pad = Math.max(1, WIDTH - plain(l).length - plain(r).length);
-  return `${c.dim}│${c.reset} ${l}${" ".repeat(pad)}${r} ${c.dim}│${c.reset}`;
-}
-
-function rule(title = ""): string {
-  const t = title ? ` ${title} ` : "";
-  const dashes = "─".repeat(Math.max(0, WIDTH + 2 - plain(t).length));
-  return `${c.dim}├${t}${dashes}┤${c.reset}`;
-}
-
-function num(n: number): string {
-  return new Intl.NumberFormat("en-US").format(n);
-}
-
-function bar(part: number, whole: number, width = 18): string {
-  if (whole <= 0) return "";
-  const filled = Math.round((part / whole) * width);
-  return `${"█".repeat(filled)}${c.dim}${"░".repeat(width - filled)}${c.reset}`;
-}
 
 function renderCoverage(f: UsageFacts): string[] {
   const cv = f.coverage;
@@ -401,8 +357,9 @@ function renderProof(f: UsageFacts): string[] {
       : ctl.verdict === "inconclusive"
         ? `${c.dim}−${c.reset}`
         : `${c.red}✗${c.reset}`;
-    out.push(line(`${icon} ${ctl.name.slice(0, 44)}`));
-    out.push(line(`   ${c.dim}${ctl.observed.slice(0, 56)}${c.reset}`));
+    // The whole row is the control's name: cut only what the box cannot hold, and say so.
+    out.push(line(`${icon} ${clip(ctl.name, WIDTH - 2)}`));
+    out.push(line(`   ${c.dim}${clip(ctl.observed, WIDTH - 3)}${c.reset}`));
   }
   out.push(line(""));
   out.push(
@@ -480,21 +437,35 @@ export function renderTab(facts: UsageFacts, tab: Tab, opts: { interactive: bool
   return lines.join("\n");
 }
 
-export async function cmdUsage(): Promise<boolean> {
-  const { gatherUsage } = await import("../usage-report.js");
-  const facts = gatherUsage();
-
+/**
+ * Run `--prove` when asked, then print the whole report as one document when `--json` or
+ * `--markdown` asks for it. Returns true when it printed, so the caller skips the boxed view.
+ */
+async function printDocument(facts: UsageFacts): Promise<boolean> {
   // The controls spawn real gate invocations, so they are opt-in: a dashboard that costs seconds
   // every time it opens is a dashboard nobody opens.
   if (hasFlag(process.argv, "--prove")) {
     const { proveFloor } = await import("../usage-prove.js");
     facts.proof = proveFloor(process.cwd(), { deep: hasFlag(process.argv, "--deep") });
   }
-
   if (hasFlag(process.argv, "--json")) {
     console.log(JSON.stringify(facts, null, 2));
     return true;
   }
+  // Headings and tables for a phone, a chat or a PR comment, where the 66-column box wraps.
+  if (hasFlag(process.argv, "--markdown")) {
+    const { renderUsageMarkdown } = await import("../usage-markdown.js");
+    console.log(renderUsageMarkdown(facts));
+    return true;
+  }
+  return false;
+}
+
+export async function cmdUsage(): Promise<boolean> {
+  const { gatherUsage } = await import("../usage-report.js");
+  const facts = gatherUsage();
+
+  if (await printDocument(facts)) return true;
 
   const requested = (flagValue(process.argv, "--tab") ?? "").toLowerCase();
   if (requested && !TABS.includes(requested as Tab)) {

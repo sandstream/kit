@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, readFile, readdir, access, writeFile } from "node:fs/promises";
@@ -15,6 +15,10 @@ import {
   verdictPassed,
   parseBrewInfo,
 } from "./triage.js";
+import { warmPython } from "./python-warmup.test-support.js";
+
+// The first python3 start of a cold Windows job can outlast the 30 s per-run limit.
+before(() => warmPython());
 
 describe("parseBrewInfo (brew triage -> upstream repo resolution)", () => {
   const formula = (over: Record<string, unknown> = {}) => ({

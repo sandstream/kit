@@ -3,7 +3,7 @@
  * real skill CRITICAL for `sk-`, and it read only SKILL.md, so a skill's scripts were never
  * opened. Both are pinned here against the script itself.
  */
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -12,6 +12,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { warmPython } from "./python-warmup.test-support.js";
+
+// The first python3 start of a cold Windows job can outlast the 30 s per-run limit.
+before(() => warmPython());
 
 const exec = promisify(execFile);
 const TRIAGE_PY = resolve(
