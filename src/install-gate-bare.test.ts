@@ -222,3 +222,25 @@ describe("parseInstallCommand marks a bare install", () => {
     }
   });
 });
+
+describe("parseInstallCommand treats the value of --prefix and -C as a location, not a package", () => {
+  it("does not triage a relative or drive-letter directory as a package", () => {
+    for (const command of [
+      "npm install --prefix sub",
+      "npm install --prefix C:/Users/x/dir",
+      "npm install -C ../elsewhere",
+    ]) {
+      const probe = parseInstallCommand(command);
+      assert.deepEqual(probe.refs, [], command);
+      assert.deepEqual(probe.unverifiable, [], command);
+      assert.equal(probe.bareInstall, true, command);
+    }
+  });
+
+  it("still triages the packages named next to it", () => {
+    const probe = parseInstallCommand("npm install --prefix C:/Users/x/dir left-pad");
+    assert.deepEqual(probe.refs, ["npm:left-pad"]);
+    assert.deepEqual(probe.unverifiable, []);
+    assert.equal(probe.bareInstall, false);
+  });
+});

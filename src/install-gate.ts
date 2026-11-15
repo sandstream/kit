@@ -983,6 +983,15 @@ function repoFetcherSources(command: string, throughArgs: string[], probe: Insta
   }
 }
 
+/** The positional targets of an installer, without the value of `--prefix <dir>` or `-C <dir>`: those
+ *  name where npm installs, not a package to fetch. */
+function installTargets(m: Matcher, args: string[], tokens: string[]): string[] {
+  const targets = resolveTargets(m, args, tokens);
+  if (m.single) return targets;
+  const directories = directoryFlagValues(tokens);
+  return targets.filter((t) => !directories.includes(t));
+}
+
 /**
  * The packages a matched invocation actually FETCHES.
  *  - pkgFlagOnly (uv run) / exec -c call: the positional is a LOCAL script or shell string —
@@ -1039,11 +1048,7 @@ function applyNpmRunner(
   }
 }
 
-/**
- * Mark an npm-family installer that fetches the manifest's own dependencies. `npm install --prefix <dir>`
- * hands the directory to the positional scan: it is the install location, not a package, so an install
- * whose only "targets" are such values is still bare.
- */
+/** Mark an npm-family installer that names no package, so it fetches the manifest's own dependencies. */
 function noteBareInstall(
   m: Matcher,
   tokens: string[],
@@ -1051,8 +1056,7 @@ function noteBareInstall(
   probe: InstallProbe,
 ): void {
   if (m.scheme !== "npm" || m.single || m.pkgFlagOnly || isGlobalInstall(tokens)) return;
-  const directories = directoryFlagValues(tokens);
-  if (targets.every((t) => directories.includes(t))) probe.bareInstall = true;
+  if (targets.length === 0) probe.bareInstall = true;
 }
 
 /** Apply one matched matcher to `probe`. Returns true when the segment was consumed. */
@@ -1065,7 +1069,7 @@ function applyMatcher(
 ): boolean {
   const start = m.argStart(pos);
   if (start < 0) return false;
-  const targets = resolveTargets(m, pos.slice(start), tokens);
+  const targets = installTargets(m, pos.slice(start), tokens);
 
   if (targets.length === 0) {
     // A grant verb with no named operand approves whatever npm has pending — there is no
@@ -1099,7 +1103,6 @@ function applyMatcher(
   const redirect = sourceRedirect(raw, tokens);
   if (redirect) probe.unverifiable.push(`alt-registry:${redirect}`);
   recordTargets(m, targets, probe);
-  noteBareInstall(m, tokens, targets, probe);
   // Package flags select available packages. The positional selects the invoked command.
   // Inspect that command's sources regardless of package order or additional packages.
   if (m.single && m.scheme === "npm" && targets.length > 0) {
