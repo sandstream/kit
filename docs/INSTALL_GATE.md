@@ -43,7 +43,7 @@ It fetches every dependency that `package.json` declares.
 - A git, URL or GitHub-shorthand dependency has no registry triage and blocks the install. A `file:`, `link:` or `workspace:` dependency is skipped.
   An `npm:` alias is triaged under the real package name.
 - The gate follows leading `cd <path> &&` steps and `--prefix <dir>` or `-C <dir>`. A `cd` it cannot resolve statically
-  (`$VAR`, `$(...)`, a `cd` that does not lead the command) blocks the install.
+  (`$VAR`, `$(...)`, a `cd` that does not lead the command) blocks the install. On Windows write the path with forward slashes: the command tokenizer reads a backslash as an escape, so a backslash path is refused as unverifiable (still blocked, never allowed).
 
 The gate does not triage transitive dependencies, and a receipt matches a package by name, not by version.
 Receipts are per directory, so triage from the directory you install in.

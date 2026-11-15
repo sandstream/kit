@@ -27,6 +27,10 @@ function receipt(dir: string, name: string, ageDays = 0, target = name): void {
   writeFileSync(join(dir, TRIAGE_LOG_FILE), line + "\n", { flag: "a" });
 }
 
+// The command tokenizer reads a backslash as an escape, so a Windows path in a command is written with
+// forward slashes, which Windows accepts too.
+const fwd = (dir: string): string => dir.replace(/\\/g, "/");
+
 const skill = { dependencies: { "axe-core": "4.10.3" }, devDependencies: { playwright: "1.58.0" } };
 
 describe("a bare install of a manifest that no commit gate covers", () => {
@@ -108,7 +112,7 @@ describe("a bare install: which directory it installs", () => {
 
   it("follows --prefix to the directory that is installed", async () => {
     const dir = project(skill);
-    const verdict = await decideBashGate(`npm install --prefix ${dir}`, undefined, tmpdir());
+    const verdict = await decideBashGate(`npm install --prefix ${fwd(dir)}`, undefined, tmpdir());
     assert.equal(verdict.block, true);
     assert.match(verdict.reason, /axe-core/);
   });
@@ -116,9 +120,9 @@ describe("a bare install: which directory it installs", () => {
   it("follows -C and the --prefix=<dir> form too", async () => {
     const dir = project(skill);
     for (const command of [
-      `npm install -C ${dir}`,
-      `npm install --prefix=${dir}`,
-      `npm -C ${dir} ci`,
+      `npm install -C ${fwd(dir)}`,
+      `npm install --prefix=${fwd(dir)}`,
+      `npm -C ${fwd(dir)} ci`,
     ]) {
       const verdict = await decideBashGate(command, undefined, tmpdir());
       assert.equal(verdict.block, true, command);
