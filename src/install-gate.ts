@@ -19,6 +19,7 @@
  * (#779) but `gem install` is not routed here yet: that is an owner decision. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
+import { checkBareInstall } from "./install-gate-bare.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -31,7 +32,9 @@ import {
 } from "./install-gate-repos.js";
 import {
   binBase,
+  directoryFlagValues,
   hiddenVerb,
+  isGlobalInstall,
   PREFIX_BINS,
   skipWrapperArgs,
   sourceConfigurationFlag,
@@ -64,6 +67,12 @@ export interface InstallProbe {
    * abandoned `tsc` package is the motivating case).
    */
   runnerBinCandidates: string[];
+  /**
+   * A package-less npm, pnpm, yarn or bun install (`npm ci`, `yarn`, `npm update`): it fetches the
+   * manifest's declared dependencies. Not `isInstall`, because `guard` reads that flag. `decideBashGate`
+   * asks `checkBareInstall` about it when it knows the directory.
+   */
+  bareInstall: boolean;
 }
 
 // Leading shell keywords / grouping tokens that precede a real command without
@@ -558,6 +567,12 @@ function pipInstallerArgStart(t: string[]): number {
 }
 
 /** Recognized package-manager invocations, by leading-token shape. */
+/** yarn 1 `global add|install` takes its args at 3. `yarn` alone, or with only flags, is `yarn install`. */
+function yarnArgStart(t: string[]): number {
+  if (t[1] === "global" && /^(add|install)$/.test(t[2] ?? "")) return 3;
+  return t.length === 1 || t[1].startsWith("-") ? 1 : -1;
+}
+
 const MATCHERS: Matcher[] = [
   // npm install|i|add <pkg...>, pnpm add|install, yarn add, bun add  (INSTALLER: all args)
   {
@@ -579,8 +594,7 @@ const MATCHERS: Matcher[] = [
         /^(add|install|i|update|upgrade)$/.test(t[1] ?? "")
       )
         return 2;
-      // yarn 1 global add / yarn global install
-      if (bin === "yarn" && t[1] === "global" && /^(add|install)$/.test(t[2] ?? "")) return 3;
+      if (bin === "yarn") return yarnArgStart(t);
       return -1;
     },
   },
@@ -679,6 +693,7 @@ export function parseInstallCommand(command: string): InstallProbe {
     refs: [],
     unverifiable: [],
     runnerBinCandidates: [],
+    bareInstall: false,
   };
   if (!command || typeof command !== "string") return probe;
   for (const ref of repoFetchToShellRefs(command)) {
@@ -1024,6 +1039,22 @@ function applyNpmRunner(
   }
 }
 
+/**
+ * Mark an npm-family installer that fetches the manifest's own dependencies. `npm install --prefix <dir>`
+ * hands the directory to the positional scan: it is the install location, not a package, so an install
+ * whose only "targets" are such values is still bare.
+ */
+function noteBareInstall(
+  m: Matcher,
+  tokens: string[],
+  targets: string[],
+  probe: InstallProbe,
+): void {
+  if (m.scheme !== "npm" || m.single || m.pkgFlagOnly || isGlobalInstall(tokens)) return;
+  const directories = directoryFlagValues(tokens);
+  if (targets.every((t) => directories.includes(t))) probe.bareInstall = true;
+}
+
 /** Apply one matched matcher to `probe`. Returns true when the segment was consumed. */
 function applyMatcher(
   m: Matcher,
@@ -1059,6 +1090,7 @@ function applyMatcher(
       probe.isInstall = true;
       probe.unverifiable.push(`alt-registry:${bareRedirect}`);
     }
+    noteBareInstall(m, tokens, targets, probe);
     return true; // otherwise: bare reinstall / runner-or-uv-run with no fetched pkg — not an add
   }
   probe.isInstall = true;
@@ -1067,6 +1099,7 @@ function applyMatcher(
   const redirect = sourceRedirect(raw, tokens);
   if (redirect) probe.unverifiable.push(`alt-registry:${redirect}`);
   recordTargets(m, targets, probe);
+  noteBareInstall(m, tokens, targets, probe);
   // Package flags select available packages. The positional selects the invoked command.
   // Inspect that command's sources regardless of package order or additional packages.
   if (m.single && m.scheme === "npm" && targets.length > 0) {
@@ -1219,7 +1252,7 @@ export async function decideBashGate(
   const bypass = gitHookBypass(command);
   if (bypass) return { block: true, reason: hookBypassReason(bypass), checked: [] };
   const probe = parseInstallCommand(command);
-  if (!probe.isInstall) {
+  if (!probe.isInstall && !probe.bareInstall) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };
   }
   if (probe.unverifiable.length > 0) {
@@ -1234,6 +1267,10 @@ export async function decideBashGate(
         `cannot reduce to a triage target: ${probe.unverifiable.join(", ")} — run \`kit triage\` manually, or install via \`kit pkg\` (fail-closed)`,
       checked: [],
     };
+  }
+  if (probe.bareInstall && cwd) {
+    const bare = checkBareInstall(command, cwd);
+    if (bare.block) return { block: true, reason: bare.reason, checked: [] };
   }
   const shadowed = cwd ? probe.runnerBinCandidates.filter((name) => hasLocalBin(cwd, name)) : [];
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));

@@ -30,6 +30,24 @@ For example, `uv run -- python app.py --config-file=settings.toml` does not sele
 A previous package triage does not verify a source selected by an unread configuration file.
 Remove the source configuration to use the default registry. Kit cannot verify installs with these options.
 
+## Bare installs
+
+A bare `npm install`, `npm ci`, `npm update`, `pnpm install`, `yarn` or `bun install` names no package.
+It fetches every dependency that `package.json` declares.
+
+- When git tracks `package.json`, `kit triage check-deps` gates a new dependency at commit. The gate allows the install.
+- When git does not track it (a Claude Code skill, an unpacked download, a scratch folder), no commit gates it.
+  The gate blocks the install until every direct dependency (`dependencies`, `devDependencies`, `optionalDependencies`)
+  has a triage receipt in `.kit-triage.jsonl` from the last 7 days. The message names the missing ones and the command to run,
+  for example `cd <dir> && kit triage npm axe-core playwright`.
+- A git, URL or GitHub-shorthand dependency has no registry triage and blocks the install. A `file:`, `link:` or `workspace:` dependency is skipped.
+  An `npm:` alias is triaged under the real package name.
+- The gate follows leading `cd <path> &&` steps and `--prefix <dir>` or `-C <dir>`. A `cd` it cannot resolve statically
+  (`$VAR`, `$(...)`, a `cd` that does not lead the command) blocks the install.
+
+The gate does not triage transitive dependencies, and a receipt matches a package by name, not by version.
+Receipts are per directory, so triage from the directory you install in.
+
 ## Limits
 
 This command inspection does not replace dependency checks after a Git update.

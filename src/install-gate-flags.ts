@@ -280,3 +280,15 @@ export function hiddenVerb(
   if (INSTALLER_VERB_RE.test(verbs[1] ?? "")) return null;
   return `global-option:${tokens[0]} ${unknown} ${verbs[1]}`;
 }
+
+/** The values of `--prefix <dir>` and `-C <dir>` (separate form), which name where npm installs. */
+export function directoryFlagValues(tokens: string[]): string[] {
+  return tokens.flatMap((t, i) =>
+    (t === "--prefix" || t === "-C") && tokens[i + 1] ? [tokens[i + 1]] : [],
+  );
+}
+
+/** `npm i -g`, `npm install --global`, `yarn global add`: not an install of this directory's manifest. */
+export function isGlobalInstall(tokens: string[]): boolean {
+  return tokens.some((t) => t === "-g" || t === "--global" || t === "global");
+}

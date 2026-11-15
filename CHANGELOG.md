@@ -2,6 +2,13 @@
 
 ### Added
 
+- **The install gate now blocks a bare install of a manifest that git does not track** until every
+  direct dependency has a fresh triage receipt. `npm install`, `npm ci`, `npm update`, `pnpm install`,
+  `yarn` and `bun install` name no package, so the gate used to ignore them. In a repository that was
+  covered by `kit triage check-deps` at commit. A Claude Code skill with its own `package.json`, an
+  unpacked download or a scratch folder has no commit, so its dependencies were fetched untriaged.
+  The block names the missing packages and the command to run. See `docs/INSTALL_GATE.md`.
+
 - **`kit ingest cloudflare-audit <findings.json>`** reads the findings file written by Cloudflare's
   security-audit skill. A `confirmed` record becomes a failure at its own overall severity; a
   `needs_validation` record becomes a `low` warning marked unverified; a `rejected` record is counted on
@@ -19,7 +26,7 @@
     string); kit read neither, so the gate allowed the call. It now reads both.
   - Augment 1.x renamed its shell tool from `launch-process` to `bash`; the matcher is now
     `bash|launch-process`.
-  Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
+    Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
 - **`kit agent-config` writes Cline's block into `.clinerules/kit.md` when `.clinerules` is a
   folder.** Cline reads `.clinerules` as a file or a folder of rule files, and kit's own Cline gate
   creates the folder (`.clinerules/hooks/`). After that, every `kit agent-config` failed for Cline
