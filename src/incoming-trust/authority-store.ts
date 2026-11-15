@@ -157,7 +157,9 @@ export class IncomingTrustStore {
       try {
         this.read(repository);
         return true;
-      } catch {
+      } catch (error) {
+        // A lock held by another process says nothing about the file: not damage.
+        if (isBusy(error)) throw new Error("Incoming trust: store-busy", { cause: error });
         return false;
       }
     };
@@ -186,4 +188,9 @@ export class IncomingTrustStore {
     if (!result) throw new Error("Incoming trust: not-enrolled");
     return result;
   }
+}
+
+function isBusy(error: unknown): boolean {
+  const e = error as { errcode?: number; message?: string } | null;
+  return e?.errcode === 5 || e?.errcode === 6 || /database is locked|busy/i.test(e?.message ?? "");
 }

@@ -147,16 +147,16 @@ These functions hold no launch lock and do not isolate a workload. The launch lo
 
 `kit security incoming <sub>` drives the store. Every subcommand accepts `--repo <dir>` (default: the current directory), `--store <dir>` and `--json`.
 
-| Subcommand | What it does |
-| --- | --- |
-| `enroll --authority <file>` | Enrolls the repository with an authority file from the external signer. |
-| `status` | Prints phase, generation, candidate digest, signer ids and approval expiry. Reads only. |
+| Subcommand                                                           | What it does                                                                                                                         |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `enroll --authority <file>`                                          | Enrolls the repository with an authority file from the external signer.                                                              |
+| `status`                                                             | Prints phase, generation, candidate digest, signer ids and approval expiry. Reads only.                                              |
 | `stage --source <dir> --snapshot-dir <new dir> --origin <https url>` | Captures the source once, fetches and checks every locked artifact against the given origins, and stages the bound candidate digest. |
-| `request --checks <file> [--out <file>]` | Builds the verification report and prints the digest that the external signer signs. |
-| `approve --verification <file> --approval <file>` | Records an approval. The store verifies the signature, context, checks and expiry. |
-| `reject`, `retry` | Move the state. A retry needs fresh evidence and a fresh approval. |
-| `rotate --signers <file>` | Replaces the signers and returns the state to pending. |
-| `recover --acknowledge <text>` | Moves a damaged store aside. See "Recovery of a damaged store". |
+| `request --checks <file> [--out <file>]`                             | Builds the verification report and prints the digest that the external signer signs.                                                 |
+| `approve --verification <file> --approval <file>`                    | Records an approval. The store verifies the signature, context, checks and expiry.                                                   |
+| `reject`, `retry`                                                    | Move the state. A retry needs fresh evidence and a fresh approval.                                                                   |
+| `rotate --signers <file>`                                            | Replaces the signers and returns the state to pending.                                                                               |
+| `recover --acknowledge <text>`                                       | Moves a damaged store aside. See "Recovery of a damaged store".                                                                      |
 
 kit never signs. The mutating subcommands are refused in read-only mode, and `request` is refused with `--out`. Input files must be regular files under 1 MiB. `--out` refuses to overwrite a file.
 `approve` does not start the candidate and does not hold a launch lock.

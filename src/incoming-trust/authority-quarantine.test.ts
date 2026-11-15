@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { it } from "node:test";
 import { storeFixture } from "./authority-store.test-support.js";
 import { QUARANTINE_ACKNOWLEDGEMENT } from "./authority-files.js";
@@ -93,6 +94,28 @@ it("is refused in read-only mode", () => {
   } finally {
     if (previous === undefined) delete process.env.KIT_READ_ONLY;
     else process.env.KIT_READ_ONLY = previous;
+    f.cleanup();
+  }
+});
+
+it("does not call a store damaged because another process holds its lock", () => {
+  const f = storeFixture();
+  try {
+    const path = enrolled(f);
+    const holder = new DatabaseSync(path);
+    try {
+      holder.exec("BEGIN EXCLUSIVE");
+      assert.throws(
+        () => f.store.quarantineDamaged(f.repository, QUARANTINE_ACKNOWLEDGEMENT),
+        /busy/,
+      );
+    } finally {
+      holder.exec("ROLLBACK");
+      holder.close();
+    }
+    assert.equal(existsSync(path), true, "a locked store must stay where it is");
+    assert.equal(f.store.read(f.repository)?.phase, "pending");
+  } finally {
     f.cleanup();
   }
 });
