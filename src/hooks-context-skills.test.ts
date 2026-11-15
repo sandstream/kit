@@ -46,7 +46,7 @@ function fixture() {
   mkdirSync(bin);
   writeFileSync(
     join(bin, "npm"),
-    `#!/bin/sh\necho "$*" >> '${calls}'\ncase "$1" in\n  audit) echo '${AUDIT}'; exit 1;;\n  outdated) echo '${OUTDATED}'; exit 1;;\nesac\nexit 0\n`,
+    `#!/bin/sh\necho "$* token=\${NPM_TOKEN:-none} git=\${GIT_TERMINAL_PROMPT:-unset}" >> '${calls}'\ncase "$1" in\n  audit) echo '${AUDIT}'; exit 1;;\n  outdated) echo '${OUTDATED}'; exit 1;;\nesac\nexit 0\n`,
   );
   chmodSync(join(bin, "npm"), 0o755);
   const scripts = join(home, ".claude", "skills", "tillganglighet", "scripts");
@@ -96,13 +96,25 @@ declare("kit hooks context reports skill dependencies", (f) => {
     assert.match(lines[0], /playwright 1\.58\.0 \(latest 2\.0\.0\)/);
   });
 
-  it("pins npm to the folder and turns workspaces off", () => {
-    const logged = readFileSync(f().calls, "utf8");
-    const lines = logged.split("\n").filter(Boolean);
-    assert.ok(lines.length >= 2, logged);
+  it("turns workspaces off and does not pass --prefix, which would make <folder>/etc/npmrc the global config", () => {
+    const lines = readFileSync(f().calls, "utf8").split("\n").filter(Boolean);
+    assert.ok(lines.length >= 2, lines.join("\n"));
     for (const line of lines) {
       assert.match(line, /--no-workspaces/);
-      assert.match(line, /--prefix \S*tillganglighet\/scripts/);
+      assert.doesNotMatch(line, /--prefix/);
+    }
+  });
+
+  it("gives both npm calls an environment without tokens and with git prompts off", () => {
+    f().run({ NPM_TOKEN: "super-secret-value" });
+    rmSync(join(f().home, ".kit"), { recursive: true, force: true });
+    writeFileSync(f().calls, "");
+    f().run({ NPM_TOKEN: "super-secret-value" });
+    const lines = readFileSync(f().calls, "utf8").split("\n").filter(Boolean);
+    assert.ok(lines.length >= 2, lines.join("\n"));
+    for (const line of lines) {
+      assert.match(line, /token=none/);
+      assert.match(line, /git=0/);
     }
   });
 

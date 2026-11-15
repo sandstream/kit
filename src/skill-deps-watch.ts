@@ -55,6 +55,8 @@ export function safeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     if (value !== undefined && !SECRET_NAME.test(name)) out[name] = value;
   }
   out.NO_COLOR = "1";
+  // A dependency the registry does not serve can make npm run git. Never ask for a password.
+  out.GIT_TERMINAL_PROMPT = "0";
   return out;
 }
 
@@ -205,6 +207,31 @@ function npmrcNote(dir: string, roots: string[]): string | undefined {
   return `kit: skill "${printable(skillNameOf(dir, roots))}" has its own .npmrc, so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
 }
 
+const REMOTE_SPEC =
+  /^(?:git(?:\+[a-z]+)?:|github:|gitlab:|bitbucket:|gist:|https?:|ssh:)|^[\w.-]+\/[\w.-]+(?:#.*)?$/i;
+
+/** A dependency the npm registry does not serve makes `npm outdated` run git or fetch a URL. */
+function remoteDependencyNote(dir: string, roots: string[]): string | undefined {
+  try {
+    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const remote = ["dependencies", "devDependencies", "optionalDependencies"].some((field) => {
+      const group = manifest[field];
+      return (
+        group !== null &&
+        typeof group === "object" &&
+        Object.values(group).some((spec) => typeof spec === "string" && REMOTE_SPEC.test(spec))
+      );
+    });
+    if (!remote) return undefined;
+  } catch {
+    return undefined; // an unreadable manifest is for npm to report
+  }
+  return `kit: skill "${printable(skillNameOf(dir, roots))}" has a dependency from outside the npm registry (git or a URL), so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
+}
+
 function safeLockHash(dir: string): string | undefined {
   try {
     return lockHash(dir);
@@ -246,7 +273,7 @@ export function watchSkillDeps(options: WatchOptions, deps: WatchDeps): string[]
   let skipped = 0;
   let dirty = false;
   for (const dir of findSkillProjects(options.roots)) {
-    const refusal = npmrcNote(dir, options.roots);
+    const refusal = npmrcNote(dir, options.roots) ?? remoteDependencyNote(dir, options.roots);
     if (refusal) {
       notes.push(refusal);
       continue;
@@ -278,9 +305,13 @@ export function watchSkillDeps(options: WatchOptions, deps: WatchDeps): string[]
 
 const CHECK_TIMEOUT_MS = 8000;
 
-/** Run npm in exactly this folder: no workspace root above it, no other project prefix. */
-function pinnedTo(dir: string): string[] {
-  return ["--no-workspaces", "--prefix", dir];
+/**
+ * No workspace root above the folder. `--prefix <dir>` is left out on purpose: npm then reads
+ * `<dir>/etc/npmrc` as its global config, which a skill folder can ship (a registry set there is
+ * followed). Without it, npm takes the folder as the project from the working directory.
+ */
+function pinnedTo(): string[] {
+  return ["--no-workspaces"];
 }
 
 function majorOf(version: string): number {
@@ -288,7 +319,7 @@ function majorOf(version: string): number {
 }
 
 function outdatedMajors(dir: string): Behind[] {
-  const r = spawnSync("npm", ["outdated", "--json", ...pinnedTo(dir)], {
+  const r = spawnSync("npm", ["outdated", "--json", ...pinnedTo()], {
     cwd: dir,
     encoding: "utf8",
     timeout: CHECK_TIMEOUT_MS,
@@ -318,8 +349,9 @@ function outdatedMajors(dir: string): Behind[] {
 export function checkWithNpm(dir: string): SkillDepsCheck {
   const outcome = runAudit(
     dir,
-    { manager: "npm", command: ["npm", "audit", "--json", ...pinnedTo(dir)] },
+    { manager: "npm", command: ["npm", "audit", "--json", ...pinnedTo()] },
     CHECK_TIMEOUT_MS,
+    safeEnv(process.env),
   );
   if (outcome.error) throw new Error(outcome.error);
   return {

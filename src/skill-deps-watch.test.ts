@@ -244,6 +244,29 @@ describe("watchSkillDeps does not trust a skill folder", () => {
     assert.ok(dir.length > 0);
   });
 
+  it("does not run npm for a manifest with a git or URL dependency, and says so", () => {
+    const skills = root();
+    for (const spec of [
+      "git+https://example.invalid/x.git",
+      "github:owner/repo",
+      "owner/repo",
+      "https://example.invalid/x.tgz",
+      "ssh://git@example.invalid/x.git",
+    ]) {
+      const dir = skill(skills, `s${spec.length}`);
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: { x: spec } }));
+    }
+    const calls: string[] = [];
+    const notes = watchSkillDeps(options(skills), deps(clean, calls));
+    assert.deepEqual(calls, []);
+    assert.equal(notes.length, 5);
+    assert.ok(notes.every((n) => /outside the npm registry/.test(n)));
+  });
+});
+
+describe("watchSkillDeps does not trust what a skill folder says", () => {
+  const options = (skills: string) => ({ roots: [skills], cache: join(root(), "c.json") });
+
   it("drops package names and versions that are not valid, so no text reaches the agent", () => {
     const skills = root();
     skill(skills, "s");
@@ -313,6 +336,7 @@ describe("safeEnv", () => {
       NODE_AUTH_TOKEN: "e",
       npm_config__authToken: "f",
     });
-    assert.deepEqual(Object.keys(env).sort(), ["HOME", "NO_COLOR", "PATH"]);
+    assert.deepEqual(Object.keys(env).sort(), ["GIT_TERMINAL_PROMPT", "HOME", "NO_COLOR", "PATH"]);
+    assert.equal(env.GIT_TERMINAL_PROMPT, "0");
   });
 });
