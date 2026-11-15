@@ -266,8 +266,28 @@ function instructionRows(
  * against `root`, the directory the agent starts in.
  */
 function userSettingsRows(root: string, home: string): SecurityCheckResult[] {
-  const shown = "~/.claude/settings.json";
-  const body = readInstructionFile(join(home, ".claude", "settings.json"));
+  return userHookFileRows(root, join(home, ".claude", "settings.json"), "~/.claude/settings.json");
+}
+
+/**
+ * The hooks in Codex's user-level `hooks.json` (`~/.codex`, or `$CODEX_HOME`), which Codex runs in
+ * every project, as Claude Code does `~/.claude/settings.json`. The file has the same shape: `hooks`,
+ * then event, then matcher groups of `command` handlers. Tools that manage agents write here: Orca
+ * installs its Codex status hook in `~/.codex`. Inline `[hooks]` tables in `config.toml` are not
+ * parsed; the secrets scan still reads that file as text.
+ */
+function codexHookRows(
+  root: string,
+  home: string,
+  env: Record<string, unknown>,
+): SecurityCheckResult[] {
+  const codex = codexHome(home, env);
+  return userHookFileRows(root, join(codex.dir, "hooks.json"), `${codex.shown}/hooks.json`);
+}
+
+/** Malware-shaped commands and hook scripts in one user-level JSON hook file. */
+function userHookFileRows(root: string, file: string, shown: string): SecurityCheckResult[] {
+  const body = readInstructionFile(file);
   if (body === null) return [];
   const rows: SecurityCheckResult[] = auditSettingsCommands(body).map((c) => ({
     category: "exposure",
@@ -293,7 +313,8 @@ export function runUserAgentAudit(
   const s = surfaces(home, env, claude);
   const instructions = instructionRows(home, env, claude);
   const settings = claude ? userSettingsRows(root, home) : [];
-  const rows = [...s.rows, ...instructions.rows, ...settings];
+  const codexHooks = codexHookRows(root, home, env);
+  const rows = [...s.rows, ...instructions.rows, ...settings, ...codexHooks];
   if (rows.length === 0 && (s.scanned > 0 || instructions.read > 0)) {
     rows.push({
       category: "exposure",
