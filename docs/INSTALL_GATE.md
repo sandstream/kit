@@ -45,6 +45,17 @@ It fetches every dependency that `package.json` declares.
 - The gate follows leading `cd <path> &&` steps and `--prefix <dir>` or `-C <dir>`. A `cd` it cannot resolve statically
   (`$VAR`, `$(...)`, a `cd` that does not lead the command) blocks the install. On Windows write the path with forward slashes: the command tokenizer reads a backslash as an escape, so a backslash path is refused as unverifiable (still blocked, never allowed).
 
+- The gate refuses the install when the folder has its own `.npmrc` (it can name another registry) or when the lockfile
+  (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`) resolves a package from outside the default
+  registry. `bun.lock` is not read.
+- It follows one directory flag: `--prefix` and `-C` for npm, `--prefix`, `-C` and `--dir` for pnpm, `--cwd` for yarn and bun.
+  More than one, an `NPM_CONFIG_*` assignment or `env -C` blocks the install, because npm and this gate could pick different folders.
+  A flag of another program, such as `git -C`, is not read as npm's.
+
+A tracked `package.json` stays allowed. That relies on `kit triage check-deps` running at commit, which holds only where kit's hooks are
+installed. A freshly cloned repository whose hooks are not installed is therefore not covered. Closing that would block `npm ci` in every
+checkout, so it is left as a policy decision for the maintainer.
+
 The gate does not triage transitive dependencies, and a receipt matches a package by name, not by version.
 Receipts are per directory, so triage from the directory you install in.
 

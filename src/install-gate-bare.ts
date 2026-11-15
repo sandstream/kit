@@ -31,12 +31,20 @@ function literalPath(token: string, base: string): string | undefined {
   return resolve(base, home);
 }
 
-function prefixOf(command: string): string | undefined {
-  const match = /(?:^|\s)(?:--prefix|-C)(?:=|\s+)("[^"]*"|'[^']*'|\S+)/.exec(command);
-  return match?.[1];
+const DIRECTORY_FLAG = /(?:^|\s)(?:--prefix|-C|--dir|--cwd)(?:=|\s+)("[^"]*"|'[^']*'|\S+)/g;
+// An environment assignment or `env -C` that moves npm to a directory this module cannot see.
+const MOVES_NPM =
+  /(?:^|[\s;&|(])(?:NPM_CONFIG_\w*|npm_config_\w*)=|(?:^|[\s;&|(])env\s+(?:\S+\s+)*?(?:-C|--chdir)\b/;
+
+/** The directory flags of the package-manager segments only: `git -C x` is not npm's directory. */
+function directoryFlags(command: string): string[] {
+  return command
+    .split(/&&|\|\||[;|\n]/)
+    .filter((segment) => /(?:^|\s)(?:npm|pnpm|yarn|bun)(?:\s|$)/.test(segment))
+    .flatMap((segment) => [...segment.matchAll(DIRECTORY_FLAG)].map((m) => m[1]));
 }
 
-/** The directory a bare install runs in: the caller's, moved by leading `cd` steps or `--prefix`. */
+/** The directory a bare install runs in: the caller's, moved by leading `cd` steps or one directory flag. */
 export function installDirectory(command: string, cwd: string): Directory {
   let dir = cwd;
   let rest = command;
@@ -49,10 +57,12 @@ export function installDirectory(command: string, cwd: string): Directory {
   if (/(?:^|[\s;&|(])(?:cd|pushd|popd)(?:\s|$)/.test(rest)) {
     return { unresolved: "a cd that does not lead the command" };
   }
-  const prefix = prefixOf(rest);
-  if (prefix !== undefined) {
-    const next = literalPath(prefix, dir);
-    return next ? { dir: next } : { unresolved: `--prefix ${prefix}` };
+  if (MOVES_NPM.test(rest)) return { unresolved: "an environment or env -C that moves npm" };
+  const flags = directoryFlags(rest);
+  if (flags.length > 1) return { unresolved: "more than one directory flag" };
+  if (flags.length === 1) {
+    const next = literalPath(flags[0], dir);
+    return next ? { dir: next } : { unresolved: `directory flag ${flags[0]}` };
   }
   return { dir };
 }
@@ -127,6 +137,50 @@ function refusal(dir: string, detail: string): BareVerdict {
   };
 }
 
+const DEFAULT_REGISTRIES = ["https://registry.npmjs.org/", "https://registry.yarnpkg.com/"];
+const fromDefaultRegistry = (url: string): boolean =>
+  DEFAULT_REGISTRIES.some((prefix) => url.startsWith(prefix));
+
+/** Every `resolved` string in an npm lockfile, however deeply `dependencies` nest. */
+function resolvedUrls(lock: unknown): string[] {
+  const urls: string[] = [];
+  const stack: unknown[] = [lock];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== "object") continue;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "resolved" && typeof value === "string") urls.push(value);
+      else stack.push(value);
+    }
+  }
+  return urls;
+}
+
+/** Why a lockfile in `dir` cannot be trusted to name only the default registry, or undefined. */
+function lockfileSourceProblem(dir: string): string | undefined {
+  for (const name of ["package-lock.json", "npm-shrinkwrap.json"]) {
+    const path = join(dir, name);
+    if (!existsSync(path)) continue;
+    try {
+      const urls = resolvedUrls(JSON.parse(readFileSync(path, "utf8")));
+      if (!urls.every(fromDefaultRegistry))
+        return `${name} resolves a package from outside the default registry`;
+    } catch {
+      return `${name} cannot be read`;
+    }
+  }
+  for (const name of ["yarn.lock", "pnpm-lock.yaml"]) {
+    const path = join(dir, name);
+    if (!existsSync(path)) continue;
+    const urls = [
+      ...readFileSync(path, "utf8").matchAll(/^\s*(?:resolved\s+"?|tarball:\s*"?)(\S+?)"?\s*$/gm),
+    ];
+    if (!urls.every((m) => fromDefaultRegistry(m[1])))
+      return `${name} resolves a package from outside the default registry`;
+  }
+  return undefined;
+}
+
 /** Decide a bare install. Pure apart from reading the manifest, the receipts and `git ls-files`. */
 export function checkBareInstall(command: string, cwd: string): BareVerdict {
   const where = installDirectory(command, cwd);
@@ -148,6 +202,13 @@ export function checkBareInstall(command: string, cwd: string): BareVerdict {
   if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) {
     return refusal(dir, "package.json is not an object");
   }
+  // A folder's own .npmrc can name another registry or scope registry, and the lockfile can pin a
+  // package to a URL elsewhere. Receipts are for names on the default registry; neither is covered.
+  if (existsSync(join(dir, ".npmrc"))) {
+    return refusal(dir, "the folder has its own .npmrc, which can redirect the registry");
+  }
+  const lockProblem = lockfileSourceProblem(dir);
+  if (lockProblem) return refusal(dir, `the lockfile cannot be trusted: ${lockProblem}`);
   const direct = directDependencies(manifest);
   const refused = direct.flatMap((d) => ("refused" in d ? [d.refused] : []));
   if (refused.length > 0) return refusal(dir, `cannot triage ${refused.join(", ")}`);

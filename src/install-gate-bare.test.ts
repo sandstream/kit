@@ -264,3 +264,121 @@ describe("a package that shares its name with the --prefix or -C value is still 
     assert.deepEqual(probe.refs, ["pip:evil"]);
   });
 });
+
+describe("a bare install where the folder can redirect the registry", () => {
+  const withReceipts = (manifest: unknown): string => {
+    const dir = project(manifest);
+    for (const name of Object.keys((manifest as { dependencies: object }).dependencies)) {
+      receipt(dir, name);
+    }
+    return dir;
+  };
+  const lock = (resolved: string) =>
+    JSON.stringify({
+      lockfileVersion: 3,
+      packages: { "": {}, "node_modules/axe-core": { version: "4.10.3", resolved } },
+    });
+
+  it("is blocked when the folder has its own .npmrc, even with every receipt present", async () => {
+    const dir = withReceipts({ dependencies: { "axe-core": "4.10.3" } });
+    writeFileSync(join(dir, ".npmrc"), "registry=https://example.invalid/\n");
+    const verdict = await decideBashGate("npm install", undefined, dir);
+    assert.equal(verdict.block, true);
+    assert.match(verdict.reason, /\.npmrc/);
+  });
+
+  it("is blocked when the lockfile resolves a package from another registry", async () => {
+    const dir = withReceipts({ dependencies: { "axe-core": "4.10.3" } });
+    writeFileSync(join(dir, "package-lock.json"), lock("https://example.invalid/axe-core.tgz"));
+    const verdict = await decideBashGate("npm ci", undefined, dir);
+    assert.equal(verdict.block, true);
+    assert.match(verdict.reason, /lockfile/);
+  });
+
+  it("passes when the lockfile resolves from the default registry", async () => {
+    const dir = withReceipts({ dependencies: { "axe-core": "4.10.3" } });
+    const resolved = "https://registry.npmjs.org/axe-core/-/axe-core-4.10.3.tgz";
+    writeFileSync(join(dir, "package-lock.json"), lock(resolved));
+    assert.equal((await decideBashGate("npm ci", undefined, dir)).block, false);
+  });
+
+  it("is blocked when the lockfile cannot be read", async () => {
+    const dir = withReceipts({ dependencies: { "axe-core": "4.10.3" } });
+    writeFileSync(join(dir, "package-lock.json"), "{ not json");
+    assert.equal((await decideBashGate("npm ci", undefined, dir)).block, true);
+  });
+});
+
+describe("a bare install that names its directory in more than one way", () => {
+  it("refuses two directory flags, because npm and this gate could pick different ones", async () => {
+    const dir = project(skill);
+    for (const command of [
+      "npm install --prefix a --prefix b",
+      "npm install --prefix a -C b",
+      "npm install -C a --prefix=b",
+    ]) {
+      const verdict = await decideBashGate(command, undefined, dir);
+      assert.equal(verdict.block, true, command);
+      assert.match(verdict.reason, /directory/, command);
+    }
+  });
+
+  it("does not take the -C of another program as the install directory", async () => {
+    const dir = project(skill);
+    for (const command of [
+      "git -C /elsewhere pull && npm install",
+      "git -C /elsewhere pull; npm install --ignore-scripts",
+      "tar -C /elsewhere -xf a.tar | npm install",
+    ]) {
+      const verdict = await decideBashGate(command, undefined, dir);
+      assert.equal(verdict.block, true, command);
+      assert.match(verdict.reason, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), command);
+    }
+  });
+
+  it("refuses an environment or env -C that moves npm", async () => {
+    const dir = project(skill);
+    for (const command of [
+      "NPM_CONFIG_PREFIX=/x npm install",
+      "npm_config_prefix=/x npm install",
+      "env -C /x npm install",
+      "env --chdir=/x npm install",
+    ]) {
+      const verdict = await decideBashGate(command, undefined, dir);
+      assert.equal(verdict.block, true, command);
+      assert.match(verdict.reason, /directory/, command);
+    }
+  });
+
+  it("follows pnpm --dir and yarn or bun --cwd", async () => {
+    const dir = project(skill);
+    for (const command of [
+      `pnpm install --dir ${fwd(dir)}`,
+      `yarn install --cwd ${fwd(dir)}`,
+      `bun install --cwd ${fwd(dir)}`,
+    ]) {
+      const verdict = await decideBashGate(command, undefined, tmpdir());
+      assert.equal(verdict.block, true, command);
+      assert.match(verdict.reason, /axe-core/, command);
+    }
+  });
+
+  it("does not read a --dir or --cwd value as a package, and keeps a package of that name", () => {
+    for (const command of [
+      "pnpm install --dir sub",
+      "yarn install --cwd sub",
+      "bun install --cwd sub",
+    ]) {
+      const probe = parseInstallCommand(command);
+      assert.deepEqual(probe.refs, [], command);
+      assert.equal(probe.bareInstall, true, command);
+    }
+    for (const [command, ref] of [
+      ["pnpm add --dir evil evil", "npm:evil"],
+      ["yarn add --cwd evil evil", "npm:evil"],
+      ["bun add --cwd evil evil", "npm:evil"],
+    ]) {
+      assert.deepEqual(parseInstallCommand(command).refs, [ref], command);
+    }
+  });
+});

@@ -753,12 +753,12 @@ function compactPositionals(tokens: string[]): string[] {
 }
 
 /** A flag whose next token is its value, so neither is a package or a verb. */
-function skipsValue(tok: string, pipFamily: boolean, directoryFlags: boolean): boolean {
+function skipsValue(tok: string, pipFamily: boolean, manager: string): boolean {
   return (
     SOURCE_FLAG_RE.test(tok) ||
     VALUE_PKG_FLAG_RE.test(tok) ||
     (pipFamily && REQUIREMENT_FLAG_RE.test(tok)) ||
-    (directoryFlags && isDirectoryValueFlag(tok))
+    isDirectoryValueFlag(tok, manager)
   );
 }
 
@@ -769,9 +769,6 @@ function indexedPositionals(tokens: string[]): { pos: string[]; at: number[] } {
   // those aren't valueless flags, so eating the next token would drop a real package
   // (`npm i -e evil` must still gate `evil`). Source/package-value flags exist in both.
   const pipFamily = /^(pip|pip3|pipx|uv|uvx|poetry|pdm|python|python3)$/.test(tokens[0] ?? "");
-  // `--prefix <dir>` and `-C <dir>` name where npm or pnpm installs, not a package. Dropping the
-  // value by position keeps a package of the same name (`npm i --prefix x x`) in the targets.
-  const directoryFlags = /^(npm|pnpm)$/.test(tokens[0] ?? "");
   const pos: string[] = [];
   const at: number[] = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -790,7 +787,7 @@ function indexedPositionals(tokens: string[]): { pos: string[]; at: number[] } {
       }
       continue;
     }
-    if (skipsValue(tok, pipFamily, directoryFlags)) {
+    if (skipsValue(tok, pipFamily, tokens[0] ?? "")) {
       i++; // skip the flag AND its value token
       continue;
     }

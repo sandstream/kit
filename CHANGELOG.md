@@ -7,7 +7,10 @@
   `yarn` and `bun install` name no package, so the gate used to ignore them. In a repository that was
   covered by `kit triage check-deps` at commit. A Claude Code skill with its own `package.json`, an
   unpacked download or a scratch folder has no commit, so its dependencies were fetched untriaged.
-  The block names the missing packages and the command to run. See `docs/INSTALL_GATE.md`.
+  The block names the missing packages and the command to run. A folder with its own `.npmrc`, or a
+  lockfile that resolves from outside the default registry, is refused too, and so is a command that
+  names its directory in more than one way. `--prefix`/`-C`/`--dir`/`--cwd` values are no longer read as
+  packages. See `docs/INSTALL_GATE.md`.
 
 - **`kit ingest cloudflare-audit <findings.json>`** reads the findings file written by Cloudflare's
   security-audit skill. A `confirmed` record becomes a failure at its own overall severity; a

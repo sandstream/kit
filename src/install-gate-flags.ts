@@ -286,7 +286,10 @@ export function isGlobalInstall(tokens: string[]): boolean {
   return tokens.some((t) => t === "-g" || t === "--global" || t === "global");
 }
 
-/** npm and pnpm flags whose next token names the install directory, not a package. */
-export function isDirectoryValueFlag(token: string): boolean {
-  return token === "--prefix" || token === "-C";
+/** The flag whose next token names the install directory, per package manager. Not a package. */
+export function isDirectoryValueFlag(token: string, manager: string): boolean {
+  if (manager === "npm") return token === "--prefix" || token === "-C";
+  if (manager === "pnpm") return token === "--prefix" || token === "-C" || token === "--dir";
+  if (manager === "yarn" || manager === "bun") return token === "--cwd";
+  return false;
 }
