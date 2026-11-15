@@ -7,7 +7,12 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
-import { LOCAL_COVER, staleCatalogDetail, staleCatalogStatus } from "./bumblebee-age.js";
+import {
+  LOCAL_COVER,
+  scannedHead,
+  staleCatalogDetail,
+  staleCatalogStatus,
+} from "./bumblebee-age.js";
 import { checkEnvIgnoreProtection } from "./check-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
@@ -2469,6 +2474,7 @@ export function bumblebeeStaleCatalogVerdict(
   outcome: ScanOutcome,
   ageDays: number,
   update: { latest: string; pinned: string } | null,
+  profile = "baseline",
 ): SecurityCheckResult {
   const suggestion = update
     ? `bumblebee ${update.latest} is available (pinned ${update.pinned}). Moving BUMBLEBEE_VERSION + TARBALL_CHECKSUMS together in src/bumblebee.ts is the only way to change the bundled catalogs — compare the release tarball's threat_intel/ to see what it actually adds.`
@@ -2477,7 +2483,7 @@ export function bumblebeeStaleCatalogVerdict(
     category: "supply-chain",
     name: BUMBLEBEE_NAME,
     status: staleCatalogStatus(ageDays),
-    detail: staleCatalogDetail(outcome.packagesScanned, ageDays, update),
+    detail: staleCatalogDetail(outcome.packagesScanned, ageDays, update, profile),
     suggestion,
     ...(update && {
       advisory: {
@@ -2492,6 +2498,7 @@ export function bumblebeeStaleCatalogVerdict(
 async function bumblebeeCatalogAdvisory(
   install: ScannerInstall,
   outcome: ScanOutcome,
+  profile: string,
 ): Promise<SecurityCheckResult | null> {
   const newest = await newestCatalogMtime(install.catalogDir);
   if (newest === null) return null;
@@ -2500,7 +2507,7 @@ async function bumblebeeCatalogAdvisory(
   // Cached-only lookup keeps the security verdict independent of network availability.
   const { readCachedBumblebeeUpdateSync } = await import("./bumblebee-update.js");
   const update = readCachedBumblebeeUpdateSync(BUMBLEBEE_VERSION);
-  return bumblebeeStaleCatalogVerdict(outcome, ageDays, update);
+  return bumblebeeStaleCatalogVerdict(outcome, ageDays, update, profile);
 }
 
 async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
@@ -2530,13 +2537,13 @@ async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
   if (findings) return findings;
   const incomplete = bumblebeeIncompleteVerdict(outcome, context);
   if (incomplete) return incomplete;
-  const advisory = await bumblebeeCatalogAdvisory(ensured.install, outcome);
+  const advisory = await bumblebeeCatalogAdvisory(ensured.install, outcome, profile);
   return (
     advisory ?? {
       category: "supply-chain",
       name: BUMBLEBEE_NAME,
       status: "pass",
-      detail: `no known exposures (${outcome.packagesScanned} packages, profile=${profile})`,
+      detail: scannedHead(outcome.packagesScanned, profile),
     }
   );
 }
