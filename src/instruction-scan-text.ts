@@ -6,7 +6,11 @@ import { sanitizeDisplayText as sanitizeInstructionDisplay } from "./display-tex
 export { sanitizeDisplayText as sanitizeInstructionDisplay } from "./display-text.js";
 
 export type InstructionRule =
-  "secret-to-outbound" | "exec-after-download" | "conceal-from-user" | `injection:${string}`;
+  | "secret-to-outbound"
+  | "exec-after-download"
+  | "conceal-from-user"
+  | "remote-instructions"
+  | `injection:${string}`;
 
 export interface InstructionFinding {
   file: string;

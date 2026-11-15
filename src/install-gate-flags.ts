@@ -25,7 +25,11 @@ export function binBase(tok: string): string {
   // that as argv0 after the wrapper is stripped, so `t[0] === "pnpm"` never matched. Only bin
   // names flow through binBase (never package args), so a scoped/versioned package like
   // `@scope/pkg@1` is unaffected.
-  return resolved.replace(/@.+$/, "");
+  // A Windows launcher keeps its extension (`npm.cmd`, `pnpm.exe`) and any letter case.
+  return resolved
+    .replace(/@.+$/, "")
+    .replace(/\.(?:cmd|exe|bat|ps1)$/i, "")
+    .toLowerCase();
 }
 
 /**
