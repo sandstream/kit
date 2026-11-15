@@ -256,6 +256,25 @@ export async function writeBaseline(root: string, advisories: Advisory[]): Promi
   await writeFile(join(root, ADVISORY_BASELINE_FILE), renderBaseline(advisories), "utf-8");
 }
 
+/**
+ * `npm audit --json` prints `{"error": {...}}` when it cannot reach the registry. That is valid JSON
+ * with no advisories, so without this check a failed audit reads as a clean one.
+ */
+export function auditJsonError(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return undefined;
+  try {
+    const value = JSON.parse(trimmed) as { error?: unknown };
+    if (value.error === undefined) return undefined;
+    const e = value.error as { code?: unknown; summary?: unknown };
+    const detail =
+      typeof value.error === "string" ? value.error : `${e.code ?? ""} ${e.summary ?? ""}`;
+    return `audit reported an error: ${detail.trim().slice(0, 120)}`;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface AuditOutcome {
   advisories: Advisory[];
   /** Set when the audit could not produce a readable result — never treated as "clean". */
@@ -270,16 +289,30 @@ export interface AuditOutcome {
  * not the signal. The signal is whether the output parsed into advisories: no advisories AND no
  * parseable JSON means the audit did not run, and that must not read as a clean result.
  */
-export function runAudit(root: string, runner: AuditRunner): AuditOutcome {
+export function runAudit(
+  root: string,
+  runner: AuditRunner,
+  timeoutMs = 180_000,
+  env: NodeJS.ProcessEnv = process.env,
+): AuditOutcome {
   const [bin, ...args] = runner.command;
   const r = spawnSync(bin, args, {
     cwd: root,
     encoding: "utf-8",
-    timeout: 180_000,
-    env: { ...process.env, NO_COLOR: "1" },
+    timeout: timeoutMs,
+    env: { ...env, NO_COLOR: "1" },
   });
   if (r.error) return { advisories: [], error: r.error.message, manager: runner.manager };
+  if (r.status === null) {
+    return {
+      advisories: [],
+      error: `${runner.manager} audit was stopped (${r.signal})`,
+      manager: runner.manager,
+    };
+  }
   const out = r.stdout ?? "";
+  const reported = auditJsonError(out);
+  if (reported) return { advisories: [], error: reported, manager: runner.manager };
   const advisories = parseAuditJson(out);
   if (advisories.length === 0) {
     const looksLikeJson = out.trimStart().startsWith("{") || out.trimStart().startsWith("[");
