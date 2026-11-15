@@ -33,6 +33,8 @@ function literalPath(token: string, base: string): string | undefined {
 
 // A package manager as a command word: bare, by path or in quotes (`/usr/bin/npm`, `"npm"`, `npm.cmd`).
 const MANAGER = /(?:^|[\s/\\"'])(?:npm|pnpm|yarn|bun)(?:\.cmd|\.exe)?(?=[\s"']|$)/;
+// A quoted &, ; or | would be cut as a separator by the split below, so such a command is refused.
+const QUOTED_SEPARATOR = /(["'])[^"']*[&;|][^"']*\1/;
 const DIRECTORY_FLAG = /(?:^|\s)(?:--prefix|-C|--dir|--cwd)(?:=|\s+)("[^"]*"|'[^']*'|\S+)/g;
 // An environment assignment or `env -C` that moves npm to a directory this module cannot see.
 const MOVES_NPM =
@@ -59,6 +61,7 @@ export function installDirectory(command: string, cwd: string): Directory {
   if (/(?:^|[\s;&|(])(?:cd|pushd|popd)(?:\s|$)/.test(rest)) {
     return { unresolved: "a cd that does not lead the command" };
   }
+  if (QUOTED_SEPARATOR.test(rest)) return { unresolved: "a quote that holds &, ; or |" };
   if (MOVES_NPM.test(rest)) return { unresolved: "an environment or env -C that moves npm" };
   const flags = directoryFlags(rest);
   if (flags.length > 1) return { unresolved: "more than one directory flag" };
@@ -146,6 +149,8 @@ const STEERING_FILES = [
   ".yarnrc.yml",
   "bunfig.toml",
   ".pnpmfile.cjs",
+  ".pnpmfile.mjs",
+  "pnpm-workspace.yaml",
   "bun.lock",
   "bun.lockb",
 ];

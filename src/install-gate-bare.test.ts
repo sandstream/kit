@@ -417,6 +417,8 @@ describe("a bare install where another config file or lockfile can steer the ins
     ".yarnrc.yml",
     "bunfig.toml",
     ".pnpmfile.cjs",
+    ".pnpmfile.mjs",
+    "pnpm-workspace.yaml",
     "bun.lock",
     "bun.lockb",
   ]) {
@@ -429,4 +431,20 @@ describe("a bare install where another config file or lockfile can steer the ins
       assert.ok(verdict.reason.includes(file), verdict.reason);
     });
   }
+});
+
+describe("a bare install: a quoted separator is not read as a segment end", () => {
+  it("refuses a command whose quotes hold & ; or |, because the split would misread it", async () => {
+    const dir = project({ dependencies: { "axe-core": "4.10.3" } });
+    receipt(dir, "axe-core");
+    for (const command of [
+      'echo "a & b" && npm install --prefix x',
+      "echo 'a; b' ; npm install --prefix x",
+      'npm install --prefix "x | y"',
+    ]) {
+      const verdict = await decideBashGate(command, undefined, dir);
+      assert.equal(verdict.block, true, command);
+      assert.match(verdict.reason, /quote/, command);
+    }
+  });
 });
