@@ -4,12 +4,15 @@
 
 - **`kit hooks context` now watches the npm dependencies that skills carry.** A skill may ship its own
   `package.json` and `node_modules` (`~/.claude/skills/<name>/scripts`), and nothing updates those on
-  its own. At session start kit runs `npm audit` and `npm outdated` in each such folder (user skills and
-  `<project>/.claude/skills`) and prints one plain line per skill with a known vulnerability or a
-  dependency a major version behind. It is silent when all is well or when offline, asks the network at
-  most once a day per skill (cached in `~/.kit/skill-deps-watch.json` by lockfile hash), stops after a
-  15-second budget, and only reads: it never installs or updates. `KIT_SKILL_DEPS_WATCH=0` turns it
-  off. npm only for now (`package-lock.json`); pnpm, yarn and bun lockfiles are not read.
+  its own. At session start kit runs `npm audit` and `npm outdated` in each such folder of your own
+  user skills and prints one plain line per skill with a known vulnerability or a dependency a major
+  version behind. A project's `.claude/skills` is not scanned: it comes with a clone, and npm would
+  follow whatever `.npmrc` the repository ships. A folder with its own `.npmrc` is not checked either,
+  and the line says so. npm runs without tokens, keys or npm config in its environment, and only
+  valid package names and versions reach the line. It is silent when all is well or when offline,
+  asks the network at most once a day per skill (cached in `~/.kit/skill-deps-watch.json` by lockfile
+  hash, never after a failed check), stops after a 15-second budget, and only reads: it never
+  installs or updates. `KIT_SKILL_DEPS_WATCH=0` turns it off. npm only for now (`package-lock.json`).
 
 - **`kit ingest cloudflare-audit <findings.json>`** reads the findings file written by Cloudflare's
   security-audit skill. A `confirmed` record becomes a failure at its own overall severity; a
@@ -19,6 +22,10 @@
   kit-research `twelve-security-repos-list-vs-kit`.
 
 ### Fixed
+
+- **`npm audit` that could not reach the registry no longer reads as a clean audit.** npm prints
+  `{"error": {...}}` as valid JSON with no advisories; `runAudit` returned that as zero findings.
+  It now reports the error, and a stopped audit (timeout or signal) is an error too.
 
 - **Three harness adapters now match their vendor's documented hook contract.**
   - Antigravity's PreToolUse reply needs a stdout `decision` and its docs give exit codes no meaning;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -38,31 +39,23 @@ const OUTDATED = JSON.stringify({
   playwright: { current: "1.58.0", wanted: "1.58.0", latest: "2.0.0" },
 });
 
-describe("kit hooks context reports skill dependencies", { skip: !posix }, () => {
-  let home: string;
-  let bin: string;
-  let calls: string;
-
-  before(() => {
-    home = realpathSync(mkdtempSync(join(tmpdir(), "kit-hookctx-")));
-    bin = join(home, "bin");
-    calls = join(home, "npm-calls.log");
-    mkdirSync(bin);
-    writeFileSync(
-      join(bin, "npm"),
-      `#!/bin/sh\necho "$1" >> '${calls}'\ncase "$1" in\n  audit) echo '${AUDIT}'; exit 1;;\n  outdated) echo '${OUTDATED}'; exit 1;;\nesac\nexit 0\n`,
-    );
-    chmodSync(join(bin, "npm"), 0o755);
-    const scripts = join(home, ".claude", "skills", "tillganglighet", "scripts");
-    mkdirSync(join(scripts, "node_modules"), { recursive: true });
-    writeFileSync(join(scripts, "package.json"), '{"dependencies":{"axe-core":"4.10.3"}}');
-    writeFileSync(join(scripts, "package-lock.json"), '{"lockfileVersion":3}');
-  });
-  after(() => rmSync(home, { recursive: true, force: true }));
-
-  const run = (extra: Record<string, string> = {}) =>
+function fixture() {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "kit-hookctx-")));
+  const bin = join(home, "bin");
+  const calls = join(home, "npm-calls.log");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "npm"),
+    `#!/bin/sh\necho "$1" >> '${calls}'\ncase "$1" in\n  audit) echo '${AUDIT}'; exit 1;;\n  outdated) echo '${OUTDATED}'; exit 1;;\nesac\nexit 0\n`,
+  );
+  chmodSync(join(bin, "npm"), 0o755);
+  const scripts = join(home, ".claude", "skills", "tillganglighet", "scripts");
+  mkdirSync(join(scripts, "node_modules"), { recursive: true });
+  writeFileSync(join(scripts, "package.json"), '{"dependencies":{"axe-core":"4.10.3"}}');
+  writeFileSync(join(scripts, "package-lock.json"), '{"lockfileVersion":3}');
+  const run = (extra: Record<string, string> = {}, cwd: string = home) =>
     spawnSync(process.execPath, [CLI, "hooks", "context"], {
-      cwd: home,
+      cwd,
       encoding: "utf8",
       env: {
         ...process.env,
@@ -73,7 +66,25 @@ describe("kit hooks context reports skill dependencies", { skip: !posix }, () =>
         ...extra,
       },
     });
-  const npmCalls = () => readFileSync(calls, "utf8").split("\n").filter(Boolean).length;
+  const npmCalls = () =>
+    existsSync(calls) ? readFileSync(calls, "utf8").split("\n").filter(Boolean).length : 0;
+  return { home, bin, calls, run, npmCalls };
+}
+
+function declare(title: string, body: (f: () => ReturnType<typeof fixture>) => void): void {
+  describe(title, { skip: !posix }, () => {
+    let current: ReturnType<typeof fixture>;
+    before(() => {
+      current = fixture();
+    });
+    after(() => rmSync(current.home, { recursive: true, force: true }));
+    body(() => current);
+  });
+}
+
+declare("kit hooks context reports skill dependencies", (f) => {
+  const run = (extra: Record<string, string> = {}) => f().run(extra);
+  const npmCalls = () => f().npmCalls();
 
   it("prints one plain line naming the skill, the vulnerability and the major behind", () => {
     const r = run();
@@ -98,12 +109,56 @@ describe("kit hooks context reports skill dependencies", { skip: !posix }, () =>
     assert.equal(r.status, 0);
     assert.doesNotMatch(r.stdout, /kit: skill/);
   });
+});
 
+declare("kit hooks context with a broken or untrusted setup", (f) => {
+  const run = (extra: Record<string, string> = {}) => f().run(extra);
+  const npmCalls = () => f().npmCalls();
   it("exits 0 and says nothing when npm is not usable", () => {
-    rmSync(join(home, ".kit"), { recursive: true, force: true });
-    writeFileSync(join(bin, "npm"), "#!/bin/sh\nexit 127\n");
+    rmSync(join(f().home, ".kit"), { recursive: true, force: true });
+    writeFileSync(join(f().bin, "npm"), "#!/bin/sh\nexit 127\n");
     const r = run();
     assert.equal(r.status, 0);
     assert.doesNotMatch(r.stdout, /kit: skill/);
+  });
+
+  it("does not cache a failed audit as clean: the next session asks again", () => {
+    rmSync(join(f().home, ".kit"), { recursive: true, force: true });
+    writeFileSync(
+      join(f().bin, "npm"),
+      `#!/bin/sh\necho "$1" >> '${f().calls}'\ncase "$1" in\n  audit) echo '{"error":{"code":"ENOTFOUND","summary":"offline"}}'; exit 1;;\nesac\nexit 0\n`,
+    );
+    const first = npmCalls();
+    assert.doesNotMatch(run().stdout, /kit: skill/);
+    const afterFirst = npmCalls();
+    assert.ok(afterFirst > first);
+    run();
+    assert.ok(npmCalls() > afterFirst, "an error must not be cached as a clean result");
+  });
+
+  it("does not scan a skills folder inside the current project", () => {
+    rmSync(join(f().home, ".kit"), { recursive: true, force: true });
+    writeFileSync(
+      join(f().bin, "npm"),
+      `#!/bin/sh\necho "$PWD" >> '${f().calls}'\ncase "$1" in\n  audit) echo '${AUDIT}'; exit 1;;\n  outdated) echo '{}'; exit 0;;\nesac\nexit 0\n`,
+    );
+    const project = join(f().home, "project");
+    const scripts = join(project, ".claude", "skills", "projskill", "scripts");
+    mkdirSync(join(scripts, "node_modules"), { recursive: true });
+    writeFileSync(join(scripts, "package.json"), "{}");
+    writeFileSync(join(scripts, "package-lock.json"), "{}");
+    writeFileSync(f().calls, "");
+    const r = spawnSync(process.execPath, [CLI, "hooks", "context"], {
+      cwd: project,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: f().home,
+        USERPROFILE: f().home,
+        PATH: f().bin + delimiter + (process.env.PATH ?? ""),
+      },
+    });
+    assert.equal(r.status, 0);
+    assert.doesNotMatch(readFileSync(f().calls, "utf8"), /projskill/);
   });
 });

@@ -32,13 +32,15 @@ import { realDeps, watchSkillDeps, type WatchDeps } from "./skill-deps-watch.js"
 export function skillDepsContext(
   env: NodeJS.ProcessEnv = process.env,
   deps: WatchDeps = realDeps,
-  cwd: string = process.cwd(),
+  home: string = homedir(),
 ): string[] {
   if (env.KIT_SKILL_DEPS_WATCH === "0") return [];
+  // Only the user's own skills. A project's `.claude/skills` comes with a clone, and running npm in
+  // it would follow whatever `.npmrc` the repository ships.
   return watchSkillDeps(
     {
-      roots: [join(homedir(), ".claude", "skills"), join(cwd, ".claude", "skills")],
-      cache: join(homedir(), ".kit", "skill-deps-watch.json"),
+      roots: [join(home, ".claude", "skills")],
+      cache: join(home, ".kit", "skill-deps-watch.json"),
       readOnly: isReadOnlyMode(),
     },
     deps,
