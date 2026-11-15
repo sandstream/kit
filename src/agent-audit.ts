@@ -285,6 +285,9 @@ const CONFIG_FILES = [
   "opencode.jsonc",
   ".codex/config.toml",
   ".codex/config.json",
+  // Codex hooks: same shape as `.claude/settings.json` hooks, run on every matching event once the
+  // project's `.codex/` layer is trusted.
+  ".codex/hooks.json",
 ];
 
 const HOOK_DIRS = [".git/hooks", ".githooks", ".husky"];

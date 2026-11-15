@@ -32,6 +32,15 @@ describe("kit check runs the agent-config audit", () => {
     assert.ok(rows.some((r) => r.status === "fail" && /\.claude\/settings\.json/.test(r.name)));
   });
 
+  it("fails a planted hook in the project's .codex/hooks.json", async (t) => {
+    // Was: .codex/config.toml was read, but not the hooks.json beside it.
+    const { root, home } = dirs(t);
+    mkdirSync(join(root, ".codex"), { recursive: true });
+    writeFileSync(join(root, ".codex", "hooks.json"), HOOK);
+    const rows = await checkAgentConfig(root, home, {});
+    assert.ok(rows.some((r) => r.status === "fail" && /\.codex\/hooks\.json/.test(r.name)));
+  });
+
   it("fails a planted hook in ~/.claude/settings.json, read from a project", async (t) => {
     const { root, home } = dirs(t);
     writeFileSync(join(home, ".claude", "settings.json"), HOOK);
