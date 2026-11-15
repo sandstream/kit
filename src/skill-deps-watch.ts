@@ -211,7 +211,8 @@ function npmrcNote(dir: string, roots: string[]): string | undefined {
 // one. A colon, a slash or an `@` outside an alias (git+https, github:, owner/repo, git@host:path,
 // file:, link:, workspace:, a path) is something npm fetches from somewhere else.
 const RANGE_CHARS = "[A-Za-z0-9.^~<>=|*+\\- ]";
-const REGISTRY_RANGE = new RegExp(`^${RANGE_CHARS}{0,100}$`);
+// A leading dot is a path to npm ("." and ".." are directories), never a range.
+const REGISTRY_RANGE = new RegExp(`^(?!\\.)${RANGE_CHARS}{0,100}$`);
 const REGISTRY_ALIAS = new RegExp(
   `^npm:(?:@[a-z0-9~][\\w.~-]*/)?[a-z0-9~][\\w.~-]*(?:@${RANGE_CHARS}{0,100})?$`,
 );
@@ -225,29 +226,35 @@ const DEPENDENCY_FIELDS = [
   "peerDependencies",
 ];
 
-/** True when any spec in the group is not a registry spec. Nested objects are `overrides`. */
-function groupHasOtherSource(group: unknown): boolean {
+const MAX_OVERRIDE_DEPTH = 8;
+
+/** True when any spec in the group is not a registry spec. Nested objects are `overrides`; nesting
+ *  past the limit counts as another source, so a deep tree cannot hide one. */
+function groupHasOtherSource(group: unknown, depth = 0): boolean {
   if (typeof group === "string") return !isRegistrySpec(group);
   if (group === null || typeof group !== "object" || Array.isArray(group))
     return group !== undefined;
-  return Object.values(group).some(groupHasOtherSource);
+  if (depth >= MAX_OVERRIDE_DEPTH) return true;
+  return Object.values(group).some((value) => groupHasOtherSource(value, depth + 1));
 }
 
 /** A dependency the npm registry does not serve makes `npm outdated` run git or fetch a URL. */
 function remoteDependencyNote(dir: string, roots: string[]): string | undefined {
+  const name = printable(skillNameOf(dir, roots));
+  let manifest: Record<string, unknown>;
   try {
-    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as Record<
-      string,
-      unknown
-    >;
-    const other = [...DEPENDENCY_FIELDS, "overrides"].some((field) =>
-      groupHasOtherSource(manifest[field]),
-    );
-    if (!other) return undefined;
+    // npm strips a leading byte order mark before it parses; so does this.
+    const text = readFileSync(join(dir, "package.json"), "utf8").replace(/^\ufeff/, "");
+    manifest = JSON.parse(text) as Record<string, unknown>;
   } catch {
-    return undefined; // an unreadable manifest is for npm to report
+    // A manifest this cannot read may be one npm reads differently. Do not hand it to npm.
+    return `kit: skill "${name}" has a package.json that kit cannot read, so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
   }
-  return `kit: skill "${printable(skillNameOf(dir, roots))}" has a dependency from outside the npm registry (git, a URL or a path), so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
+  const other = [...DEPENDENCY_FIELDS, "overrides"].some((field) =>
+    groupHasOtherSource(manifest[field]),
+  );
+  if (!other) return undefined;
+  return `kit: skill "${name}" has a dependency from outside the npm registry (git, a URL or a path), so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
 }
 
 function safeLockHash(dir: string): string | undefined {

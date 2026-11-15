@@ -277,6 +277,68 @@ describe("watchSkillDeps and where a dependency comes from", () => {
     assert.equal(notes.length, specs.length);
     assert.ok(notes.every((n) => /outside the npm registry/.test(n)));
   });
+});
+
+describe("watchSkillDeps reads a manifest the way npm does", () => {
+  const options = (skills: string) => ({ roots: [skills], cache: join(root(), "c.json") });
+  const manifestIn = (skills: string, name: string, manifest: unknown): void => {
+    const dir = skill(skills, name);
+    writeFileSync(join(dir, "package.json"), JSON.stringify(manifest));
+  };
+
+  it("treats a spec that npm reads as a path as another source, also a bare dot", () => {
+    const skills = root();
+    [".", "..", ".5", "./x", "~/x"].forEach((spec, n) =>
+      manifestIn(skills, `p${n}`, { dependencies: { x: spec } }),
+    );
+    const calls: string[] = [];
+    const notes = watchSkillDeps(options(skills), deps(clean, calls));
+    assert.deepEqual(calls, []);
+    assert.equal(notes.length, 5);
+  });
+
+  it("does not check, and says so, when it cannot read the manifest", () => {
+    const skills = root();
+    const dir = skill(skills, "broken");
+    writeFileSync(join(dir, "package.json"), "{ not json");
+    const calls: string[] = [];
+    const notes = watchSkillDeps(options(skills), deps(clean, calls));
+    assert.deepEqual(calls, []);
+    assert.equal(notes.length, 1);
+    assert.match(notes[0], /package\.json/);
+    assert.match(notes[0], /not checked/);
+  });
+});
+
+describe("watchSkillDeps manifest edge cases", () => {
+  const options = (skills: string) => ({ roots: [skills], cache: join(root(), "c.json") });
+  const manifestIn = (skills: string, name: string, manifest: unknown): void => {
+    const dir = skill(skills, name);
+    writeFileSync(join(dir, "package.json"), JSON.stringify(manifest));
+  };
+
+  it("reads a manifest that starts with a byte order mark, as npm does", () => {
+    const skills = root();
+    const dir = skill(skills, "bom");
+    writeFileSync(
+      join(dir, "package.json"),
+      "\ufeff" + JSON.stringify({ dependencies: { x: "^1.0.0" } }),
+    );
+    const calls: string[] = [];
+    watchSkillDeps(options(skills), deps(clean, calls));
+    assert.equal(calls.length, 1);
+  });
+
+  it("treats overrides nested deeper than the limit as another source", () => {
+    const skills = root();
+    let nested: unknown = "1.0.0";
+    for (let n = 0; n < 40; n++) nested = { a: nested };
+    manifestIn(skills, "deep", { overrides: nested });
+    const calls: string[] = [];
+    const notes = watchSkillDeps(options(skills), deps(clean, calls));
+    assert.deepEqual(calls, []);
+    assert.equal(notes.length, 1);
+  });
 
   it("looks in every dependency field, including peerDependencies and overrides", () => {
     const skills = root();
