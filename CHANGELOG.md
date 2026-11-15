@@ -2,6 +2,16 @@
 
 ### Added
 
+- **The install gate now blocks a bare install of a manifest that git does not track** until every
+  direct dependency has a fresh triage receipt. `npm install`, `npm ci`, `npm update`, `pnpm install`,
+  `yarn` and `bun install` name no package, so the gate used to ignore them. In a repository that was
+  covered by `kit triage check-deps` at commit. A Claude Code skill with its own `package.json`, an
+  unpacked download or a scratch folder has no commit, so its dependencies were fetched untriaged.
+  The block names the missing packages and the command to run. A folder with its own `.npmrc`, `.yarnrc`, `bunfig.toml`, `.pnpmfile.cjs` or a bun lockfile, or a
+  lockfile that resolves from outside the default registry, is refused too, and so is a command that
+  names its directory in more than one way. `--prefix`/`-C`/`--dir`/`--cwd` values are no longer read as
+  packages. See `docs/INSTALL_GATE.md`.
+
 - **`kit hooks context` now watches the npm dependencies that skills carry.** A skill may ship its own
   `package.json` and `node_modules` (`~/.claude/skills/<name>/scripts`), and nothing updates those on
   its own. At session start kit runs `npm audit` and `npm outdated` in each such folder of your own
