@@ -11,6 +11,13 @@
 
 ### Fixed
 
+- **The user-level agent audit no longer reports vendored dependencies as plaintext secrets.** A skill can
+  ship its own `node_modules` (`~/.claude/skills/<name>/scripts`). The secret rules read locale files
+  (`"pass": "..."`) and minified bundles (`key:"..."`) there and failed `kit check` with 21 critical
+  findings on one machine, all vendor code. The secret analyzer now skips files under a `node_modules`
+  path segment. The malware and MCP analyzers still read them, because code the agent runs is the
+  attack surface. A secret in a file you wrote is still reported.
+
 - **Three harness adapters now match their vendor's documented hook contract.**
   - Antigravity's PreToolUse reply needs a stdout `decision` and its docs give exit codes no meaning;
     the gate printed nothing and exited 2. Antigravity's hook now runs `gate-bash --format antigravity`,
@@ -19,7 +26,7 @@
     string); kit read neither, so the gate allowed the call. It now reads both.
   - Augment 1.x renamed its shell tool from `launch-process` to `bash`; the matcher is now
     `bash|launch-process`.
-  Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
+    Found by kit-research `caniuse-agent-gates`, which replays each harness's documented payload.
 - **`kit agent-config` writes Cline's block into `.clinerules/kit.md` when `.clinerules` is a
   folder.** Cline reads `.clinerules` as a file or a folder of rule files, and kit's own Cline gate
   creates the folder (`.clinerules/hooks/`). After that, every `kit agent-config` failed for Cline

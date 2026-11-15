@@ -160,10 +160,21 @@ export function userInstructionFiles(
   return files;
 }
 
+/**
+ * A path inside an installed dependency tree. A skill can ship its own `node_modules`
+ * (`~/.claude/skills/<name>/scripts`), and the secret rules read those files as secrets: a locale
+ * file with `"pass": "..."` or a minified bundle with `key:"..."` is vendor code, not a credential
+ * the user stored. The malware and MCP analyzers still read these files, because code the agent runs
+ * is the attack surface; only the secret analyzer skips them.
+ */
+function isVendored(shown: string): boolean {
+  return shown.split("/").includes("node_modules");
+}
+
 /** One file's rows from the project audit's analyzers. Pure. */
 export function surfaceRows(shown: string, label: string, body: string): SecurityCheckResult[] {
   const rows: SecurityCheckResult[] = [];
-  const secrets = auditConfigSecrets(body);
+  const secrets = isVendored(shown) ? [] : auditConfigSecrets(body);
   if (secrets.length > 0) {
     const kinds = [...new Set(secrets.map((x) => x.label))].join(", ");
     rows.push({
