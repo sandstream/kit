@@ -19,6 +19,33 @@ import {
 } from "./check-hooks.js";
 import { loadConfig } from "./config.js";
 import { resolveConfigPath } from "./cli-shared.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { isReadOnlyMode } from "./read-only-mode.js";
+import { realDeps, watchSkillDeps, type WatchDeps } from "./skill-deps-watch.js";
+
+/**
+ * Lines about npm dependencies that skills carry (`~/.claude/skills/<name>/scripts`). Nothing
+ * updates those on its own, so a session start is the moment to say that one has a known
+ * vulnerability or is a major version behind. `KIT_SKILL_DEPS_WATCH=0` turns it off.
+ */
+export function skillDepsContext(
+  env: NodeJS.ProcessEnv = process.env,
+  deps: WatchDeps = realDeps,
+  home: string = homedir(),
+): string[] {
+  if (env.KIT_SKILL_DEPS_WATCH === "0") return [];
+  // Only the user's own skills. A project's `.claude/skills` comes with a clone, and running npm in
+  // it would follow whatever `.npmrc` the repository ships.
+  return watchSkillDeps(
+    {
+      roots: [join(home, ".claude", "skills")],
+      cache: join(home, ".kit", "skill-deps-watch.json"),
+      readOnly: isReadOnlyMode(),
+    },
+    deps,
+  );
+}
 
 /** The line an agent should read, or null when every declared hook would run. */
 export function hooksContextNote(results: HookCheckResult[]): string | null {
@@ -38,6 +65,11 @@ export function hooksContextNote(results: HookCheckResult[]): string | null {
 
 /** Print the note when there is one. Always true: a session-start hook must never fail. */
 export async function runHooksContext(): Promise<true> {
+  try {
+    for (const note of skillDepsContext()) console.log(note);
+  } catch {
+    // A skill-dependency check that breaks must not break the session.
+  }
   try {
     const config = await loadConfig(resolveConfigPath());
     if (!config.hooks || Object.keys(config.hooks).length === 0 || !isGitRepository()) return true;
