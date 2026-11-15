@@ -47,7 +47,8 @@ It fetches every dependency that `package.json` declares.
 
 - The gate refuses the install when the folder has its own `.npmrc` (it can name another registry) or when the lockfile
   (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`) resolves a package from outside the default
-  registry. `bun.lock` is not read.
+  registry. A folder that holds `.yarnrc`, `.yarnrc.yml`, `bunfig.toml`, `.pnpmfile.cjs`, `bun.lock` or `bun.lockb` is
+  refused too: those steer the install or are not parsed here.
 - It follows one directory flag: `--prefix` and `-C` for npm, `--prefix`, `-C` and `--dir` for pnpm, `--cwd` for yarn and bun.
   More than one, an `NPM_CONFIG_*` assignment or `env -C` blocks the install, because npm and this gate could pick different folders.
   A flag of another program, such as `git -C`, is not read as npm's.

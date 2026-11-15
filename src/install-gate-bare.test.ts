@@ -382,3 +382,51 @@ describe("a bare install that names its directory in more than one way", () => {
     }
   });
 });
+
+describe("a bare install: segments and managers are read the way the shell does", () => {
+  const triaged = (): string => {
+    const dir = project({ dependencies: { "axe-core": "4.10.3" } });
+    receipt(dir, "axe-core");
+    return dir;
+  };
+
+  it("does not take the -C of a program before a single & as the install directory", async () => {
+    const dir = project(skill);
+    const verdict = await decideBashGate("git -C /elsewhere pull & npm install", undefined, dir);
+    assert.equal(verdict.block, true);
+    assert.match(verdict.reason, /bare install/);
+  });
+
+  it("reads the directory flags of a package manager named by path or in quotes", async () => {
+    const dir = triaged();
+    for (const command of [
+      "/usr/bin/npm install --prefix a --prefix b",
+      '"npm" install --prefix a --prefix b',
+      "'/opt/node/bin/npm' install --prefix a --prefix b",
+    ]) {
+      const verdict = await decideBashGate(command, undefined, dir);
+      assert.equal(verdict.block, true, command);
+      assert.match(verdict.reason, /directory/, command);
+    }
+  });
+});
+
+describe("a bare install where another config file or lockfile can steer the install", () => {
+  for (const file of [
+    ".yarnrc",
+    ".yarnrc.yml",
+    "bunfig.toml",
+    ".pnpmfile.cjs",
+    "bun.lock",
+    "bun.lockb",
+  ]) {
+    it(`is blocked when the folder holds ${file}, even with every receipt present`, async () => {
+      const dir = project({ dependencies: { "axe-core": "4.10.3" } });
+      receipt(dir, "axe-core");
+      writeFileSync(join(dir, file), "x\n");
+      const verdict = await decideBashGate("npm install", undefined, dir);
+      assert.equal(verdict.block, true);
+      assert.ok(verdict.reason.includes(file), verdict.reason);
+    });
+  }
+});

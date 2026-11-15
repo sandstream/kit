@@ -31,6 +31,8 @@ function literalPath(token: string, base: string): string | undefined {
   return resolve(base, home);
 }
 
+// A package manager as a command word: bare, by path or in quotes (`/usr/bin/npm`, `"npm"`, `npm.cmd`).
+const MANAGER = /(?:^|[\s/\\"'])(?:npm|pnpm|yarn|bun)(?:\.cmd|\.exe)?(?=[\s"']|$)/;
 const DIRECTORY_FLAG = /(?:^|\s)(?:--prefix|-C|--dir|--cwd)(?:=|\s+)("[^"]*"|'[^']*'|\S+)/g;
 // An environment assignment or `env -C` that moves npm to a directory this module cannot see.
 const MOVES_NPM =
@@ -39,8 +41,8 @@ const MOVES_NPM =
 /** The directory flags of the package-manager segments only: `git -C x` is not npm's directory. */
 function directoryFlags(command: string): string[] {
   return command
-    .split(/&&|\|\||[;|\n]/)
-    .filter((segment) => /(?:^|\s)(?:npm|pnpm|yarn|bun)(?:\s|$)/.test(segment))
+    .split(/&|\|\||[;|\n]/)
+    .filter((segment) => MANAGER.test(segment))
     .flatMap((segment) => [...segment.matchAll(DIRECTORY_FLAG)].map((m) => m[1]));
 }
 
@@ -137,6 +139,17 @@ function refusal(dir: string, detail: string): BareVerdict {
   };
 }
 
+// Config a package manager reads from the folder, and lockfiles this module does not parse.
+const STEERING_FILES = [
+  ".npmrc",
+  ".yarnrc",
+  ".yarnrc.yml",
+  "bunfig.toml",
+  ".pnpmfile.cjs",
+  "bun.lock",
+  "bun.lockb",
+];
+
 const DEFAULT_REGISTRIES = ["https://registry.npmjs.org/", "https://registry.yarnpkg.com/"];
 const fromDefaultRegistry = (url: string): boolean =>
   DEFAULT_REGISTRIES.some((prefix) => url.startsWith(prefix));
@@ -204,8 +217,12 @@ export function checkBareInstall(command: string, cwd: string): BareVerdict {
   }
   // A folder's own .npmrc can name another registry or scope registry, and the lockfile can pin a
   // package to a URL elsewhere. Receipts are for names on the default registry; neither is covered.
-  if (existsSync(join(dir, ".npmrc"))) {
-    return refusal(dir, "the folder has its own .npmrc, which can redirect the registry");
+  const steering = STEERING_FILES.find((name) => existsSync(join(dir, name)));
+  if (steering) {
+    return refusal(
+      dir,
+      `the folder holds ${steering}, which can redirect the install or is not read`,
+    );
   }
   const lockProblem = lockfileSourceProblem(dir);
   if (lockProblem) return refusal(dir, `the lockfile cannot be trusted: ${lockProblem}`);
