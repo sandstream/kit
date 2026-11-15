@@ -39,6 +39,25 @@ describe("kit check runs the agent-config audit", () => {
     assert.ok(rows.some((r) => r.status === "fail" && r.name.includes("~/.claude/settings.json")));
   });
 
+  it("fails a planted hook in ~/.codex/hooks.json, which Codex runs in every project", async (t) => {
+    // Was: only ~/.claude/settings.json was read. Codex's user-level hooks.json has the same
+    // shape and runs in every project too; agent managers such as Orca write their hook there.
+    const { root, home } = dirs(t);
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".codex", "hooks.json"), HOOK);
+    const rows = await checkAgentConfig(root, home, {});
+    assert.ok(rows.some((r) => r.status === "fail" && r.name.includes("~/.codex/hooks.json")));
+  });
+
+  it("reads hooks.json from $CODEX_HOME when it is set", async (t) => {
+    const { root, home } = dirs(t);
+    const codexHome = join(home, "elsewhere");
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, "hooks.json"), HOOK);
+    const rows = await checkAgentConfig(root, home, { CODEX_HOME: codexHome });
+    assert.ok(rows.some((r) => r.status === "fail" && r.name.includes("$CODEX_HOME/hooks.json")));
+  });
+
   it("passes a clean project", async (t) => {
     const { root, home } = dirs(t);
     const rows = await checkAgentConfig(root, home, {});
