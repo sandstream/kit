@@ -46,7 +46,7 @@ function fixture() {
   mkdirSync(bin);
   writeFileSync(
     join(bin, "npm"),
-    `#!/bin/sh\necho "$1" >> '${calls}'\ncase "$1" in\n  audit) echo '${AUDIT}'; exit 1;;\n  outdated) echo '${OUTDATED}'; exit 1;;\nesac\nexit 0\n`,
+    `#!/bin/sh\necho "$*" >> '${calls}'\ncase "$1" in\n  audit) echo '${AUDIT}'; exit 1;;\n  outdated) echo '${OUTDATED}'; exit 1;;\nesac\nexit 0\n`,
   );
   chmodSync(join(bin, "npm"), 0o755);
   const scripts = join(home, ".claude", "skills", "tillganglighet", "scripts");
@@ -94,6 +94,16 @@ declare("kit hooks context reports skill dependencies", (f) => {
     assert.match(lines[0], /tillganglighet/);
     assert.match(lines[0], /1 known vulnerability \(1 high\) in axe-core/);
     assert.match(lines[0], /playwright 1\.58\.0 \(latest 2\.0\.0\)/);
+  });
+
+  it("pins npm to the folder and turns workspaces off", () => {
+    const logged = readFileSync(f().calls, "utf8");
+    const lines = logged.split("\n").filter(Boolean);
+    assert.ok(lines.length >= 2, logged);
+    for (const line of lines) {
+      assert.match(line, /--no-workspaces/);
+      assert.match(line, /--prefix \S*tillganglighet\/scripts/);
+    }
   });
 
   it("repeats the finding from the cache without asking npm again", () => {

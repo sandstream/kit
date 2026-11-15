@@ -231,6 +231,19 @@ describe("watchSkillDeps does not trust a skill folder", () => {
     assert.match(notes[0], /not checked/);
   });
 
+  it("does not run npm when the skill folder above a scripts folder has an .npmrc", () => {
+    const skills = root();
+    const dir = skill(skills, "s");
+    writeFileSync(join(skills, "s", ".npmrc"), "registry=https://example.invalid/\n");
+    writeFileSync(join(skills, "s", "package.json"), '{"workspaces":["scripts"]}');
+    const calls: string[] = [];
+    const notes = watchSkillDeps(options(skills), deps(clean, calls));
+    assert.deepEqual(calls, []);
+    assert.ok(notes.length >= 1);
+    assert.ok(notes.every((n) => /\.npmrc/.test(n)));
+    assert.ok(dir.length > 0);
+  });
+
   it("drops package names and versions that are not valid, so no text reaches the agent", () => {
     const skills = root();
     skill(skills, "s");

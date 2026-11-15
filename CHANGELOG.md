@@ -7,8 +7,9 @@
   its own. At session start kit runs `npm audit` and `npm outdated` in each such folder of your own
   user skills and prints one plain line per skill with a known vulnerability or a dependency a major
   version behind. A project's `.claude/skills` is not scanned: it comes with a clone, and npm would
-  follow whatever `.npmrc` the repository ships. A folder with its own `.npmrc` is not checked either,
-  and the line says so. npm runs without tokens, keys or npm config in its environment, and only
+  follow whatever `.npmrc` the repository ships. A folder with its own `.npmrc`, or below a skill
+  folder that has one, is not checked either, and the line says so. npm is pinned to the folder with
+  `--prefix` and `--no-workspaces`. npm runs without tokens, keys or npm config in its environment, and only
   valid package names and versions reach the line. It is silent when all is well or when offline,
   asks the network at most once a day per skill (cached in `~/.kit/skill-deps-watch.json` by lockfile
   hash, never after a failed check), stops after a 15-second budget, and only reads: it never

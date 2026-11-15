@@ -177,10 +177,31 @@ function describe(name: string, dir: string, r: SkillDepsCheck): string | undefi
   );
 }
 
+/** The skill folder itself: the root plus the first path segment below it. */
+function skillFolderOf(dir: string, roots: string[]): string {
+  for (const root of roots) {
+    const rel = relative(root, dir);
+    if (!rel.startsWith("..") && rel !== "") return join(root, rel.split(sep)[0]);
+  }
+  return dir;
+}
+
+/** Every folder from `dir` up to and including its skill folder. npm may take an ancestor as the
+ *  project root (a `workspaces` entry does that), and then reads that ancestor's `.npmrc`. */
+function foldersUpToSkill(dir: string, roots: string[]): string[] {
+  const top = skillFolderOf(dir, roots);
+  const folders = [dir];
+  for (let at = dir; at !== top && dirname(at) !== at;) {
+    at = dirname(at);
+    folders.push(at);
+  }
+  return folders;
+}
+
 function npmrcNote(dir: string, roots: string[]): string | undefined {
   // A folder's own .npmrc can name another registry or read a token from the environment, and npm
-  // would follow it. Do not run npm there.
-  if (!existsSync(join(dir, ".npmrc"))) return undefined;
+  // would follow it. Do not run npm there, nor below a skill folder that has one.
+  if (!foldersUpToSkill(dir, roots).some((f) => existsSync(join(f, ".npmrc")))) return undefined;
   return `kit: skill "${printable(skillNameOf(dir, roots))}" has its own .npmrc, so its npm dependencies are not checked. Check them by hand with \`kit triage npm\`.`;
 }
 
@@ -256,12 +277,17 @@ export function watchSkillDeps(options: WatchOptions, deps: WatchDeps): string[]
 
 const CHECK_TIMEOUT_MS = 8000;
 
+/** Run npm in exactly this folder: no workspace root above it, no other project prefix. */
+function pinnedTo(dir: string): string[] {
+  return ["--no-workspaces", "--prefix", dir];
+}
+
 function majorOf(version: string): number {
   return Number.parseInt(version.split(".")[0] ?? "", 10);
 }
 
 function outdatedMajors(dir: string): Behind[] {
-  const r = spawnSync("npm", ["outdated", "--json"], {
+  const r = spawnSync("npm", ["outdated", "--json", ...pinnedTo(dir)], {
     cwd: dir,
     encoding: "utf8",
     timeout: CHECK_TIMEOUT_MS,
@@ -291,7 +317,7 @@ function outdatedMajors(dir: string): Behind[] {
 export function checkWithNpm(dir: string): SkillDepsCheck {
   const outcome = runAudit(
     dir,
-    { manager: "npm", command: ["npm", "audit", "--json"] },
+    { manager: "npm", command: ["npm", "audit", "--json", ...pinnedTo(dir)] },
     CHECK_TIMEOUT_MS,
   );
   if (outcome.error) throw new Error(outcome.error);
