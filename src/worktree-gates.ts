@@ -10,12 +10,13 @@
  * This installs them when the worktree is created (the `post-checkout` hook calls it), and only
  * mirrors a main checkout that already has them: it never imposes gates on a project that chose none.
  */
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { gateLiveness, gateMarkerPath, installAllInstallGates } from "./agent-config.js";
 import { getCanonicalProjectRoot } from "./memory/canonical-root.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
+import { isReadOnlyMode } from "./read-only-mode.js";
 
 export type WorktreeGatesOutcome =
   "installed" | "already-gated" | "not-a-worktree" | "main-not-gated" | "failed";
@@ -60,6 +61,11 @@ export async function ensureWorktreeGates(
   }
   if (wired(here)) return { outcome: "already-gated", detail: "the gates are already wired here" };
   try {
+    // The Claude Code installers skip a checkout with neither `.claude/` nor `CLAUDE.md`. The main
+    // checkout has `.claude/` (the marker above lives there), but both are often untracked, so a new
+    // worktree had neither and was left ungated while git printed "not wired here" — in a tool that
+    // creates a worktree per agent, nobody reads that line. Mirror the directory the gates belong in.
+    if (!isReadOnlyMode()) mkdirSync(resolve(here, ".claude"), { recursive: true });
     await install(here);
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err);

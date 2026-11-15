@@ -65,7 +65,7 @@ interface Repo {
   wt: string;
 }
 
-function repo(gatedMain: boolean): Repo {
+function repo(gatedMain: boolean, opts: { trackClaudeMd?: boolean } = {}): Repo {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-wt-gates-")));
   const main = join(root, "main");
   const wt = join(root, "wt");
@@ -73,7 +73,7 @@ function repo(gatedMain: boolean): Repo {
   mkdirSync(join(main, ".claude"), { recursive: true });
   writeFileSync(join(main, "CLAUDE.md"), "# project\n");
   writeFileSync(join(main, ".gitignore"), ".claude/\n");
-  git(main, "add", "CLAUDE.md", ".gitignore");
+  git(main, "add", ...(opts.trackClaudeMd === false ? [] : ["CLAUDE.md"]), ".gitignore");
   git(main, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-qm", "init");
   if (gatedMain) {
     markGatesInstalled(main);
@@ -94,6 +94,24 @@ describe("ensureWorktreeGates", () => {
       assert.equal(live.installGate, true);
       assert.equal(live.envGate, true);
       assert.equal(live.everInstalled, true);
+    } finally {
+      rmTemp(r.root);
+    }
+  });
+
+  it("wires the gates when neither `.claude/` nor CLAUDE.md is tracked", async () => {
+    // Was: the installers saw no Claude Code project in the new worktree and skipped, so the
+    // worktree stayed ungated while the main checkout was gated (measured with Orca, which
+    // starts every agent in a new worktree).
+    const r = repo(true, { trackClaudeMd: false });
+    try {
+      await installGates(r.main);
+      assert.equal(existsSync(join(r.wt, "CLAUDE.md")), false, "precondition: nothing tracked");
+      const got = await ensureWorktreeGates(r.wt, installGates);
+      assert.equal(got.outcome, "installed", got.detail);
+      const live = gateLiveness(r.wt);
+      assert.equal(live.installGate, true);
+      assert.equal(live.envGate, true);
     } finally {
       rmTemp(r.root);
     }

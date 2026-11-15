@@ -22,12 +22,25 @@ function why(update: Update): string {
     : "no newer bumblebee release exists upstream, and upstream main may hold newer entries this release cannot load";
 }
 
+/**
+ * What a clean scan covered. The default `baseline` profile reads this machine's global and user
+ * package roots and agent configs, never the repository: run in a project with no manifest at all,
+ * it still reported "no known exposures (86 packages)", which reads as a verdict on the project.
+ */
+export function scannedHead(packagesScanned: number, profile: string): string {
+  if (profile === "baseline") {
+    return `no known exposures in ${packagesScanned} packages on this machine (baseline profile: global and user package roots and agent configs, not this repository's dependencies; KIT_BUMBLEBEE_PROFILE=project with KIT_BUMBLEBEE_ROOTS=. scans the repository)`;
+  }
+  return `no known exposures (${packagesScanned} packages, profile=${profile})`;
+}
+
 export function staleCatalogDetail(
   packagesScanned: number,
   ageDays: number,
   update: Update,
+  profile = "baseline",
 ): string {
-  const head = `no known exposures (${packagesScanned} packages)`;
+  const head = scannedHead(packagesScanned, profile);
   if (ageDays <= STALE_AFTER_DAYS) {
     return `${head}; note: threat-intel catalogs are ${ageDays} days old (advisory, not gated); ${why(update)}`;
   }
