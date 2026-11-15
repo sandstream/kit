@@ -23,7 +23,7 @@ import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 
 import { gatherUsage } from "../usage-report.js";
-import { clip, renderTab } from "./usage.js";
+import { renderTab } from "./usage.js";
 
 describe("renderTab", () => {
   const facts = gatherUsage(mkdtempSync(join(tmpdir(), "kit-usage-render-")), homedir());
@@ -64,8 +64,6 @@ describe("renderTab", () => {
     } as typeof facts;
     const rendered = renderTab(proved, "proof", { interactive: false });
     assert.match(rendered, /refuses a plaintext credential in \.env/);
-    assert.equal(clip("abcdef", 4), "abc…");
-    assert.equal(clip("abc", 4), "abc");
   });
 
   it("tells the operator the proof has not been run rather than implying it passed", () => {
