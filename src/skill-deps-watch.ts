@@ -215,20 +215,21 @@ function safeLockHash(dir: string): string | undefined {
 
 type Looked = { result: SkillDepsCheck; fresh: boolean } | "over-budget" | "failed";
 
+interface LookupContext {
+  cache: Cache;
+  deps: WatchDeps;
+  started: number;
+  budget: number;
+}
+
 /** A cached result that is under a day old and matches the lockfile, else a new check if time allows. */
-function lookup(
-  cache: Cache,
-  dir: string,
-  hash: string,
-  deps: WatchDeps,
-  started: number,
-  budget: number,
-): Looked {
+function lookup(ctx: LookupContext, dir: string, hash: string): Looked {
+  const { cache, deps } = ctx;
   const hit = cache[dir];
   if (hit && hit.lockHash === hash && deps.now() < hit.checkedAt + DAY_MS) {
     return { result: hit.result, fresh: false };
   }
-  if (deps.now() - started >= budget) return "over-budget";
+  if (deps.now() - ctx.started >= ctx.budget) return "over-budget";
   try {
     return { result: deps.check(dir), fresh: true };
   } catch {
@@ -252,7 +253,7 @@ export function watchSkillDeps(options: WatchOptions, deps: WatchDeps): string[]
     }
     const hash = safeLockHash(dir);
     if (hash === undefined) continue;
-    const got = lookup(cache, dir, hash, deps, started, budget);
+    const got = lookup({ cache, deps, started, budget }, dir, hash);
     if (got === "over-budget") {
       skipped += 1;
       continue;

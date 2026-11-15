@@ -270,16 +270,23 @@ describe("watchSkillDeps does not trust a skill folder", () => {
     assert.doesNotMatch(note, /\n/);
   });
 
-  it("keeps a skill folder name with control characters out of the note", () => {
-    const skills = root();
-    skill(skills, "evil\nname");
-    const bad: SkillDepsCheck = {
-      vulnerabilities: [{ package: "x", severity: "high", title: "t" }],
-      majorsBehind: [],
-    };
-    const [note] = watchSkillDeps(options(skills), deps(bad));
-    assert.doesNotMatch(note, /\n|\u001b/);
-  });
+  it(
+    "keeps a skill folder name with control characters out of the note",
+    {
+      skip:
+        process.platform === "win32" && "Windows cannot create a folder whose name has a newline",
+    },
+    () => {
+      const skills = root();
+      skill(skills, "evil\nname");
+      const bad: SkillDepsCheck = {
+        vulnerabilities: [{ package: "x", severity: "high", title: "t" }],
+        majorsBehind: [],
+      };
+      const [note] = watchSkillDeps(options(skills), deps(bad));
+      assert.doesNotMatch(note, /\n|\u001b/);
+    },
+  );
 
   it("counts an unknown severity as info instead of printing it", () => {
     const skills = root();
