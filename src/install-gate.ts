@@ -33,6 +33,7 @@ import {
 import {
   binBase,
   hiddenVerb,
+  isDirectoryValueFlag,
   isGlobalInstall,
   PREFIX_BINS,
   skipWrapperArgs,
@@ -757,7 +758,7 @@ function skipsValue(tok: string, pipFamily: boolean, directoryFlags: boolean): b
     SOURCE_FLAG_RE.test(tok) ||
     VALUE_PKG_FLAG_RE.test(tok) ||
     (pipFamily && REQUIREMENT_FLAG_RE.test(tok)) ||
-    (directoryFlags && (tok === "--prefix" || tok === "-C"))
+    (directoryFlags && isDirectoryValueFlag(tok))
   );
 }
 

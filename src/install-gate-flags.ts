@@ -285,3 +285,8 @@ export function hiddenVerb(
 export function isGlobalInstall(tokens: string[]): boolean {
   return tokens.some((t) => t === "-g" || t === "--global" || t === "global");
 }
+
+/** npm and pnpm flags whose next token names the install directory, not a package. */
+export function isDirectoryValueFlag(token: string): boolean {
+  return token === "--prefix" || token === "-C";
+}
