@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **The install gate now reads a Windows launcher name as the package manager.** `npm.cmd install left-pad`, `pnpm.exe add x`, `npx.cmd x` and `NPM.CMD i x` were not recognised as installs, so they passed untriaged, and a bare `npm.cmd install` was not checked either. The `.cmd`, `.exe`, `.bat` and `.ps1` suffix and the letter case are ignored when the binary is matched. A package whose name ends in `.cmd` is still a package.
+
 ### Added
 
 - **The install gate now blocks a bare install of a manifest that git does not track** until every
