@@ -16,12 +16,20 @@ work merges after the release-prep commit, that work waits for the next version 
 than shipping under a version whose changelog does not mention it.
 
 ```bash
-# 1. Prepare: bump package.json, write the CHANGELOG section, merge that PR.
+# 1. Prepare: bump package.json, then assemble the changelog fragments and name the section:
+node scripts/changelog-fragments.mjs assemble   # merges changes/*.md into [Unreleased]
+#    rename `## [Unreleased]` to `## [X.Y.Z] - <date>`, add a fresh empty `## [Unreleased]`,
+#    and merge that PR.
 # 2. Tag the prep commit itself (signed — the job verifies the signature):
 git tag -s vX.Y.Z <prep-commit> -m "vX.Y.Z: <one line>"
 git push origin vX.Y.Z
 # 3. Approve the `npm-publish` environment when GitHub asks.
 ```
+
+Pull requests do not edit `CHANGELOG.md`. Each adds a fragment, `changes/<name>.md`, written
+exactly as its entry should appear under `## [Unreleased]` ([`changes/README.md`](../changes/README.md)).
+Fragments never share lines, so merging one pull request does not give the others a CHANGELOG
+conflict. `src/changelog-fragments.test.ts` fails CI on a malformed fragment.
 
 Every release PR also updates, in the same PR:
 
@@ -39,6 +47,8 @@ Each of these fails the release rather than shipping something unverifiable:
 - the tag does not match `package.json`'s version;
 - `CHANGELOG.md` has no section for that version (checked **before** the publish, so an
   undocumented release aborts while aborting is still free);
+- a changelog fragment under `changes/` was not assembled, so its entry would be missing from
+  the release notes;
 - the tag is unsigned, or signed by a key whose fingerprint is not the one pinned in the
   `MAINTAINER_KEY_FPR` secret (the in-repo public key alone is not trusted — a tag pusher
   could swap it);
