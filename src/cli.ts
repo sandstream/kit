@@ -635,7 +635,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "stable",
     // Not MCP-exposed: this is a boxed terminal view for a human, and every exposed tool costs
     // standing context in every agent session. The frozen ten stay ten.
-    help: "Tabbed report of what kit has recorded — coverage with its denominator, refusals, memory, triage — plus --prove, which runs the floor against inputs it must refuse",
+    help: "Tabbed report of what kit has recorded — coverage with its denominator, refusals, memory, triage — plus --prove, which runs the floor against inputs it must refuse, and --markdown for a phone or a chat",
   },
   check: {
     handler: cmdCheck,

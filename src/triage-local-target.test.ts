@@ -8,7 +8,7 @@
  * These run the real triage.py. Local-path refusals happen before any request, so no server
  * is needed; `KIT_GITHUB_API` points at a closed port so a regression cannot reach GitHub.
  */
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -17,6 +17,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { warmPython } from "./python-warmup.test-support.js";
+
+// The first python3 start of a cold Windows job can outlast the 30 s per-run limit.
+before(() => warmPython());
 
 const exec = promisify(execFile);
 const TRIAGE_PY = resolve(

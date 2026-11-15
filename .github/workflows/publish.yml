@@ -135,6 +135,11 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           VERSION="${TAG#v}"
+          # A fragment left under changes/ is an entry missing from these notes.
+          if ! node scripts/changelog-fragments.mjs check --none-left; then
+            echo "::error::changelog fragments under changes/ were not assembled into CHANGELOG.md for $VERSION. Run 'node scripts/changelog-fragments.mjs assemble', then re-tag."
+            exit 1
+          fi
           if ! node scripts/changelog-section.mjs "$VERSION" > /tmp/release-notes.md; then
             echo "::error::CHANGELOG.md has no section for $VERSION — refusing to publish an undocumented release. Add a '## [$VERSION]' section, then re-tag."
             exit 1
