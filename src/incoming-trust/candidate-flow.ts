@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { bindIncomingCandidate, type IncomingCandidate } from "./candidate.js";
 import { fetchAndInspectNpmArtifact, type NpmArtifactResult } from "./npm-artifact.js";
@@ -54,12 +54,18 @@ export type IncomingCandidateFlow =
 
 function readInput(tree: string, name: string): Buffer | "missing" | "unreadable" {
   const path = join(tree, name);
+  let fd: number | undefined;
   try {
-    const info = lstatSync(path);
+    // One descriptor for the check and the read, so the file cannot be swapped in between. A link is
+    // refused by the open itself where the platform supports it.
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const info = fstatSync(fd);
     if (!info.isFile() || info.size > MAX_INPUT_BYTES) return "unreadable";
-    return readFileSync(path);
+    return readFileSync(fd);
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable";
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 

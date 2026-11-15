@@ -47,27 +47,35 @@ it("verification refuses public copied permissions and external hard links", pos
   }
 });
 
-it("failed capture preserves a replacement destination it does not own", (t) => {
-  const f = snapshotFixture();
-  try {
-    fs.writeFileSync(join(f.source, "input"), "source bytes");
-    t.mock.method(fs, "readSync", () => {
-      fs.renameSync(f.destination, join(f.root, "moved-capture"));
-      fs.mkdirSync(f.destination, { mode: 0o700 });
-      fs.writeFileSync(join(f.destination, "keep"), "replacement bytes");
-      throw new Error("expected read interruption");
-    });
-    syncBuiltinESMExports();
-    assert.throws(
-      () => captureIncomingSnapshot(f.source, f.destination),
-      /expected read interruption/,
-    );
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
-    assert.equal(fs.readFileSync(join(f.destination, "keep"), "utf8"), "replacement bytes");
-  } finally {
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
-    f.cleanup();
-  }
-});
+it(
+  "failed capture preserves a replacement destination it does not own",
+  {
+    skip:
+      process.platform === "win32" &&
+      "the test renames a directory that the capture still holds open, which Windows refuses (EPERM); unverified on win32",
+  },
+  (t) => {
+    const f = snapshotFixture();
+    try {
+      fs.writeFileSync(join(f.source, "input"), "source bytes");
+      t.mock.method(fs, "readSync", () => {
+        fs.renameSync(f.destination, join(f.root, "moved-capture"));
+        fs.mkdirSync(f.destination, { mode: 0o700 });
+        fs.writeFileSync(join(f.destination, "keep"), "replacement bytes");
+        throw new Error("expected read interruption");
+      });
+      syncBuiltinESMExports();
+      assert.throws(
+        () => captureIncomingSnapshot(f.source, f.destination),
+        /expected read interruption/,
+      );
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+      assert.equal(fs.readFileSync(join(f.destination, "keep"), "utf8"), "replacement bytes");
+    } finally {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+      f.cleanup();
+    }
+  },
+);

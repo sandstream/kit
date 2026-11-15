@@ -12,6 +12,7 @@ import {
 import { join } from "node:path";
 import { userInfo } from "node:os";
 import { it } from "node:test";
+import { secureDirStrict } from "../utils/secure-perms.js";
 import { IncomingTrustStore } from "./authority-store.js";
 import { storeFixture } from "./authority-store.test-support.js";
 
@@ -33,10 +34,22 @@ for (const kind of ["inside", "contains"] as const) {
   it(`refuses an authority directory that ${kind === "inside" ? "is inside" : "contains"} the repository`, () => {
     const f = storeFixture();
     try {
-      const directory = kind === "inside" ? join(f.repository, "state") : f.root;
+      // The store checks that the parent of the requested directory is controlled before it compares
+      // paths, and a system temp directory often is not (group-writable on Linux, inherited ACL on
+      // Windows). Build the layout under the fixture's own controlled root.
+      let repository = f.repository;
+      let directory = join(f.repository, "state");
+      if (kind === "inside") secureDirStrict(f.repository);
+      else {
+        directory = join(f.root, "outer");
+        mkdirSync(directory);
+        secureDirStrict(directory);
+        repository = join(directory, "repository");
+        mkdirSync(repository);
+      }
       const store = new IncomingTrustStore(directory);
       assert.throws(
-        () => store.update(f.repository, { type: "enroll", authority: f.proof.authority }),
+        () => store.update(repository, { type: "enroll", authority: f.proof.authority }),
         /outside the repository/,
       );
       assert.equal(existsSync(join(directory, "authority.sqlite")), false);

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { it } from "node:test";
+import { secureDirStrict } from "../utils/secure-perms.js";
 import { captureIncomingSnapshot, verifyIncomingSnapshot } from "./snapshot.js";
 import { snapshotFixture } from "./snapshot.test-support.js";
 
@@ -44,6 +45,9 @@ it("refuses existing destinations and overlap without removing their contents", 
     fs.writeFileSync(join(f.destination, "keep"), "existing content");
     assert.throws(() => captureIncomingSnapshot(f.source, f.destination), /destination-exists/);
     assert.equal(fs.readFileSync(join(f.destination, "keep"), "utf8"), "existing content");
+    // The destination's parent must be controlled before overlap is judged; on Windows a plain
+    // temp folder inherits an ACL that is not.
+    secureDirStrict(f.source);
     assert.throws(
       () => captureIncomingSnapshot(f.source, join(f.source, "captured")),
       /overlapping-paths/,

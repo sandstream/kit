@@ -181,7 +181,7 @@ describe("bindIncomingCandidate sources and ordering", () => {
       });
       assert.equal(result.status, "refused", source);
       if (result.status === "refused")
-        assert.match(result.reason, /^artifact-source-unsupported|inventory-incomplete$/);
+        assert.match(result.reason, /^(?:artifact-source-unsupported|inventory-incomplete)$/);
     }
     const inventory = lock({ "node_modules/bund": { version: "1.0.0", inBundle: true } });
     const result = bindIncomingCandidate({
