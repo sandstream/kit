@@ -11,7 +11,7 @@
   approval survives. `recover` moves a damaged store aside and never deletes it. The archive inspection refuses entries whose
   names collide after full Unicode case folding or normalization (including the long s and compatibility forms), so a macOS or Windows extraction cannot
   overwrite one entry with another. See docs/INCOMING_TRUST.md. This adds no launch
-  lock and no workload isolation: nothing runs the candidate yet. Native Windows and macOS are
+  lock and no workload isolation: nothing runs the candidate yet. `stage` records the checks kit computed and an approval must carry them unchanged; a rejection or a signer rotation no longer makes the voided candidate the baseline; a database locked by another process is not treated as damaged. Native Windows and macOS are
   unverified.
 
 - **`kit hooks context` now watches the npm dependencies that skills carry.** A skill may ship its own

@@ -7,6 +7,7 @@ function accepted(f: ReturnType<typeof storeFixture>) {
   f.store.update(f.repository, { type: "enroll", authority: f.proof.authority });
   const staged = f.store.update(f.repository, {
     type: "stage",
+    evidence: [],
     expectedGeneration: 1,
     expectedPhase: "pending",
     candidateDigest: "c".repeat(64),
@@ -30,6 +31,11 @@ describe("authority key rotation", () => {
       assert.equal(state.authority.generation, before.authority.generation + 1);
       assert.equal(state.phase, "pending");
       assert.equal(state.acceptance, null);
+      assert.equal(
+        state.authority.baselineDigest,
+        before.authority.baselineDigest,
+        "a rotation voids the approval and must not promote the candidate it voids",
+      );
       assert.deepEqual(f.store.read(f.repository), state);
       assert.deepEqual(f.store.decide(f.repository, "c".repeat(64), f.proof.now), {
         allowed: false,

@@ -31,6 +31,7 @@ for (const [kind, reason] of invalidProofs) {
       f.store.update(f.repository, { type: "enroll", authority: f.proof.authority });
       const staged = f.store.update(f.repository, {
         type: "stage",
+        evidence: [],
         expectedGeneration: 1,
         expectedPhase: "pending",
         candidateDigest: "c".repeat(64),
@@ -55,6 +56,7 @@ it("rechecks expiry and validates the exact input when a stored approval is used
     f.store.update(f.repository, { type: "enroll", authority: f.proof.authority });
     const staged = f.store.update(f.repository, {
       type: "stage",
+      evidence: [],
       expectedGeneration: 1,
       expectedPhase: "pending",
       candidateDigest: "c".repeat(64),

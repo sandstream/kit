@@ -28,7 +28,8 @@ Every mutation after enrollment supplies the observed generation and phase. Both
 | `reject` | Current generation.                                              | Advances the generation and removes approval. An existing rejection remains unchanged.             |
 | `retry`  | Rejected state and current generation.                           | Advances the generation and returns to pending. Fresh evidence is required.                        |
 
-When an accepted state changes, its candidate becomes the next baseline.
+When a new candidate replaces an accepted one, the accepted candidate becomes the next baseline.
+A `reject` or `rotate` voids the approval and leaves the baseline where it was.
 A repeated `stage` never clears a rejection. Enrollment never replaces existing authority.
 SQLite transactions serialize state changes. Acceptance changes phase without changing the signed candidate generation.
 The phase check prevents an earlier pending writer from replacing that acceptance.

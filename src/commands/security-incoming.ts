@@ -128,7 +128,12 @@ async function stage(inv: Invocation): Promise<boolean> {
     );
     return false;
   }
-  const state = stageCandidate(inv.store, inv.repository, flow.candidate.candidateDigest);
+  const state = stageCandidate(
+    inv.store,
+    inv.repository,
+    flow.candidate.candidateDigest,
+    flow.candidate.checks,
+  );
   return show(inv, describeState(state), `Staged: ${summary(state)}`);
 }
 

@@ -2,6 +2,7 @@ import type { IncomingTrustAction, IncomingTrustState } from "./authority-store.
 import {
   incomingApproval,
   incomingAuthority,
+  incomingCheck,
   incomingTimestamp,
   incomingVerification,
 } from "./decision-schema.js";
@@ -9,6 +10,7 @@ import { incomingAuthorityKeys } from "./decision-protocol.js";
 import {
   decideIncomingExecution,
   type IncomingAuthority,
+  type IncomingCheck,
   type IncomingContext,
 } from "./decision.js";
 
@@ -46,7 +48,7 @@ export function validateAction(action: IncomingTrustAction): void {
     throw new Error("Incoming trust: invalid-action");
   const keys = {
     enroll: ["type", "authority"],
-    stage: ["type", "expectedGeneration", "expectedPhase", "candidateDigest"],
+    stage: ["type", "expectedGeneration", "expectedPhase", "candidateDigest", "evidence"],
     accept: ["type", "expectedGeneration", "expectedPhase", "verification", "approval", "now"],
     reject: ["type", "expectedGeneration", "expectedPhase"],
     retry: ["type", "expectedGeneration", "expectedPhase"],
@@ -70,7 +72,10 @@ export function validateAction(action: IncomingTrustAction): void {
 function validateChange(action: Exclude<IncomingTrustAction, { type: "enroll" }>): void {
   if (!["pending", "accepted", "rejected"].includes(action.expectedPhase))
     throw new Error("Incoming trust: invalid-action");
-  if (action.type === "stage" && !validDigest(action.candidateDigest))
+  if (
+    action.type === "stage" &&
+    (!validDigest(action.candidateDigest) || !validEvidence(action.evidence))
+  )
     throw new Error("Incoming trust: invalid-action");
   if (
     action.type === "accept" &&
@@ -81,11 +86,35 @@ function validateChange(action: Exclude<IncomingTrustAction, { type: "enroll" }>
     throw new Error("Incoming trust: invalid-action");
 }
 
-function advance(state: IncomingTrustState, phase: "pending" | "rejected"): IncomingTrustState {
+export function validEvidence(value: unknown): value is IncomingCheck[] {
+  return Array.isArray(value) && value.length <= 128 && value.every(incomingCheck);
+}
+
+/** Every check kit computed must appear in the report unchanged. Extra operator checks may follow. */
+export function carriesEvidence(evidence: IncomingCheck[], checks: IncomingCheck[]): boolean {
+  return evidence.every((kit) =>
+    checks.some(
+      (c) => c.id === kit.id && c.status === kit.status && c.evidenceDigest === kit.evidenceDigest,
+    ),
+  );
+}
+
+/**
+ * `replaced` is true only when a new candidate takes the place of an accepted one. Then the accepted
+ * candidate is the baseline. A rejection or a signer rotation voids the approval, so it must not
+ * promote the candidate it voids.
+ */
+function advance(
+  state: IncomingTrustState,
+  phase: "pending" | "rejected",
+  replaced = false,
+): IncomingTrustState {
   const generation = state.authority.generation + 1;
   if (!Number.isSafeInteger(generation)) throw new Error("Incoming trust: generation-exhausted");
   const baselineDigest =
-    state.phase === "accepted" ? state.candidateDigest! : state.authority.baselineDigest;
+    replaced && state.phase === "accepted"
+      ? state.candidateDigest!
+      : state.authority.baselineDigest;
   return {
     ...state,
     phase,
@@ -117,10 +146,16 @@ export function transition(
   if (action.type === "stage") {
     return action.candidateDigest === state.candidateDigest
       ? state
-      : { ...advance(state, "pending"), candidateDigest: action.candidateDigest };
+      : {
+          ...advance(state, "pending", true),
+          candidateDigest: action.candidateDigest,
+          evidence: action.evidence,
+        };
   }
   if (action.type === "accept") {
     if (state.phase !== "pending") throw new Error("Incoming trust: not-pending");
+    if (!carriesEvidence(state.evidence, action.verification.checks))
+      throw new Error("Incoming trust: evidence-mismatch");
     const decision = decideIncomingExecution(
       stateContext(state),
       action.verification,
@@ -153,11 +188,12 @@ export function decodeState(body: unknown): IncomingTrustState {
 function validState(value: unknown): value is IncomingTrustState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const state = value as IncomingTrustState;
-  const fields = ["schema", "authority", "phase", "candidateDigest", "acceptance"];
+  const fields = ["schema", "authority", "phase", "candidateDigest", "evidence", "acceptance"];
   if (Object.keys(state).length !== fields.length || !fields.every((k) => Object.hasOwn(state, k)))
     return false;
   if (state.schema !== 1 || !validAuthority(state.authority)) return false;
   if (state.candidateDigest !== null && !validDigest(state.candidateDigest)) return false;
+  if (!validEvidence(state.evidence)) return false;
   if (state.phase === "pending" || state.phase === "rejected") return state.acceptance === null;
   return state.phase === "accepted" && validAcceptedState(state);
 }
@@ -167,6 +203,7 @@ function validAcceptedState(state: IncomingTrustState): boolean {
   const accepted = state.acceptance;
   if (typeof accepted !== "object" || Object.keys(accepted).length !== 2 || !accepted.approval)
     return false;
+  if (!carriesEvidence(state.evidence, accepted.verification.checks)) return false;
   return decideIncomingExecution(
     stateContext(state),
     accepted.verification,

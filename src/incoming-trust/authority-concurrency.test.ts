@@ -18,7 +18,7 @@ it("serializes two real processes and refuses the writer with a stale generation
       `import { IncomingTrustStore } from ${JSON.stringify(new URL("./authority-store.js", import.meta.url).href)};
 const [directory, repository, digest] = process.argv.slice(2);
 try {
-  const state = new IncomingTrustStore(directory).update(repository, { type: 'stage', expectedGeneration: 1, expectedPhase: "pending", candidateDigest: digest });
+  const state = new IncomingTrustStore(directory).update(repository, { type: 'stage', evidence: [], expectedGeneration: 1, expectedPhase: "pending", candidateDigest: digest });
   process.stdout.write(JSON.stringify({ accepted: true, digest: state.candidateDigest }));
 } catch (error) {
   process.stdout.write(JSON.stringify({ accepted: false, reason: error.message }));

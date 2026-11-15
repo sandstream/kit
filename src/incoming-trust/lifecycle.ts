@@ -1,5 +1,5 @@
 import type { IncomingTrustState, IncomingTrustStore } from "./authority-store.js";
-import { stateContext } from "./authority-state.js";
+import { carriesEvidence, stateContext } from "./authority-state.js";
 import { incomingVerificationDigest } from "./decision-protocol.js";
 import type { IncomingApproval, IncomingCheck, IncomingVerification } from "./decision.js";
 import { incomingVerification } from "./decision-schema.js";
@@ -31,9 +31,15 @@ export function stageCandidate(
   store: IncomingTrustStore,
   repository: string,
   candidateDigest: string,
+  evidence: IncomingCheck[],
 ): IncomingTrustState {
   const state = current(store, repository);
-  return store.update(repository, { type: "stage", ...expectation(state), candidateDigest });
+  return store.update(repository, {
+    type: "stage",
+    ...expectation(state),
+    candidateDigest,
+    evidence,
+  });
 }
 
 function requiredChecksPass(state: IncomingTrustState, checks: IncomingCheck[]): boolean {
@@ -57,6 +63,8 @@ export function requestApproval(
   const state = current(store, repository);
   const context = stateContext(state);
   if (state.phase !== "pending") throw new Error("Incoming trust: not-pending");
+  if (!carriesEvidence(state.evidence, checks))
+    throw new Error("Incoming trust: evidence-mismatch");
   if (!requiredChecksPass(state, checks)) throw new Error("Incoming trust: checks-incomplete");
   const verification: IncomingVerification = {
     schema: 1,

@@ -20,7 +20,7 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
 
 - `stage` binds a protected snapshot, the lockfile inventory and one verified npm artifact per
   entry into one candidate digest.
-- `request` writes what an external signer must approve.
+- `request` writes what an external signer must approve. `stage` records the checks kit computed (the snapshot and the npm artifacts). `request` and `approve` refuse a report that leaves out one of them or carries another digest for it, so `--checks` cannot claim evidence kit did not compute. Stores written before this field existed read as damaged and need `recover`.
 - `approve` verifies an approval that an external signer produced and records it. A forged
   signature is refused and the state stays pending.
 - `rotate` replaces the signers and returns the store to pending, so no old approval survives.

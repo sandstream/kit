@@ -16,6 +16,7 @@ it("enrolls external authority without approving code and reads it in a fresh st
       authority: f.proof.authority,
       phase: "pending",
       candidateDigest: null,
+      evidence: [],
       acceptance: null,
     });
     assert.deepEqual(new IncomingTrustStore(f.directory).read(f.repository), state);
@@ -102,6 +103,7 @@ it("refuses every mutation in read-only mode and retains read access", () => {
       () =>
         f.store.update(f.repository, {
           type: "stage",
+          evidence: [],
           expectedGeneration: 1,
           expectedPhase: "pending",
           candidateDigest: "c".repeat(64),

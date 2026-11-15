@@ -4,6 +4,7 @@ import {
   decideIncomingExecution,
   type IncomingApproval,
   type IncomingAuthority,
+  type IncomingCheck,
   type IncomingVerification,
   type IncomingDenial,
 } from "./decision.js";
@@ -29,12 +30,18 @@ export interface IncomingTrustState {
   authority: IncomingAuthority;
   phase: "pending" | "accepted" | "rejected";
   candidateDigest: string | null;
+  /** The checks kit computed for the staged candidate. An approval must carry them unchanged. */
+  evidence: IncomingCheck[];
   acceptance: { verification: IncomingVerification; approval: IncomingApproval } | null;
 }
 
 export type IncomingTrustAction =
   | { type: "enroll"; authority: IncomingAuthority }
-  | (IncomingStateExpectation & { type: "stage"; candidateDigest: string })
+  | (IncomingStateExpectation & {
+      type: "stage";
+      candidateDigest: string;
+      evidence: IncomingCheck[];
+    })
   | (IncomingStateExpectation & {
       type: "accept";
       verification: IncomingVerification;
@@ -97,6 +104,7 @@ function enroll(
     authority,
     phase: "pending",
     candidateDigest: null,
+    evidence: [],
     acceptance: null,
   };
   db.prepare(

@@ -8,6 +8,7 @@ it("requires complete signed evidence and invalidates it when a different candid
     f.store.update(f.repository, { type: "enroll", authority: f.proof.authority });
     const staged = f.store.update(f.repository, {
       type: "stage",
+      evidence: [],
       expectedGeneration: 1,
       expectedPhase: "pending",
       candidateDigest: "c".repeat(64),
@@ -30,6 +31,7 @@ it("requires complete signed evidence and invalidates it when a different candid
     });
     const changed = f.store.update(f.repository, {
       type: "stage",
+      evidence: [],
       expectedGeneration: 2,
       expectedPhase: "accepted",
       candidateDigest: "f".repeat(64),
@@ -52,6 +54,7 @@ it("preserves rejection until explicit retry and refuses the earlier signed appr
     f.store.update(f.repository, { type: "enroll", authority: f.proof.authority });
     const staged = f.store.update(f.repository, {
       type: "stage",
+      evidence: [],
       expectedGeneration: 1,
       expectedPhase: "pending",
       candidateDigest: "c".repeat(64),
@@ -65,11 +68,16 @@ it("preserves rejection until explicit retry and refuses the earlier signed appr
     });
     assert.equal(rejected.phase, "rejected");
     assert.equal(rejected.authority.generation, 3);
-    assert.equal(rejected.authority.baselineDigest, "c".repeat(64));
+    assert.equal(
+      rejected.authority.baselineDigest,
+      f.proof.authority.baselineDigest,
+      "rejecting a candidate must not make it the baseline",
+    );
     assert.equal(rejected.acceptance, null);
     assert.deepEqual(
       f.store.update(f.repository, {
         type: "stage",
+        evidence: [],
         expectedGeneration: 3,
         expectedPhase: "rejected",
         candidateDigest: "c".repeat(64),

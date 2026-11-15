@@ -68,6 +68,7 @@ it("resolves a repository path alias to the existing authority binding", () => {
     assert.deepEqual(f.store.read(alias), enrolled);
     const staged = f.store.update(alias, {
       type: "stage",
+      evidence: [],
       expectedGeneration: 1,
       expectedPhase: "pending",
       candidateDigest: "c".repeat(64),

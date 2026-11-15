@@ -94,7 +94,10 @@ it("drives enroll, stage, request, approve and status through the real CLI", () 
       "https://registry.npmjs.org",
     );
     assert.match(staged.candidateDigest, /^[0-9a-f]{64}$/);
-    const checks = writeJson(f, "checks.json", CHECKS);
+    const checks = writeJson(f, "checks.json", [
+      ...CHECKS,
+      ...(f.store.read(f.repository)?.evidence ?? []),
+    ]);
     const out = join(f.root, "verification.json");
     const requested = json(f, "request", "--checks", checks, "--out", out);
     const verification = JSON.parse(readFileSync(out, "utf8"));
@@ -129,7 +132,14 @@ it("refuses a forged approval and leaves the state pending", () => {
       "https://registry.npmjs.org",
     );
     const out = join(f.root, "verification.json");
-    json(f, "request", "--checks", writeJson(f, "checks.json", CHECKS), "--out", out);
+    json(
+      f,
+      "request",
+      "--checks",
+      writeJson(f, "checks.json", [...CHECKS, ...(f.store.read(f.repository)?.evidence ?? [])]),
+      "--out",
+      out,
+    );
     const verification = JSON.parse(readFileSync(out, "utf8"));
     Object.assign(f.proof.verification, verification);
     f.proof.approval.context = { ...verification.context };
@@ -217,6 +227,37 @@ it("prints usage for an unknown subcommand", () => {
     const result = incoming(f, "bogus");
     assert.notEqual(result.status, 0);
     assert.match(result.output, /Usage: kit security incoming|Usage:/);
+  } finally {
+    f.cleanup();
+  }
+});
+
+it("refuses a request that claims another digest for a check kit computed at stage", () => {
+  const f = storeFixture();
+  try {
+    dependencyFreeRepository(f);
+    json(f, "enroll", "--authority", writeJson(f, "authority.json", f.proof.authority));
+    json(
+      f,
+      "stage",
+      "--source",
+      f.repository,
+      "--snapshot-dir",
+      join(f.root, "snapshot"),
+      "--origin",
+      "https://registry.npmjs.org",
+    );
+    const kit = f.store.read(f.repository)?.evidence ?? [];
+    assert.ok(kit.length > 0, "stage must record kit's own checks");
+    const forged = kit.map((check) => ({ ...check, evidenceDigest: "9".repeat(64) }));
+    const result = incoming(
+      f,
+      "request",
+      "--checks",
+      writeJson(f, "checks.json", [...CHECKS, ...forged]),
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /evidence-mismatch/);
   } finally {
     f.cleanup();
   }

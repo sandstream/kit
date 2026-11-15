@@ -45,6 +45,7 @@ for (const kind of corruptions) {
       f.store.update(f.repository, { type: "enroll", authority: f.proof.authority });
       const staged = f.store.update(f.repository, {
         type: "stage",
+        evidence: [],
         expectedGeneration: 1,
         expectedPhase: "pending",
         candidateDigest: "c".repeat(64),

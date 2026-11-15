@@ -17,6 +17,7 @@ it("refuses a stale process after another writer accepts the same candidate gene
     f.store.update(f.repository, { type: "enroll", authority: f.proof.authority });
     const staged = f.store.update(f.repository, {
       type: "stage",
+      evidence: [],
       expectedGeneration: 1,
       expectedPhase: "pending",
       candidateDigest: "c".repeat(64),

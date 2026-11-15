@@ -52,7 +52,7 @@ export function incomingContext(value: unknown): value is IncomingContext {
   );
 }
 
-function check(value: unknown): value is IncomingCheck {
+export function incomingCheck(value: unknown): value is IncomingCheck {
   if (!fields(value, ["id", "status", "evidenceDigest"])) return false;
   return (
     label(value.id) &&
@@ -70,7 +70,7 @@ export function incomingVerification(value: unknown): value is IncomingVerificat
     incomingTimestamp(value.createdAt) &&
     Array.isArray(value.checks) &&
     value.checks.length <= 128 &&
-    value.checks.every(check)
+    value.checks.every(incomingCheck)
   );
 }
 

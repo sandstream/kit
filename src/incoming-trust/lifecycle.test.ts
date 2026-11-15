@@ -44,7 +44,7 @@ describe("incoming approval lifecycle: stage and request", () => {
   it("stages a candidate and builds a verification the authority can sign", () => {
     const f = enrolled();
     try {
-      const staged = stageCandidate(f.store, f.repository, DIGEST);
+      const staged = stageCandidate(f.store, f.repository, DIGEST, []);
       assert.equal(staged.candidateDigest, DIGEST);
       const request = requestApproval(f.store, f.repository, passingChecks(f), f.proof.now);
       assert.equal(request.verification.context.candidateDigest, DIGEST);
@@ -71,7 +71,7 @@ describe("incoming approval lifecycle: stage and request", () => {
   it("refuses a request whose checks can never satisfy the authority", () => {
     const f = enrolled();
     try {
-      stageCandidate(f.store, f.repository, DIGEST);
+      stageCandidate(f.store, f.repository, DIGEST, []);
       const checks = passingChecks(f);
       checks.pop();
       assert.throws(
@@ -91,7 +91,7 @@ describe("incoming approval lifecycle: stage and request", () => {
   it("refuses a repository that was never enrolled", () => {
     const f = storeFixture();
     try {
-      assert.throws(() => stageCandidate(f.store, f.repository, DIGEST), /not-enrolled/);
+      assert.throws(() => stageCandidate(f.store, f.repository, DIGEST, []), /not-enrolled/);
     } finally {
       f.cleanup();
     }
@@ -102,7 +102,7 @@ describe("incoming approval lifecycle: decide", () => {
   it("accepts a signed approval for the requested verification and allows only that digest", () => {
     const f = enrolled();
     try {
-      stageCandidate(f.store, f.repository, DIGEST);
+      stageCandidate(f.store, f.repository, DIGEST, []);
       const request = requestApproval(f.store, f.repository, passingChecks(f), f.proof.now - 2_000);
       const approval = signRequest(f, request);
       assert.equal(approval.verificationDigest, request.verificationDigest);
@@ -130,7 +130,7 @@ describe("incoming approval lifecycle: decide", () => {
   it("refuses a forged approval and leaves the state pending", () => {
     const f = enrolled();
     try {
-      stageCandidate(f.store, f.repository, DIGEST);
+      stageCandidate(f.store, f.repository, DIGEST, []);
       const request = requestApproval(f.store, f.repository, passingChecks(f), f.proof.now - 2_000);
       const approval = signRequest(f, request);
       approval.signature = Buffer.alloc(64, 1).toString("base64");
@@ -147,10 +147,10 @@ describe("incoming approval lifecycle: decide", () => {
   it("rejects, blocks a repeated stage, and needs a retry before a new request", () => {
     const f = enrolled();
     try {
-      stageCandidate(f.store, f.repository, DIGEST);
+      stageCandidate(f.store, f.repository, DIGEST, []);
       const rejected = rejectCandidate(f.store, f.repository);
       assert.equal(rejected.phase, "rejected");
-      assert.equal(stageCandidate(f.store, f.repository, DIGEST).phase, "rejected");
+      assert.equal(stageCandidate(f.store, f.repository, DIGEST, []).phase, "rejected");
       assert.throws(
         () => requestApproval(f.store, f.repository, passingChecks(f), f.proof.now),
         /not-pending/,
