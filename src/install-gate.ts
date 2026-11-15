@@ -19,7 +19,7 @@
  * (#779) but `gem install` is not routed here yet: that is an owner decision. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
-import { checkBareInstall } from "./install-gate-bare.js";
+import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -73,6 +73,8 @@ export interface InstallProbe {
    * asks `checkBareInstall` about it when it knows the directory.
    */
   bareInstall: boolean;
+  /** The parsed tokens of each bare install, so the directory comes from them and not from the text. */
+  bareSegments: BareSegment[];
 }
 
 // Leading shell keywords / grouping tokens that precede a real command without
@@ -694,6 +696,7 @@ export function parseInstallCommand(command: string): InstallProbe {
     unverifiable: [],
     runnerBinCandidates: [],
     bareInstall: false,
+    bareSegments: [],
   };
   if (!command || typeof command !== "string") return probe;
   for (const ref of repoFetchToShellRefs(command)) {
@@ -1045,7 +1048,10 @@ function noteBareInstall(
   probe: InstallProbe,
 ): void {
   if (m.scheme !== "npm" || m.single || m.pkgFlagOnly || isGlobalInstall(tokens)) return;
-  if (targets.length === 0) probe.bareInstall = true;
+  if (targets.length === 0) {
+    probe.bareInstall = true;
+    probe.bareSegments.push({ manager: tokens[0], tokens });
+  }
 }
 
 /** Apply one matched matcher to `probe`. Returns true when the segment was consumed. */
@@ -1261,7 +1267,7 @@ export async function decideBashGate(
     };
   }
   if (probe.bareInstall && cwd) {
-    const bare = checkBareInstall(command, cwd);
+    const bare = checkBareInstall(command, cwd, probe.bareSegments);
     if (bare.block) return { block: true, reason: bare.reason, checked: [] };
   }
   const shadowed = cwd ? probe.runnerBinCandidates.filter((name) => hasLocalBin(cwd, name)) : [];

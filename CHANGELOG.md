@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **The bare-install check now reads the install directory from the tokens the install gate parsed,** not from the command text. A quote that held `&`, `;` or `|` could make the earlier regex cut a command in the wrong place and read another program's `-C`. The gate's own tokenizer already splits the command, so the check takes the manager and its arguments from it. A command with two bare installs, or a directory value that still holds a shell character, is refused.
+
 ### Added
 
 - **The install gate now blocks a bare install of a manifest that git does not track** until every
