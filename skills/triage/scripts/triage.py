@@ -774,8 +774,19 @@ def triage_docker(rep):
     last_days = _days_since(data.get("last_updated"))
     if last_days is not None and last_days > ABANDONED_DAYS:
         rep.warn(f"image not updated in {last_days} days -- stale base / unpatched CVEs likely")
-    if not data.get("is_official") and (data.get("pull_count") or 0) < 1000:
+    if data.get("is_official"):
+        return
+    if (data.get("pull_count") or 0) < 1000:
         rep.warn("unofficial image with low pull count -- verify the publisher")
+    # A backdoored build of an open-source tool reached 8,817 pulls in under a month from a new,
+    # single-purpose account (FBI FLASH 2026-11-13, artex-forensics): pulls came fast and said
+    # nothing about the code inside. Age is checked whatever the pull count.
+    registered_days = _days_since(data.get("date_registered"))
+    if registered_days is not None and registered_days < NEW_DAYS:
+        rep.warn(f"image repository is very new ({registered_days} days) -- "
+                 "a high pull count does not make it established")
+    rep.fact("pull count is reputation, not provenance: it does not show this image was built "
+             "from its published source")
 
 
 def _skill_scan():

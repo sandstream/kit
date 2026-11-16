@@ -26,6 +26,18 @@ const TRIAGE_PY = resolve(
   "triage.py",
 );
 const REPO = { pull_count: 5_000_000, last_updated: new Date().toISOString() };
+const DAY = 86_400_000;
+// The shape of the backdoored ARTEX image (FBI FLASH 2026-11-13): thousands of pulls within a
+// month of the repository's registration. Shape only; the name is not the real one.
+const YOUNG_POPULAR = {
+  pull_count: 8_817,
+  last_updated: new Date().toISOString(),
+  date_registered: new Date(Date.now() - 27 * DAY).toISOString(),
+};
+const ESTABLISHED = {
+  ...YOUNG_POPULAR,
+  date_registered: new Date(Date.now() - 900 * DAY).toISOString(),
+};
 const TAGS = new Set(["qdrant/qdrant/tags/latest", "library/nginx/tags/1.27"]);
 
 let server: Server;
@@ -43,6 +55,8 @@ before(async () => {
     };
     if (path.includes(":")) return send(400, { message: "invalid repository name" }); // as Hub does
     if (/^(qdrant\/qdrant|library\/nginx)\/?$/.test(path)) return send(200, REPO);
+    if (/^example\/young-popular\/?$/.test(path)) return send(200, YOUNG_POPULAR);
+    if (/^example\/established\/?$/.test(path)) return send(200, ESTABLISHED);
     if (TAGS.has(path.replace(/\/$/, ""))) return send(200, { name: path.split("/").pop() });
     send(404, { message: "not found" });
   });
@@ -90,5 +104,23 @@ describe("kit triage docker: tags and digests", () => {
     if (out === null) return;
     assert.match(out, /CRITICAL: image 'qdrant\/qdrant:no-such-tag' not found on Docker Hub/);
     assert.match(out, /TRIAGE FAILED/);
+  });
+});
+
+describe("kit triage docker: pull count is not provenance", () => {
+  it("warns on a repository under 30 days old, however many pulls it has", async (t) => {
+    // Was: 8,817 pulls passed the only publisher check (< 1,000 pulls) without a word.
+    const out = await triage(t, "example/young-popular");
+    if (out === null) return;
+    assert.match(out, /image repository is very new \(27 days\)/);
+    assert.match(out, /pull count is reputation, not provenance/);
+  });
+
+  it("does not warn on age for an older repository, but still states what pulls do not show", async (t) => {
+    const out = await triage(t, "example/established");
+    if (out === null) return;
+    assert.doesNotMatch(out, /very new/);
+    assert.match(out, /pull count is reputation, not provenance/);
+    assert.match(out, /TRIAGE PASSED/);
   });
 });
