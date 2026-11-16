@@ -2,6 +2,8 @@
 
 ### Fixed
 
+- **The bare-install check now reads the install directory from the tokens the install gate parsed,** not from the command text. A quote that held `&`, `;` or `|` could make the earlier regex cut a command in the wrong place and read another program's `-C`. The gate's own tokenizer already splits the command, so the check takes the manager and its arguments from it. A command with two bare installs, or a directory value that still holds a shell character, is refused.
+
 - **The install gate now reads a Windows launcher name as the package manager.** `npm.cmd install left-pad`, `pnpm.exe add x`, `npx.cmd x` and `NPM.CMD i x` were not recognised as installs, so they passed untriaged, and a bare `npm.cmd install` was not checked either. The `.cmd`, `.exe`, `.bat` and `.ps1` suffix and the letter case are ignored when the binary is matched. A package whose name ends in `.cmd` is still a package.
 
 ### Added

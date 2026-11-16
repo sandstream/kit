@@ -433,18 +433,44 @@ describe("a bare install where another config file or lockfile can steer the ins
   }
 });
 
-describe("a bare install: a quoted separator is not read as a segment end", () => {
-  it("refuses a command whose quotes hold & ; or |, because the split would misread it", async () => {
-    const dir = project({ dependencies: { "axe-core": "4.10.3" } });
-    receipt(dir, "axe-core");
+describe("a bare install: the directory comes from the tokens the gate parsed", () => {
+  const withSub = (): { dir: string; sub: string } => {
+    const dir = project({ name: "root" });
+    const sub = join(dir, "x");
+    mkdirSync(sub);
+    writeFileSync(join(sub, "package.json"), JSON.stringify({ dependencies: { "axe-core": "1" } }));
+    return { dir, sub };
+  };
+
+  it("reads --prefix after a quoted separator in an earlier command", async () => {
+    const { dir, sub } = withSub();
     for (const command of [
       'echo "a & b" && npm install --prefix x',
       "echo 'a; b' ; npm install --prefix x",
-      'npm install --prefix "x | y"',
+      'printf "%s" "a|b" && npm install --prefix x',
+      `echo "it's" && npm install --prefix x`,
     ]) {
       const verdict = await decideBashGate(command, undefined, dir);
       assert.equal(verdict.block, true, command);
-      assert.match(verdict.reason, /quote/, command);
+      assert.ok(verdict.reason.includes(sub), `${command}: ${verdict.reason}`);
     }
+  });
+
+  it("refuses a directory value that still holds a shell metacharacter", async () => {
+    const dir = project({ dependencies: { "axe-core": "4.10.3" } });
+    receipt(dir, "axe-core");
+    for (const command of ['npm install --prefix "x | y"', "npm install --prefix 'x;y'"]) {
+      const verdict = await decideBashGate(command, undefined, dir);
+      assert.equal(verdict.block, true, command);
+      assert.match(verdict.reason, /directory flag/, command);
+    }
+  });
+
+  it("refuses two bare installs in one command, because each has its own directory", async () => {
+    const dir = project({ dependencies: { "axe-core": "4.10.3" } });
+    receipt(dir, "axe-core");
+    const verdict = await decideBashGate("npm install && npm install --prefix x", undefined, dir);
+    assert.equal(verdict.block, true);
+    assert.match(verdict.reason, /more than one/);
   });
 });

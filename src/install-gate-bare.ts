@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { isDirectoryValueFlag } from "./install-gate-flags.js";
 import { TRIAGE_LOG_FILE, TRIAGE_MAX_AGE_DAYS } from "./triage-receipt.js";
 
 export interface BareVerdict {
@@ -31,25 +32,35 @@ function literalPath(token: string, base: string): string | undefined {
   return resolve(base, home);
 }
 
-// A package manager as a command word: bare, by path or in quotes (`/usr/bin/npm`, `"npm"`, `npm.cmd`).
-const MANAGER = /(?:^|[\s/\\"'])(?:npm|pnpm|yarn|bun)(?:\.cmd|\.exe)?(?=[\s"']|$)/;
-// A quoted &, ; or | would be cut as a separator by the split below, so such a command is refused.
-const QUOTED_SEPARATOR = /(["'])[^"']*[&;|][^"']*\1/;
-const DIRECTORY_FLAG = /(?:^|\s)(?:--prefix|-C|--dir|--cwd)(?:=|\s+)("[^"]*"|'[^']*'|\S+)/g;
 // An environment assignment or `env -C` that moves npm to a directory this module cannot see.
 const MOVES_NPM =
   /(?:^|[\s;&|(])(?:NPM_CONFIG_\w*|npm_config_\w*)=|(?:^|[\s;&|(])env\s+(?:\S+\s+)*?(?:-C|--chdir)\b/;
 
-/** The directory flags of the package-manager segments only: `git -C x` is not npm's directory. */
-function directoryFlags(command: string): string[] {
-  return command
-    .split(/&|\|\||[;|\n]/)
-    .filter((segment) => MANAGER.test(segment))
-    .flatMap((segment) => [...segment.matchAll(DIRECTORY_FLAG)].map((m) => m[1]));
+/** One package-less install the gate parsed: the manager and the command's own tokens. */
+export interface BareSegment {
+  manager: string;
+  tokens: string[];
+}
+
+const EQUALS_FLAGS = ["--prefix", "-C", "--dir", "--cwd"];
+
+/** The directory flag values in a parsed install command. `undefined` marks a flag with no value. */
+function directoryValues(segment: BareSegment): (string | undefined)[] {
+  const { manager, tokens } = segment;
+  const values: (string | undefined)[] = [];
+  tokens.forEach((token, i) => {
+    if (isDirectoryValueFlag(token, manager)) values.push(tokens[i + 1]);
+    for (const flag of EQUALS_FLAGS) {
+      if (token.startsWith(`${flag}=`) && isDirectoryValueFlag(flag, manager)) {
+        values.push(token.slice(flag.length + 1));
+      }
+    }
+  });
+  return values;
 }
 
 /** The directory a bare install runs in: the caller's, moved by leading `cd` steps or one directory flag. */
-export function installDirectory(command: string, cwd: string): Directory {
+export function installDirectory(command: string, cwd: string, segments: BareSegment[]): Directory {
   let dir = cwd;
   let rest = command;
   for (let match = LEADING_CD.exec(rest); match; match = LEADING_CD.exec(rest)) {
@@ -61,13 +72,14 @@ export function installDirectory(command: string, cwd: string): Directory {
   if (/(?:^|[\s;&|(])(?:cd|pushd|popd)(?:\s|$)/.test(rest)) {
     return { unresolved: "a cd that does not lead the command" };
   }
-  if (QUOTED_SEPARATOR.test(rest)) return { unresolved: "a quote that holds &, ; or |" };
+  if (segments.length > 1) return { unresolved: "more than one bare install in the command" };
   if (MOVES_NPM.test(rest)) return { unresolved: "an environment or env -C that moves npm" };
-  const flags = directoryFlags(rest);
+  const flags = segments.flatMap(directoryValues);
   if (flags.length > 1) return { unresolved: "more than one directory flag" };
   if (flags.length === 1) {
-    const next = literalPath(flags[0], dir);
-    return next ? { dir: next } : { unresolved: `directory flag ${flags[0]}` };
+    const value = flags[0];
+    const next = value === undefined ? undefined : literalPath(value, dir);
+    return next ? { dir: next } : { unresolved: `directory flag ${value ?? "without a value"}` };
   }
   return { dir };
 }
@@ -200,8 +212,12 @@ function lockfileSourceProblem(dir: string): string | undefined {
 }
 
 /** Decide a bare install. Pure apart from reading the manifest, the receipts and `git ls-files`. */
-export function checkBareInstall(command: string, cwd: string): BareVerdict {
-  const where = installDirectory(command, cwd);
+export function checkBareInstall(
+  command: string,
+  cwd: string,
+  segments: BareSegment[],
+): BareVerdict {
+  const where = installDirectory(command, cwd, segments);
   if ("unresolved" in where) {
     return refusal(cwd, `cannot tell which directory is installed (${where.unresolved})`);
   }
