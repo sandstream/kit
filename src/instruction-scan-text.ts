@@ -10,6 +10,7 @@ export type InstructionRule =
   | "exec-after-download"
   | "conceal-from-user"
   | "remote-instructions"
+  | "markdown-image-exfil"
   | `injection:${string}`;
 
 export interface InstructionFinding {
