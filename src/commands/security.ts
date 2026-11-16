@@ -33,6 +33,17 @@ import { scanTranscripts } from "../scan-transcripts.js";
 import { sampleCosts } from "../cost-monitor.js";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "../check-gitignore.js";
 import { cmdSecurityVerifyPull } from "./security-verify-pull.js";
+import { cmdSecurityIncoming, SECURITY_INCOMING_USAGE } from "./security-incoming.js";
+
+/** Subcommands that live in their own module. A table keeps `cmdSecurity` from growing a branch each. */
+const DELEGATED_SUBCOMMANDS: Record<string, () => boolean | Promise<boolean>> = {
+  "verify-pull": cmdSecurityVerifyPull,
+  incoming: () => cmdSecurityIncoming(process.argv.slice(4)),
+};
+
+function delegatedSubcommand(sub: string | undefined) {
+  return sub && Object.hasOwn(DELEGATED_SUBCOMMANDS, sub) ? DELEGATED_SUBCOMMANDS[sub] : undefined;
+}
 
 async function cmdSecurityPrescan(): Promise<boolean> {
   const root = process.argv[4];
@@ -292,9 +303,8 @@ export async function cmdSecurity(): Promise<boolean> {
     return cmdSecurityCheckGitignore();
   }
 
-  if (sub === "verify-pull") {
-    return cmdSecurityVerifyPull();
-  }
+  const delegate = delegatedSubcommand(sub);
+  if (delegate) return delegate();
 
   if (sub === "prescan") {
     return cmdSecurityPrescan();
@@ -306,7 +316,7 @@ export async function cmdSecurity(): Promise<boolean> {
 
   if (sub !== "policy") {
     console.error(
-      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] [--include-tests] | advisories [--accept] | scan-artifact <path> [--recursive] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
+      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] [--include-tests] | advisories [--accept] | scan-artifact <path> [--recursive] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | incoming (${SECURITY_INCOMING_USAGE}) | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
     );
     return false;
   }

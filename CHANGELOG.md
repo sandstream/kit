@@ -6,6 +6,18 @@
 
 ### Added
 
+- **`kit security incoming <enroll|status|stage|request|approve|reject|retry|rotate|recover>`** operates
+  an incoming-trust authority store. It binds a protected snapshot, the lockfile inventory and one
+  verified npm artifact per entry into a single candidate digest, and moves that candidate through
+  stage, request, approve, reject and retry. Signing stays outside kit: `approve` verifies an
+  approval that an external signer produced and records it. A forged signature is refused and the
+  state stays pending. `rotate` replaces the signers and returns the store to pending, so no old
+  approval survives. `recover` moves a damaged store aside and never deletes it. The archive inspection refuses entries whose
+  names collide after full Unicode case folding or normalization (including the long s and compatibility forms), so a macOS or Windows extraction cannot
+  overwrite one entry with another. See docs/INCOMING_TRUST.md. This adds no launch
+  lock and no workload isolation: nothing runs the candidate yet. `stage` records the checks kit computed and an approval must carry them unchanged; a rejection or a signer rotation no longer makes the voided candidate the baseline; a database locked by another process is not treated as damaged. Native Windows and macOS are
+  unverified.
+
 - **The install gate now blocks a bare install of a manifest that git does not track** until every
   direct dependency has a fresh triage receipt. `npm install`, `npm ci`, `npm update`, `pnpm install`,
   `yarn` and `bun install` name no package, so the gate used to ignore them. In a repository that was
