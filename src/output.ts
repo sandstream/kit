@@ -394,6 +394,113 @@ export function printAuditTable(events: AuditEvent[]): void {
   }
 }
 
+interface SummaryCounts {
+  total: number;
+  ok: number;
+  skipped: number;
+  setupGaps: number;
+  incompleteScans: number;
+  realIssues: number;
+}
+
+const notPassOrSkip = (r: { status: string }): boolean =>
+  r.status !== "pass" && r.status !== "skip";
+
+function countSummary(
+  tools: ToolStatus[],
+  services: ServiceStatus[],
+  secrets: SecretStatus[],
+  security: SecurityCheckResult[],
+  deploy: DeployCheckResult[],
+): SummaryCounts {
+  // A skip is NOT a pass. Counting them together produced "All 25 checks passed ✓" on a tree where
+  // 15 checks never ran and the code one directory down had 30 known vulnerabilities, the same
+  // defect class as #517 (a skipped CI check rendering as success), one level up in the verdict
+  // line itself. Skips still do not GATE: they are counted and named, not failed.
+  const passed = (r: { status: string }): boolean => r.status === "pass";
+  const skippedResult = (r: { status: string }): boolean => r.status === "skip";
+  const toolsOk = tools.filter((t) => t.ok).length;
+  const servicesOk = services.filter((s) => s.authenticated).length;
+  const secretsOk = secrets.filter((s) => s.available).length;
+  const ok =
+    toolsOk +
+    servicesOk +
+    secretsOk +
+    security.filter(passed).length +
+    deploy.filter(passed).length;
+  const skipped = security.filter(skippedResult).length + deploy.filter(skippedResult).length;
+
+  // P5: separate SETUP GAPS (a tool not installed, a service not logged in, a scanner that
+  // couldn't run) from REAL issues (an actual finding a check produced). On a fresh clone the
+  // gap is almost all setup, so a flat "8 issues" reads as failure when it isn't. A security
+  // result can contain a real finding even when its scan is incomplete. Count both facts for it.
+  const setupGaps =
+    tools.length -
+    toolsOk +
+    (services.length - servicesOk) +
+    (secrets.length - secretsOk) +
+    deploy.filter((d) => notPassOrSkip(d) && d.didNotRun).length +
+    security.filter((s) => notPassOrSkip(s) && s.didNotRun && !s.scanIncomplete).length;
+  return {
+    total: tools.length + services.length + secrets.length + security.length + deploy.length,
+    ok,
+    skipped,
+    setupGaps,
+    incompleteScans: security.filter((s) => notPassOrSkip(s) && s.scanIncomplete).length,
+    realIssues:
+      deploy.filter((d) => notPassOrSkip(d) && !d.didNotRun).length +
+      security.filter((s) => notPassOrSkip(s) && (!s.didNotRun || s.hasFindings)).length,
+  };
+}
+
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function printProblems(n: SummaryCounts): void {
+  const parts = [`${c.bold}${n.ok}/${n.total} passed${c.reset}`];
+  if (n.skipped > 0) parts.push(`${c.dim}${n.skipped} could not run${c.reset}`);
+  if (n.setupGaps > 0) parts.push(`${c.yellow}${plural(n.setupGaps, "setup gap")}${c.reset}`);
+  if (n.incompleteScans > 0) {
+    parts.push(`${c.yellow}${plural(n.incompleteScans, "incomplete check")}${c.reset}`);
+  }
+  if (n.realIssues > 0) parts.push(`${c.red}${plural(n.realIssues, "real issue")}${c.reset}`);
+  console.log(parts.join(`${c.dim}  ·  ${c.reset}`));
+  console.log();
+  if (n.setupGaps > 0) {
+    console.log(
+      `${c.dim}Setup gaps are expected on a fresh clone — run ${c.reset}${c.bold}kit install${c.reset}${c.dim} / ${c.reset}${c.bold}kit login${c.reset}${c.dim} / ${c.reset}${c.bold}kit secrets${c.reset}${c.dim}.${c.reset}`,
+    );
+  }
+  if (n.realIssues > 0) {
+    console.log(
+      `${c.dim}Real issues are genuine findings — run ${c.reset}${c.bold}kit check --category security${c.reset}${c.dim} for detail.${c.reset}`,
+    );
+  }
+}
+
+function printVerdict(n: SummaryCounts): void {
+  // Three states, not two: everything ran and passed; everything that ran passed but some could
+  // not run; something is actually wrong. Collapsing the middle state into the first is what made
+  // a directory with 15 non-runs read as "All 25 checks passed".
+  const allGood = n.total - n.ok - n.skipped === 0;
+  if (n.total === 0) {
+    // "All 0 checks passed" is the emptiest possible false green.
+    console.log(`${c.dim}no checks applied here${c.reset}`);
+  } else if (allGood && n.skipped === 0) {
+    console.log(`${c.bold}${c.green}All ${n.total} checks passed ✓${c.reset}`);
+  } else if (allGood) {
+    // Everything that ran passed, but not everything ran, and the count says which is which.
+    console.log(
+      `${c.bold}${c.green}${n.ok} passed${c.reset}${c.dim}  ·  ${c.reset}${c.dim}${n.skipped} could not run${c.reset}`,
+    );
+    console.log();
+    console.log(
+      `${c.dim}${n.skipped} of ${n.total} check(s) did not run — this verdict covers the other ${n.ok}. Each row above carries its reason.${c.reset}`,
+    );
+  } else {
+    printProblems(n);
+  }
+}
+
 export function printSummary(
   tools: ToolStatus[],
   services: ServiceStatus[],
@@ -402,94 +509,7 @@ export function printSummary(
   deploy?: DeployCheckResult[],
 ): void {
   console.log();
-
-  const toolsOk = tools.filter((t) => t.ok).length;
-  const servicesOk = services.filter((s) => s.authenticated).length;
-  const secretsOk = secrets.filter((s) => s.available).length;
-  // A skip is NOT a pass. Counting them together produced "All 25 checks passed ✓" on a tree where
-  // 15 checks never ran and the code one directory down had 30 known vulnerabilities — the same
-  // defect class as #517 (a skipped CI check rendering as success), one level up in the verdict
-  // line itself. Skips still do not GATE: they are counted and named, not failed.
-  const securityOk = security ? security.filter((s) => s.status === "pass").length : 0;
-  const deployOk = deploy ? deploy.filter((d) => d.status === "pass").length : 0;
-  const securitySkipped = security ? security.filter((s) => s.status === "skip").length : 0;
-  const deploySkipped = deploy ? deploy.filter((d) => d.status === "skip").length : 0;
-  const skipped = securitySkipped + deploySkipped;
-
-  const total =
-    tools.length +
-    services.length +
-    secrets.length +
-    (security?.length || 0) +
-    (deploy?.length || 0);
-  const ok = toolsOk + servicesOk + secretsOk + securityOk + deployOk;
-  // Three states, not two: everything ran and passed; everything that ran passed but some could
-  // not run; something is actually wrong. Collapsing the middle state into the first is what made
-  // a directory with 15 non-runs read as "All 25 checks passed".
-  const problems = total - ok - skipped;
-  const allGood = problems === 0;
-
-  // P5 — separate SETUP GAPS (a tool not installed, a service not logged in, a scanner that
-  // couldn't run) from REAL issues (an actual finding a check produced). On a fresh clone the
-  // gap is almost all setup, so a flat "8 issues" reads as failure when it isn't. Missing
-  // tools/auth/secrets are setup. A security result can contain a real finding
-  // even when its scan is incomplete. Count both facts for that result.
-  const setupGaps =
-    tools.length -
-    toolsOk +
-    (services.length - servicesOk) +
-    (secrets.length - secretsOk) +
-    (deploy?.filter((d) => d.status !== "pass" && d.status !== "skip" && d.didNotRun).length ?? 0) +
-    (security?.filter(
-      (s) => s.status !== "pass" && s.status !== "skip" && s.didNotRun && !s.scanIncomplete,
-    ).length ?? 0);
-  const incompleteScans =
-    security?.filter((s) => s.status !== "pass" && s.status !== "skip" && s.scanIncomplete)
-      .length ?? 0;
-  const realIssues =
-    (deploy?.filter((d) => d.status !== "pass" && d.status !== "skip" && !d.didNotRun).length ??
-      0) +
-    (security?.filter(
-      (s) => s.status !== "pass" && s.status !== "skip" && (!s.didNotRun || s.hasFindings),
-    ).length ?? 0);
-
-  if (total === 0) {
-    // "All 0 checks passed" is the emptiest possible false green.
-    console.log(`${c.dim}no checks applied here${c.reset}`);
-  } else if (allGood && skipped === 0) {
-    console.log(`${c.bold}${c.green}All ${total} checks passed ✓${c.reset}`);
-  } else if (allGood) {
-    // Everything that ran passed — but not everything ran, and the count says which is which.
-    console.log(
-      `${c.bold}${c.green}${ok} passed${c.reset}${c.dim}  ·  ${c.reset}${c.dim}${skipped} could not run${c.reset}`,
-    );
-    console.log();
-    console.log(
-      `${c.dim}${skipped} of ${total} check(s) did not run — this verdict covers the other ${ok}. Each row above carries its reason.${c.reset}`,
-    );
-  } else {
-    const parts = [`${c.bold}${ok}/${total} passed${c.reset}`];
-    if (skipped > 0) parts.push(`${c.dim}${skipped} could not run${c.reset}`);
-    if (setupGaps > 0)
-      parts.push(`${c.yellow}${setupGaps} setup gap${setupGaps === 1 ? "" : "s"}${c.reset}`);
-    if (incompleteScans > 0)
-      parts.push(
-        `${c.yellow}${incompleteScans} incomplete check${incompleteScans === 1 ? "" : "s"}${c.reset}`,
-      );
-    if (realIssues > 0)
-      parts.push(`${c.red}${realIssues} real issue${realIssues === 1 ? "" : "s"}${c.reset}`);
-    console.log(parts.join(`${c.dim}  ·  ${c.reset}`));
-    console.log();
-    if (setupGaps > 0)
-      console.log(
-        `${c.dim}Setup gaps are expected on a fresh clone — run ${c.reset}${c.bold}kit install${c.reset}${c.dim} / ${c.reset}${c.bold}kit login${c.reset}${c.dim} / ${c.reset}${c.bold}kit secrets${c.reset}${c.dim}.${c.reset}`,
-      );
-    if (realIssues > 0)
-      console.log(
-        `${c.dim}Real issues are genuine findings — run ${c.reset}${c.bold}kit check --category security${c.reset}${c.dim} for detail.${c.reset}`,
-      );
-  }
-
+  printVerdict(countSummary(tools, services, secrets, security ?? [], deploy ?? []));
   console.log();
 }
 
