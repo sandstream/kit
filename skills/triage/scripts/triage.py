@@ -753,37 +753,19 @@ def triage_repo(rep):
 
 
 def triage_docker(rep):
-    # Hub's repository API takes the bare name: `name:tag` or `name@sha256:…` there is HTTP 400.
-    ref = rep.target.split("@", 1)[0]
-    repo, _, tag = ref.rpartition(":") if ":" in ref.rsplit("/", 1)[-1] else (ref, "", "")
-    api_repo = repo if "/" in repo else f"library/{repo}"
-    try:
-        data, _ = _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}")
-        if tag:  # the tag must exist too, or the name alone would vouch for any tag
-            _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}/tags/{urllib.parse.quote(tag)}")
-    except (urllib.error.URLError, TimeoutError, OSError) as e:  # HTTPError is a URLError
-        code = getattr(e, "code", None)
-        rep.critical(f"image '{rep.target}' not found on Docker Hub" if code == 404 else
-                     f"Docker Hub returned HTTP {code} (cannot verify)" if code else
-                     "could not reach Docker Hub (offline?) -- cannot verify")
-        return
-    official, last_days = data.get("is_official"), _days_since(data.get("last_updated"))
-    rep.fact(f"{api_repo}: {data.get('pull_count', 0)} pulls, official={official or False}"
-             f"{'' if official else ' -- pull count is reputation, not provenance'}")
-    if last_days is not None and last_days > ABANDONED_DAYS:
-        rep.warn(f"image not updated in {last_days} days -- stale base / unpatched CVEs likely")
-    if not official and (data.get("pull_count") or 0) < 1000:
-        rep.warn("unofficial image with low pull count -- verify the publisher")
-    if not official and (reg := _days_since(data.get("date_registered"))) is not None and reg < NEW_DAYS:
-        rep.warn(f"image repository is very new ({reg} days) -- many pulls do not make it established")
+    _sibling("docker_scan.py").triage_docker(rep, sys.modules[__name__])
 
 
 def _skill_scan():
-    """skill_scan.py from this script's own directory, loaded by path: that directory was taken off
+    return _sibling("skill_scan.py")
+
+
+def _sibling(name):
+    """A script from this one's own directory, loaded by path: that directory was taken off
     sys.path at the top of this file, so nothing else planted there can be imported."""
     import importlib.util
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skill_scan.py")
-    spec = importlib.util.spec_from_file_location("kit_skill_scan", path)
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+    spec = importlib.util.spec_from_file_location("kit_" + name[:-3], path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
