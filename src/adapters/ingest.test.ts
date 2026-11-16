@@ -280,3 +280,81 @@ describe("ingestStrict: a SARIF scan that did not finish", () => {
     assert.equal(outcome.ok, false);
   });
 });
+
+describe("parseSarif: severity, location and rule details", () => {
+  const log = (results: unknown[], rules: unknown[] = [], name = "scanner") =>
+    JSON.stringify({ runs: [{ tool: { driver: { name, rules } }, results }] });
+
+  it("takes the severity from the result before the rule, and from the level when neither has a score", () => {
+    const out = parseSarif(
+      log(
+        [
+          { ruleId: "R1", level: "note", properties: { "security-severity": "9.8" } },
+          { ruleId: "R2", level: "note" },
+          { ruleId: "R3", level: "error" },
+          { ruleId: "R4", level: "warning" },
+          { ruleId: "R5" },
+        ],
+        [
+          { id: "R1", properties: { "security-severity": "1.0" } },
+          { id: "R2", properties: { "security-severity": "7.5" } },
+        ],
+      ),
+    );
+    assert.deepEqual(
+      out.map((f) => f.severity),
+      ["critical", "high", "high", "medium", "low"],
+    );
+  });
+
+  it("maps the score bands: 9 and up critical, 7 high, 4 medium, lower low", () => {
+    const score = (s: string) =>
+      parseSarif(log([{ ruleId: "X", properties: { "security-severity": s } }]))[0].severity;
+    assert.deepEqual(
+      [score("9"), score("7"), score("4"), score("3.9")],
+      ["critical", "high", "medium", "low"],
+    );
+  });
+
+  it("writes the location with a line, without a line, and without a uri", () => {
+    const at = (loc: unknown) =>
+      parseSarif(log([{ ruleId: "X", message: { text: "bad" }, locations: [loc] }]))[0].detail;
+    assert.equal(
+      at({ physicalLocation: { artifactLocation: { uri: "a.ts" }, region: { startLine: 7 } } }),
+      "bad (a.ts:7)",
+    );
+    assert.equal(at({ physicalLocation: { artifactLocation: { uri: "a.ts" } } }), "bad (a.ts)");
+    assert.equal(at({ physicalLocation: {} }), "bad");
+  });
+
+  it("names a finding after the tool and rule, with fallbacks for a missing tool, rule and message", () => {
+    const out = parseSarif(JSON.stringify({ runs: [{ results: [{}] }] }));
+    assert.equal(out[0].name, "sarif: (rule)");
+    assert.equal(out[0].detail, "(rule)");
+    assert.equal(out[0].status, "fail");
+    assert.equal(out[0].category, "exposure");
+  });
+
+  it("cites a CWE from the rule's tags and keeps runs apart", () => {
+    const out = parseSarif(
+      JSON.stringify({
+        runs: [
+          {
+            tool: {
+              driver: {
+                name: "one",
+                rules: [{ id: "A", properties: { tags: ["external/cwe/cwe-89"] } }],
+              },
+            },
+            results: [{ ruleId: "A" }],
+          },
+          { tool: { driver: { name: "two" } }, results: [{ ruleId: "A" }] },
+        ],
+      }),
+    );
+    assert.equal(out[0].name, "one: A");
+    assert.equal(out[0].rule?.id, "CWE-89");
+    assert.equal(out[1].name, "two: A");
+    assert.equal(out[1].rule, undefined);
+  });
+});
