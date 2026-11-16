@@ -79,7 +79,7 @@ example `enforcement gate liveness` in a worktree. It must be the exact name, an
 
 ## Architecture decisions are a gate, and `kit check` does not run it
 
-`docs/adr` holds seven ADRs. The four accepted-and-enforced ones carry a `kit-enforce`
+`docs/adr` holds ten ADRs. The four accepted-and-enforced ones carry a `kit-enforce`
 block, which makes them five deterministic rules — not prose:
 
 - **ADR-0001** no model-client import anywhere in `src/**` (the zero-LLM core).
@@ -90,10 +90,13 @@ block, which makes them five deterministic rules — not prose:
 - **ADR-0006** `src/utils/**` imports nothing from the repo — derived by `kit adr derive`
   from an asymmetry the code had obeyed for months, then accepted.
 
-Three more are accepted but **documented, not enforced** — ADR-0004 (workflow skills live
-above kit), ADR-0005 (browser substrate), and **ADR-0007** (kit may measure model + kit
-residual risk, but owns only the rig — the frozen input, ingest schema, deterministic
-adjudication and receipts — never the judgement).
+Six more are accepted but **documented, not enforced** by a `kit-enforce` block — ADR-0004
+(workflow skills live above kit), ADR-0005 (browser substrate), **ADR-0007** (kit may measure
+model + kit residual risk, but owns only the rig — the frozen input, ingest schema, deterministic
+adjudication and receipts — never the judgement), ADR-0008 (service passkeys and tokens have
+separate owners), ADR-0009 (cloud evidence is ingested read-only) and **ADR-0010** (no AI slop:
+the manifesto's resolutions, each marked as held by a gate, a practice, or open — read its
+**open** rows as known gaps, not permission).
 
 `node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
 does **not** include the ADR stage — only `kit review` (check + design + standards + adr + skill)
