@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adrFindingKey, collectAdrFindings, freezeAdrBaseline } from "./adr.js";
+import { adrFindingKey, adrListState, collectAdrFindings, freezeAdrBaseline } from "./adr.js";
+import { parseAdr } from "../adr.js";
 import { baselineGet, type Baseline } from "../baseline.js";
 import type { AdrViolation } from "../adr.js";
 import { rmTemp } from "../temp-cleanup.test-support.js";
@@ -124,5 +125,30 @@ describe("collectAdrFindings — an enforced_by pointer must point at something 
   it("is silent when the field is absent", () => {
     dir = seed("");
     assert.equal(collectAdrFindings(dir).violations.length, 0);
+  });
+});
+
+describe("kit adr list: the label matches what holds the ADR", () => {
+  const adr = (front: string, body = "prose only") => parseAdr(`---\n${front}\n---\n${body}`)!;
+
+  it("an accepted ADR held by enforced_by files is not labelled 'documented, not enforced'", () => {
+    // Was: ADR-0009 printed "documented, not enforced" above the two tests that enforce it.
+    const s = adrListState(
+      adr("id: A-9\ntitle: t\nstatus: accepted\nenforced_by: [src/x.test.ts, src/y.test.ts]"),
+    );
+    assert.equal(s.label, "enforced outside the grammar (2 files)");
+    assert.equal(s.tone, "green");
+  });
+
+  it("an accepted ADR with neither rules nor enforced_by stays 'documented, not enforced'", () => {
+    const s = adrListState(adr("id: A-4\ntitle: t\nstatus: accepted"));
+    assert.deepEqual(s, { label: "documented, not enforced", tone: "yellow" });
+  });
+
+  it("a non-accepted ADR shows its status", () => {
+    assert.deepEqual(adrListState(adr("id: A-1\ntitle: t\nstatus: proposed")), {
+      label: "proposed",
+      tone: "dim",
+    });
   });
 });
