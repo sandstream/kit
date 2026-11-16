@@ -151,14 +151,6 @@ async function loadCommandEnvironment(
   return { env, knownSecrets };
 }
 
-export async function redactCommandForEnvironment(
-  command: string,
-  cwd: string = process.cwd(),
-): Promise<string> {
-  const { knownSecrets } = await loadCommandEnvironment(cwd, true, {});
-  return redactSecrets(command, knownSecrets);
-}
-
 /** Redact raw arguments before a caller adds display quotes or JSON escapes. */
 export async function redactArgumentsForEnvironment(
   commandArgs: readonly string[],

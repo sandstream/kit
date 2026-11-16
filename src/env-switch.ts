@@ -121,14 +121,6 @@ export function prodReadAllowed(
 }
 
 /**
- * Test-only: reset the module-scoped "warned-once" flag so tests can
- * exercise the warning path deterministically.
- */
-export function _resetProdOkWarningForTests(): void {
-  warnedAboutProdOk = false;
-}
-
-/**
  * A key counts as prod-scoped when its `ref` / `name` / `vault_path` mentions
  * a typical prod marker. Conservative — false positives just nudge the user
  * to confirm; false negatives would defeat the gate.

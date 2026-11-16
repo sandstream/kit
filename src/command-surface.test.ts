@@ -176,3 +176,31 @@ describe("documented command count matches the surface", () => {
     });
   }
 });
+
+// docs/CLI_STABILITY.md listed 23 experimental commands while the tier table had 27
+// (`rig`, `services`, `upstream` and `worktree-gates` were missing). The list is the
+// contract a user reads before depending on a command, so it is held to COMMAND_TIERS.
+describe("documented stability tiers match COMMAND_TIERS", () => {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const text = readFileSync(join(repoRoot, "docs", "CLI_STABILITY.md"), "utf-8");
+  const m = text.match(
+    /(\d+) commands are `stable` and (\d+) are `experimental`: ([\s\S]*?)\.\s*`kit <cmd> --help`/,
+  );
+  const byTier = (tier: CommandTier) =>
+    Object.entries(COMMAND_TIERS)
+      .filter(([, t]) => t === tier)
+      .map(([cmd]) => cmd)
+      .sort();
+
+  it("states the counts in the expected form", () => {
+    assert.ok(m, "docs/CLI_STABILITY.md no longer states the tiers in the expected form");
+  });
+
+  it("names exactly the experimental commands, with both counts right", () => {
+    if (!m) return;
+    const listed = [...m[3]!.matchAll(/`([a-z][a-z0-9-]*)`/g)].map((x) => x[1]!).sort();
+    assert.deepEqual(listed, byTier("experimental"));
+    assert.equal(Number(m[2]), byTier("experimental").length);
+    assert.equal(Number(m[1]), byTier("stable").length);
+  });
+});

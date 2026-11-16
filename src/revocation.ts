@@ -154,23 +154,3 @@ export async function forceRevocationCheck(
   const result = await refreshRevocationStatus(fullConfig, identity);
   return result.verified ? { ...result.status } : { revoked: true };
 }
-
-/**
- * Legacy terminal handler: clear the local verdict and exit. Does not erase provider secrets.
- */
-export async function handleRevocation(config: GovernanceConfig | undefined): Promise<void> {
-  console.error("\n" + "=".repeat(80));
-  console.error("ACCESS REVOKED");
-  console.error("=".repeat(80));
-  console.error("Your agent access has been revoked.");
-  console.error("All operations are blocked.");
-  console.error("Please contact the system administrator.");
-  console.error("=".repeat(80) + "\n");
-
-  // Clear local cache
-  cachedRevocationStatus = null;
-  lastRevocationCheck = 0;
-
-  // Exit process
-  process.exit(1);
-}

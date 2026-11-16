@@ -805,7 +805,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   "self-audit": {
     handler: cmdSelfAudit,
     stability: "stable",
-    help: "Audit kit's own source against its 12 self-hardening rules (--list-rules, --only=<ids>, --format)",
+    help: "Audit kit's own source against its self-hardening rules (--list-rules, --only=<ids>, --format)",
   },
   coverage: {
     handler: cmdCoverage,

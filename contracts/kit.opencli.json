@@ -2795,7 +2795,7 @@
     },
     "self-audit": {
       "kind": "command",
-      "summary": "Audit kit's own source against its 12 self-hardening rules (--list-rules, --only=<ids>, --format)",
+      "summary": "Audit kit's own source against its self-hardening rules (--list-rules, --only=<ids>, --format)",
       "x-kit-accepted-flags": [
         "--attest",
         "--claude",
