@@ -414,6 +414,26 @@ export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
   return false;
 }
 
+/**
+ * The `kit adr list` label. An accepted ADR with no `kit-enforce` rules but an `enforced_by`
+ * list is held by those files (`adr check` fails if one is missing), so it is not labelled
+ * "documented, not enforced": ADR-0009 printed that label above the two tests enforcing it.
+ */
+export function adrListState(adr: Adr): { label: string; tone: "green" | "yellow" | "dim" } {
+  const n = adr.rules.length;
+  if (adrIsEnforced(adr))
+    return { label: `enforced (${n} rule${n === 1 ? "" : "s"})`, tone: "green" };
+  if (adr.status !== "accepted") return { label: adr.status, tone: "dim" };
+  if (adr.enforcedBy.length > 0) {
+    const m = adr.enforcedBy.length;
+    return {
+      label: `enforced outside the grammar (${m} file${m === 1 ? "" : "s"})`,
+      tone: "green",
+    };
+  }
+  return { label: "documented, not enforced", tone: "yellow" };
+}
+
 export async function cmdAdr(): Promise<boolean> {
   const args = process.argv.slice(3);
   const sub =
@@ -453,16 +473,14 @@ export async function cmdAdr(): Promise<boolean> {
     }
     console.log(`${c.bold}ADRs${c.reset}`);
     for (const { adr, file } of adrs) {
-      const state = adrIsEnforced(adr)
-        ? `${c.green}enforced (${adr.rules.length} rule${adr.rules.length === 1 ? "" : "s"})${c.reset}`
-        : adr.status === "accepted"
-          ? `${c.yellow}documented, not enforced${c.reset}`
-          : `${c.dim}${adr.status}${c.reset}`;
-      console.log(`  ${adr.id}  ${adr.title}  [${state}]  ${c.dim}${file}${c.reset}`);
-      // Where the claim is held when the grammar cannot hold it. Printed under the ADR so
-      // "documented, not enforced" is never confused with "not enforced anywhere".
+      const { label, tone } = adrListState(adr);
+      console.log(
+        `  ${adr.id}  ${adr.title}  [${c[tone]}${label}${c.reset}]  ${c.dim}${file}${c.reset}`,
+      );
+      // Where the claim is held when the grammar cannot hold it.
+      const lead = adrIsEnforced(adr) ? "also enforced by" : "enforced by";
       for (const target of adr.enforcedBy) {
-        console.log(`      ${c.dim}└ also enforced by ${target}${c.reset}`);
+        console.log(`      ${c.dim}└ ${lead} ${target}${c.reset}`);
       }
     }
     return true;

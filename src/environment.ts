@@ -149,13 +149,6 @@ export function isNonInteractive(): boolean {
 }
 
 /**
- * Test-only: reset the module-scoped warning flag.
- */
-export function _resetNonInteractiveWarningForTests(): void {
-  warnedAboutNonInteractive = false;
-}
-
-/**
  * Get a human-readable description of the environment
  */
 export function formatEnvironment(envInfo: EnvironmentInfo): string {
