@@ -190,3 +190,74 @@ describe("kit status with memory hooks", () => {
     assert.match(find(items, "memory-hooks")?.detail ?? "", /2 wired/);
   });
 });
+
+describe("kit status: row order and the config-derived rows", () => {
+  const isolate = (proj: string): void => {
+    process.env.KIT_MEMORY_DB = join(proj, "memory.db");
+    process.env.KIT_CLAUDE_SETTINGS = join(proj, "absent.json");
+    process.env.KIT_MEMORY_HOOK_MARKER = join(proj, "absent-claude-marker");
+    process.env.KIT_CODEX_HOOKS = join(proj, "absent-codex-hooks.json");
+    process.env.KIT_CODEX_MEMORY_HOOK_MARKER = join(proj, "absent-codex-marker");
+  };
+
+  it("lists the rows in a fixed order", async () => {
+    const proj = join(tmp, "order");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, ".kit.toml"), `[tools]\nnode = "22"\n`);
+    isolate(proj);
+    const keys = (await gatherStatus(proj)).map((i) => i.key);
+    assert.deepEqual(
+      keys.filter((k) => k !== "config-schema"),
+      [
+        "config",
+        "vault",
+        "tools",
+        "gitignore",
+        "dep-policy",
+        "agent-config",
+        "memory",
+        "memory-hooks",
+        "git-hooks",
+      ],
+    );
+  });
+
+  it("names the declared keys when the vault has no store, and counts the tools", async () => {
+    const proj = join(tmp, "keys-only");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(
+      join(proj, ".kit.toml"),
+      `[secrets.keys.API_KEY]\nsource = "env"\n[tools]\nnode = "22"\nnpm = "10"\n`,
+    );
+    isolate(proj);
+    const items = await gatherStatus(proj);
+    assert.equal(find(items, "vault")?.ok, true);
+    assert.equal(find(items, "vault")?.detail, "store: keys");
+    assert.equal(find(items, "vault")?.hint, undefined);
+    assert.equal(find(items, "tools")?.detail, "2 declared");
+  });
+
+  it("reports an empty vault and no tools with a hint each", async () => {
+    const proj = join(tmp, "bare-config");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, ".kit.toml"), `[project]\nname = "x"\n`);
+    isolate(proj);
+    const items = await gatherStatus(proj);
+    assert.equal(find(items, "vault")?.ok, false);
+    assert.match(find(items, "vault")?.hint ?? "", /kit secrets/);
+    assert.equal(find(items, "tools")?.ok, false);
+    assert.match(find(items, "tools")?.hint ?? "", /\[tools\]/);
+  });
+
+  it("skips the config-derived rows on a malformed config and still answers", async () => {
+    const proj = join(tmp, "malformed");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, ".kit.toml"), "this is = = not toml [[[");
+    isolate(proj);
+    const items = await gatherStatus(proj);
+    assert.equal(find(items, "config")?.ok, true);
+    assert.equal(find(items, "vault"), undefined);
+    assert.equal(find(items, "tools"), undefined);
+    assert.ok(find(items, "dep-policy"));
+  });
+});

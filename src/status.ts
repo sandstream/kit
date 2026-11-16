@@ -66,137 +66,165 @@ async function gitignoreStatus(cwd: string): Promise<StatusItem> {
   }
 }
 
-export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusItem[]> {
-  const items: StatusItem[] = [];
-  let configuredHooks: HooksConfig | undefined;
+const hint = (ok: boolean, text: string): string | undefined => (ok ? undefined : text);
 
-  const configPath = join(cwd, ".kit.toml");
-  const hasConfig = existsSync(configPath);
-  items.push({
+function configItem(hasConfig: boolean): StatusItem {
+  return {
     key: "config",
     label: ".kit.toml",
     ok: hasConfig,
     detail: hasConfig ? "present" : "missing",
-    hint: hasConfig ? undefined : "run `kit init`",
-  });
+    hint: hint(hasConfig, "run `kit init`"),
+  };
+}
 
-  if (hasConfig) {
-    try {
-      const cfg = await loadConfig(configPath);
-      configuredHooks = cfg.hooks;
-      const hasVault = !!(
-        cfg.secrets &&
-        (cfg.secrets.store || (cfg.secrets.keys && Object.keys(cfg.secrets.keys).length > 0))
-      );
-      items.push({
-        key: "vault",
-        label: "secrets vault",
-        ok: hasVault,
-        detail: hasVault ? `store: ${cfg.secrets?.store ?? "keys"}` : "none configured",
-        hint: hasVault ? undefined : "configure [secrets] + `kit secrets`",
-      });
-      const toolCount = cfg.tools ? Object.keys(cfg.tools).length : 0;
-      items.push({
-        key: "tools",
-        label: "tools",
-        ok: toolCount > 0,
-        detail: `${toolCount} declared`,
-        hint: toolCount > 0 ? undefined : "declare [tools] in .kit.toml",
-      });
-    } catch {
-      // malformed config — skip the derived checks rather than crash
-    }
+/** The vault and tools rows, plus the hooks the config declares. A malformed config adds nothing. */
+async function configDerived(
+  configPath: string,
+): Promise<{ items: StatusItem[]; hooks?: HooksConfig }> {
+  try {
+    const cfg = await loadConfig(configPath);
+    const hasVault = !!(
+      cfg.secrets &&
+      (cfg.secrets.store || (cfg.secrets.keys && Object.keys(cfg.secrets.keys).length > 0))
+    );
+    const toolCount = cfg.tools ? Object.keys(cfg.tools).length : 0;
+    return {
+      hooks: cfg.hooks,
+      items: [
+        {
+          key: "vault",
+          label: "secrets vault",
+          ok: hasVault,
+          detail: hasVault ? `store: ${cfg.secrets?.store ?? "keys"}` : "none configured",
+          hint: hint(hasVault, "configure [secrets] + `kit secrets`"),
+        },
+        {
+          key: "tools",
+          label: "tools",
+          ok: toolCount > 0,
+          detail: `${toolCount} declared`,
+          hint: hint(toolCount > 0, "declare [tools] in .kit.toml"),
+        },
+      ],
+    };
+  } catch {
+    return { items: [] }; // malformed config: skip the derived checks rather than crash
   }
+}
 
-  // Secret hygiene — does .gitignore cover the sensitive paths kit cares about?
-  items.push(await gitignoreStatus(cwd));
-
-  // Schema currency. `kit config migrate --check` has answered this since versioning landed —
-  // and nothing called it, so `✓ .kit.toml present` was the only thing the checklist said about
-  // the config, and "present" is not "current" (#511). Measured on kit's own repo: v0 while the
-  // schema was v1, unreported. `--check` semantics exactly: behind ⇒ not ok, no write.
+// Schema currency. `kit config migrate --check` has answered this since versioning landed, and
+// nothing called it, so `✓ .kit.toml present` was the only thing the checklist said about the
+// config. "present" is not "current" (#511). Behind means not ok, and nothing is written.
+async function configSchemaItems(cwd: string): Promise<StatusItem[]> {
   try {
     const { planConfigMigration } = await import("./config-migrate.js");
     const plan = planConfigMigration(cwd);
-    if (plan !== null) {
-      items.push({
+    if (plan === null) return [];
+    return [
+      {
         key: "config-schema",
         label: "config schema",
         ok: plan.current,
         detail: plan.current
           ? `v${plan.toVersion}, current`
           : `v${plan.fromVersion}, current is v${plan.toVersion}`,
-        hint: plan.current ? undefined : "run `kit config migrate`",
-      });
-    }
+        hint: hint(plan.current, "run `kit config migrate`"),
+      },
+    ];
   } catch {
-    // an unreadable/malformed config is already reported by the rows above
+    return []; // an unreadable or malformed config is already reported by the rows above
   }
+}
 
-  // Supply chain — is there a dependency allowlist to enforce on install?
-  const hasAllowlist = existsSync(join(cwd, ALLOWLIST_FILE));
-  items.push({
+function depPolicyItem(cwd: string): StatusItem {
+  const has = existsSync(join(cwd, ALLOWLIST_FILE));
+  return {
     key: "dep-policy",
     label: "dependency policy",
-    ok: hasAllowlist,
-    detail: hasAllowlist ? "allowlist present" : "no allowlist",
-    hint: hasAllowlist ? undefined : "run `kit security policy init`",
-  });
+    ok: has,
+    detail: has ? "allowlist present" : "no allowlist",
+    hint: hint(has, "run `kit security policy init`"),
+  };
+}
 
+function agentConfigItem(cwd: string): StatusItem {
   const wired = fileIncludes(join(cwd, "CLAUDE.md"), KIT_BLOCK_BEGIN);
-  items.push({
+  return {
     key: "agent-config",
     label: "agent wired",
     ok: wired,
     detail: wired ? "CLAUDE.md kit block present" : "not wired",
-    hint: wired ? undefined : "run `kit agent-config`",
-  });
+    hint: hint(wired, "run `kit agent-config`"),
+  };
+}
 
+function memoryItem(): StatusItem {
   let messages = 0;
   try {
     const db = openMemoryDb();
     messages = getStats(db).messages;
     db.close();
   } catch {
-    // memory store unavailable — reported as 0
+    // memory store unavailable: reported as 0
   }
-  items.push({
+  return {
     key: "memory",
     label: "memory indexed",
     ok: messages > 0,
     detail: `${messages} messages`,
-    hint: messages > 0 ? undefined : "run `kit memory index`",
-  });
+    hint: hint(messages > 0, "run `kit memory index`"),
+  };
+}
 
-  const hookLiveness = allMemoryHooksLiveness();
-  const hooked = hookLiveness.everInstalled && hookLiveness.missing.length === 0;
-  const hookDetail = !hookLiveness.everInstalled
+function memoryHooksItem(): StatusItem {
+  const liveness = allMemoryHooksLiveness();
+  const hooked = liveness.everInstalled && liveness.missing.length === 0;
+  const detail = !liveness.everInstalled
     ? "not installed"
-    : hookLiveness.missing.length > 0
-      ? `missing: ${hookLiveness.missing.join(", ")}`
-      : `${hookLiveness.present.length} wired`;
-  items.push({
+    : liveness.missing.length > 0
+      ? `missing: ${liveness.missing.join(", ")}`
+      : `${liveness.present.length} wired`;
+  return {
     key: "memory-hooks",
     label: "memory hooks",
     ok: hooked,
-    detail: hookDetail,
-    hint: hooked ? undefined : "run `kit memory install`",
-  });
+    detail,
+    hint: hint(hooked, "run `kit memory install`"),
+  };
+}
 
-  const hookChecks = configuredHooks ? await checkHooks(configuredHooks, ".git", cwd) : [];
-  const failingHooks = hookChecks.filter((check) => hookCheckStatus(check) === "fail");
-  const gitHooksWired = hookChecks.length > 0 && failingHooks.length === 0;
-  items.push({
+async function gitHooksItem(cwd: string, configured: HooksConfig | undefined): Promise<StatusItem> {
+  const checks = configured ? await checkHooks(configured, ".git", cwd) : [];
+  const failing = checks.filter((check) => hookCheckStatus(check) === "fail");
+  const wired = checks.length > 0 && failing.length === 0;
+  const detail = wired
+    ? `${checks.length} wired`
+    : failing.length > 0
+      ? `missing or outdated: ${failing.map((check) => check.hookName).join(", ")}`
+      : "not configured";
+  return {
     key: "git-hooks",
     label: "git hooks",
-    ok: gitHooksWired,
-    detail: gitHooksWired
-      ? `${hookChecks.length} wired`
-      : failingHooks.length > 0
-        ? `missing or outdated: ${failingHooks.map((check) => check.hookName).join(", ")}`
-        : "not configured",
-    hint: gitHooksWired ? undefined : "run `kit hooks check` and `kit hooks install`",
-  });
+    ok: wired,
+    detail,
+    hint: hint(wired, "run `kit hooks check` and `kit hooks install`"),
+  };
+}
 
-  return items;
+export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusItem[]> {
+  const configPath = join(cwd, ".kit.toml");
+  const hasConfig = existsSync(configPath);
+  const derived = hasConfig ? await configDerived(configPath) : { items: [] };
+  return [
+    configItem(hasConfig),
+    ...derived.items,
+    await gitignoreStatus(cwd), // does .gitignore cover the sensitive paths kit cares about?
+    ...(await configSchemaItems(cwd)),
+    depPolicyItem(cwd),
+    agentConfigItem(cwd),
+    memoryItem(),
+    memoryHooksItem(),
+    await gitHooksItem(cwd, derived.hooks),
+  ];
 }
