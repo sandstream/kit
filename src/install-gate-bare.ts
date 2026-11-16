@@ -11,7 +11,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { isDirectoryValueFlag } from "./install-gate-flags.js";
 import { TRIAGE_LOG_FILE, TRIAGE_MAX_AGE_DAYS } from "./triage-receipt.js";
 
@@ -211,6 +211,30 @@ function lockfileSourceProblem(dir: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Why a folder above `dir` can steer the install, or undefined. npm, pnpm and bun read the registry
+ * config of a workspace root that lists the folder as a member; a plain parent .npmrc is ignored when
+ * the folder has its own package.json (probed with npm 10, pnpm 10 and bun 1.3). A parent
+ * package.json that cannot be read counts, since the gate cannot tell what it declares.
+ * Not verified: yarn, whose `workspaces` rule is assumed to match.
+ */
+function workspaceRootAbove(dir: string): string | undefined {
+  for (let up = dirname(dir); up !== dirname(up); up = dirname(up)) {
+    if (existsSync(join(up, "pnpm-workspace.yaml"))) return `${up} holds pnpm-workspace.yaml`;
+    const manifest = join(up, "package.json");
+    if (!existsSync(manifest)) continue;
+    try {
+      const parent: unknown = JSON.parse(readFileSync(manifest, "utf8"));
+      if (parent !== null && typeof parent === "object" && "workspaces" in parent) {
+        return `${up} is a workspace root`;
+      }
+    } catch {
+      return `${manifest} cannot be read`;
+    }
+  }
+  return undefined;
+}
+
 /** Decide a bare install. Pure apart from reading the manifest, the receipts and `git ls-files`. */
 export function checkBareInstall(
   command: string,
@@ -244,6 +268,10 @@ export function checkBareInstall(
       dir,
       `the folder holds ${steering}, which can redirect the install or is not read`,
     );
+  }
+  const rootProblem = workspaceRootAbove(dir);
+  if (rootProblem) {
+    return refusal(dir, `a folder above can steer the install as a workspace root: ${rootProblem}`);
   }
   const lockProblem = lockfileSourceProblem(dir);
   if (lockProblem) return refusal(dir, `the lockfile cannot be trusted: ${lockProblem}`);

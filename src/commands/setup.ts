@@ -210,14 +210,11 @@ async function runConfiguredCommand(label: string, cmdStr: string): Promise<bool
   return false;
 }
 
-export async function cmdSetup(): Promise<boolean> {
-  console.log(`${c.bold}${c.cyan}kit setup${c.reset}`);
-  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
+type SetupConfig = Awaited<ReturnType<typeof loadConfig>>;
+type SetupProfile = ReturnType<typeof resolveMode>["profile"];
 
-  const config = await loadConfig(resolveConfigPath());
-
-  // Setup MODE — a named preset over the knobs below (flag > [setup].mode > full).
-  // full ≡ the historical behavior; other modes gate which steps run + the posture.
+/** Setup MODE: a named preset over the steps (flag > [setup].mode > full). */
+function announceMode(config: SetupConfig): SetupProfile {
   const { profile, requested, recognized } = resolveMode(
     flagValue(process.argv, "--mode"),
     config.setup?.mode,
@@ -235,15 +232,11 @@ export async function cmdSetup(): Promise<boolean> {
     console.log(`${c.dim}read-only review — no installs / logins / secrets / hooks.${c.reset}`);
   }
   console.log();
+  return profile;
+}
 
-  // Network posture (connected vs air-gapped enclave): the mode can force it,
-  // otherwise prompt. Writes [air_gap]; idempotent — skips if already declared.
-  await offerPosture(resolveConfigPath(), config, isNonInteractive(), profile.posture);
-
-  // Recommended profile: an explicit flag always wins; otherwise ASK
-  // interactively (the flag is just the scriptable answer to this question).
-  // CI/agents without a flag get the core setup — we never silently wire global
-  // ~/.claude hooks or the repo's git hooks without an explicit yes.
+/** Recommended profile: a flag wins, else ASK. Never wire ~/.claude or git hooks without a yes. */
+async function chooseRecommended(config: SetupConfig, profile: SetupProfile): Promise<boolean> {
   let recommended: boolean;
   if (hasFlag(process.argv, "--recommended")) {
     recommended = true;
@@ -259,102 +252,100 @@ export async function cmdSetup(): Promise<boolean> {
     );
     console.log();
   }
-
   if (recommended) {
     console.log(
       `${c.dim}Recommended profile on — memory + git hooks wired after the core steps.${c.reset}\n`,
     );
   }
+  return recommended;
+}
 
-  // Step 1: Install (skipped by modes that don't install tools — agent/review/minimal)
-  let installOk = true;
-  if (profile.install) {
-    console.log(`${c.bold}[1/6] Install${c.reset}`);
-    installOk = await cmdInstall();
-
-    if (!installOk) {
-      console.log(`${c.red}Install failed — stopping setup.${c.reset}`);
-      console.log(
-        `${c.dim}Fix the issues above and run ${c.reset}${c.bold}kit setup${c.reset}${c.dim} again.${c.reset}`,
-      );
-      return false;
-    }
-
-    // Project dependencies. cmdInstall above provisions the TOOLCHAIN (node, pnpm,
-    // … via mise); now install the project's own deps so the repo actually works
-    // after setup. The generated [setup].install was never executed before — kit
-    // installed the toolchain but left node_modules absent.
-    if (config.setup?.install) {
-      await runConfiguredCommand("deps installed", config.setup.install);
-    }
+/** Step 1: install (skipped by agent/review modes). */
+async function installStep(config: SetupConfig, profile: SetupProfile): Promise<boolean> {
+  if (!profile.install) return true;
+  console.log(`${c.bold}[1/6] Install${c.reset}`);
+  const installOk = await cmdInstall();
+  if (!installOk) {
+    console.log(`${c.red}Install failed — stopping setup.${c.reset}`);
+    console.log(
+      `${c.dim}Fix the issues above and run ${c.reset}${c.bold}kit setup${c.reset}${c.dim} again.${c.reset}`,
+    );
+    return false;
   }
+  // cmdInstall provisions the TOOLCHAIN; now install the project's own deps.
+  if (config.setup?.install) {
+    await runConfiguredCommand("deps installed", config.setup.install);
+  }
+  return true;
+}
 
-  // Step 2: Git Hooks
-  if (profile.hooks && config.hooks && Object.keys(config.hooks).length > 0 && isGitRepository()) {
-    console.log(`${c.bold}[2/6] Git Hooks${c.reset}`);
-    await cmdHooks();
+/** Step 2: git hooks. */
+async function gitHooksStep(config: SetupConfig, profile: SetupProfile): Promise<void> {
+  if (!(
+    profile.hooks &&
+    config.hooks &&
+    Object.keys(config.hooks).length > 0 &&
+    isGitRepository()
+  )) {
+    return;
+  }
+  console.log(`${c.bold}[2/6] Git Hooks${c.reset}`);
+  await cmdHooks();
+  console.log();
+}
+
+/** Step 3: login (skipped where secrets resolve from a vault). */
+async function loginStep(profile: SetupProfile): Promise<boolean> {
+  if (!profile.login) return true;
+  console.log(`${c.bold}[3/6] Login${c.reset}`);
+  const loginOk = await cmdLogin();
+  if (!loginOk) {
+    console.log(`${c.yellow}Some logins failed — continuing with secrets + verify.${c.reset}\n`);
+  }
+  return loginOk;
+}
+
+/** Harden .gitignore BEFORE cmdSecrets writes .env.local (a repo-local append, announced). */
+async function hardenGitignoreForSecrets(): Promise<void> {
+  if (!isGitRepository()) return;
+  const gi = await checkGitignore(process.cwd());
+  if (gi.missingPatterns.length === 0) return;
+  const patched = await patchGitignore(process.cwd());
+  const names = gi.missingPatterns
+    .slice(0, 3)
+    .map((m) => m.pattern)
+    .join(", ");
+  console.log(
+    `  ${c.green}✓${c.reset} hardened .gitignore ${c.dim}(+${patched.added}: ${names}${gi.missingPatterns.length > 3 ? ", …" : ""}) — review + commit it${c.reset}`,
+  );
+}
+
+/** Step 4: secrets (skipped only by review — read-only). */
+async function secretsStep(profile: SetupProfile): Promise<boolean> {
+  if (!profile.secrets) return true;
+  console.log(`${c.bold}[4/6] Secrets${c.reset}`);
+  await hardenGitignoreForSecrets();
+  return cmdSecrets();
+}
+
+/** [setup].migrate / .seed can mutate a real DB: run only with --with-migrate, else print them. */
+async function migrateStep(config: SetupConfig): Promise<void> {
+  if (!(config.setup?.migrate || config.setup?.seed)) return;
+  if (hasFlag(process.argv, "--with-migrate")) {
+    console.log(`${c.bold}[+] Migrate / seed${c.reset}`);
+    if (config.setup.migrate) await runConfiguredCommand("migrate", config.setup.migrate);
+    if (config.setup.seed) await runConfiguredCommand("seed", config.setup.seed);
     console.log();
+  } else {
+    const cmds = [config.setup.migrate, config.setup.seed].filter(Boolean).join("  ·  ");
+    console.log(
+      `  ${c.yellow}!${c.reset} ${c.dim}Skipping migrate/seed (may mutate a real DB). Run deliberately: ${c.reset}${c.bold}${cmds}${c.reset}${c.dim}  or  ${c.reset}${c.bold}kit setup --with-migrate${c.reset}`,
+    );
   }
+}
 
-  // Step 3: Login (skipped in airgap/ci/agent/review/minimal — those resolve from a vault)
-  let loginOk = true;
-  if (profile.login) {
-    console.log(`${c.bold}[3/6] Login${c.reset}`);
-    loginOk = await cmdLogin();
-
-    if (!loginOk) {
-      console.log(`${c.yellow}Some logins failed — continuing with secrets + verify.${c.reset}\n`);
-    }
-  }
-
-  // Step 4: Secrets (skipped only by review — read-only)
-  let secretsOk = true;
-  if (profile.secrets) {
-    console.log(`${c.bold}[4/6] Secrets${c.reset}`);
-
-    // Harden .gitignore BEFORE secrets are materialized. kit's headline is
-    // "secret-safe", but cmdSecrets writes .env.local below — if the repo's
-    // .gitignore doesn't already cover it, the next `git add .` stages real
-    // secrets. Patching is a non-destructive, repo-local append, so we do it by
-    // default and announce it (standalone `kit security check-gitignore --fix`
-    // remains for the manual path).
-    if (isGitRepository()) {
-      const gi = await checkGitignore(process.cwd());
-      if (gi.missingPatterns.length > 0) {
-        const patched = await patchGitignore(process.cwd());
-        const names = gi.missingPatterns
-          .slice(0, 3)
-          .map((m) => m.pattern)
-          .join(", ");
-        console.log(
-          `  ${c.green}✓${c.reset} hardened .gitignore ${c.dim}(+${patched.added}: ${names}${gi.missingPatterns.length > 3 ? ", …" : ""}) — review + commit it${c.reset}`,
-        );
-      }
-    }
-
-    secretsOk = await cmdSecrets();
-  }
-
-  // [setup].migrate / .seed are intentionally NOT auto-run: a configured migrate
-  // (`supabase db push`, `prisma migrate deploy`) can mutate a linked — possibly
-  // production — database. Run only on explicit opt-in; otherwise surface the
-  // exact command so applying it stays a deliberate human action.
-  if (config.setup?.migrate || config.setup?.seed) {
-    if (hasFlag(process.argv, "--with-migrate")) {
-      console.log(`${c.bold}[+] Migrate / seed${c.reset}`);
-      if (config.setup.migrate) await runConfiguredCommand("migrate", config.setup.migrate);
-      if (config.setup.seed) await runConfiguredCommand("seed", config.setup.seed);
-      console.log();
-    } else {
-      const cmds = [config.setup.migrate, config.setup.seed].filter(Boolean).join("  ·  ");
-      console.log(
-        `  ${c.yellow}!${c.reset} ${c.dim}Skipping migrate/seed (may mutate a real DB). Run deliberately: ${c.reset}${c.bold}${cmds}${c.reset}${c.dim}  or  ${c.reset}${c.bold}kit setup --with-migrate${c.reset}`,
-      );
-    }
-  }
-
-  // Step 5: Agent config — teach the present agent(s) to use kit. Idempotent;
-  // only writes a managed block, so re-running setup leaves it unchanged.
+/** Step 5: agent config. Idempotent: only writes a managed block. */
+async function agentConfigStep(): Promise<void> {
   console.log(`${c.bold}[5/6] Agent config${c.reset}`);
   const agentResults = await writeAgentConfig();
   for (const r of agentResults) {
@@ -365,80 +356,87 @@ export async function cmdSetup(): Promise<boolean> {
       console.log(`  ${mark}${c.reset} ${r.agent} ${c.dim}→ ${r.file} (${r.action})${c.reset}`);
     }
   }
-  // Let the agent actually run kit: grant the read-only kit commands (same as
-  // `kit agent-config`). Without this the agent hits the permission wall.
+  // Grant the read-only kit commands (same as `kit agent-config`).
   const perms = await installKitPermissions();
   if (perms.action === "created" || perms.action === "updated") {
     console.log(
       `  ${c.green}✓${c.reset} allowed ${perms.added.length} read-only kit command(s) ${c.dim}→ ${perms.file}${c.reset}`,
     );
   }
-  // Install the ENFORCEMENT gates too — a block that only advises leaves the floor
-  // out, which the gate-liveness check (rightly) fails. `kit agent teach` installs
-  // these by default; setup must too, so a fresh setup produces a complete floor.
+  // Install the ENFORCEMENT gates too: a block that only advises fails gate-liveness.
   for (const { agent, result } of await installAllInstallGates()) {
     if (result.action === "created" || result.action === "updated") {
       console.log(`  ${c.green}✓${c.reset} ${agent} gate ${c.dim}→ ${result.file}${c.reset}`);
     }
   }
   console.log();
+}
 
-  // Step 6: Verify
+/** Recommended hardening: memory hooks + git hooks (opt-in via --recommended). */
+async function recommendedHardeningStep(config: SetupConfig): Promise<void> {
+  console.log(`\n${c.bold}[+] Recommended hardening${c.reset}`);
+  const h = await applyRecommendedHardening(config);
+  const hook = (name: string, e: string) =>
+    console.log(`  ${c.green}✓${c.reset} ${name} memory hook ${c.dim}${e}${c.reset}`);
+  const warn = (msg: string) => console.log(`  ${c.yellow}!${c.reset} ${c.dim}${msg}${c.reset}`);
+  for (const e of h.memory.claude.added) hook("Claude Code", e);
+  for (const e of h.memory.codex.added) hook("Codex", e);
+  if (h.memory.claude.added.length === 0 && h.memory.codex.added.length === 0)
+    console.log(`  ${c.dim}= memory hooks already wired${c.reset}`);
+  if (!h.memory.claude.resolved || !h.memory.codex.resolved)
+    warn("memory hooks use a bare `kit` (kit not resolvable to an absolute path)");
+  if (h.memory.codex.added.length > 0)
+    warn("restart/refresh Codex, then open /hooks and trust the new memory hooks");
+  for (const r of h.hooks) {
+    const icon =
+      r.action === "failed" ? `${c.red}✗` : r.action === "skipped" ? `${c.yellow}!` : `${c.green}✓`;
+    console.log(`  ${icon}${c.reset} git ${r.hookName} ${c.dim}(${r.action})${c.reset}`);
+  }
+  console.log();
+}
+
+/** Project verify (the configured build), run last. cmdCheck audits setup STATE instead. */
+async function projectVerifyStep(config: SetupConfig): Promise<boolean> {
+  if (!config.setup?.verify) return true;
+  console.log(`\n${c.bold}[+] Verify build${c.reset}`);
+  const ok = await runConfiguredCommand(config.setup.verify, config.setup.verify);
+  console.log();
+  return ok;
+}
+
+function printSetupVerdict(allOk: boolean): void {
+  const done = `${c.bold}${c.green}Setup complete — you're ready to go! ✓${c.reset}`;
+  const left = `${c.bold}${c.yellow}Setup finished with issues. Run ${c.reset}${c.bold}kit check${c.reset}${c.yellow} to see what's left.${c.reset}`;
+  console.log(`${allOk ? done : left}\n`);
+}
+
+export async function cmdSetup(): Promise<boolean> {
+  console.log(`${c.bold}${c.cyan}kit setup${c.reset}`);
+  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
+
+  const config = await loadConfig(resolveConfigPath());
+  const profile = announceMode(config);
+
+  // Network posture: the mode can force it, otherwise prompt. Writes [air_gap]; idempotent.
+  await offerPosture(resolveConfigPath(), config, isNonInteractive(), profile.posture);
+
+  const recommended = await chooseRecommended(config, profile);
+
+  const installOk = await installStep(config, profile);
+  if (!installOk) return false;
+  await gitHooksStep(config, profile);
+  const loginOk = await loginStep(profile);
+  const secretsOk = await secretsStep(profile);
+  await migrateStep(config);
+  await agentConfigStep();
+
   console.log(`${c.bold}[6/6] Verify${c.reset}`);
   const verifyOk = await cmdCheck();
-
-  // Recommended hardening: memory hooks + git hooks (opt-in via --recommended).
-  if (recommended) {
-    console.log(`\n${c.bold}[+] Recommended hardening${c.reset}`);
-    const h = await applyRecommendedHardening(config);
-    for (const e of h.memory.claude.added)
-      console.log(`  ${c.green}✓${c.reset} Claude Code memory hook ${c.dim}${e}${c.reset}`);
-    for (const e of h.memory.codex.added)
-      console.log(`  ${c.green}✓${c.reset} Codex memory hook ${c.dim}${e}${c.reset}`);
-    if (h.memory.claude.added.length === 0 && h.memory.codex.added.length === 0)
-      console.log(`  ${c.dim}= memory hooks already wired${c.reset}`);
-    if (!h.memory.claude.resolved || !h.memory.codex.resolved) {
-      console.log(
-        `  ${c.yellow}!${c.reset} ${c.dim}memory hooks use a bare \`kit\` (kit not resolvable to an absolute path)${c.reset}`,
-      );
-    }
-    if (h.memory.codex.added.length > 0) {
-      console.log(
-        `  ${c.yellow}!${c.reset} ${c.dim}restart/refresh Codex, then open /hooks and trust the new memory hooks${c.reset}`,
-      );
-    }
-    for (const r of h.hooks) {
-      const icon =
-        r.action === "failed"
-          ? `${c.red}✗`
-          : r.action === "skipped"
-            ? `${c.yellow}!`
-            : `${c.green}✓`;
-      console.log(`  ${icon}${c.reset} git ${r.hookName} ${c.dim}(${r.action})${c.reset}`);
-    }
-    console.log();
-  }
-
-  // Project verify (e.g. the configured build). Distinct from cmdCheck above,
-  // which audits setup STATE — this proves the app actually builds. Run last so
-  // deps + secrets are in place.
-  let setupVerifyOk = true;
-  if (config.setup?.verify) {
-    console.log(`\n${c.bold}[+] Verify build${c.reset}`);
-    setupVerifyOk = await runConfiguredCommand(config.setup.verify, config.setup.verify);
-    console.log();
-  }
+  if (recommended) await recommendedHardeningStep(config);
+  const setupVerifyOk = await projectVerifyStep(config);
 
   const allOk = installOk && loginOk && secretsOk && verifyOk && setupVerifyOk;
-
-  if (allOk) {
-    console.log(`${c.bold}${c.green}Setup complete — you're ready to go! ✓${c.reset}\n`);
-  } else {
-    console.log(
-      `${c.bold}${c.yellow}Setup finished with issues. Run ${c.reset}${c.bold}kit check${c.reset}${c.yellow} to see what's left.${c.reset}\n`,
-    );
-  }
-
+  printSetupVerdict(allOk);
   return allOk;
 }
 
