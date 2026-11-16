@@ -123,3 +123,34 @@ describe("cmdProfile", () => {
     assert.match(logs.join("\n"), /usage: kit profile/);
   });
 });
+
+describe("cmdProfile freeze output", () => {
+  it("prints the counts, the vault store and the fingerprint in text mode", async () => {
+    mkdirSync(join(dir, ".claude/skills/api-test"), { recursive: true });
+    writeFileSync(join(dir, ".claude/skills/api-test/SKILL.md"), "# api-test\n");
+    writeFileSync(join(dir, ".kit.toml"), `[secrets]\nstore = "1password"\n`);
+    setArgs("freeze");
+    assert.equal(await cmdProfile(), true);
+    const out = logs.join("\n");
+    assert.match(out, /kit profile freeze/);
+    assert.match(out, /1 skill\(s\), 0 mcp server\(s\), 0 plugin\(s\), vault store=1password/);
+    assert.doesNotMatch(out, /preserved operator-authored/);
+  });
+
+  it("keeps a declared vault and gates when nothing is discovered, and says so", async () => {
+    writeFileSync(
+      join(dir, PROFILE_FILE),
+      `version = 1\n[vault]\nstore = "infisical"\n[gates]\nstandards = true\n`,
+    );
+    setArgs("freeze", "--json");
+    assert.equal(await cmdProfile(), true);
+    const out = JSON.parse(logs.join("\n"));
+    assert.equal(out.frozen, true);
+    assert.equal(out.profile.vault.store, "infisical");
+    assert.deepEqual(out.profile.gates, { standards: true });
+    logs.length = 0;
+    setArgs("freeze");
+    await cmdProfile();
+    assert.match(logs.join("\n"), /preserved operator-authored sections/);
+  });
+});

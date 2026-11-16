@@ -158,39 +158,31 @@ function toComponents(items: { name: string; source?: string }[]): ProfileCompon
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function profileFreeze(jsonMode: boolean): Promise<boolean> {
-  const cwd = process.cwd();
-  const existing = await loadProfile();
-  const { skills, mcpServers } = discoverAgentToolchain(cwd);
-  const actual = await discoverActualState(cwd);
-
-  // Snapshot the discoverable dimensions (skills/mcp/plugins/vault); preserve the
-  // non-discoverable, operator-authored sections (workflows/gates/scope) verbatim.
+/** Snapshot the discoverable dimensions and carry the operator-authored sections over verbatim. */
+function freezeProfile(
+  existing: KitProfile | null,
+  discovered: Pick<KitProfile, "skills" | "mcp" | "plugins">,
+  vaultStore: string | undefined,
+): KitProfile {
   const next: KitProfile = {
     version: existing?.version ?? 1,
     generated: existing?.generated ?? new Date(0).toISOString(),
-    skills: toComponents(skills),
-    mcp: toComponents(mcpServers),
-    plugins: toComponents(discoverPlugins(cwd)),
+    ...discovered,
   };
-  if (existing?.name) next.name = existing.name;
-  if (existing?.workflows) next.workflows = existing.workflows;
-  if (existing?.gates) next.gates = existing.gates;
-  if (existing?.scope) next.scope = existing.scope;
-  const vaultStore = actual.vaultStore ?? existing?.vault?.store;
+  // Operator-authored sections travel verbatim.
+  for (const key of ["name", "workflows", "gates", "scope"] as const) {
+    if (existing?.[key]) Object.assign(next, { [key]: existing[key] });
+  }
   if (vaultStore !== undefined) next.vault = { ...existing?.vault, store: vaultStore };
   else if (existing?.vault) next.vault = existing.vault;
-  await saveProfile(next, cwd);
+  return next;
+}
 
-  if (jsonMode) {
-    console.log(JSON.stringify({ frozen: true, profile: next }, null, 2));
-    return true;
-  }
+function printFrozen(next: KitProfile, existing: KitProfile | null): void {
   console.log(`${c.bold}kit profile freeze${c.reset} → ${c.bold}${PROFILE_FILE}${c.reset}`);
+  const vault = next.vault?.store ? `, vault store=${next.vault.store}` : "";
   console.log(
-    `  ${c.green}✓${c.reset} ${next.skills?.length ?? 0} skill(s), ${next.mcp?.length ?? 0} mcp server(s), ${next.plugins?.length ?? 0} plugin(s)${
-      next.vault?.store ? `, vault store=${next.vault.store}` : ""
-    }`,
+    `  ${c.green}✓${c.reset} ${next.skills?.length ?? 0} skill(s), ${next.mcp?.length ?? 0} mcp server(s), ${next.plugins?.length ?? 0} plugin(s)${vault}`,
   );
   if (existing?.workflows || existing?.scope || existing?.gates) {
     console.log(
@@ -198,6 +190,25 @@ async function profileFreeze(jsonMode: boolean): Promise<boolean> {
     );
   }
   console.log(`  ${c.dim}${profileFingerprint(next)}${c.reset}`);
+}
+
+async function profileFreeze(jsonMode: boolean): Promise<boolean> {
+  const cwd = process.cwd();
+  const existing = await loadProfile();
+  const { skills, mcpServers } = discoverAgentToolchain(cwd);
+  const actual = await discoverActualState(cwd);
+  const next = freezeProfile(
+    existing,
+    {
+      skills: toComponents(skills),
+      mcp: toComponents(mcpServers),
+      plugins: toComponents(discoverPlugins(cwd)),
+    },
+    actual.vaultStore ?? existing?.vault?.store,
+  );
+  await saveProfile(next, cwd);
+  if (jsonMode) console.log(JSON.stringify({ frozen: true, profile: next }, null, 2));
+  else printFrozen(next, existing);
   return true;
 }
 
