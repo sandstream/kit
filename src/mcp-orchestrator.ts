@@ -24,7 +24,7 @@
  * MCP cloud-host's standard `/authorize` endpoint).
  */
 
-import { readFile, writeFile, mkdir, rename, access, unlink } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { McpConfig, McpServerConfig } from "./config.js";
@@ -219,16 +219,4 @@ export async function storeStaticToken(
     subject: opts.subject,
     expiresAt,
   });
-}
-
-/**
- * Test-only: delete the token store so tests start fresh.
- */
-export async function _resetTokenStoreForTests(): Promise<void> {
-  try {
-    await access(tokenFile());
-    await writeFile(tokenFile(), "{}\n", "utf-8");
-  } catch {
-    /* nothing to reset */
-  }
 }
