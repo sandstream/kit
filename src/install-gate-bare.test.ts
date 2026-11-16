@@ -474,3 +474,60 @@ describe("a bare install: the directory comes from the tokens the gate parsed", 
     assert.match(verdict.reason, /more than one/);
   });
 });
+
+describe("a bare install below a workspace root", () => {
+  // npm, pnpm and bun read the registry config of a workspace root that lists the folder as a member.
+  // A plain parent .npmrc is ignored when the folder has its own package.json, so only a root counts.
+  const below = (levels: number): { root: string; dir: string } => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "kit-bare-root-")));
+    made.push(root);
+    let dir = root;
+    for (let i = 0; i < levels; i++) dir = join(dir, `sub${i}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ dependencies: { "axe-core": "4.10.3" } }),
+    );
+    receipt(dir, "axe-core");
+    return { root, dir };
+  };
+  const decide = (dir: string) => decideBashGate("npm install", undefined, dir);
+
+  it("is blocked when the parent holds pnpm-workspace.yaml", async () => {
+    const { root, dir } = below(1);
+    writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - 'sub0'\n");
+    const verdict = await decide(dir);
+    assert.equal(verdict.block, true);
+    assert.ok(verdict.reason.includes("workspace"), verdict.reason);
+  });
+
+  for (const workspaces of [["sub0"], { packages: ["sub0"] }]) {
+    it(`is blocked when the parent package.json has workspaces as ${Array.isArray(workspaces) ? "a list" : "an object"}`, async () => {
+      const { root, dir } = below(1);
+      writeFileSync(join(root, "package.json"), JSON.stringify({ workspaces }));
+      const verdict = await decide(dir);
+      assert.equal(verdict.block, true);
+      assert.ok(verdict.reason.includes("workspace"), verdict.reason);
+    });
+  }
+
+  it("is blocked when the root is two levels up", async () => {
+    const { root, dir } = below(2);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ workspaces: ["sub0/sub1"] }));
+    assert.equal((await decide(dir)).block, true);
+  });
+
+  it("is blocked when a parent package.json cannot be read", async () => {
+    const { root, dir } = below(1);
+    writeFileSync(join(root, "package.json"), "{ not json");
+    assert.equal((await decide(dir)).block, true);
+  });
+
+  it("stays allowed when the parent has a package.json without workspaces and its own .npmrc", async () => {
+    const { root, dir } = below(1);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "parent" }));
+    writeFileSync(join(root, ".npmrc"), "registry=https://example.invalid/\n");
+    const verdict = await decide(dir);
+    assert.equal(verdict.block, false, verdict.reason);
+  });
+});
