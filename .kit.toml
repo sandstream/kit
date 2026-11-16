@@ -9,7 +9,9 @@ node = "22"
 # installs on PASS — bare names are untriageable and the gate blocks them.
 "aqua:aquasecurity/trivy" = "0.76.1"
 "aqua:trufflesecurity/trufflehog" = "3.99.7"
-# lizard 1.25.1 (adopted 2026-11-09, owner decision, issue #716). Since 7.3.0 the TypeScript
+# lizard 1.26.1 (2026-11-16: measured identical to 1.25.1 on this repo with kit's own arguments --
+# 125 functions in 8 Python files, 6 over the limit, 0 differing). 1.25.1 was adopted 2026-11-09
+# (owner decision, issue #716). Since 7.3.0 the TypeScript
 # compiler scanner (npm:typescript) measures JavaScript and TypeScript, and lizard measures the
 # other languages only: here the Python under skills/. 1.24.0 cut TypeScript function extents
 # short, which was the reason for the bump; that defect no longer reaches the gate. 1.24.2
@@ -18,7 +20,7 @@ node = "22"
 # local and CI findings stable; `kit install` triages each backend ref before
 # mise installs it, and `resolveToolBin` finds the resulting binary mise-first.
 "npm:license-checker" = "25.0.1"
-"pipx:lizard" = "1.25.1"
+"pipx:lizard" = "1.26.1"
 "npm:typescript" = "6.0.3"
 "npm:jscpd" = "5.4.3"
 "aqua:boyter/scc" = "4.1.0"

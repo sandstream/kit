@@ -6,7 +6,7 @@
 # lockfile and omits dev dependencies instead.
 
 # One external base lets Dependabot update the digest used by every stage.
-FROM node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS node-base
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS node-base
 
 # Stage 1: Builder
 FROM node-base AS builder
