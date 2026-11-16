@@ -753,37 +753,19 @@ def triage_repo(rep):
 
 
 def triage_docker(rep):
-    # Hub's repository API takes the bare name: `name:tag` or `name@sha256:…` there is HTTP 400.
-    ref = rep.target.split("@", 1)[0]
-    repo, _, tag = ref.rpartition(":") if ":" in ref.rsplit("/", 1)[-1] else (ref, "", "")
-    api_repo = repo if "/" in repo else f"library/{repo}"
-    try:
-        data, _ = _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}")
-        if tag:  # the tag must exist too, or the name alone would vouch for any tag
-            _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}/tags/{urllib.parse.quote(tag)}")
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            rep.critical(f"image '{rep.target}' not found on Docker Hub")
-        else:
-            rep.critical(f"Docker Hub returned HTTP {e.code} (cannot verify)")
-        return
-    except (urllib.error.URLError, TimeoutError, OSError):
-        rep.critical("could not reach Docker Hub (offline?) -- cannot verify")
-        return
-    rep.fact(f"{api_repo}: {data.get('pull_count', 0)} pulls, official={data.get('is_official', False)}")
-    last_days = _days_since(data.get("last_updated"))
-    if last_days is not None and last_days > ABANDONED_DAYS:
-        rep.warn(f"image not updated in {last_days} days -- stale base / unpatched CVEs likely")
-    if not data.get("is_official") and (data.get("pull_count") or 0) < 1000:
-        rep.warn("unofficial image with low pull count -- verify the publisher")
+    _sibling("docker_scan.py").triage_docker(rep, sys.modules[__name__])
 
 
 def _skill_scan():
-    """skill_scan.py from this script's own directory, loaded by path: that directory was taken off
+    return _sibling("skill_scan.py")
+
+
+def _sibling(name):
+    """A script from this one's own directory, loaded by path: that directory was taken off
     sys.path at the top of this file, so nothing else planted there can be imported."""
     import importlib.util
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skill_scan.py")
-    spec = importlib.util.spec_from_file_location("kit_skill_scan", path)
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+    spec = importlib.util.spec_from_file_location("kit_" + name[:-3], path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -803,7 +785,7 @@ def main(argv):
         print("  npm <pkg>        npm registry: existence, deprecation, age, maintainers")
         print("  pip <pkg>        PyPI: existence, yanked, age, license")
         print("  repo <owner/repo|url>   GitHub: archived, maintenance, license, age")
-        print("  docker <image>   Docker Hub: existence, freshness, publisher")
+        print("  docker <image>   Docker Hub: existence, freshness, age, publisher")
         print("  skill <path|name>   validate a local SKILL.md, else repo-check")
         return 0
     ttype = argv[0]
