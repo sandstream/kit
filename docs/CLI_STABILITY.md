@@ -24,10 +24,11 @@ command has a tier _and_ a help entry, so the surface can never silently drift.
 
 ### Current tiers
 
-52 commands are `stable` and 23 are `experimental`: `adr`, `bootstrap`, `broker`,
+53 commands are `stable` and 27 are `experimental`: `adr`, `bootstrap`, `broker`,
 `browser`, `coverage`, `decisions`, `gate-bash`, `gate-egress`, `gate-env`, `gate-fs`,
 `guard`, `guard-observe`, `identity`, `insight`, `map`, `monkey-test`, `panic`,
-`policy`, `profile`, `skill`, `slopsquat`, `team` and `tools`. `kit <cmd> --help`
+`policy`, `profile`, `rig`, `services`, `skill`, `slopsquat`, `team`, `tools`,
+`upstream` and `worktree-gates`. `kit <cmd> --help`
 marks an experimental command.
 
 The authoritative, machine-readable list lives in
