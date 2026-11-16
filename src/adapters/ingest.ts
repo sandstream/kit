@@ -77,42 +77,54 @@ interface SarifLog {
   runs?: SarifRun[];
 }
 
-export function parseSarif(json: string): SecurityCheckResult[] {
-  let log: SarifLog;
+function readSarifLog(json: string): SarifLog | undefined {
   try {
     const parsed: unknown = JSON.parse(json);
     // JSON.parse("null")/"42" is valid JSON but not an object; `log.runs` would then throw a
     // TypeError, breaking the documented "malformed input → []" contract. Guard it.
-    if (parsed === null || typeof parsed !== "object") return [];
-    log = parsed as SarifLog;
+    return parsed === null || typeof parsed !== "object" ? undefined : (parsed as SarifLog);
   } catch {
-    return [];
+    return undefined;
   }
+}
+
+function sarifLocation(res: SarifResult): string {
+  const loc = res.locations?.[0]?.physicalLocation;
+  const uri = loc?.artifactLocation?.uri;
+  const line = loc?.region?.startLine;
+  return uri ? ` (${uri}${line ? `:${line}` : ""})` : "";
+}
+
+function sarifFinding(
+  tool: string,
+  res: SarifResult,
+  rulesById: Map<string, SarifRule>,
+): SecurityCheckResult {
+  const ruleId = res.ruleId ?? "(rule)";
+  const rule = rulesById.get(ruleId);
+  const severity =
+    cvssToSeverity(
+      res.properties?.["security-severity"] ?? rule?.properties?.["security-severity"],
+    ) ?? levelToSeverity(res.level);
+  return {
+    category: "exposure",
+    name: `${tool}: ${ruleId}`,
+    status: "fail",
+    detail: `${res.message?.text ?? ruleId}${sarifLocation(res)}`,
+    severity,
+    rule: cweRuleFromTags(rule?.properties?.tags),
+  };
+}
+
+export function parseSarif(json: string): SecurityCheckResult[] {
+  const log = readSarifLog(json);
+  if (!log) return [];
   const out: SecurityCheckResult[] = [];
   for (const run of log.runs ?? []) {
     const tool = run.tool?.driver?.name ?? "sarif";
     const rulesById = new Map<string, SarifRule>();
     for (const r of run.tool?.driver?.rules ?? []) if (r.id) rulesById.set(r.id, r);
-    for (const res of run.results ?? []) {
-      const ruleId = res.ruleId ?? "(rule)";
-      const rule = rulesById.get(ruleId);
-      const severity =
-        cvssToSeverity(
-          res.properties?.["security-severity"] ?? rule?.properties?.["security-severity"],
-        ) ?? levelToSeverity(res.level);
-      const loc = res.locations?.[0]?.physicalLocation;
-      const uri = loc?.artifactLocation?.uri;
-      const line = loc?.region?.startLine;
-      const where = uri ? ` (${uri}${line ? `:${line}` : ""})` : "";
-      out.push({
-        category: "exposure",
-        name: `${tool}: ${ruleId}`,
-        status: "fail",
-        detail: `${res.message?.text ?? ruleId}${where}`,
-        severity,
-        rule: cweRuleFromTags(rule?.properties?.tags),
-      });
-    }
+    for (const res of run.results ?? []) out.push(sarifFinding(tool, res, rulesById));
   }
   return out;
 }
