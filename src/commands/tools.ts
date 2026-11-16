@@ -50,97 +50,89 @@ function pad(s: string, n: number): string {
   return s.length >= n ? s : s + " ".repeat(n - s.length);
 }
 
-export async function cmdTools(): Promise<boolean> {
-  const args = process.argv.slice(3);
-  const sub = args[0] && !args[0].startsWith("--") ? args[0] : "list";
-  if (sub !== "list") {
-    console.error(`${c.red}unknown subcommand: kit tools ${sub}${c.reset}`);
-    console.error(`${c.dim}available: kit tools list [--latest] [--auth] [--json]${c.reset}`);
-    return false;
-  }
+type Fact = Awaited<ReturnType<(typeof import("../tool-inventory.js"))["inventoryTools"]>>[number];
 
-  const jsonMode = hasFlag(process.argv, "--json");
-  const withCurrency = hasFlag(process.argv, "--latest");
-
-  const withAuth = hasFlag(process.argv, "--auth");
-
-  let declared: Record<string, string> = {};
-  let services: Record<string, ServiceConfig> = {};
+async function declaredAndServices(): Promise<{
+  declared: Record<string, string>;
+  services: Record<string, ServiceConfig>;
+}> {
   try {
     const config = await loadConfig(resolveConfigPath());
-    declared = (config.tools ?? {}) as Record<string, string>;
-    services = config.services ?? {};
+    return {
+      declared: (config.tools ?? {}) as Record<string, string>,
+      services: config.services ?? {},
+    };
   } catch {
-    /* no config here — the undeclared inventory is still worth printing */
+    return { declared: {}, services: {} }; // no config here: the undeclared inventory still prints
   }
+}
 
-  const { inventoryTools } = await import("../tool-inventory.js");
-  const facts = await inventoryTools(declared, { withCurrency });
-  const auth = withAuth ? await authFor(facts, services) : new Map<string, AuthResult | null>();
+function printJson(
+  facts: Fact[],
+  auth: Map<string, AuthResult | null>,
+  withCurrency: boolean,
+  withAuth: boolean,
+): void {
+  const tools = facts.map((f) => ({
+    name: f.name,
+    declared: f.declared ?? null,
+    path: f.path,
+    source: f.provenance?.source ?? null,
+    shimmed: f.provenance?.shimmed ?? null,
+    installed: f.installed,
+    currency: f.currency ?? null,
+    ...(withAuth ? { auth: auth.get(f.name) ?? null } : {}),
+  }));
+  console.log(
+    JSON.stringify({ checkedCurrency: withCurrency, checkedAuth: withAuth, tools }, null, 2),
+  );
+}
 
-  if (jsonMode) {
-    console.log(
-      JSON.stringify(
-        {
-          checkedCurrency: withCurrency,
-          checkedAuth: withAuth,
-          tools: facts.map((f) => ({
-            name: f.name,
-            declared: f.declared ?? null,
-            path: f.path,
-            source: f.provenance?.source ?? null,
-            shimmed: f.provenance?.shimmed ?? null,
-            installed: f.installed,
-            currency: f.currency ?? null,
-            ...(withAuth ? { auth: auth.get(f.name) ?? null } : {}),
-          })),
-        },
-        null,
-        2,
-      ),
-    );
-    return true;
+function currencyIcon(drift: Fact["currency"]): string {
+  if (drift?.drift === "behind") return `${c.yellow}!${c.reset}`;
+  if (drift?.drift === "unknown") return `${c.dim}−${c.reset}`;
+  return `${c.green}✓${c.reset}`;
+}
+
+function currencyNote(drift: Fact["currency"]): string {
+  if (drift?.drift === "behind") return `  ${c.yellow}→ ${drift.latest} available${c.reset}`;
+  if (drift?.drift === "ahead") return `  ${c.dim}ahead of ${drift.latest}${c.reset}`;
+  if (drift?.drift === "unknown") return `  ${c.dim}unchecked: ${drift.reason}${c.reset}`;
+  return "";
+}
+
+/** One printed row of the inventory: a missing tool, or an installed one with source and currency. */
+export function toolRow(
+  f: Fact,
+  nameW: number,
+  auth: { on: boolean; result: AuthResult | null },
+): string {
+  const declaredMark = f.declared ? `${c.dim}(pin ${f.declared})${c.reset}` : "";
+  if (!f.path) {
+    return `  ${c.red}✗${c.reset} ${pad(f.name, nameW)} ${c.red}not installed${c.reset}  ${declaredMark}`;
   }
+  const source = f.provenance?.source ?? "unknown";
+  const shim = f.provenance?.shimmed ? `${c.dim}(shim)${c.reset}` : "";
+  const version = f.installed ?? `${c.yellow}version unreadable${c.reset}`;
+  const note = currencyNote(f.currency);
+  const login = auth.on ? authNote(auth.result) : "";
+  return `  ${currencyIcon(f.currency)} ${pad(f.name, nameW)} ${pad(String(version), 14)} ${c.dim}${pad(source, 10)}${c.reset} ${shim} ${declaredMark}${note}${login}`;
+}
 
+function printList(
+  facts: Fact[],
+  auth: Map<string, AuthResult | null>,
+  withCurrency: boolean,
+  withAuth: boolean,
+): void {
   console.log(`${c.bold}${c.cyan}kit tools list${c.reset}`);
   console.log(`${c.dim}${"─".repeat(64)}${c.reset}`);
   const nameW = Math.max(10, ...facts.map((f) => f.name.length)) + 2;
-  const srcW = 10;
-
   for (const f of facts) {
-    const declaredMark = f.declared ? `${c.dim}(pin ${f.declared})${c.reset}` : "";
-    if (!f.path) {
-      console.log(
-        `  ${c.red}✗${c.reset} ${pad(f.name, nameW)} ${c.red}not installed${c.reset}  ${declaredMark}`,
-      );
-      continue;
-    }
-    const source = f.provenance?.source ?? "unknown";
-    const shim = f.provenance?.shimmed ? `${c.dim}(shim)${c.reset}` : "";
-    const version = f.installed ?? `${c.yellow}version unreadable${c.reset}`;
-    const drift = f.currency;
-    const icon =
-      drift?.drift === "behind"
-        ? `${c.yellow}!${c.reset}`
-        : drift?.drift === "unknown"
-          ? `${c.dim}−${c.reset}`
-          : `${c.green}✓${c.reset}`;
-    const note =
-      drift?.drift === "behind"
-        ? `  ${c.yellow}→ ${drift.latest} available${c.reset}`
-        : drift?.drift === "ahead"
-          ? `  ${c.dim}ahead of ${drift.latest}${c.reset}`
-          : drift?.drift === "unknown"
-            ? `  ${c.dim}unchecked: ${drift.reason}${c.reset}`
-            : "";
-    console.log(
-      `  ${icon} ${pad(f.name, nameW)} ${pad(String(version), 14)} ${c.dim}${pad(source, srcW)}${c.reset} ${shim} ${declaredMark}${note}${withAuth ? authNote(auth.get(f.name) ?? null) : ""}`,
-    );
-    if (f.path && process.env.KIT_TOOLS_PATHS === "1") {
+    console.log(toolRow(f, nameW, { on: withAuth, result: auth.get(f.name) ?? null }));
+    if (f.path && process.env.KIT_TOOLS_PATHS === "1")
       console.log(`      ${c.dim}${f.path}${c.reset}`);
-    }
   }
-
   console.log();
   const declaredCount = facts.filter((f) => f.declared).length;
   console.log(
@@ -157,5 +149,26 @@ export async function cmdTools(): Promise<boolean> {
     );
   }
   console.log(`${c.dim}Paths: KIT_TOOLS_PATHS=1${c.reset}`);
+}
+
+export async function cmdTools(): Promise<boolean> {
+  const args = process.argv.slice(3);
+  const sub = args[0] && !args[0].startsWith("--") ? args[0] : "list";
+  if (sub !== "list") {
+    console.error(`${c.red}unknown subcommand: kit tools ${sub}${c.reset}`);
+    console.error(`${c.dim}available: kit tools list [--latest] [--auth] [--json]${c.reset}`);
+    return false;
+  }
+  const jsonMode = hasFlag(process.argv, "--json");
+  const withCurrency = hasFlag(process.argv, "--latest");
+  const withAuth = hasFlag(process.argv, "--auth");
+
+  const { declared, services } = await declaredAndServices();
+  const { inventoryTools } = await import("../tool-inventory.js");
+  const facts = await inventoryTools(declared, { withCurrency });
+  const auth = withAuth ? await authFor(facts, services) : new Map<string, AuthResult | null>();
+
+  if (jsonMode) printJson(facts, auth, withCurrency, withAuth);
+  else printList(facts, auth, withCurrency, withAuth);
   return true;
 }
