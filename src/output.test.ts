@@ -203,3 +203,57 @@ describe("printSummary incomplete findings", () => {
     assert.doesNotMatch(cap.text(), /real issue|incomplete check/);
   });
 });
+
+describe("printSummary: tools, services, secrets and deploy", () => {
+  const tool = (ok: boolean) => ({ name: "t", ok }) as never;
+  const service = (authenticated: boolean) => ({ name: "s", authenticated }) as never;
+  const secret = (available: boolean) => ({ name: "k", available }) as never;
+  const deploy = (status: string, didNotRun = false) =>
+    ({ name: "d", status, detail: "", didNotRun }) as never;
+  const summary = (...args: Parameters<typeof printSummary>): string => {
+    const cap = captureStdout();
+    try {
+      printSummary(...args);
+    } finally {
+      cap.restore();
+    }
+    return cap.text();
+  };
+
+  it("counts a missing tool, an unauthenticated service and a missing secret as setup gaps", () => {
+    const text = summary([tool(true), tool(false)], [service(false)], [secret(false)]);
+    assert.match(text, /1\/4 passed/);
+    assert.match(text, /3 setup gaps/);
+    assert.doesNotMatch(text, /real issue/);
+    assert.match(text, /Setup gaps are expected on a fresh clone/);
+    assert.match(text, /kit install .*kit login .*kit secrets/);
+  });
+
+  it("uses the singular for one setup gap and one real issue", () => {
+    const text = summary([tool(false)], [], [], undefined, [deploy("fail")]);
+    assert.match(text, /0\/2 passed/);
+    assert.match(text, /1 setup gap(?!s)/);
+    assert.match(text, /1 real issue(?!s)/);
+    assert.match(text, /Real issues are genuine findings/);
+    assert.match(text, /kit check --category security/);
+  });
+
+  it("treats a deploy check that did not run as a setup gap, a skipped one as neither", () => {
+    const text = summary([], [], [], undefined, [
+      deploy("pass"),
+      deploy("fail", true),
+      deploy("skip"),
+    ]);
+    assert.match(text, /1\/3 passed/);
+    assert.match(text, /1 could not run/);
+    assert.match(text, /1 setup gap(?!s)/);
+    assert.doesNotMatch(text, /real issue/);
+  });
+
+  it("says all passed when tools, services, secrets and deploy checks all pass", () => {
+    const text = summary([tool(true)], [service(true)], [secret(true)], undefined, [
+      deploy("pass"),
+    ]);
+    assert.match(text, /All 4 checks passed ✓/);
+  });
+});
