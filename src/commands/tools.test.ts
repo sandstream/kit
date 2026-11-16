@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { resolve, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import { toolRow } from "./tools.js";
 
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "cli.js");
 
@@ -96,5 +97,58 @@ describe("kit tools", () => {
       countPaths(withPaths.stdout) > countPaths(plain.stdout),
       "KIT_TOOLS_PATHS=1 must add the resolved paths",
     );
+  });
+});
+
+describe("kit tools: one printed row", () => {
+  // Colour codes are not the contract; the words and the order are.
+  const plain = (row: string): string => row.replace(/\x1b\[[0-9;]*m/g, "");
+  const base = {
+    name: "gh",
+    path: "/usr/bin/gh",
+    installed: "2.60.0",
+    provenance: { source: "homebrew", shimmed: false },
+  };
+  const row = (
+    over: Record<string, unknown>,
+    auth: { on: boolean; result: unknown } = { on: false, result: null },
+  ): string => plain(toolRow({ ...base, ...over } as never, 12, auth as never));
+
+  it("says a missing tool is not installed and shows its pin", () => {
+    assert.match(row({ path: null, declared: "2.60" }), /✗ gh\s+not installed\s+\(pin 2\.60\)/);
+  });
+
+  it("shows version, source and a pin for an installed tool", () => {
+    assert.match(row({ declared: "2.60" }), /✓ gh\s+2\.60\.0\s+homebrew\s+\(pin 2\.60\)/);
+  });
+
+  it("marks a shim and an unreadable version", () => {
+    const out = row({ installed: null, provenance: { source: "mise", shimmed: true } });
+    assert.match(out, /version unreadable/);
+    assert.match(out, /\(shim\)/);
+  });
+
+  it("reports behind, ahead and unchecked currency", () => {
+    assert.match(
+      row({ currency: { drift: "behind", latest: "2.70.0" } }),
+      /! gh .*→ 2\.70\.0 available/,
+    );
+    assert.match(
+      row({ currency: { drift: "ahead", latest: "2.50.0" } }),
+      /✓ gh .*ahead of 2\.50\.0/,
+    );
+    assert.match(
+      row({ currency: { drift: "unknown", reason: "air-gap" } }),
+      /− gh .*unchecked: air-gap/,
+    );
+  });
+
+  it("appends the login state only when auth was asked for", () => {
+    const ok = { status: "authenticated", command: "gh auth login" } as never;
+    const out = { status: "unauthenticated", command: "gh auth login" } as never;
+    assert.doesNotMatch(row({}, { on: false, result: ok }), /auth:/);
+    assert.match(row({}, { on: true, result: ok }), /auth: logged in$/);
+    assert.match(row({}, { on: true, result: out }), /auth: not logged in \(gh auth login\)$/);
+    assert.match(row({}, { on: true, result: null }), /auth: no probe$/);
   });
 });
