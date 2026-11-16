@@ -761,32 +761,21 @@ def triage_docker(rep):
         data, _ = _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}")
         if tag:  # the tag must exist too, or the name alone would vouch for any tag
             _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}/tags/{urllib.parse.quote(tag)}")
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            rep.critical(f"image '{rep.target}' not found on Docker Hub")
-        else:
-            rep.critical(f"Docker Hub returned HTTP {e.code} (cannot verify)")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:  # HTTPError is a URLError
+        code = getattr(e, "code", None)
+        rep.critical(f"image '{rep.target}' not found on Docker Hub" if code == 404 else
+                     f"Docker Hub returned HTTP {code} (cannot verify)" if code else
+                     "could not reach Docker Hub (offline?) -- cannot verify")
         return
-    except (urllib.error.URLError, TimeoutError, OSError):
-        rep.critical("could not reach Docker Hub (offline?) -- cannot verify")
-        return
-    rep.fact(f"{api_repo}: {data.get('pull_count', 0)} pulls, official={data.get('is_official', False)}")
-    last_days = _days_since(data.get("last_updated"))
+    official, last_days = data.get("is_official"), _days_since(data.get("last_updated"))
+    rep.fact(f"{api_repo}: {data.get('pull_count', 0)} pulls, official={official or False}"
+             f"{'' if official else ' -- pull count is reputation, not provenance'}")
     if last_days is not None and last_days > ABANDONED_DAYS:
         rep.warn(f"image not updated in {last_days} days -- stale base / unpatched CVEs likely")
-    if data.get("is_official"):
-        return
-    if (data.get("pull_count") or 0) < 1000:
+    if not official and (data.get("pull_count") or 0) < 1000:
         rep.warn("unofficial image with low pull count -- verify the publisher")
-    # A backdoored build of an open-source tool reached 8,817 pulls in under a month from a new,
-    # single-purpose account (FBI FLASH 2026-11-13, artex-forensics): pulls came fast and said
-    # nothing about the code inside. Age is checked whatever the pull count.
-    registered_days = _days_since(data.get("date_registered"))
-    if registered_days is not None and registered_days < NEW_DAYS:
-        rep.warn(f"image repository is very new ({registered_days} days) -- "
-                 "a high pull count does not make it established")
-    rep.fact("pull count is reputation, not provenance: it does not show this image was built "
-             "from its published source")
+    if not official and (reg := _days_since(data.get("date_registered"))) is not None and reg < NEW_DAYS:
+        rep.warn(f"image repository is very new ({reg} days) -- many pulls do not make it established")
 
 
 def _skill_scan():
@@ -814,7 +803,7 @@ def main(argv):
         print("  npm <pkg>        npm registry: existence, deprecation, age, maintainers")
         print("  pip <pkg>        PyPI: existence, yanked, age, license")
         print("  repo <owner/repo|url>   GitHub: archived, maintenance, license, age")
-        print("  docker <image>   Docker Hub: existence, freshness, publisher")
+        print("  docker <image>   Docker Hub: existence, freshness, age, publisher")
         print("  skill <path|name>   validate a local SKILL.md, else repo-check")
         return 0
     ttype = argv[0]
