@@ -175,3 +175,39 @@ describe("kit heal — classification (safe / gated / fail-closed boundary)", ()
     assert.equal(isFailClosed(r({ status: "fail", detail: "scanner checksum mismatch" })), true);
   });
 });
+
+describe("heal installs the version the project pinned", () => {
+  const missing = r({
+    name: "trivy",
+    status: "fail",
+    suggestion: "mise use aqua:aquasecurity/trivy",
+  });
+
+  it("installs the [tools] pin, not latest", async () => {
+    // Was: installTools({ ref: "latest" }) regardless of .kit.toml, so heal replaced a
+    // pinned scanner with the newest release, outside the pin and its cooling window.
+    const seen: Record<string, string>[] = [];
+    const repair = safeRecipe(missing, {
+      declared: async (ref) => (ref === "aqua:aquasecurity/trivy" ? "0.76.1" : undefined),
+      install: async (tools) => {
+        seen.push(tools);
+        return [];
+      },
+    });
+    await repair!();
+    assert.deepEqual(seen, [{ "aqua:aquasecurity/trivy": "0.76.1" }]);
+  });
+
+  it("falls back to latest only when nothing is declared", async () => {
+    const seen: Record<string, string>[] = [];
+    const repair = safeRecipe(missing, {
+      declared: async () => undefined,
+      install: async (tools) => {
+        seen.push(tools);
+        return [];
+      },
+    });
+    await repair!();
+    assert.deepEqual(seen, [{ "aqua:aquasecurity/trivy": "latest" }]);
+  });
+});
