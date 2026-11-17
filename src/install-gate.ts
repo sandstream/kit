@@ -1225,6 +1225,13 @@ function hasLocalBin(cwd: string, name: string): boolean {
   );
 }
 
+/** Runner names a local `.bin` shadows, read in the directory npx runs in: none when the command
+ *  may change directory first, because the hook's cwd is then not that directory. */
+function shadowedBins(command: string, names: string[], cwd?: string): string[] {
+  if (!cwd || mayChangeDirectory(command)) return [];
+  return names.filter((name) => hasLocalBin(cwd, name));
+}
+
 /** True when `ref` (`npm:<name>[@version]`) names exactly `bare` — not merely a prefix
  *  (`npm:tsc-x` must not match `bare = "tsc"`). The version suffix always starts `@`,
  *  and a bare scoped name (`@scope/pkg`) never collides with that. */
@@ -1271,8 +1278,7 @@ export async function decideBashGate(
     const bare = checkBareInstall(command, cwd, probe.bareSegments);
     if (bare.block) return { block: true, reason: bare.reason, checked: [] };
   }
-  const local = cwd && !mayChangeDirectory(command) ? cwd : undefined; // the bin dir npx reads
-  const shadowed = local ? probe.runnerBinCandidates.filter((n) => hasLocalBin(local, n)) : [];
+  const shadowed = shadowedBins(command, probe.runnerBinCandidates, cwd);
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
   const checked: GateVerdict[] = [];
   for (const ref of refs) {
