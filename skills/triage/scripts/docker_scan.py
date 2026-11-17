@@ -29,13 +29,23 @@ def triage_docker(rep, t):
     except (urllib.error.URLError, TimeoutError, OSError):
         rep.critical("could not reach Docker Hub (offline?) -- cannot verify")
         return
-    rep.fact(f"{api_repo}: {data.get('pull_count', 0)} pulls, official={data.get('is_official', False)}")
+    official = _is_official(data, api_repo)
+    rep.fact(f"{api_repo}: {data.get('pull_count', 0)} pulls, official={official}")
     last_days = t._days_since(data.get("last_updated"))
     if last_days is not None and last_days > t.ABANDONED_DAYS:
         rep.warn(f"image not updated in {last_days} days -- stale base / unpatched CVEs likely")
-    if not data.get("is_official"):
+    if not official:
         _unofficial(rep, data, t)
     t._sibling("docker_label.py").check_source_label(rep, api_repo, rep.target.partition("@")[2] or tag, t.UA)
+
+
+def _is_official(data, api_repo):
+    """Docker Official Images live under the `library` namespace. Hub's repository API no longer
+    sets `is_official` (null for library/nginx, measured 2026-11-17), so the namespace decides;
+    an explicit `is_official: true` is still honoured."""
+    if data.get("is_official") is True:
+        return True
+    return (data.get("namespace") or api_repo.split("/", 1)[0]) == "library"
 
 
 def _unofficial(rep, data, t):
