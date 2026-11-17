@@ -19,6 +19,7 @@
  * (#779) but `gem install` is not routed here yet: that is an owner decision. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
+import { mayChangeDirectory } from "./install-gate-cwd.js";
 import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
 import { existsSync } from "node:fs";
@@ -41,8 +42,7 @@ import {
 } from "./install-gate-flags.js";
 
 import { explainUnverifiable } from "./install-gate-refusals.js";
-import { installScriptBypass, installScriptBypassReason } from "./install-gate-scripts.js";
-import { gitHookBypass, hookBypassReason } from "./install-gate-hooks.js";
+import { policyRefusal } from "./install-gate-irreversible.js";
 import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { windowsShellBodies } from "./install-gate-shells.js";
 import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
@@ -1224,6 +1224,13 @@ function hasLocalBin(cwd: string, name: string): boolean {
   );
 }
 
+/** Runner names a local `.bin` shadows, read in the directory npx runs in: none when the command
+ *  may change directory first, because the hook's cwd is then not that directory. */
+function shadowedBins(command: string, names: string[], cwd?: string): string[] {
+  if (!cwd || mayChangeDirectory(command)) return [];
+  return names.filter((name) => hasLocalBin(cwd, name));
+}
+
 /** True when `ref` (`npm:<name>[@version]`) names exactly `bare` — not merely a prefix
  *  (`npm:tsc-x` must not match `bare = "tsc"`). The version suffix always starts `@`,
  *  and a bare scoped name (`@scope/pkg`) never collides with that. */
@@ -1245,10 +1252,8 @@ export async function decideBashGate(
   deps?: GateDeps,
   cwd?: string,
 ): Promise<BashGateVerdict> {
-  const grant = installScriptBypass(command);
-  if (grant) return { block: true, reason: installScriptBypassReason(grant), checked: [] };
-  const bypass = gitHookBypass(command);
-  if (bypass) return { block: true, reason: hookBypassReason(bypass), checked: [] };
+  const refused = policyRefusal(command, splitHeredocs(command));
+  if (refused) return { block: true, reason: refused, checked: [] };
   const probe = parseInstallCommand(command);
   if (!probe.isInstall && !probe.bareInstall) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };
@@ -1270,7 +1275,7 @@ export async function decideBashGate(
     const bare = checkBareInstall(command, cwd, probe.bareSegments);
     if (bare.block) return { block: true, reason: bare.reason, checked: [] };
   }
-  const shadowed = cwd ? probe.runnerBinCandidates.filter((name) => hasLocalBin(cwd, name)) : [];
+  const shadowed = shadowedBins(command, probe.runnerBinCandidates, cwd);
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
   const checked: GateVerdict[] = [];
   for (const ref of refs) {

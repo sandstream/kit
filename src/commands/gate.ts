@@ -42,7 +42,7 @@ export async function cmdGateBash(): Promise<boolean> {
   // triage. Appending it there is what made a correct block read as a mis-parse (#501), so the
   // advice follows the reason instead of being stapled to every refusal.
   const triageAdvice = (reason: string, lead = ". "): string =>
-    /COMMAND SUBSTITUTION|UNVERIFIED COMMAND|UNVERIFIED SOURCE/.test(reason)
+    /COMMAND SUBSTITUTION|UNVERIFIED COMMAND|UNVERIFIED SOURCE|cannot be undone/.test(reason)
       ? ""
       : `${lead}Triage it first: \`kit triage …\`, or install via \`kit pkg <eco>:<name>\`.`;
 
@@ -240,11 +240,24 @@ function sessionIdOf(payload: unknown): string {
 }
 
 /**
+ * Under a verified scope, add the hosts git would contact for `git push|fetch|pull|ls-remote|
+ * clone|remote update` (remote names resolved via `git remote get-url`). A remote git cannot
+ * resolve becomes an "unknown host" denial. Returns the extra denials.
+ */
+async function gitEgressTargets(command: string, hosts: string[]): Promise<string[]> {
+  const { resolveGitTargets } = await import("../broker/git-remote-hosts.js");
+  const git = await resolveGitTargets(command, process.cwd());
+  for (const h of git.hosts) if (!hosts.includes(h)) hosts.push(h);
+  return git.unresolved.map((name) => `unknown host (unresolvable git remote "${name}")`);
+}
+
+/**
  * `kit gate-egress` — PreToolUse egress-gate (exec-broker, Pillar 3). Reads the pending tool
  * call on stdin; if it is a Bash command with explicit http(s) network targets, they must all
  * be inside the SIGNED [scope].egress (via the signed profile policy — fail-closed: a wired gate
- * with no verified scope grants nothing). Off-scope → exit 2 + audit. Commands without an
- * unambiguous URL pass through (conservative extraction; see broker/extract.ts).
+ * with no verified scope grants nothing). Off-scope → exit 2 + audit. Under a verified scope,
+ * git network commands are resolved to their remote's host too (broker/git-remote-hosts.ts).
+ * Other commands without an unambiguous URL pass through (see broker/extract.ts).
  */
 export async function cmdGateEgress(): Promise<boolean> {
   const payload = await readHookPayload();
@@ -253,8 +266,10 @@ export async function cmdGateEgress(): Promise<boolean> {
   const command = extractCommandFromHookPayload(payload);
   if (!command) return true; // not a shell command → allow
   const { extractHostsFromCommand } = await import("../broker/extract.js");
+  const { findGitNetworkCommands } = await import("../broker/git-remote-hosts.js");
   const hosts = extractHostsFromCommand(command);
-  if (hosts.length === 0) return true; // no unambiguous network target → allow
+  const hasGit = findGitNetworkCommands(command, process.cwd()).length > 0;
+  if (hosts.length === 0 && !hasGit) return true; // no network target → allow
 
   // Canonical exec-broker: the signed profile scope → BrokerPolicy, egress checked with the
   // shared decisions.checkEgress. A wired gate with no VERIFIED scope grants nothing (policy null).
@@ -264,10 +279,15 @@ export async function cmdGateEgress(): Promise<boolean> {
   let denied: string[];
   let why: string;
   if (!policy) {
+    if (hosts.length === 0) return true; // no verified scope: git remotes pass, as before
     denied = hosts;
     why = `network egress to ${hosts.join(", ")} denied — no verified scope/RoE (unsigned, tampered, or missing); a wired egress-gate grants nothing`;
   } else {
-    denied = hosts.filter((h) => !checkEgress(h, { allow: policy.egress.allow }).ok);
+    const unknown = hasGit ? await gitEgressTargets(command, hosts) : [];
+    denied = [
+      ...hosts.filter((h) => !checkEgress(h, { allow: policy.egress.allow }).ok),
+      ...unknown,
+    ];
     why = `host(s) outside the signed egress scope: ${denied.join(", ")}`;
   }
   if (denied.length === 0) return true;

@@ -11,6 +11,7 @@
  * `findSecrets`: deterministic patterns, MASKED short previews, confidence-tiered.
  * Zero-LLM, no model calls — kit finds the shape; a human decides what to do.
  */
+import { markdownImageExfil } from "../instruction-rules.js";
 
 export type InjectionConfidence = "high" | "heuristic";
 
@@ -267,7 +268,8 @@ function findObfuscatedTrigger(text: string): string | null {
 }
 
 interface Rule {
-  re: RegExp;
+  /** A pattern, or a matcher that returns the matched text or null. */
+  re: RegExp | ((text: string) => string | null);
   label: string;
   confidence: InjectionConfidence;
 }
@@ -306,7 +308,19 @@ const RULES: Rule[] = [
     label: "pipe-to-shell",
     confidence: "high",
   },
+  {
+    // A markdown image whose URL carries a query, which the text tells the agent to put into its
+    // replies: the client fetches it on render and the query carries the data out. Heuristic, not
+    // high: a note that describes the attack has the same shape and must not be quarantined.
+    re: markdownImageExfil,
+    label: "markdown-image-exfil",
+    confidence: "heuristic",
+  },
 ];
+
+function matchRule(re: Rule["re"], text: string): string | null {
+  return typeof re === "function" ? re(text) : (text.match(re)?.[0] ?? null);
+}
 
 function preview(s: string): string {
   return s.replace(/\s+/g, " ").trim().slice(0, 48);
@@ -408,8 +422,8 @@ export function findInjection(text: string): InjectionFinding[] {
   // the phrase past the rule.
   const normalized = normalizeForMatch(text);
   for (const { re, label, confidence } of RULES) {
-    const m = normalized.match(re);
-    if (m) out.push({ label, preview: preview(m[0]), confidence });
+    const m = matchRule(re, normalized);
+    if (m) out.push({ label, preview: preview(m), confidence });
   }
   return out;
 }

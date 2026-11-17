@@ -33,7 +33,19 @@ const doc = (scripts: Record<string, string>) => ({
 const PACKAGES: Record<string, unknown> = {
   "with-postinstall": doc({ postinstall: "node nudge.js", test: "node --test" }),
   "no-hooks": doc({ test: "node --test", prepare: "tsc" }),
+  // `latest` is stable; `canary` and an exact prerelease pin are the channels npm users opt into.
+  channels: {
+    ...doc({}),
+    "dist-tags": { latest: "1.0.0", canary: "1.1.0-canary.4" },
+    versions: {
+      "1.0.0": { version: "1.0.0", license: "MIT" },
+      "1.1.0-canary.4": { version: "1.1.0-canary.4", license: "MIT" },
+    },
+    time: { created: OLD, "1.0.0": OLD, "1.1.0-canary.4": OLD },
+  },
 };
+const CHANNEL = /is a prerelease channel: it publishes far more often than `latest`/;
+const SCORE = (out: string) => Number(/(\d+)\/100/.exec(out)?.[1]);
 
 let server: Server;
 let base = "";
@@ -72,12 +84,41 @@ describe("kit triage npm: install scripts", () => {
     const out = await triage(t, "with-postinstall");
     if (out === null) return;
     assert.match(out, /runs install script\(s\) on install: postinstall/);
-    assert.match(out, /TRIAGE PASSED/, "named, not scored");
+    const clean = await triage(t, "no-hooks");
+    if (clean === null) return;
+    assert.ok(
+      SCORE(out) < SCORE(clean),
+      `an install hook costs score: ${SCORE(out)} vs ${SCORE(clean)}`,
+    );
   });
 
   it("says nothing for scripts npm does not run on a registry install", async (t) => {
     const out = await triage(t, "no-hooks");
     if (out === null) return;
     assert.doesNotMatch(out, /install script/);
+    assert.doesNotMatch(out, CHANNEL);
+  });
+});
+
+describe("kit triage npm: prerelease channels", () => {
+  it("warns on a dist-tag other than latest", async (t) => {
+    const out = await triage(t, "channels@canary");
+    if (out === null) return;
+    assert.match(out, /'canary' \(1\.1\.0-canary\.4\)/);
+    assert.match(out, CHANNEL);
+  });
+
+  it("warns on an exact prerelease version", async (t) => {
+    const out = await triage(t, "channels@1.1.0-canary.4");
+    if (out === null) return;
+    assert.match(out, CHANNEL);
+  });
+
+  it("says nothing for latest, named or implied", async (t) => {
+    for (const pkg of ["channels", "channels@latest", "channels@1.0.0"]) {
+      const out = await triage(t, pkg);
+      if (out === null) return;
+      assert.doesNotMatch(out, CHANNEL, pkg);
+    }
   });
 });

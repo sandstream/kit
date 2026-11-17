@@ -16,6 +16,7 @@
  */
 import { createHash } from "node:crypto";
 import { findInjection } from "./memory/injection.js";
+import { markdownImageExfil } from "./instruction-rules.js";
 
 export interface McpToolDef {
   name: string;
@@ -222,6 +223,7 @@ function dangerousField(tool: McpToolDef): "name" | "description" | null {
  *    do not accept as a tool arg — MCP01).
  *  - undocumented: a tool with no description (cannot be triaged; MCP checklist).
  *  - unconstrained-input: top-level `additionalProperties: true` (validate inputs).
+ *  - markdown-image-exfil: a description telling the agent to put a query-string image in replies.
  */
 export function checklistFindings(tools: McpToolDef[]): McpToolFinding[] {
   const findings: McpToolFinding[] = [];
@@ -244,6 +246,7 @@ export function checklistFindings(tools: McpToolDef[]): McpToolFinding[] {
         confidence: "heuristic",
       });
     }
+    findings.push(...imageExfilFindings(name, tool));
     for (const p of collectParamNames(tool.inputSchema)) {
       const leaf = p.split(".").pop() ?? p;
       if (SECRET_PARAM.test(leaf)) {
@@ -266,6 +269,20 @@ export function checklistFindings(tools: McpToolDef[]): McpToolFinding[] {
     }
   }
   return findings;
+}
+
+/** A tool description that tells the agent to render a query-string markdown image in its
+ *  replies: the client fetches the image and the query carries the data out, no tool call needed. */
+function imageExfilFindings(name: string, tool: McpToolDef): McpToolFinding[] {
+  if (!tool.description || !markdownImageExfil(tool.description)) return [];
+  return [
+    {
+      tool: name,
+      field: "description",
+      label: "markdown-image-exfil (a query-string image in replies leaks data when it renders)",
+      confidence: "heuristic",
+    },
+  ];
 }
 
 /**

@@ -12,8 +12,8 @@
  */
 import { shellSegments, shellWords, shellWordValue } from "./install-gate-words.js";
 
-const MAX_DEPTH = 3;
-const SHELLS = new Set([
+export const MAX_DEPTH = 3;
+export const SHELLS = new Set([
   "sh",
   "bash",
   "zsh",
@@ -37,7 +37,7 @@ const VERIFY_SUBCOMMANDS = new Set([
   "pull",
 ]);
 // git's global options that take a separate value.
-const GIT_VALUE_OPTIONS = new Set([
+export const GIT_VALUE_OPTIONS = new Set([
   "-C",
   "-c",
   "--git-dir",
@@ -51,7 +51,7 @@ const COMMIT_VALUE_SHORTS = new Set(["m", "F", "c", "C", "t", "S", "u"]);
 const HOOK_FILES = /(^|[\\/])(\.git[\\/]hooks|\.husky)([\\/]|$)/;
 const FILE_EDITORS = new Set(["rm", "unlink", "mv", "chmod", "truncate", "shred"]);
 
-function bin(word: string): string {
+export function bin(word: string): string {
   return (word.split(/[\\/]/).pop() ?? "").replace(/\.exe$/i, "").toLowerCase();
 }
 
@@ -110,7 +110,7 @@ function gitBypass(args: string[]): string | null {
   return VERIFY_SUBCOMMANDS.has(sub) ? noVerifyBypass(sub, rest) : null;
 }
 
-const WRAPPERS = new Set([
+export const WRAPPERS = new Set([
   "env",
   "sudo",
   "doas",
@@ -163,7 +163,7 @@ function segmentBypass(segment: string, depth: number): string | null {
 }
 
 /** Re-quote a word so joining and re-splitting keeps it one word. */
-function quoteWord(word: string): string {
+export function quoteWord(word: string): string {
   return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, "'\\''")}'`;
 }
 

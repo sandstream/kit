@@ -7,7 +7,8 @@
 //
 // --allow  a `kit review` check that fails for a reason outside the change (an expired login, a
 //          worktree without gates). Exact name only. Printed, so it stays visible.
-// --skip   one of: tools, build, format, lint, review, tests, coverage, semgrep, pr-text.
+// --skip   one of: tools, build, format, lint, review, tests, coverage, test-growth, semgrep,
+//          pr-text.
 // --strict a branch that is behind origin/main, or a Semgrep that is not the CI version, fails
 //          instead of warning.
 import { existsSync, readFileSync } from "node:fs";
@@ -26,6 +27,7 @@ import {
   untestedFiles,
   versionMismatches,
 } from "./prepush-lib.mjs";
+import { checkTestGrowth } from "./test-growth.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const opts = parseArgs(process.argv.slice(2));
@@ -122,6 +124,17 @@ function coverage() {
   return { ok: false, detail };
 }
 
+// CI's test-growth cap (.github/workflows/pr-hygiene.yml): over 400 net new test lines needs a
+// `Test-Growth: <reason>` commit trailer.
+function testGrowth() {
+  try {
+    const r = checkTestGrowth({ cwd: root });
+    return r.ok ? { ok: true, warn: `  ${r.message}` } : { ok: false, detail: `  ${r.message}` };
+  } catch (err) {
+    return { ok: false, detail: `  could not diff against origin/main: ${err.message}` };
+  }
+}
+
 // CI's Semgrep scan, with the version and the rule packs the workflow names. Another Semgrep version
 // parses source differently (a variable named `using` parsed locally and failed in CI), so a
 // different version is not a substitute: it skips with a warning, and --strict makes it a failure.
@@ -174,6 +187,7 @@ const steps = [
   ["review", "kit review --enforce (all stages)", review],
   ["tests", "tests of the changed files", tests],
   ["coverage", "every new source file has a test (CI coverage gate)", coverage],
+  ["test-growth", "net new test lines within the cap, or a stated reason", testGrowth],
   ["semgrep", "Semgrep at the CI version and packs", semgrep],
   ["pr-text", "PR text has no session URL", prText],
 ];
