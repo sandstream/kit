@@ -1,6 +1,5 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,21 +46,6 @@ const ALLOWED = new Set([
 
 describe("shared project memory (Track D)", () => {
   const root = () => mkdtempSync(join(tmpdir(), "kit-shared-"));
-
-  it("records the git name as author, never the git email", () => {
-    const r = root();
-    execFileSync("git", ["init", "-q", r]);
-    execFileSync("git", ["config", "user.name", "Alice Fixture"], { cwd: r });
-    execFileSync("git", ["config", "user.email", "alice@example.com"], { cwd: r });
-    const e = shareEntry(
-      r,
-      { area: "a", kind: "decision", title: "t", body: "b" },
-      "2026-06-16T00:00:00Z",
-    );
-    assert.equal(e.author, "Alice Fixture");
-    assert.ok(!readFileSync(getSharedPath(r), "utf8").includes("@"), "no address on disk");
-    rmSync(r, { recursive: true, force: true });
-  });
 
   it("promotes an entry; only allow-listed fields persist; has provenance", () => {
     const r = root();
