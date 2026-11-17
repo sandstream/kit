@@ -1,7 +1,6 @@
 # kit commands
 
-> Complete reference for every `kit <subcommand>`. Last updated 2026-11-04 (kit 7.2.0).
-> Pair this with `docs/THREAT_MODEL.md` (what data flows where) and `docs/DATA_FLOW.md` (exact reads/writes per op).
+> Complete reference for every `kit <subcommand>`. Last updated 2026-11-04 (kit 7.2.0). Pair this with `docs/THREAT_MODEL.md` (what data flows where) and `docs/DATA_FLOW.md` (exact reads/writes per op).
 
 > **Machine-readable surface:** `contracts/kit.opencli.json` describes every
 > command with its stability tier (`x-kit-stability`), MCP exposure

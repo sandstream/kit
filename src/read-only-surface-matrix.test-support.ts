@@ -247,6 +247,7 @@ export const PURE_READ_COMMANDS = [
   "gate-egress",
   "gate-env",
   "gate-fs",
+  "gate-limits",
   "gha-audit",
   "governance",
   "guard-observe",
