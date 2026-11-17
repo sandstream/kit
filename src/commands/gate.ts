@@ -68,7 +68,7 @@ export async function cmdGateBash(): Promise<boolean> {
     );
     process.exit(2); // PreToolUse deny
   }
-  return stdoutAllow();
+  return stdoutAllow(verdict.notes);
 }
 
 /**
@@ -84,8 +84,13 @@ function stdoutDeny(message: string): boolean {
   return true;
 }
 
-/** Allow. Antigravity requires a `decision` on every PreToolUse reply. */
-function stdoutAllow(): boolean {
+/**
+ * Allow. Antigravity requires a `decision` on every PreToolUse reply. `notes` name what the
+ * allowed command runs untriaged (install-gate-notes.ts); they go to stderr, never to the
+ * stdout verdict.
+ */
+function stdoutAllow(notes: readonly string[] = []): boolean {
+  for (const note of notes) process.stderr.write(`kit install-gate: note: ${note}\n`);
   if (gateFormat() === "antigravity") console.log(JSON.stringify({ decision: "allow" }));
   return true;
 }
