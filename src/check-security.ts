@@ -2610,6 +2610,7 @@ async function appendHostSecurityChecks(
   results.push(await checkTranscriptSecrets(undefined, root));
   results.push(await checkGateLiveness(root), await checkGitHookFloor(root));
   results.push(await checkDeviceIdOverride());
+  results.push(await (await import("./check-docker-ioc.js")).checkDockerIocs());
 }
 
 async function loadGovernedConfig(root: string): Promise<import("./config.js").kitConfig | null> {
