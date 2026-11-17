@@ -696,6 +696,32 @@ describe("self-audit-docs — loadKnownEnvVars", () => {
     }
   });
 
+  it("counts os.environ reads in the bundled skills' Python, but not a Python test", () => {
+    // triage.py and docker_label.py read their registry overrides from os.environ; before this,
+    // a var only the skill reads (KIT_DOCKER_V2_REGISTRY) failed the docs rule as nonexistent.
+    const root = mkdtempSync(join(tmpdir(), "kit-envvars-py-"));
+    try {
+      mkdirSync(join(root, "skills", "s"), { recursive: true });
+      writeFileSync(
+        join(root, "skills", "s", "a.py"),
+        [
+          'A = os.environ.get("KIT_PY_GET", "x")',
+          "B = os.environ['KIT_PY_INDEX']",
+          'if "KIT_PY_IN" not in os.environ: pass',
+          'print("KIT_PY_ONLY_PRINTED")',
+        ].join("\n"),
+        "utf-8",
+      );
+      writeFileSync(join(root, "skills", "s", "test_a.py"), 'os.environ["KIT_PY_TEST"]', "utf-8");
+      const known = loadKnownEnvVars(root);
+      for (const v of ["KIT_PY_GET", "KIT_PY_INDEX", "KIT_PY_IN"]) assert.ok(known.has(v), v);
+      assert.equal(known.has("KIT_PY_ONLY_PRINTED"), false);
+      assert.equal(known.has("KIT_PY_TEST"), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("kit's own tree knows the hardware mandate var, and not the misspelling", () => {
     // README, doctor's remediation hint and the NIST evidence map all documented
     // KIT_REQUIRE_HARDWARE; the variable the code reads is KIT_REQUIRE_HARDWARE_IDENTITY.
