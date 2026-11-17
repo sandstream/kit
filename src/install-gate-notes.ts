@@ -9,7 +9,7 @@
  *
  * Read without execution: the command text, `package.json` and `package-lock.json`.
  */
-import { closeSync, fstatSync, openSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { installDirectory, type BareSegment } from "./install-gate-bare.js";
 
@@ -42,18 +42,15 @@ export function remoteScripts(command: string): string[] {
   return [...new Set(found)];
 }
 
-/** One open file descriptor for the size check and the read, so the file cannot change between them. */
+/** One read, then the size check: no check-then-use on the path (CodeQL file race). */
 function readJson(path: string): Record<string, unknown> | null {
-  let fd: number | undefined;
   try {
-    fd = openSync(path, "r");
-    if (fstatSync(fd).size > MAX_FILE) return null;
-    const value: unknown = JSON.parse(readFileSync(fd, "utf8"));
+    const text = readFileSync(path, "utf8");
+    if (text.length > MAX_FILE) return null;
+    const value: unknown = JSON.parse(text);
     return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
   } catch {
     return null;
-  } finally {
-    if (fd !== undefined) closeSync(fd);
   }
 }
 
