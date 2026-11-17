@@ -85,3 +85,19 @@ jobs:
       # `ci-adr-gate.test.ts` pins this step's existence — deleting it fails the suite.
       - name: Skill gate (module discipline for every shipped SKILL.md)
         run: node dist/cli.js review --stages skill
+
+  # Over 400 net new lines in src/**/*.test.ts and *.test-support.ts fails, unless a commit on the
+  # branch carries a `Test-Growth: <reason>` trailer (scripts/test-growth.mjs, also a step of
+  # scripts/prepush.mjs). Here, not in pr-hygiene.yml, which checks out no code by design.
+  test-growth:
+    name: Test growth within the cap, or a stated reason
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Over 400 net new test lines needs a Test-Growth trailer
+        run: node scripts/test-growth.mjs --base origin/main
