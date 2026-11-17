@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { ComplexityFinding } from "./check-standards.js";
 import type { JavaScriptInput } from "./standards-javascript-files.js";
 
-export const JAVASCRIPT_METRIC_VERSION = "kit-js-ccn/v1";
+const JAVASCRIPT_METRIC_VERSION = "kit-js-ccn/v1";
 export const TYPESCRIPT_TOOL_VERSIONS = new Set(["5.9.3", "6.0.3"]);
 
 type ObjectValue = Record<string, unknown>;

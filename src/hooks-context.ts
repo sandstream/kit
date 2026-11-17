@@ -29,7 +29,7 @@ import { realDeps, watchSkillDeps, type WatchDeps } from "./skill-deps-watch.js"
  * updates those on its own, so a session start is the moment to say that one has a known
  * vulnerability or is a major version behind. `KIT_SKILL_DEPS_WATCH=0` turns it off.
  */
-export function skillDepsContext(
+function skillDepsContext(
   env: NodeJS.ProcessEnv = process.env,
   deps: WatchDeps = realDeps,
   home: string = homedir(),

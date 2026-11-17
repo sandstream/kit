@@ -32,7 +32,7 @@ export function envTruthy(value: string | undefined): boolean {
 const READ_ONLY_FLAG_RE = /^--read-?only(?:=(.*))?$/;
 
 /** True for any argv token spelling the read-only flag, regardless of its value's validity. */
-export function isReadOnlyToken(token: string): boolean {
+function isReadOnlyToken(token: string): boolean {
   return READ_ONLY_FLAG_RE.test(token);
 }
 

@@ -86,7 +86,7 @@ function validateChange(action: Exclude<IncomingTrustAction, { type: "enroll" }>
     throw new Error("Incoming trust: invalid-action");
 }
 
-export function validEvidence(value: unknown): value is IncomingCheck[] {
+function validEvidence(value: unknown): value is IncomingCheck[] {
   return Array.isArray(value) && value.length <= 128 && value.every(incomingCheck);
 }
 

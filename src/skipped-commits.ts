@@ -68,7 +68,7 @@ export interface ReachabilityProbe {
  * dropped: the log is an audit trail, and "this commit was replayed" is a fact worth keeping — it
  * just is not a finding.
  */
-export const REPLAY_REASONS = new Set(["replayed"]);
+const REPLAY_REASONS = new Set(["replayed"]);
 
 export function parseSkippedCommits(content: string): SkippedCommitEntry[] {
   const entries: SkippedCommitEntry[] = [];

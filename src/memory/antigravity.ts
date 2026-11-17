@@ -19,7 +19,7 @@ import { insertMessage, upsertSession, isFileIndexed, markFileIndexed } from "./
 import type { IndexResult } from "./parser.js";
 
 /** The three Antigravity brain roots under ~/.gemini (CLI, IDE, and 2.0). */
-export function getAntigravityRoots(): string[] {
+function getAntigravityRoots(): string[] {
   const base = process.env.KIT_ANTIGRAVITY_DIR ?? join(homedir(), ".gemini");
   return ["antigravity-cli", "antigravity-ide", "antigravity"].map((seg) => join(base, seg));
 }

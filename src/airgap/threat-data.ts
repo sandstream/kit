@@ -75,7 +75,7 @@ export function sha256Hex(bytes: Buffer): string {
 }
 
 /** Verify a detached Ed25519 signature over the manifest bytes. Never throws. */
-export function verifyManifestSignature(
+function verifyManifestSignature(
   manifestBytes: Buffer,
   signature: Buffer,
   publicKeyPem: string,

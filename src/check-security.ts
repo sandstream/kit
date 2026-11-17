@@ -1364,7 +1364,7 @@ export function isIgnoredFinding(f: TrufflehogFinding, entries: SecretsIgnoreEnt
  * (file gone / unreadable) keeps the finding a normal one — never downgrade on
  * missing evidence.
  */
-export function isPublicByDesign(
+function isPublicByDesign(
   f: TrufflehogFinding,
   readFile: (path: string) => string | null,
 ): boolean {

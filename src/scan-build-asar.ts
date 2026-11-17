@@ -15,7 +15,7 @@ import type { SecretFinding } from "./utils/redactSecrets.js";
 import { findArtifactSecrets } from "./scan-build-sourcemap.js";
 
 /** Larger than this, the asar is reported as not scanned rather than read. */
-export const MAX_ASAR_BYTES = 1024 * 1024 * 1024; // 1 GiB
+const MAX_ASAR_BYTES = 1024 * 1024 * 1024; // 1 GiB
 const WINDOW = 4 * 1024 * 1024;
 /** Longer than any shape kit matches, a 4096-bit PEM private key included. */
 const OVERLAP = 64 * 1024;

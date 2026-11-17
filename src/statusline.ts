@@ -116,7 +116,7 @@ export function quickSubsystems(cwd: string): SubsystemStatus[] {
  *  Scoped to the CURRENT project (same definition as `kit memory pal list`) so the
  *  statusline action count and the list can never disagree — an unscoped count once
  *  showed 156 actions (mostly dead temp-dir scopes) while the list correctly showed 0. */
-export async function quickPalCount(cwd?: string): Promise<number> {
+async function quickPalCount(cwd?: string): Promise<number> {
   try {
     const { existsSync } = await import("node:fs");
     const { getMemoryDbPath, openMemoryDbReadOnly } = await import("./memory/db.js");

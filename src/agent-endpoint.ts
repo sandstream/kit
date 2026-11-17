@@ -14,7 +14,7 @@ import type { SecurityCheckResult } from "./check-security.js";
 import { claudeEnvSources } from "./agent-preload.js";
 
 /** Endpoint variables and the host suffixes that belong to the vendor they point at. */
-export const ENDPOINT_VARS: { name: string; vendor: string[] }[] = [
+const ENDPOINT_VARS: { name: string; vendor: string[] }[] = [
   { name: "ANTHROPIC_BASE_URL", vendor: ["api.anthropic.com"] },
   { name: "ANTHROPIC_BEDROCK_BASE_URL", vendor: [".amazonaws.com"] },
   { name: "ANTHROPIC_VERTEX_BASE_URL", vendor: [".googleapis.com"] },

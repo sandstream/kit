@@ -4,7 +4,7 @@
  * an exact match is a likely look-alike. Kept deliberately small and local (no
  * network) — it covers the names attackers most often imitate, not all of npm.
  */
-export const TOP_NPM: readonly string[] = [
+const TOP_NPM: readonly string[] = [
   "react",
   "react-dom",
   "lodash",

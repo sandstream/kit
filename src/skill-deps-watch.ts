@@ -371,7 +371,7 @@ function outdatedMajors(dir: string): Behind[] {
 }
 
 /** The real check: `npm audit` for advisories, `npm outdated` for majors. Throws when the audit cannot run. */
-export function checkWithNpm(dir: string): SkillDepsCheck {
+function checkWithNpm(dir: string): SkillDepsCheck {
   const outcome = runAudit(
     dir,
     { manager: "npm", command: ["npm", "audit", "--json", ...pinnedTo()] },

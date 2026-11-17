@@ -70,7 +70,7 @@ export async function readAllowlist(cwd: string = process.cwd()): Promise<Allowl
   }
 }
 
-export async function writeAllowlist(list: Allowlist, cwd: string = process.cwd()): Promise<void> {
+async function writeAllowlist(list: Allowlist, cwd: string = process.cwd()): Promise<void> {
   const path = resolve(cwd, ALLOWLIST_FILE);
   await writeFile(path, JSON.stringify(list, null, 2) + "\n", "utf-8");
 }

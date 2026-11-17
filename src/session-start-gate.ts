@@ -14,7 +14,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { kitSubcommandInvocation, type HookInstallResult } from "./agent-config.js";
 
-export const SESSION_START_SUBCOMMAND = "hooks context";
+const SESSION_START_SUBCOMMAND = "hooks context";
 
 interface HookCmd {
   type?: string;

@@ -76,7 +76,7 @@ export interface OnePasswordAccount {
  * distinguish "user has no account configured" from "user signed out" —
  * the two need different remediation paths.
  */
-export async function list1PasswordAccounts(): Promise<OnePasswordAccount[]> {
+async function list1PasswordAccounts(): Promise<OnePasswordAccount[]> {
   try {
     const { stdout } = await exec("op", ["account", "list", "--format=json"], {
       timeout: 5000,

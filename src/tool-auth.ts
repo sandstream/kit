@@ -12,7 +12,7 @@ import type { ServiceConfig } from "./config.js";
 import { parseCommand } from "./utils/parseCommand.js";
 import { probeName } from "./tool-inventory.js";
 
-export const BUILTIN_AUTH_PROBES: Readonly<Record<string, string>> = {
+const BUILTIN_AUTH_PROBES: Readonly<Record<string, string>> = {
   aws: "aws sts get-caller-identity",
   flyctl: "flyctl auth whoami",
   gh: "gh auth status",

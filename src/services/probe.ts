@@ -14,8 +14,8 @@ import { connect } from "node:net";
 import { execFileNoThrow, type ExecResult } from "../utils/execFileNoThrow.js";
 import type { ServiceEntry } from "./registry.js";
 
-export const SUPABASE_LABEL = "com.supabase.cli.project";
-export const COMPOSE_LABEL = "com.docker.compose.project";
+const SUPABASE_LABEL = "com.supabase.cli.project";
+const COMPOSE_LABEL = "com.docker.compose.project";
 
 export interface DockerContainer {
   id: string;
@@ -64,7 +64,7 @@ async function defaultRun(cmd: string, args: string[], opts: RunOptions = {}): P
   });
 }
 
-export function pidAliveDefault(pid: number): boolean {
+function pidAliveDefault(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -74,7 +74,7 @@ export function pidAliveDefault(pid: number): boolean {
   }
 }
 
-export function portOpenDefault(port: number, timeoutMs = 750): Promise<boolean> {
+function portOpenDefault(port: number, timeoutMs = 750): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = connect({ host: "127.0.0.1", port });
     const done = (open: boolean) => {

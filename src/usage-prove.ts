@@ -111,7 +111,7 @@ export function controlHarmlessCommandAllowed(): Control {
  * Stripe test key is staged, and the commit must fail. Then a clean commit must succeed — same
  * pairing as above.
  */
-export function controlSecretScanBlocksCommit(): Control[] {
+function controlSecretScanBlocksCommit(): Control[] {
   const name = "pre-commit refuses a staged credential";
   const inconclusive = (why: string): Control[] => [
     {
@@ -187,7 +187,7 @@ export function controlSecretScanBlocksCommit(): Control[] {
  * security dimension twice and compare the (name → status) sets. An LLM asked "is this safe?"
  * cannot pass this control by construction.
  */
-export function controlDeterminism(cwd: string): Control {
+function controlDeterminism(cwd: string): Control {
   const verdicts = (): Map<string, string> | null => {
     const r = run(["check", "--category", "security", "--json"], { cwd });
     try {

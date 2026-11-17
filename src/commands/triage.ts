@@ -667,7 +667,7 @@ async function cmdTriageCheckDeps(): Promise<boolean> {
  * `<path>.sha256` or `<path>.sig` sidecar counts as verified provenance. Exits
  * non-zero on a high-confidence (code-exec) finding.
  */
-export async function cmdTriageModel(args: string[]): Promise<boolean> {
+async function cmdTriageModel(args: string[]): Promise<boolean> {
   const json = hasFlag(args, "--json");
   const scanBytes = hasFlag(args, "--scan-bytes");
   const path = args.find((a) => !a.startsWith("--"));

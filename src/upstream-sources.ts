@@ -184,7 +184,7 @@ export function createGhFileFetcher(
   };
 }
 
-export function createDefaultFetcher(): UpstreamFetcher {
+function createDefaultFetcher(): UpstreamFetcher {
   return {
     npmLatest: createNpmLatestFetcher(),
     githubReleases: createGhReleaseFetcher(),

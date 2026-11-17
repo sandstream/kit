@@ -5,7 +5,7 @@ import { defaultCoolingDeps } from "../triage-cooling.js";
 import { triageGem, type GemTriageDeps } from "../triage-gem.js";
 import { readRegularFileIfPresent } from "../upstream-safe-read.js";
 
-export const defaultGemDeps: GemTriageDeps = {
+const defaultGemDeps: GemTriageDeps = {
   ...defaultCoolingDeps,
   lockfile: (cwd) => {
     try {

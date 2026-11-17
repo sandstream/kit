@@ -23,14 +23,14 @@ export const LIMITS = [
   "Transfer is unproven: a number for one repository and corpus does not carry to another.",
 ] as const;
 
-export const MIN_RUNS_TO_COMPARE = 3;
+const MIN_RUNS_TO_COMPARE = 3;
 
 /**
  * A loop that proposes several candidates per round and keeps the one with the best holdout score
  * (a self-improving harness, a prompt sweep) turns the holdout into a training signal. From this
  * many configs on one holdout, the report says so. Two configs is the ordinary A/B the rig is for.
  */
-export const HOLDOUT_SPENT_AT = 3;
+const HOLDOUT_SPENT_AT = 3;
 
 export interface Spread {
   mean: number;

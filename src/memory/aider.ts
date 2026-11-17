@@ -22,7 +22,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { insertMessage, upsertSession, isFileIndexed, markFileIndexed } from "./db.js";
 import type { IndexResult } from "./parser.js";
 
-export function getAiderHistoryFile(cwd: string = process.cwd()): string {
+function getAiderHistoryFile(cwd: string = process.cwd()): string {
   return (
     process.env.KIT_AIDER_HISTORY ??
     process.env.AIDER_CHAT_HISTORY_FILE ??

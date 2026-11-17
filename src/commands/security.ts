@@ -715,7 +715,7 @@ async function cmdSecurityClearCache(): Promise<boolean> {
  * recording "we ship with these", and it PRUNES as well as adds, because a list that only grows
  * stops meaning anything.
  */
-export async function cmdSecurityAdvisories(): Promise<boolean> {
+async function cmdSecurityAdvisories(): Promise<boolean> {
   const {
     ADVISORY_BASELINE_FILE,
     detectAuditRunner,

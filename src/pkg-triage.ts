@@ -45,7 +45,7 @@ export interface PkgDeps {
 }
 
 /** Publishers whose Team ID kit knows. Add one only with a Team ID read from a verified package. */
-export const PUBLISHERS: readonly PkgPublisher[] = [
+const PUBLISHERS: readonly PkgPublisher[] = [
   {
     name: "Node.js Foundation",
     teamId: "HX7739G8FX",
@@ -167,7 +167,7 @@ async function expectedChecksum(
 }
 
 /** Line breaks and other control characters: the tools print the path, so these let a name plant lines. */
-export const UNSAFE_PATH = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const UNSAFE_PATH = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 
 function refused(file: string): PkgReport {
   const detail = "the path contains a line break or control character; rename the file";

@@ -159,7 +159,7 @@ const REGISTRY_URL: Record<Ecosystem, (name: string) => string> = {
  * (the hallucination signal); a network/parse failure → `lookupFailed:true` so
  * the score fails toward caution instead of green. Never throws.
  */
-export async function fetchPackageMeta(
+async function fetchPackageMeta(
   ecosystem: Ecosystem,
   name: string,
   opts: { timeoutMs?: number; nowMs?: number } = {},

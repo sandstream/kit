@@ -18,7 +18,7 @@ import { join, relative } from "node:path";
 import { loadPublicTables, type PublicTables } from "./anon-public-tables.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
-export const ANON_ACCESS_CHECK = "anonymous database access";
+const ANON_ACCESS_CHECK = "anonymous database access";
 
 const MAX_SQL_BYTES = 2 * 1024 * 1024;
 const MAX_SQL_FILES = 2000;
@@ -147,7 +147,7 @@ function skipSpecial(text: string, i: number): Skip | null {
  * recognised only where they can start, so a dollar sign or comment opener inside another
  * construct cannot hide the statements that follow it.
  */
-export function splitStatements(text: string): { statements: string[]; unterminated: boolean } {
+function splitStatements(text: string): { statements: string[]; unterminated: boolean } {
   const statements: string[] = [];
   let current = "";
   let unterminated = false;

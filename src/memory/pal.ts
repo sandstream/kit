@@ -451,7 +451,7 @@ export function palSyncFindings(
 
 // ── Migration from the legacy python PAL ledger ───────────────────────────────
 
-export function getLegacyLedgerPath(): string {
+function getLegacyLedgerPath(): string {
   return process.env.KIT_PAL_LEDGER ?? join(homedir(), ".claude", "pal", "ledger.jsonl");
 }
 

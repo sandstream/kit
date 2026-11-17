@@ -34,7 +34,7 @@ export function linkPath(path: string, target: string | null, reader: Reader): v
   }
 }
 
-export function workspacePatterns(value: unknown, reader: Reader, path: string): string[] {
+function workspacePatterns(value: unknown, reader: Reader, path: string): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some((p) => typeof p !== "string")) {
     issue(reader, "invalid-schema", path, "Expected an array of workspace path patterns.");

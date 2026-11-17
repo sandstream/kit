@@ -37,7 +37,7 @@ import { insertMessage, upsertSession } from "./db.js";
 import type { IndexResult } from "./parser.js";
 
 /** OpenCode's data dir (parent of both `storage/` and `opencode.db`). */
-export function getOpenCodeDataDir(): string {
+function getOpenCodeDataDir(): string {
   return (
     process.env.KIT_OPENCODE_DIR ??
     process.env.OPENCODE_DATA_DIR ??
@@ -45,11 +45,11 @@ export function getOpenCodeDataDir(): string {
   );
 }
 
-export function getOpenCodeStorageDir(): string {
+function getOpenCodeStorageDir(): string {
   return join(getOpenCodeDataDir(), "storage");
 }
 
-export function getOpenCodeDbPath(): string {
+function getOpenCodeDbPath(): string {
   return join(getOpenCodeDataDir(), "opencode.db");
 }
 

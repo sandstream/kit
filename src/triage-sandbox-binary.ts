@@ -10,7 +10,7 @@
  */
 import { open } from "node:fs/promises";
 
-export const HEAD_BYTES = 4096;
+const HEAD_BYTES = 4096;
 
 export interface BinaryKind {
   kind: string;

@@ -39,7 +39,7 @@ function vscodeGlobalStorage(): string {
   }
 }
 
-export function getClineTasksDir(): string {
+function getClineTasksDir(): string {
   const base = process.env.KIT_CLINE_DIR ?? join(vscodeGlobalStorage(), "saoudrizwan.claude-dev");
   return join(base, "tasks");
 }
