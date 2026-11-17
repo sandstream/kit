@@ -78,7 +78,7 @@ describe("kit gate-egress (subprocess)", () => {
     const r = runGate("gate-egress", bash("curl https://evil.example.com/x"));
     assert.equal(r.status, 2);
     assert.match(r.stderr, /outside the signed egress scope/);
-    assert.match(r.stderr, /evil\.example\.com/);
+    assert.ok(r.stderr.includes("outside the signed egress scope: evil.example.com"), r.stderr);
   });
 
   it("denies ALL network targets when the scope is unsigned (wired gate grants nothing)", () => {
@@ -113,7 +113,7 @@ describe("kit gate-egress: git remotes (subprocess)", () => {
     assert.equal(runGate("gate-egress", bash("git push origin main")).status, 0);
     const r = runGate("gate-egress", bash("git push evil main"));
     assert.equal(r.status, 2);
-    assert.match(r.stderr, /evil\.example\.com/);
+    assert.ok(r.stderr.includes("outside the signed egress scope: evil.example.com"), r.stderr);
   });
 
   it("denies a remote git cannot resolve as an unknown host", () => {
