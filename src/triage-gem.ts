@@ -13,6 +13,7 @@
  */
 import {
   coolingCheck,
+  enforceFrom,
   limitFrom,
   supplyChainConfig,
   type CoolingDeps,
@@ -230,7 +231,7 @@ export async function triageGem(
   // The same limit and enforcement as npm and pip: [supply_chain] in .kit.toml, then the environment.
   const cfg = await supplyChainConfig(cwd);
   const limitDays = limitFrom(cfg, deps.env);
-  const enforce = cfg.min_release_age_enforce === true || deps.env.KIT_COOLING_ENFORCE === "1";
+  const enforce = enforceFrom(cfg, deps.env);
   const cooling = await coolingCheck({
     pkg: parsed.name,
     version,
