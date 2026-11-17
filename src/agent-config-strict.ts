@@ -24,11 +24,11 @@ import { dirname, resolve } from "node:path";
 export const CREDENTIAL_DIRS = ["~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gcloud"];
 
 /** `.env` and `.env.*` at any depth, then `.env.example` carved back out (order matters). */
-export const ENV_DENY_RULES = ["Read(.env)", "Read(.env.*)"];
+const ENV_DENY_RULES = ["Read(.env)", "Read(.env.*)"];
 export const ENV_EXAMPLE_CARVE_OUT = "Read(!.env.example)";
 
 /** Force push (`--force*`, `-f`, a `+refspec`) and `git reset --hard`, wherever the flag sits. */
-export const GIT_DENY_RULES = [
+const GIT_DENY_RULES = [
   "Bash(git push *--force*)",
   "Bash(git push -f*)",
   "Bash(git push * -f*)",
@@ -83,7 +83,7 @@ export function mergeDenyRules(deny: string[]): { added: string[]; moved: boolea
 }
 
 /** Enable the sandbox (unless the user turned it off) and add the credential read denies. */
-export function mergeSandbox(
+function mergeSandbox(
   settings: StrictSettings,
   platform: NodeJS.Platform,
 ): { state: SandboxState; added: string[] } {
