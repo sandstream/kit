@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 import type { SecurityCheckResult } from "./check-security.js";
 import { DOCKER_IOCS, type DockerIoc } from "./docker-ioc-data.js";
 
-export const DOCKER_IOC_NAME = "local docker image IOCs";
+const DOCKER_IOC_NAME = "local docker image IOCs";
 const LIST_ARGS = ["image", "ls", "--digests", "--no-trunc", "--format", "{{json .}}"];
 
 /** One local image row, as `docker image ls --format '{{json .}}'` prints it. */
