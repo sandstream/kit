@@ -19,7 +19,7 @@ import { readInstructionFile } from "./instruction-scan.js";
 const SCRIPT = /\.(m?js|cjs|ts|mts|sh|bash|zsh|py|rb|ps1)$/i;
 
 /** `[event, command]` for every hook command in a settings.json text. */
-export function hookCommands(json: string): Array<[string, string]> {
+function hookCommands(json: string): Array<[string, string]> {
   let obj: unknown;
   try {
     obj = JSON.parse(json);

@@ -99,7 +99,7 @@ function zipHead(b: Uint8Array, offset: number): Uint8Array | null {
 }
 
 /** The first decompressed bytes of the stream at `offset`, or null when it cannot be read. */
-export function streamHead(b: Uint8Array, format: StreamFormat, offset: number): Uint8Array | null {
+function streamHead(b: Uint8Array, format: StreamFormat, offset: number): Uint8Array | null {
   try {
     if (format === "gzip") {
       const input = b.subarray(offset, offset + STREAM_INPUT);
@@ -113,7 +113,7 @@ export function streamHead(b: Uint8Array, format: StreamFormat, offset: number):
 }
 
 /** An executable or boot image hidden one compression layer inside `b`, if any. */
-export function hiddenInside(
+function hiddenInside(
   b: Uint8Array,
 ): { kind: BinaryKind; format: StreamFormat; offset: number } | null {
   for (const { format, offset } of findStreams(b)) {

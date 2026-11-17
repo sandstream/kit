@@ -211,7 +211,7 @@ export async function runMjsPlugins(
 }
 
 /** Map a validated plugin output → net-new-gated StandardsCheckResult. */
-export function resultFromOutput(
+function resultFromOutput(
   out: PluginOutput,
   enforce: boolean,
   seen: Set<string>,

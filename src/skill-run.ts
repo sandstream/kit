@@ -40,7 +40,7 @@ export const SNAPSHOT_NAME = ".kit-skill.snapshot.json";
  * Where a repo keeps skills. `skills/` is kit's own layout; `.claude/skills/` is the
  * agent-harness convention. Both are scanned, neither is required.
  */
-export const SKILL_DIRS: readonly string[] = ["skills", ".claude/skills"];
+const SKILL_DIRS: readonly string[] = ["skills", ".claude/skills"];
 
 export interface DiscoveredSkill {
   /** Repo-relative path to the SKILL.md. */

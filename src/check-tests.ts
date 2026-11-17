@@ -97,7 +97,7 @@ export async function findUntestedSources(
 }
 
 /** Look for at least one Playwright spec tagged `@smoke`. */
-export async function hasSmokeTests(
+async function hasSmokeTests(
   cwd = process.cwd(),
   smokeDirs: string[] = ["e2e", "tests/e2e", "smoke"],
 ): Promise<boolean> {

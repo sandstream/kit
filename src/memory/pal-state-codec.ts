@@ -1,4 +1,4 @@
-export const LEGACY_STATE_FIELDS = [
+const LEGACY_STATE_FIELDS = [
   "status",
   "title",
   "detail",

@@ -437,7 +437,7 @@ async function writePluginManifest(
 }
 
 /** Register an already installed ServiceAdapter; safe to call again on repeat installs. */
-export async function registerInstalledPluginAdapter(
+async function registerInstalledPluginAdapter(
   metadata: PluginMetadata,
   cwd: string = process.cwd(),
 ): Promise<boolean> {

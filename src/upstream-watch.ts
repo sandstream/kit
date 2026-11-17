@@ -108,7 +108,7 @@ const SAFE_NAME = /^(@[a-z0-9._-]+\/)?[A-Za-z0-9._-]+$/;
 const SAFE_REPO = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 const SAFE_VERSION = /^[A-Za-z0-9._+~-]{1,64}$/;
 
-export function assertWatchedUrl(url: string): void {
+function assertWatchedUrl(url: string): void {
   const u = new URL(url);
   if (u.protocol !== "https:" || !WATCH_HOSTS.has(u.hostname)) {
     throw new Error(`refusing ${url}: not an https URL on a watched host`);

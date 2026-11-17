@@ -16,7 +16,7 @@
  */
 
 /** Triggers that run in the base repository's context, with its secrets, for a PR's event. */
-export const PRIVILEGED_TRIGGERS = ["pull_request_target", "workflow_run", "issue_comment"];
+const PRIVILEGED_TRIGGERS = ["pull_request_target", "workflow_run", "issue_comment"];
 
 /** GitHub blocks this trigger in public repositories without an allowing Actions event policy. */
 export const PRT_DEFAULT_BLOCK_DATE = "2026-12-02";

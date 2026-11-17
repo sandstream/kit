@@ -16,7 +16,7 @@ import type { RunOutcome } from "./adjudicate.js";
 import type { ConfigStats } from "./report.js";
 import type { RunMark } from "./findings.js";
 
-export const RIG_DIR = join(".kit", "rig");
+const RIG_DIR = join(".kit", "rig");
 
 export interface RigReceipt {
   inputId: string;
@@ -44,7 +44,7 @@ export function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-export function inputDir(cwd: string, inputId: string): string {
+function inputDir(cwd: string, inputId: string): string {
   return join(cwd, RIG_DIR, inputId);
 }
 

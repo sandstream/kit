@@ -5,7 +5,7 @@ import { getMemoryDbPath, openMemoryDb } from "../memory/db.js";
 import { scanPlanFiles, syncPlanFiles } from "../memory/plan-track.js";
 
 /** Keep plan tracking fail-open at SessionStart, with one short context line. */
-export function planSessionStartNotice(): string | null {
+function planSessionStartNotice(): string | null {
   if (isReadOnlyMode()) return null;
   try {
     const root = getCanonicalProjectRoot();

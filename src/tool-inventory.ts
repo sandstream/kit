@@ -92,7 +92,7 @@ export function probeName(declaration: string): string {
 }
 
 /** Read a tool's version the way the check does: run it and take the first version token. */
-export async function readToolVersion(bin: string): Promise<string | null> {
+async function readToolVersion(bin: string): Promise<string | null> {
   const r = await execFileNoThrow(bin, ["--version"], { timeout: 10_000 });
   if (!r.ok) return null;
   const m = (r.stdout || r.stderr || "").match(/(\d+[\d.]*)/);
@@ -100,12 +100,12 @@ export async function readToolVersion(bin: string): Promise<string | null> {
 }
 
 /** Where the latest-version cache lives. Per machine, not per repo: the answer is machine-wide. */
-export function latestCachePath(): string {
+function latestCachePath(): string {
   return join(process.env.KIT_AUDIT_ANCHOR_DIR ?? join(homedir(), ".kit"), "tool-latest.json");
 }
 
 /** Real dependencies for the latest lookups: subprocess, clock, on-disk TTL cache, air-gap. */
-export async function realLatestDeps(): Promise<LatestDeps> {
+async function realLatestDeps(): Promise<LatestDeps> {
   const { isAirGapPosture } = await import("./update-check.js");
   const offline = await isAirGapPosture();
   const path = latestCachePath();

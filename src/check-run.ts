@@ -85,7 +85,7 @@ export const CHECK_CATEGORIES = [
  * Dimensions that run only when named in `--category`. A default check stays offline and its
  * verdict does not move because a new dimension exists.
  */
-export const OPT_IN_CATEGORIES: readonly CheckCategory[] = ["upstream"];
+const OPT_IN_CATEGORIES: readonly CheckCategory[] = ["upstream"];
 
 export type CheckCategory = (typeof CHECK_CATEGORIES)[number];
 

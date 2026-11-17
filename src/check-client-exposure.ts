@@ -36,7 +36,7 @@ import type { SecurityCheckResult } from "./check-security.js";
  * (`PUBLIC_`), Create React App (`REACT_APP_`), Expo (`EXPO_PUBLIC_`), Nuxt (`NUXT_PUBLIC_`),
  * Gatsby (`GATSBY_`), Vue CLI (`VUE_APP_`), Storybook (`STORYBOOK_`).
  */
-export const CLIENT_PREFIXES = [
+const CLIENT_PREFIXES = [
   "VITE_",
   "NEXT_PUBLIC_",
   "PUBLIC_",

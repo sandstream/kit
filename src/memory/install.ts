@@ -103,11 +103,11 @@ export function getCodexHooksPath(): string {
  * it lets a liveness check tell "never installed" (silent = fine) apart from
  * "was installed, now GONE" (the loop silently degraded to capture-nothing).
  */
-export function memoryInstallMarkerPath(): string {
+function memoryInstallMarkerPath(): string {
   return process.env.KIT_MEMORY_HOOK_MARKER ?? join(homedir(), ".kit", ".memory-hooks-installed");
 }
 
-export function codexMemoryInstallMarkerPath(): string {
+function codexMemoryInstallMarkerPath(): string {
   return (
     process.env.KIT_CODEX_MEMORY_HOOK_MARKER ??
     join(homedir(), ".kit", ".memory-hooks-codex-installed")

@@ -22,7 +22,7 @@ import { DatabaseSync } from "node:sqlite";
 import { insertMessage, upsertSession, isFileIndexed, markFileIndexed } from "./db.js";
 import type { IndexResult } from "./parser.js";
 
-export function getCursorStateDb(): string {
+function getCursorStateDb(): string {
   if (process.env.KIT_CURSOR_DB) return process.env.KIT_CURSOR_DB;
   const home = homedir();
   const sub = join("Cursor", "User", "globalStorage", "state.vscdb");

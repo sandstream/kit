@@ -488,7 +488,7 @@ export async function cmdConfig(): Promise<boolean> {
  * question had no answer surface: six of the 23 sections carried no description in the type, two
  * appeared in no document, and `kit config knobs` covered four.
  */
-export async function cmdConfigSections(): Promise<boolean> {
+async function cmdConfigSections(): Promise<boolean> {
   const { CONFIG_SECTIONS } = await import("../config-surface.js");
   const wantJson = hasFlag(process.argv, "--json");
 

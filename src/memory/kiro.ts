@@ -37,7 +37,7 @@ function dataLocalDir(): string {
   }
 }
 
-export function getKiroDb(): string {
+function getKiroDb(): string {
   return process.env.KIT_KIRO_DB ?? join(dataLocalDir(), "kiro-cli", "data.sqlite3");
 }
 

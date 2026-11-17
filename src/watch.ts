@@ -15,8 +15,8 @@ import {
   type Severity,
 } from "./security-prs.js";
 
-export const WATCH_CACHE = ".kit/watch.json";
-export const WATCH_STALE_MS = 48 * 3_600_000;
+const WATCH_CACHE = ".kit/watch.json";
+const WATCH_STALE_MS = 48 * 3_600_000;
 
 export interface WatchCache {
   at: string;

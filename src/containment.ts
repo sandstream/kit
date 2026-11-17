@@ -176,7 +176,7 @@ function uncontained(s: ContainmentSignals, details: string[]): ContainmentVerdi
 }
 
 /** What a kernel boundary means for a local kernel privilege escalation. Pure. */
-export function kernelNote(kernel: KernelBoundary): string {
+function kernelNote(kernel: KernelBoundary): string {
   if (kernel === "shared-kernel")
     return "shares the host kernel: a local kernel privilege escalation reaches the host";
   if (kernel === "separate-kernel")

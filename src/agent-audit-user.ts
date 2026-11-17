@@ -30,7 +30,7 @@ import {
 import { hookScriptRows } from "./agent-hook-scripts.js";
 import { readInstructionFile, scanInstructionText } from "./instruction-scan.js";
 
-export const USER_AGENT_DIRS = [
+const USER_AGENT_DIRS = [
   { dir: join(".claude", "skills"), label: "user skill" },
   { dir: join(".claude", "commands"), label: "user command" },
   { dir: join(".claude", "agents"), label: "user subagent" },
@@ -58,7 +58,7 @@ export function codexHome(
 }
 
 /** Every user-level agent directory kit reads, for Claude Code and Codex. Pure. */
-export function userSurfaces(home: string, env: Record<string, unknown>): UserSurface[] {
+function userSurfaces(home: string, env: Record<string, unknown>): UserSurface[] {
   const codex = codexHome(home, env);
   return [
     ...USER_AGENT_DIRS.map(({ dir, label }) => ({

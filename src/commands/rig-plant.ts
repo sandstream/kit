@@ -15,7 +15,7 @@ import { c } from "../utils/colors.js";
 import { flagValue, GLOBAL_FLAGS, hasFlag, rejectUnknownFlags } from "../utils/flags.js";
 import { defectToml, plantFromFix, PlantRefused } from "../rig/plant.js";
 
-export const PLANT_FLAGS = [
+const PLANT_FLAGS = [
   "--from-fix",
   "--split",
   "--id",

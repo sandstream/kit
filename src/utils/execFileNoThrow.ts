@@ -15,7 +15,7 @@ export interface ExecResult {
 }
 
 /** 64 MiB, the limit most callers already set. A report grows with what a scanner finds. */
-export const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
+const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 
 const MAXBUFFER_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
 

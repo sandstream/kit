@@ -172,7 +172,7 @@ export function hitlBlocksForSecurity(results: SecurityCheckResult[]): HitlBlock
     }));
 }
 
-export function hitlBlocksForDeploy(results: DeployCheckResult[]): HitlBlock[] {
+function hitlBlocksForDeploy(results: DeployCheckResult[]): HitlBlock[] {
   return results
     .filter((r) => r.status === "fail")
     .map((r) => {

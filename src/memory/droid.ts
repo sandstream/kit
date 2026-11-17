@@ -22,7 +22,7 @@ import { insertMessage, upsertSession, isFileIndexed, markFileIndexed } from "./
 import { extractText } from "./content.js";
 import type { IndexResult } from "./parser.js";
 
-export function getDroidProjectsDir(): string {
+function getDroidProjectsDir(): string {
   const base = process.env.KIT_DROID_DIR ?? join(homedir(), ".factory");
   return join(base, "projects");
 }

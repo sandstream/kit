@@ -21,7 +21,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { insertMessage, upsertSession, isFileIndexed, markFileIndexed } from "./db.js";
 import type { IndexResult } from "./parser.js";
 
-export function getContinueSessionsDir(): string {
+function getContinueSessionsDir(): string {
   const base = process.env.KIT_CONTINUE_DIR ?? join(homedir(), ".continue");
   return join(base, "sessions");
 }

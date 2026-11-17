@@ -255,7 +255,7 @@ export function resultOk(status: BrowserVerdictStatus): boolean {
   return status !== "fail" && status !== "blocker";
 }
 
-export function chromeCdpCommand(platform: NodeJS.Platform = process.platform): string {
+function chromeCdpCommand(platform: NodeJS.Platform = process.platform): string {
   if (platform === "darwin") {
     return [
       "/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome",

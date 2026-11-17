@@ -36,7 +36,7 @@ function dataLocalDir(): string {
   }
 }
 
-export function getAmazonQDb(): string {
+function getAmazonQDb(): string {
   return process.env.KIT_AMAZONQ_DB ?? join(dataLocalDir(), "amazon-q", "data.sqlite3");
 }
 

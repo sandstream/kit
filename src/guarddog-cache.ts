@@ -27,7 +27,7 @@ export interface GuardDogCacheEntry {
   packages: number;
 }
 
-export function guardDogCachePath(): string {
+function guardDogCachePath(): string {
   return process.env.KIT_GUARDDOG_CACHE ?? join(homedir(), ".kit", "guarddog-cache.json");
 }
 

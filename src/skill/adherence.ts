@@ -69,7 +69,7 @@ export interface RuntimeEvidenceSummary {
 }
 
 /** Older callers can prove a denial, but absence of a denial proves no result. */
-export function actionOutcome(action: Pick<ObservedAction, "outcome" | "denied">): ToolOutcome {
+function actionOutcome(action: Pick<ObservedAction, "outcome" | "denied">): ToolOutcome {
   const outcome = toolOutcome(action.outcome);
   return action.denied ? mergeToolOutcome(outcome, "denied") : outcome;
 }

@@ -22,7 +22,7 @@ import {
   type TranscriptTools,
 } from "./transcript-tools.js";
 
-export function getCodexSessionsDir(): string {
+function getCodexSessionsDir(): string {
   const base = process.env.KIT_CODEX_DIR ?? join(homedir(), ".codex");
   return join(base, "sessions");
 }

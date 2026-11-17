@@ -91,7 +91,7 @@ export interface PlatformScan {
 }
 
 /** Run hadolint over the repo's Dockerfiles. */
-export async function scanContainer(cwd: string): Promise<PlatformScan> {
+async function scanContainer(cwd: string): Promise<PlatformScan> {
   const dockerfiles = findDockerfiles(cwd);
   if (dockerfiles.length === 0) {
     return { dockerfiles: [], findings: [], didNotRun: false }; // nothing to lint ⇒ clean skip, not a gap

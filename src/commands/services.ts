@@ -114,7 +114,7 @@ export function statusOf(entry: ServiceEntry, live: Liveness, now: number): Serv
   return live === "alive" ? "running" : "unknown";
 }
 
-export function formatDuration(ms: number): string {
+function formatDuration(ms: number): string {
   const abs = Math.abs(ms);
   const m = Math.round(abs / 60_000);
   if (m < 60) return `${m}m`;

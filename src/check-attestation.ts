@@ -146,7 +146,7 @@ export function ed25519Fingerprint(pub: KeyObject | string): string {
 }
 
 /** Read the TOFU-pinned Ed25519 fingerprint, or null when none is pinned. */
-export async function readPinnedEd25519Fingerprint(dir?: string): Promise<string | null> {
+async function readPinnedEd25519Fingerprint(dir?: string): Promise<string | null> {
   try {
     const fp = (await readFile(ed25519PinPath(dir), "utf-8")).trim().toLowerCase();
     return fp.length > 0 ? fp : null;
@@ -179,7 +179,7 @@ export async function pinEd25519Fingerprint(fingerprint: string, dir?: string): 
  * either an SPKI PEM public key or a raw fingerprint hex (optionally `sha256:`
  * prefixed). Returns null when it cannot be interpreted.
  */
-export function expectedKeyToFingerprint(expected: string): string | null {
+function expectedKeyToFingerprint(expected: string): string | null {
   const trimmed = expected.trim();
   if (trimmed.includes("BEGIN PUBLIC KEY")) {
     try {
@@ -478,7 +478,7 @@ export async function verifyAttestation(
 }
 
 /** Write a receipt to `.kit-check-attestation.json` in `cwd`. */
-export async function writeAttestation(att: Attestation, cwd: string): Promise<string> {
+async function writeAttestation(att: Attestation, cwd: string): Promise<string> {
   const path = join(cwd, ATTESTATION_FILE);
   await writeFile(path, JSON.stringify(att, null, 2) + "\n", "utf-8");
   return path;

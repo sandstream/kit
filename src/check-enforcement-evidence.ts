@@ -24,10 +24,10 @@ import { resolve } from "node:path";
 import type { GateLiveness } from "./agent-config.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
-export const EVIDENCE_CHECK = "enforcement evidence";
+const EVIDENCE_CHECK = "enforcement evidence";
 
 const DAY_MS = 86_400_000;
-export const BYPASS_WINDOW_DAYS = 14;
+const BYPASS_WINDOW_DAYS = 14;
 
 /** The result of one run of the negative controls: counts and names, nothing else. */
 export interface GateProof {

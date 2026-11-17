@@ -47,7 +47,7 @@ export interface JavaScriptInput {
   sha256: string;
 }
 
-export function sourceDigest(text: string): string {
+function sourceDigest(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 

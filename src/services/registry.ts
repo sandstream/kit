@@ -74,7 +74,7 @@ export function servicesFile(env: NodeJS.ProcessEnv = process.env): string {
   return join(homedir(), ".kit", "services.json");
 }
 
-export function emptyRegistry(): ServiceRegistry {
+function emptyRegistry(): ServiceRegistry {
   return { version: 1, services: [] };
 }
 

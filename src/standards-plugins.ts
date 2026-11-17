@@ -367,7 +367,7 @@ function lineMatches(lines: string[], re: RegExp): boolean {
 }
 
 /** Run one plugin's regex over the applicable source files. Pure w.r.t. the repo. */
-export function evaluatePlugin(cwd: string, spec: StandardPluginSpec): PluginEvaluation {
+function evaluatePlugin(cwd: string, spec: StandardPluginSpec): PluginEvaluation {
   const matchRe = new RegExp(spec.match);
   const scopeRe = spec.scope ? new RegExp(spec.scope) : null;
   const excludes = spec.exclude.map((pattern) => ({

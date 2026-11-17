@@ -29,7 +29,7 @@ export interface SupplyChainConfig {
   min_release_age_enforce?: boolean;
 }
 
-export const DEFAULT_COOLING_DAYS = 14;
+const DEFAULT_COOLING_DAYS = 14;
 const DAY_MS = 86_400_000;
 const NPM_NAME = /^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/;
 const STABLE = /^(\d+)\.(\d+)\.(\d+)$/;

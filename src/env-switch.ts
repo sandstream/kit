@@ -14,7 +14,7 @@ export type kitEnv = "dev" | "staging" | "prod";
 
 export const KNOWN_ENVS: kitEnv[] = ["dev", "staging", "prod"];
 
-export const ACTIVE_ENV_FILE = ".kit/active-env.json";
+const ACTIVE_ENV_FILE = ".kit/active-env.json";
 
 export interface ActiveEnvState {
   env: kitEnv;

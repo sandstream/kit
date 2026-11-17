@@ -52,7 +52,7 @@ export function resolveHooksDir(gitDir = ".git", cwd = process.cwd()): string {
  * pre-commit hook. The post-commit detector reads it back; if it's missing
  * the commit was made with `--no-verify` and we audit the skip.
  */
-export const HOOK_SENTINEL_REL = ".kit-hook-ran";
+const HOOK_SENTINEL_REL = ".kit-hook-ran";
 
 /**
  * Project-relative log of commits that bypassed pre-commit. Written by the
@@ -366,7 +366,7 @@ export async function installHook(
  * check-hooks' `content.includes(cmd)` up-to-date detection keeps working.
  * Non-kit commands (npm, etc.) pass through untouched.
  */
-export function rewriteKitInvocation(cmd: string, kitBin: string): string {
+function rewriteKitInvocation(cmd: string, kitBin: string): string {
   if (kitBin === "kit") return cmd; // nothing to rewrite to
   if (cmd === "kit") return kitBin;
   if (cmd.startsWith("kit ")) return `${kitBin}${cmd.slice(3)}`;

@@ -29,7 +29,7 @@ const MAX_BYTES = 16 * 1024 * 1024;
 /** Fetch one URL as bytes; throws on any failure. Injected in tests, so they never open a socket. */
 export type ApkFetcher = (url: string) => Promise<Buffer>;
 
-export const defaultApkFetcher: ApkFetcher = async (url) => {
+const defaultApkFetcher: ApkFetcher = async (url) => {
   const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
   const body = Buffer.from(await response.arrayBuffer());

@@ -22,9 +22,9 @@ import {
 const GEM_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const DAY_MS = 86_400_000;
 /** A gem first published this recently has no history to judge it by. */
-export const NEW_GEM_DAYS = 30;
+const NEW_GEM_DAYS = 30;
 /** Fewer lifetime downloads than this across all versions: almost nobody runs it. */
-export const LOW_DOWNLOADS = 1_000;
+const LOW_DOWNLOADS = 1_000;
 
 export interface GemTarget {
   name: string;

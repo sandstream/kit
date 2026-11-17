@@ -240,7 +240,7 @@ function readSource(path: string): string | null {
 const list = (names: readonly string[]) => names.join(", ");
 
 /** The detail text for what was found, and the way out of each. Never contains a value. */
-export function describeSafety(r: SafetyResult): string {
+function describeSafety(r: SafetyResult): string {
   const parts: string[] = [];
   if (r.readableSecret.length > 0) {
     parts.push(
@@ -261,7 +261,7 @@ export function describeSafety(r: SafetyResult): string {
 }
 
 /** The names a `[deploy.vercel]` table lists under an optional key, ignoring anything that is not a list of strings. */
-export function configNames(provider: unknown, key: string): string[] {
+function configNames(provider: unknown, key: string): string[] {
   const value =
     provider && typeof provider === "object"
       ? (provider as Record<string, unknown>)[key]

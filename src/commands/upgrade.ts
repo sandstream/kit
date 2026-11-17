@@ -103,7 +103,7 @@ export async function selfUpgrade(): Promise<boolean> {
  * Every flag `kit upgrade` honors. `--self` is the only one the command reads;
  * the globals are honored by cli.ts / config.ts for every command.
  */
-export const UPGRADE_FLAGS = ["--self", ...GLOBAL_FLAGS] as const;
+const UPGRADE_FLAGS = ["--self", ...GLOBAL_FLAGS] as const;
 
 export async function cmdUpgrade(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit upgrade${c.reset}`);

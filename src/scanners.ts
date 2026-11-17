@@ -21,7 +21,7 @@ import { redactSecrets } from "./utils/redactSecrets.js";
  * percent of the findings in one repo. Only this directory is skipped, never `.terraform/` itself or
  * the lock file and sources next to it.
  */
-export const PROVIDER_DIR = ".terraform/providers";
+const PROVIDER_DIR = ".terraform/providers";
 // Built from parts: a literal slash-star-star inside a string is read as a comment start by lizard.
 export const PROVIDER_GLOB = ["**", PROVIDER_DIR].join("/");
 const PROVIDER_GLOB_ALL = [PROVIDER_GLOB, "**"].join("/");
@@ -426,7 +426,7 @@ function withoutControls(text: string): string {
  * line that names a failure wins, else the last line. Control characters are removed, credentials
  * redacted, and the length capped.
  */
-export function scannerReason(stderr: string | undefined): string | undefined {
+function scannerReason(stderr: string | undefined): string | undefined {
   const lines = redactSecrets(withoutControls(stderr ?? ""))
     .split("\n")
     .map((l) => l.trim())
@@ -449,12 +449,7 @@ export function scannerEnv(
  * is unknown (a green result hides the gap). `ran` succeeded; `not-applicable` is
  * a legitimate skip (the scanner does not apply to this project) and is NOT a gap.
  */
-export const NON_RUNNING_STATUSES: ScannerStatus[] = [
-  "not-installed",
-  "no-token",
-  "error",
-  "timed-out",
-];
+const NON_RUNNING_STATUSES: ScannerStatus[] = ["not-installed", "no-token", "error", "timed-out"];
 
 export interface ScanGateOptions {
   /** Scanner ids that MUST run; if one did not, the gate fails (even without strict). */
