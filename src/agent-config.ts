@@ -514,7 +514,7 @@ export async function installAiderRules(
  * `kit …` hits the permission wall in auto/non-interactive mode and the agent
  * silently never runs it. These are all non-mutating: no `secrets`, `fix`,
  * `hooks add`, `agent-config`, `context use`, or `memory install` — those keep
- * prompting on purpose. We never write a `deny` rule or a bypass mode.
+ * prompting on purpose. Never a bypass mode; the deny rules live in agent-config-strict.ts.
  */
 export const READONLY_KIT_PERMISSIONS: string[] = [
   "Bash(kit check:*)",
@@ -765,6 +765,17 @@ export interface HookInstallResult {
 interface SettingsHookCmd {
   type?: string;
   command: string;
+  onFailure?: string;
+  async?: boolean;
+}
+
+/**
+ * A gate hook entry that fails CLOSED: with `onFailure: "block"` a gate that cannot start (exit 127,
+ * a crash) blocks the tool call instead of letting it run. Field and semantics per
+ * https://code.claude.com/docs/en/hooks (Command hook fields; Claude Code v2.1.295 or later).
+ */
+function gateHook(command: string): SettingsHookCmd {
+  return { type: "command", command, onFailure: "block" };
 }
 interface SettingsHookGroup {
   matcher?: string;
@@ -784,8 +795,8 @@ function refreshSettingsGateCommand(
         continue;
       }
       found = true;
-      if (hook.command !== desired) {
-        hook.command = desired;
+      if (hook.command !== desired || (hook.onFailure !== "block" && !hook.async)) {
+        Object.assign(hook, { command: desired, ...(hook.async ? {} : { onFailure: "block" }) });
         updated = true;
       }
     }
@@ -931,7 +942,7 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
     return { file, action: "unchanged", detail: "install-gate already wired" };
   }
 
-  pre.push({ matcher: "Bash", hooks: [{ type: "command", command: desired }] });
+  pre.push({ matcher: "Bash", hooks: [gateHook(desired)] });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
@@ -988,7 +999,7 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
 
   pre.push({
     matcher: "Write|Edit|NotebookEdit",
-    hooks: [{ type: "command", command: desired }],
+    hooks: [gateHook(desired)],
   });
   try {
     await mkdir(dirname(path), { recursive: true });
@@ -1050,13 +1061,13 @@ export async function installBrokerGates(cwd: string = process.cwd()): Promise<H
   if (!egress.found) {
     pre.push({
       matcher: "Bash",
-      hooks: [{ type: "command", command: desiredEgress }],
+      hooks: [gateHook(desiredEgress)],
     });
   }
   if (!fs.found) {
     pre.push({
       matcher: "Write|Edit|NotebookEdit",
-      hooks: [{ type: "command", command: desiredFs }],
+      hooks: [gateHook(desiredFs)],
     });
   }
   try {
@@ -1620,7 +1631,7 @@ export async function installInstallGateAntigravity(
     return { file, action: "unchanged", detail: "install-gate already wired" };
   }
   if (kitHook) kitHook.command = desired;
-  else pre.push({ matcher: "run_command", hooks: [{ type: "command", command: desired }] });
+  else pre.push({ matcher: "run_command", hooks: [gateHook(desired)] });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");

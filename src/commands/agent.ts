@@ -20,6 +20,7 @@ import {
   installAiderRules,
   loadUserRulesProfile,
 } from "../agent-config.js";
+import { describeStrictResult, installStrictSettings } from "../agent-config-strict.js";
 
 export async function cmdSkills(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
@@ -67,6 +68,19 @@ export async function cmdSkills(): Promise<boolean> {
   return requiredMissing.length === 0;
 }
 
+/**
+ * The allow rules, then the strict layer Claude Code enforces itself: deny rules for credential
+ * dirs, .env* and destructive git, plus the OS sandbox (not on native Windows, where it does not
+ * run). A separate function so cmdAgentConfig keeps its baseline-frozen size.
+ */
+async function installPermissionsAndStrict(): ReturnType<typeof installKitPermissions> {
+  const strict = await installStrictSettings();
+  console.log(`\n  ${c.bold}Deny rules + sandbox${c.reset} ${c.dim}(Claude Code)${c.reset}`);
+  for (const line of describeStrictResult(strict)) console.log(`    ${line}`);
+  if (strict.action === "failed") process.exitCode = 1;
+  return installKitPermissions();
+}
+
 export async function cmdAgentConfig(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit agent-config${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
@@ -111,7 +125,7 @@ export async function cmdAgentConfig(): Promise<boolean> {
   }
   // Let the agent actually RUN kit: grant read-only kit commands in
   // .claude/settings.json, so they don't hit the permission wall in auto mode.
-  const perms = await installKitPermissions();
+  const perms = await installPermissionsAndStrict();
   if (perms.action === "created" || perms.action === "updated") {
     console.log(
       `\n  ${c.green}✓${c.reset} allowed ${c.bold}${perms.added.length}${c.reset} read-only kit command(s) in ${c.dim}${perms.file}${c.reset} ${c.dim}(so the agent can run them without a prompt)${c.reset}`,
