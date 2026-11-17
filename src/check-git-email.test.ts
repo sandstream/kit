@@ -59,7 +59,7 @@ describe("checkGitEmail", () => {
     assert.equal(row?.category, "exposure");
     assert.match(row?.detail ?? "", /a\*\*\*@example\.com/);
     assert.doesNotMatch(JSON.stringify(row), /alice/);
-    assert.match(row?.suggestion ?? "", /users\.noreply\.github\.com/);
+    assert.ok((row?.suggestion ?? "").includes("@users.noreply.github.com"), row?.suggestion);
   });
 
   it("passes a GitHub no-reply address", async (t) => {
