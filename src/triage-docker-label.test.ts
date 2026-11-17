@@ -195,7 +195,9 @@ describe("kit triage docker: OCI source label", () => {
     assert.match(out, /source label: https:\/\/github\.com\/example\/pinned/);
     assert.ok(seen.some((s) => s.path === `/v2/example/pinned/manifests/${PIN}`));
   });
+});
 
+describe("kit triage docker: what the source-label probe fetches", () => {
   it("fetches manifests and the config only: no layer, and no token sent to the CDN", async (t) => {
     const out = await triage(t, "example/matching");
     if (out === null) return;
