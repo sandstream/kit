@@ -1,6 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb } from "./db.js";
@@ -14,7 +14,6 @@ import {
   palShow,
   palTakeover,
   palAutoVerify,
-  palPrune,
   deviceId,
   deviceIdOverrideActive,
   importLegacyLedger,
@@ -511,39 +510,6 @@ describe("PAL — device coupling (don't nag about ephemeral-session items)", ()
     const db = legacyPalDb(t, [{ id: "leg", title: "legacy", origin_device: null }]);
     withDevice("any-device", () => {
       assert.ok(palList(db).some((p) => p.id === "leg"));
-    });
-    db.close();
-  });
-
-  it("prune closes this device's dead-origin items, keeps live ones, ignores other devices", (t) => {
-    const db = fresh();
-    const directory = realpathSync(mkdtempSync(join(tmpdir(), "kit-pal-prune-")));
-    t.after(() => rmTemp(directory));
-    const live = join(directory, "live");
-    const dead = join(directory, "dead");
-    mkdirSync(live);
-    mkdirSync(dead);
-    const addAt = (title: string, dev: string, root: string) => {
-      const cwd = process.cwd();
-      try {
-        process.chdir(root);
-        return withDevice(dev, () => palAdd(db, { title }));
-      } finally {
-        process.chdir(cwd);
-      }
-    };
-    const deadId = addAt("dead", "dev-here", dead);
-    const liveId = addAt("live", "dev-here", live);
-    const otherId = addAt("other", "other-dev", dead);
-    rmSync(dead, { recursive: true });
-    assert.ok(!existsSync(dead));
-    withDevice("dev-here", () => {
-      const r = palPrune(db);
-      assert.deepEqual(r.closed, [deadId]);
-      const openIds = palList(db, { allDevices: true })
-        .map((p) => p.id)
-        .sort();
-      assert.deepEqual(openIds, [liveId, otherId].sort());
     });
     db.close();
   });

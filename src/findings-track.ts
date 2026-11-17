@@ -89,7 +89,7 @@ export async function syncSecurityFindings(
   if (scope !== null && !scope.includes("security")) return null;
   try {
     const { openMemoryDb } = await import("./memory/db.js");
-    const { palSyncFindings } = await import("./memory/pal.js");
+    const { palSyncFindings, palPrune } = await import("./memory/pal.js");
     const { getCurrentProjectRoot } = await import("./memory/project.js");
     const { getCanonicalProjectRoot } = await import("./memory/canonical-root.js");
     // Scope by the ABSOLUTE project root, not its basename: two different repos
@@ -114,6 +114,10 @@ export async function syncSecurityFindings(
       const a = palSyncFindings(db, "adv", advisoryFindings(results), {
         scope: getCanonicalProjectRoot(),
       });
+      // Findings of folders that no longer exist (scratch dirs, removed worktrees) cannot be
+      // fixed or re-scanned, so they would stay open forever. Reaping here means no one has to
+      // remember `kit memory pal prune`. It closes findings only, never plans or bug reports.
+      palPrune(db);
       return {
         added: r.added + a.added,
         reopened: r.reopened + a.reopened,
