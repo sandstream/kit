@@ -47,7 +47,6 @@ const PLATFORM_CHECKLIST: { label: string; action: string; url: string }[] = [
 ];
 
 export async function cmdPanic(): Promise<boolean> {
-  if (hasFlag(process.argv, "--stop") || hasFlag(process.argv, "--resume")) return panicSwitch();
   const reason = flagValue(process.argv, "--reason") ?? "panic: device/key compromise";
   const skipChecklist = hasFlag(process.argv, "--no-checklist");
 
@@ -159,9 +158,14 @@ async function panicStop(): Promise<boolean> {
   return true;
 }
 
-/** `--stop` or `--resume`, ahead of the key rotation that plain `kit panic` does. */
-function panicSwitch(): Promise<boolean> {
-  return hasFlag(process.argv, "--stop") ? panicStop() : panicResume();
+/**
+ * The `panic` handler: `--stop` and `--resume` run on their own, ahead of the key rotation that
+ * plain `kit panic` does. A separate entry so cmdPanic keeps its baseline-frozen size.
+ */
+export function cmdPanicEntry(): Promise<boolean> {
+  if (hasFlag(process.argv, "--stop")) return panicStop();
+  if (hasFlag(process.argv, "--resume")) return panicResume();
+  return cmdPanic();
 }
 
 async function panicResume(): Promise<boolean> {
