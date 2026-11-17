@@ -15,8 +15,7 @@
  * Offline and read-only. The result holds counts by identity kind, tool and destination host,
  * never an identity value.
  */
-import { createReadStream } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { classifyToolCall } from "./transcript-identity-classify.js";
@@ -85,8 +84,16 @@ function claudeDir(env: NodeJS.ProcessEnv): string | null {
 async function accountEmail(home: string, env: NodeJS.ProcessEnv): Promise<string> {
   const file = join(claudeDir(env) ?? home, ".claude.json");
   try {
-    if ((await stat(file)).size > MAX_CONFIG_BYTES) return "";
-    const parsed = JSON.parse(await readFile(file, "utf8")) as {
+    // One handle for the size check and the read: no check-then-use on the path (CodeQL file race).
+    const fh = await open(file, "r");
+    let text: string;
+    try {
+      if ((await fh.stat()).size > MAX_CONFIG_BYTES) return "";
+      text = await fh.readFile("utf8");
+    } finally {
+      await fh.close();
+    }
+    const parsed = JSON.parse(text) as {
       oauthAccount?: { emailAddress?: unknown };
     };
     const v = parsed?.oauthAccount?.emailAddress;
@@ -185,13 +192,17 @@ async function scanFile(
   scan: IdentityScan,
   max: number,
 ): Promise<void> {
+  let fh: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    if ((await stat(file)).size > max) {
+    // Size check and read through one handle: no check-then-use on the path (CodeQL file race).
+    fh = await open(file, "r");
+    if ((await fh.stat()).size > max) {
       scan.filesSkipped++;
       return;
     }
     const needles = ids.map((i) => i.value.toLowerCase());
-    const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
+    const input = fh.createReadStream({ autoClose: false });
+    const lines = createInterface({ input, crlfDelay: Infinity });
     for await (const line of lines) {
       if (!line.includes('"tool_use"')) continue;
       const lower = line.toLowerCase();
@@ -200,6 +211,8 @@ async function scanFile(
     scan.filesScanned++;
   } catch {
     scan.filesSkipped++;
+  } finally {
+    await fh?.close();
   }
 }
 

@@ -51,7 +51,8 @@ describe("kit audit transcripts", () => {
     assert.equal(r.ok, true);
     assert.match(r.out, /2 tool call\(s\) carried an identity; 1 network-shaped/);
     assert.match(r.out, /account-email\s+1 \(1 network-shaped\)/);
-    assert.match(r.out, /api\.example\.net\s+1/);
+    const rows = r.out.split("\n").map((l) => l.trim().split(/\s+/).join(" "));
+    assert.ok(rows.includes("api.example.net 1"), r.out);
     for (const v of ["alice", "carol", "Fixture"]) assert.equal(r.out.includes(v), false, v);
   });
 
