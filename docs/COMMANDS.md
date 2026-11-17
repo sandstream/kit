@@ -302,8 +302,8 @@ Add `--include-tests` to scan them. Directories named `test` or `tests` are stil
 ### Code guardrails in the security check
 
 `kit check --category security` scans shell scripts, GitHub workflow commands, Dockerfiles, and source files.
-It reports public cloud commands, literal Dockerfile secrets, and guards that contain only a commented `throw` or `return`.
-It reports the file and line. It does not print secret values.
+It reports public cloud commands, literal Dockerfile secrets, and guards that contain only a commented `throw` or `return`. It reports the file and line. It does not print secret values.
+The `browser scripts` row lists the third-party scripts the project ships to browsers: see [BROWSER_SCRIPTS.md](BROWSER_SCRIPTS.md).
 The scan skips generated directories and source files larger than 256 KB. It reports skipped source paths as an incomplete scan.
 
 Put `kit-ignore <rule>: <reason>` on the affected line or the line before it.
