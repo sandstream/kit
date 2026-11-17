@@ -73,3 +73,13 @@ describe("kit check runs the agent-config audit", () => {
     assert.equal(rows.filter((r) => r.status === "fail").length, 0);
   });
 });
+
+describe("kit check names .env entries in .worktreeinclude", () => {
+  it("warns on a .worktreeinclude that copies .env into every worktree", async (t) => {
+    // Was: no row. Claude Code and Orca copy each listed file into every new agent worktree.
+    const { root, home } = dirs(t);
+    writeFileSync(join(root, ".worktreeinclude"), ".env\n");
+    const rows = await checkAgentConfig(root, home, {});
+    assert.ok(rows.some((r) => r.status === "warn" && r.name.includes(".worktreeinclude")));
+  });
+});
