@@ -835,7 +835,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   panic: {
     handler: cmdPanic,
     stability: "experimental",
-    help: "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist (experimental)",
+    help: "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist; --stop makes every gate refuse every tool call until --resume (experimental)",
   },
   policy: {
     handler: cmdPolicy,

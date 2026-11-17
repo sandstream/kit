@@ -176,6 +176,23 @@ async function gateDeny(label: string, message: string): Promise<boolean> {
 }
 
 /**
+ * `kit panic --stop` (stop-switch.ts): while `~/.kit/stop` exists, every gate refuses every tool
+ * call before deciding anything else. Returns true when it refused (Cline: stdout JSON).
+ */
+async function stopInEffect(label: string): Promise<boolean> {
+  const { readStop } = await import("../stop-switch.js");
+  const { homedir } = await import("node:os");
+  const stop = readStop(homedir());
+  if (!stop) return false;
+  const reason = `kit panic --stop is in effect since ${stop.since} (${stop.reason}): every gated tool call is refused. A person runs \`kit panic --resume\` to lift it.`;
+  await auditGateDeny(label, reason);
+  if (stdoutDeny(`kit ${label}: ${reason}`)) return true;
+  const { writeSync } = await import("node:fs");
+  writeSync(2, `kit ${label}: BLOCKED — ${reason}\n`);
+  process.exit(2); // PreToolUse deny
+}
+
+/**
  * Run a PreToolUse gate FAIL-CLOSED: any unexpected error from the handler DENIES (exit 2 —
  * the block signal) instead of propagating to the CLI's generic error path, which sets exit 1.
  * Exit 1 is a NON-BLOCKING error per the PreToolUse contract, i.e. the tool call would proceed —
@@ -189,6 +206,7 @@ export async function runGateFailClosed(
   handler: () => boolean | Promise<boolean>,
 ): Promise<boolean> {
   try {
+    if (await stopInEffect(label)) return false;
     return await handler();
   } catch (err) {
     const reason = `gate error (fail-closed): ${err instanceof Error ? err.message : String(err)}`;

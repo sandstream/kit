@@ -47,6 +47,7 @@ const PLATFORM_CHECKLIST: { label: string; action: string; url: string }[] = [
 ];
 
 export async function cmdPanic(): Promise<boolean> {
+  if (hasFlag(process.argv, "--stop") || hasFlag(process.argv, "--resume")) return panicSwitch();
   const reason = flagValue(process.argv, "--reason") ?? "panic: device/key compromise";
   const skipChecklist = hasFlag(process.argv, "--no-checklist");
 
@@ -129,5 +130,53 @@ export async function cmdPanic(): Promise<boolean> {
   console.log(
     `\n${c.dim}Recover on a clean device: clone the repo + ${c.reset}${c.bold}kit memory restore${c.reset}${c.dim} (encrypted backup) + ${c.reset}${c.bold}kit identity init${c.reset}${c.dim} — state lives off-device, not on the lost one.${c.reset}`,
   );
+  return true;
+}
+
+/**
+ * `kit panic --stop`: every gated agent on this machine is refused at its next tool call until a
+ * person runs `kit panic --resume` (stop-switch.ts). It does not rotate keys; run plain
+ * `kit panic` for that. Prints the secrets checklist, since a copied credential outlives a stop.
+ */
+async function panicStop(): Promise<boolean> {
+  const { writeStop } = await import("../stop-switch.js");
+  const { homedir } = await import("node:os");
+  const reason = flagValue(process.argv, "--reason") ?? "panic --stop";
+  const state = writeStop(homedir(), reason);
+  await appendAuditEventDirect({
+    operation: "panic.stop",
+    environment: "local",
+    success: true,
+    metadata: { reason, since: state.since },
+  });
+  console.log(`${c.red}${c.bold}⚠ kit panic --stop${c.reset} ${c.dim}(${state.since})${c.reset}`);
+  console.log(
+    `${c.green}✓${c.reset} every PreToolUse gate on this machine now refuses every tool call. Agents without kit's gates are not stopped; end those sessions yourself.`,
+  );
+  console.log(
+    `${c.dim}A stopped agent does not invalidate a credential it already copied: rotate what it could read (kit secrets rotate), then lift the stop with${c.reset} ${c.bold}kit panic --resume${c.reset}`,
+  );
+  return true;
+}
+
+/** `--stop` or `--resume`, ahead of the key rotation that plain `kit panic` does. */
+function panicSwitch(): Promise<boolean> {
+  return hasFlag(process.argv, "--stop") ? panicStop() : panicResume();
+}
+
+async function panicResume(): Promise<boolean> {
+  const { clearStop } = await import("../stop-switch.js");
+  const { homedir } = await import("node:os");
+  if (!clearStop(homedir())) {
+    console.log(`${c.dim}no stop in effect${c.reset}`);
+    return true;
+  }
+  await appendAuditEventDirect({
+    operation: "panic.resume",
+    environment: "local",
+    success: true,
+    metadata: {},
+  });
+  console.log(`${c.green}✓${c.reset} stop lifted; the gates decide tool calls again`);
   return true;
 }

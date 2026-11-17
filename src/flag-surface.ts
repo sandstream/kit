@@ -412,7 +412,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--test-command",
   ],
   open: [],
-  panic: ["--no-checklist", "--reason"],
+  panic: ["--no-checklist", "--reason", "--resume", "--stop"],
   pkg: ["--agent", "--dry-run"],
   plugin: ["--installed", "--skip-install", "--tag"],
   policy: ["--force", "--json", "--key", "--label", "--list", "--remove", "--strict", "--ttl"],
