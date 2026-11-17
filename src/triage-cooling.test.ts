@@ -143,26 +143,6 @@ describe("applyCooling: the warning and its limits", () => {
     assert.equal(verdictPassed(r.output), false);
   });
 
-  it("only warns when .kit.toml opts out, and still names the newest older version", async () => {
-    publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
-    const cwd = project({ ".kit.toml": OPT_OUT, "package.json": "{}" });
-    const r = await run(cwd, "1.0.1");
-    assert.match(r.output, /WARNING: cooling: 1\.0\.1 was published 2 days ago, limit 14/);
-    assert.match(r.output, /fixture@1\.0\.0/);
-    assert.equal(r.passed, true);
-    assert.equal(verdictPassed(r.output), true);
-  });
-
-  it("only warns when KIT_COOLING_ENFORCE=0, which wins over .kit.toml like the day limit does", async () => {
-    publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
-    const cwd = project({ ".kit.toml": "[supply_chain]\nmin_release_age_enforce = true\n" });
-    const r = await run(cwd, "1.0.1", { KIT_COOLING_ENFORCE: "0" });
-    assert.match(r.output, /WARNING: cooling: 1\.0\.1/);
-    assert.equal(r.passed, true);
-    const on = await run(project({ ".kit.toml": OPT_OUT }), "1.0.1", { KIT_COOLING_ENFORCE: "1" });
-    assert.equal(on.passed, false);
-  });
-
   it("asks the registry for a scoped package under its own path", async () => {
     const meta = { "1.0.0": {}, "1.0.1": {} };
     registry.set("/@scope/fixture", {
@@ -210,6 +190,30 @@ describe("applyCooling: the warning and its limits", () => {
     assert.match(r.output, /CRITICAL: cooling: 1\.0\.1/);
     assert.equal(r.passed, false);
     assert.equal(verdictPassed(r.output), false);
+  });
+});
+
+describe("applyCooling: turning the hold into a warning", () => {
+  const { publish, project, run } = localServices();
+
+  it("only warns when .kit.toml opts out, and still names the newest older version", async () => {
+    publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
+    const cwd = project({ ".kit.toml": OPT_OUT, "package.json": "{}" });
+    const r = await run(cwd, "1.0.1");
+    assert.match(r.output, /WARNING: cooling: 1\.0\.1 was published 2 days ago, limit 14/);
+    assert.match(r.output, /fixture@1\.0\.0/);
+    assert.equal(r.passed, true);
+    assert.equal(verdictPassed(r.output), true);
+  });
+
+  it("only warns when KIT_COOLING_ENFORCE=0, which wins over .kit.toml like the day limit does", async () => {
+    publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
+    const cwd = project({ ".kit.toml": "[supply_chain]\nmin_release_age_enforce = true\n" });
+    const r = await run(cwd, "1.0.1", { KIT_COOLING_ENFORCE: "0" });
+    assert.match(r.output, /WARNING: cooling: 1\.0\.1/);
+    assert.equal(r.passed, true);
+    const on = await run(project({ ".kit.toml": OPT_OUT }), "1.0.1", { KIT_COOLING_ENFORCE: "1" });
+    assert.equal(on.passed, false);
   });
 });
 
