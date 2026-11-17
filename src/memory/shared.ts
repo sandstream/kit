@@ -104,22 +104,22 @@ export function getSharedPath(root: string): string {
   return join(root, ".kit", "shared", "memory.jsonl");
 }
 
+/**
+ * The author recorded on a shared entry: git's `user.name` only. Shared memory can be pushed to a
+ * remote and is read back into agents' context, so it never carries an email address
+ * (kit-research `claude-code-account-email-user-agent-vs-kit`).
+ */
 function gitAuthor(root: string): string {
-  const read = (key: string): string => {
-    try {
-      return execFileSync("git", ["config", key], {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-    } catch {
-      return "";
-    }
-  };
-  const name = read("user.name");
-  const email = read("user.email");
-  if (name && email) return `${name} <${email}>`;
-  return name || email || "unknown";
+  try {
+    const name = execFileSync("git", ["config", "user.name"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return name || "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 function gitHead(root: string): string | undefined {
