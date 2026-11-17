@@ -95,7 +95,7 @@ describe("applyCooling for pip", () => {
   it("warns about a release younger than the limit and names pip's spelling of an older one", async (t) => {
     const cwd = mkdtempSync(join(tmpdir(), "kit-cooling-pip-"));
     t.after(() => rmTemp(cwd));
-    const d = deps();
+    const d = deps({ KIT_COOLING_ENFORCE: "0" });
     const r = await applyCooling(
       cwd,
       "pip",
@@ -103,13 +103,13 @@ describe("applyCooling for pip", () => {
       { passed: true, output: report("1.1.0") },
       d,
     );
-    assert.equal(r.passed, true, "a warning, not a hold, by default");
+    assert.equal(r.passed, true, "a warning, not a hold, once enforcement is turned off");
     assert.match(r.output, /WARNING: cooling: 1\.1\.0 was published 3 days ago, limit 14/);
     assert.match(r.output, /fixture==1\.0\.0/);
     assert.deepEqual(d.urls, ["https://pypi.org/pypi/fixture/json"]);
   });
 
-  it("holds the pass when cooling is enforced, and is silent for an old release", async (t) => {
+  it("holds the pass by default, and is silent for an old release", async (t) => {
     const cwd = mkdtempSync(join(tmpdir(), "kit-cooling-pip-"));
     t.after(() => rmTemp(cwd));
     const held = await applyCooling(
@@ -117,7 +117,7 @@ describe("applyCooling for pip", () => {
       "pip",
       "fixture",
       { passed: true, output: report("1.1.0") },
-      deps({ KIT_COOLING_ENFORCE: "1" }),
+      deps(),
     );
     assert.equal(held.passed, false);
     assert.match(held.output, /TRIAGE HELD: cooling period/);

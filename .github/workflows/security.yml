@@ -31,11 +31,17 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci
+      - run: npm ci --ignore-scripts
+      - name: Build CLI
+        # The audit gate reads its exception rules from dist/audit-exceptions.js.
+        run: npm run build
       - name: npm audit (high+)
         # Matches pre-push hook policy (.kit.toml). Moderates tracked separately;
         # postcss/qs remaining moderates only fixable via next 9.3.3 downgrade (breaking).
-        run: npm audit --audit-level=high
+        # Same as `npm audit --audit-level=high`, except that audit-exceptions.json can cover a
+        # finding that has no patched version, per advisory id, with a reason and an end date
+        # within 90 days.
+        run: node scripts/npm-audit-gate.mjs
       - name: Snyk scan
         if: env.SNYK_TOKEN != ''
         uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
@@ -58,7 +64,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Build CLI
         run: npm run build
       - name: Bumblebee deep scan on repo
@@ -89,9 +95,12 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Build CLI
         run: npm run build
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
       - name: Install guarddog + semgrep
         run: |
           python3 -m pip install --user pipx==1.17.2
@@ -125,7 +134,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -334,7 +343,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci && npm run build
+      - run: npm ci --ignore-scripts && npm run build
       - name: Run checkSecurity directly
         # Avoid `kit check` which also runs services/secrets/skills checks
         # that need gh auth, 1password, etc. — unavailable in CI.
@@ -352,7 +361,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci && npm run build
+      - run: npm ci --ignore-scripts && npm run build
       - name: Run kit self-audit
         # No --fail-on-warning. GATES this job (fail -> blocks the gate via needs):
         #   R11 CI references a missing/renamed script
@@ -386,7 +395,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci && npm run build
+      - run: npm ci --ignore-scripts && npm run build
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       # Triage verifies each tool's upstream repo through the GitHub API. Anonymous calls share
       # a 60/hour limit per runner IP, and triage correctly fails closed when it cannot verify.

@@ -132,6 +132,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   const { runAgentPreload } = await import("../agent-preload.js");
   const { runAgentEndpoint } = await import("../agent-endpoint.js");
   const { runUserAgentAudit } = await import("../agent-audit-user.js");
+  const { runAgentSkillPosture } = await import("../agent-skill-posture.js");
   const { homedir } = await import("node:os");
   const results = [
     ...runAgentAudit(process.cwd()),
@@ -139,6 +140,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
     ...runAgentTrifecta(process.cwd(), homedir()),
     ...runAgentPreload(process.cwd(), homedir(), process.env),
     ...runAgentEndpoint(process.cwd(), homedir(), process.env),
+    ...runAgentSkillPosture(process.cwd(), homedir()),
   ];
   const fails = results.filter((r) => r.status === "fail").length;
 

@@ -1,3 +1,14 @@
+/** A decoded or downloaded payload that an interpreter would run (install-gate-pipe-interp). */
+function explainPiped(tokens: readonly string[]): string | null {
+  const piped = tokens.filter((t) => t.startsWith("piped-payload:"));
+  if (piped.length === 0) return null;
+  return (
+    `UNVERIFIED COMMAND: ${piped.map((t) => t.slice("piped-payload:".length)).join(", ")} runs ` +
+    "decoded or downloaded text as a program, and kit cannot read that text before it runs. " +
+    "Write it to a file and read it first, or install from a source kit can triage (fail-closed)."
+  );
+}
+
 /** Explain unresolved commands without suggesting a package triage that cannot resolve them. */
 function explainCarrier(tokens: readonly string[]): string | null {
   const wrapper = tokens.find(
@@ -43,6 +54,8 @@ function explainCarrier(tokens: readonly string[]): string | null {
  * hides the defect rather than fixing it. So: name it, and give the fix.
  */
 export function explainUnverifiable(tokens: readonly string[]): string | null {
+  const piped = explainPiped(tokens);
+  if (piped) return piped;
   const carrier = explainCarrier(tokens);
   if (carrier) return carrier;
   const sources = tokens.filter((t) => t.startsWith("repo-source:"));

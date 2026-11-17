@@ -1,0 +1,3 @@
+### Added
+
+- **`kit self-audit` rule R18 fails a test that tests nothing.** It reads `src/**/*.test.ts` as text and reports three patterns from a published test-audit checklist: a test with no assertion (no `assert`, `expect` or `throw`, and no call to a helper that asserts), an assertion that compares a value with itself or asserts the constant `true`, and two tests in one file with the same body. kit's own tests tripped it 8 times; those tests are fixed in the same change (a teardown written as a test, a silent pass where a skip was meant, one test asserting through a throw, and five copies of earlier tests).

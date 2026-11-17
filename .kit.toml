@@ -28,7 +28,7 @@ node = "22"
 
 [hooks]
 pre-commit = ["kit security scan-staged", "npm run build"]
-pre-push = ["npm audit --audit-level=high"]
+pre-push = ["node scripts/npm-audit-gate.mjs"]
 
 [memory]
 project_id = "9e87b45f-50c5-461a-8c50-7e3bfed46ddd"

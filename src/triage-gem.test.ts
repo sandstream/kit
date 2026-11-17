@@ -100,8 +100,8 @@ describe("lockedGemVersion", () => {
 });
 
 describe("triageGem", () => {
-  it("fails strutil-core 1.0.1 on its OSV malicious record, and warns on its age", async () => {
-    const d = deps(STRUTIL, [{ id: "MAL-2026-19054" }]);
+  it("fails strutil-core 1.0.1 on its OSV malicious record, and warns on its age when cooling only warns", async () => {
+    const d = deps(STRUTIL, [{ id: "MAL-2026-19054" }], { env: { KIT_COOLING_ENFORCE: "0" } });
     const r = await triageGem("/nonexistent", "strutil-core", d);
     assert.equal(r.passed, false);
     assert.match(r.output, /triaged 1\.0\.1/);
@@ -111,8 +111,8 @@ describe("triageGem", () => {
     assert.match(r.output, /TRIAGE FAILED$/);
   });
 
-  it("holds the same release on cooling alone, before any advisory exists, when enforcement is on", async () => {
-    const d = deps(STRUTIL, [], { env: { KIT_COOLING_ENFORCE: "1" } });
+  it("holds the same release on cooling alone, before any advisory exists, by default", async () => {
+    const d = deps(STRUTIL, []);
     const r = await triageGem("/nonexistent", "strutil-core", d);
     assert.equal(r.passed, false);
     assert.match(r.output, /x CRITICAL: cooling: 1\.0\.1 was published 0 days ago/);

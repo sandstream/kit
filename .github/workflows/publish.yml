@@ -56,16 +56,17 @@ jobs:
         # registry-side switch lands (one per published package on npmjs.com — docs/RELEASING.md).
         #
         # Measured on npm 11.19.1 against this repo before wiring: `npm ci` and
-        # `npm publish --dry-run` both behave identically, and npm >= 11's skip-install-scripts
-        # default costs nothing here (esbuild's postinstall is the only one in the tree, and
-        # the build + tests pass without it). Asserted by src/publish-workflow.test.ts.
+        # `npm publish --dry-run` both behave identically. npm 11 still runs install scripts (npm 12
+        # skips dependency scripts only), so this job passes --ignore-scripts: esbuild's postinstall
+        # is the only one in the tree and the build + tests pass without it. Held by
+        # src/workflow-install-scripts.test.ts.
         run: |
-          npm i -g npm@11.19.1
+          npm i -g npm@11.19.1 --ignore-scripts
           npm --version
 
       - name: Install dependencies
         # npm ci uses package-lock.json exactly — no version drift.
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Verify tag matches package.json version
         # Refuse to publish if someone pushes `v1.2.3` but package.json says
