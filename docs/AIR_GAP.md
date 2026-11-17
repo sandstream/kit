@@ -36,12 +36,13 @@ The triage script reads its registry hosts from the environment, defaulting to
 the public registries. Set these (in the shell, CI job, or the environment kit
 runs under) to your internal mirrors:
 
-| Env var               | Default                      | Used for                                                                 |
-| :-------------------- | :--------------------------- | :----------------------------------------------------------------------- |
-| `KIT_NPM_REGISTRY`    | `https://registry.npmjs.org` | npm package metadata (`kit triage npm:…`)                                |
-| `KIT_PYPI_INDEX`      | `https://pypi.org`           | PyPI metadata (`pip:…`); expects `/pypi/<name>/json`                     |
-| `KIT_GITHUB_API`      | `https://api.github.com`     | repo metadata (`repo:…`, `skill` fallback) — GitHub Enterprise API base  |
-| `KIT_DOCKER_REGISTRY` | `https://hub.docker.com`     | image metadata (`docker:…`); expects the `/v2/repositories/<repo>` shape |
+| Env var                  | Default                        | Used for                                                                                                                                                                                                               |
+| :----------------------- | :----------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KIT_NPM_REGISTRY`       | `https://registry.npmjs.org`   | npm package metadata (`kit triage npm:…`)                                                                                                                                                                              |
+| `KIT_PYPI_INDEX`         | `https://pypi.org`             | PyPI metadata (`pip:…`); expects `/pypi/<name>/json`                                                                                                                                                                   |
+| `KIT_GITHUB_API`         | `https://api.github.com`       | repo metadata (`repo:…`, `skill` fallback) — GitHub Enterprise API base                                                                                                                                                |
+| `KIT_DOCKER_REGISTRY`    | `https://hub.docker.com`       | image metadata (`docker:…`); expects the `/v2/repositories/<repo>` shape                                                                                                                                               |
+| `KIT_DOCKER_V2_REGISTRY` | `https://registry-1.docker.io` | the image's OCI source label (`docker:…`): manifest and config blob only, never a layer. When `KIT_DOCKER_REGISTRY` is set and this is not, the label is reported as not checked instead of asking the public registry |
 
 The mirror must expose the same JSON shapes as the upstream it mirrors (most
 internal npm/PyPI proxies and GitHub Enterprise do). The package/repo name is
@@ -75,7 +76,7 @@ What the mode does per scanner:
 | **grype**       | sets `GRYPE_DB_AUTO_UPDATE=false` (provide a cached DB via `GRYPE_DB_CACHE_DIR`, synced with `grype db update` on a connected host)                           |
 | **osv-scanner** | adds `--offline` (point at a synced local OSV DB)                                                                                                             |
 | **snyk**        | **skipped** — talks to the Snyk cloud                                                                                                                         |
-| **semgrep**     | Registry configs are refused; an explicit local ruleset path can run offline.                                                                                |
+| **semgrep**     | Registry configs are refused; an explicit local ruleset path can run offline.                                                                                 |
 
 Install scanners through your internal package mirror or an approved binary
 cache. In connected mode kit may provision its pinned Bumblebee binary; air-gap

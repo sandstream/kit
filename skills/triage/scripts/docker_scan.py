@@ -3,7 +3,8 @@
 `kit triage docker <image>` checks that the image (and its tag) exists, its freshness and its
 publisher. Pull count is reputation, not provenance: the backdoored ARTEX image (FBI FLASH
 2026-11-13) reached 8,817 pulls within a month of its repository's registration, so a young
-repository is a warning whatever its pull count.
+repository is a warning whatever its pull count. The image's OCI source label is read by
+docker_label.py.
 """
 import urllib.error
 import urllib.parse
@@ -34,6 +35,7 @@ def triage_docker(rep, t):
         rep.warn(f"image not updated in {last_days} days -- stale base / unpatched CVEs likely")
     if not data.get("is_official"):
         _unofficial(rep, data, t)
+    t._sibling("docker_label.py").check_source_label(rep, api_repo, rep.target.partition("@")[2] or tag, t.UA)
 
 
 def _unofficial(rep, data, t):
