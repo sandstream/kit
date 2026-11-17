@@ -8,8 +8,9 @@
  * rather than decode it and gate the result.
  *
  * A download from GitHub is triaged as its repository, as `curl … | sh` already was (#531). A
- * download from another host piped to a SHELL is left to #531's rule, which does not blind-block
- * vanity installers (`curl https://mise.run | sh`). Every other case here is refused.
+ * download from any other host is refused, for a shell as for any other interpreter: the owner
+ * chose to stop exempting vanity installers (`curl https://mise.run | sh`), because nothing ties
+ * that script to a repository triage could read. Download it, read it, then run the file.
  *
  * An interpreter that reads its program from an argument (`python3 -m json.tool`, `node -e …`,
  * `perl -ne …`, `bash -c …`, `python3 script.py`) reads the pipe as data, and is not a hit.
@@ -229,8 +230,6 @@ function record(
     out.refs.push(...refs);
     return;
   }
-  // #531: a non-GitHub download fed to a shell is not blind-blocked. Decoded text always is.
-  if (producer.urls.length > 0 && SHELL_NAMES.has(interp)) return;
   out.refused.push(`piped-payload:${producer.name} | ${interp}`);
 }
 
