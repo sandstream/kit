@@ -43,6 +43,7 @@
 // enforcement question without fabricating metadata a code generator could misuse.
 
 import { readFileSync, readdirSync } from "node:fs";
+import { envReadPatterns } from "./env-read-patterns.js";
 import { join } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { KNOWN_SECTIONS } from "./config.js";
@@ -67,25 +68,7 @@ const FLAG_VALIDATION_CATEGORY: SecurityCheckResult["category"] = "self-audit/fl
  * `airgap/config.ts` reads its vars), or sets it for a child process/hook. Only a
  * name the implementation never touches at all is reported.
  */
-const ENV_READ_PATTERNS = [
-  /process\.env\.([A-Z][A-Z0-9_]{2,60})/g,
-  /process\.env\[["'`]([A-Z][A-Z0-9_]{2,60})/g,
-  /\benv\.([A-Z][A-Z0-9_]{2,60})/g,
-  /["'`](KIT_[A-Z0-9_]{2,60})["'`]\s*[:=,;)\]]/g,
-  /\b(KIT_[A-Z0-9_]{2,60})\s*[:=]/g,
-];
-const SH_READ_PATTERNS = [/\$\{?(KIT_[A-Z0-9_]{2,60})\b/g]; // bash: $KIT_X or ${KIT_X:-…}
-// The triage skill's Python (skills/triage/scripts) reads its registry overrides from os.environ.
-const PY_READ_PATTERNS = [
-  /os\.environ(?:\.get\(|\[)\s*["'](KIT_[A-Z0-9_]{2,60})["']/g,
-  /["'](KIT_[A-Z0-9_]{2,60})["']\s+(?:not\s+)?in\s+os\.environ/g,
-];
-function readPatterns(name: string): RegExp[] {
-  if (name.endsWith(".py")) return PY_READ_PATTERNS;
-  return name.endsWith(".sh") ? SH_READ_PATTERNS : ENV_READ_PATTERNS;
-}
-/** Collect every `KIT_*` name src/, scripts/ (npm scripts and bash, e.g. `kit mcp web`) and the
- *  bundled skills' Python read or set. */
+/** Collect every `KIT_*` name src/, scripts/ and the bundled skills' Python read or set. */
 export function loadKnownEnvVars(repoRoot: string): Set<string> {
   const known = new Set<string>();
   function visit(dir: string): void {
@@ -101,15 +84,15 @@ export function loadKnownEnvVars(repoRoot: string): Set<string> {
         visit(join(dir, e.name));
         continue;
       }
-      if (!/\.(ts|mjs|sh|py)$/.test(e.name) || /\.test\.(ts|mjs)$|^test_.*\.py$/.test(e.name))
-        continue;
+      const patterns = envReadPatterns(e.name);
+      if (!patterns) continue;
       let text;
       try {
         text = readFileSync(join(dir, e.name), "utf-8");
       } catch {
         continue;
       }
-      for (const re of readPatterns(e.name)) {
+      for (const re of patterns) {
         for (const m of text.matchAll(re)) known.add(m[1]);
       }
     }
