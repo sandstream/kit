@@ -205,6 +205,7 @@
     "hooks add",
     "hooks check",
     "hooks context",
+    "hooks gates",
     "hooks install",
     "hooks uninstall",
     "identity",
