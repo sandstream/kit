@@ -411,8 +411,10 @@ it("a held WAL transition lock exhausts one five-second budget and closes the fa
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.errcode, 5);
   assert.equal(result.connectionClosed, true);
+  // One 5 s budget, not two. The upper bound is "under a second budget", not "about 5 s": a
+  // loaded Windows runner took 6.2 s and 6.8 s for the one budget (kit#906, 2026-11-17).
   assert.ok(
-    result.elapsedMs !== undefined && result.elapsedMs >= 4900 && result.elapsedMs < 6000,
+    result.elapsedMs !== undefined && result.elapsedMs >= 4900 && result.elapsedMs < 9900,
     JSON.stringify(result),
   );
   holder.resume();
