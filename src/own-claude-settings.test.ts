@@ -1,7 +1,8 @@
 /**
- * kit's own committed `.claude/settings.json` must wire the PreToolUse gates, so a fresh clone or a
- * cloud session of kit runs gated. The commands invoke `kit` from PATH, the last-resort form of
- * `kitSubcommandInvocation`: a committed file cannot hold this machine's absolute wrapper path.
+ * kit's own committed `.claude/settings.json` wires the gates at session start, not as committed
+ * PreToolUse entries: a committed gate command cannot be both portable and live (kit's liveness rule
+ * rejects a bare `kit`; the forms it accepts name one machine's paths). `kit hooks gates` writes the
+ * gates in the resolved form on the machine the session runs on (src/session-gates.ts).
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -16,29 +17,20 @@ interface Group {
   hooks?: { type?: string; command?: string }[];
 }
 
-function preToolUse(): Group[] {
-  const raw = readFileSync(join(REPO_ROOT, ".claude", "settings.json"), "utf-8");
-  const settings = JSON.parse(raw) as { hooks?: { PreToolUse?: Group[] } };
-  return settings.hooks?.PreToolUse ?? [];
-}
-
-function commandFor(matcher: string): string | undefined {
-  const group = preToolUse().find((g) => g.matcher === matcher);
-  return group?.hooks?.find((h) => h.type === "command")?.command;
+function settings(): { hooks?: Record<string, Group[]> } {
+  return JSON.parse(readFileSync(join(REPO_ROOT, ".claude", "settings.json"), "utf-8"));
 }
 
 describe("kit's own .claude/settings.json", () => {
-  it("wires gate-bash on Bash", () => {
-    assert.equal(commandFor("Bash"), "kit gate-bash");
+  it("wires the gates at session start with `kit hooks gates`", () => {
+    const commands = (settings().hooks?.SessionStart ?? []).flatMap((g) =>
+      (g.hooks ?? []).map((h) => h.command),
+    );
+    assert.ok(commands.includes("kit hooks gates"), commands.join("; "));
+    assert.ok(commands.includes("kit hooks context"), commands.join("; "));
   });
 
-  it("wires gate-env on Write|Edit|NotebookEdit", () => {
-    assert.equal(commandFor("Write|Edit|NotebookEdit"), "kit gate-env");
-  });
-
-  it("holds no machine-specific path in a gate command", () => {
-    for (const hook of preToolUse().flatMap((g) => g.hooks ?? [])) {
-      assert.ok(!/[/\\]|\$HOME/.test(hook.command ?? ""), `machine-specific: ${hook.command}`);
-    }
+  it("commits no PreToolUse gate, which liveness would reject as a bare `kit`", () => {
+    assert.deepEqual(settings().hooks?.PreToolUse ?? [], []);
   });
 });
