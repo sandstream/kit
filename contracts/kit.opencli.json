@@ -227,6 +227,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "transcripts": {
+          "kind": "command",
+          "summary": "Count agent tool calls in ~/.claude/projects transcripts that carried your git or Claude account identity, and which were network-shaped (--identity, --json, --fail-on-network); offline, never prints a value",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "verify": {
           "kind": "command",
           "summary": "Verify the audit chain and HMAC seal. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
@@ -243,8 +252,10 @@
         "--all",
         "--env",
         "--external",
+        "--fail-on-network",
         "--format",
         "--help",
+        "--identity",
         "--json",
         "--key",
         "--limit",
