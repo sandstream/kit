@@ -60,6 +60,23 @@ describe("auditInstallScripts: flags secrets", () => {
     );
     assert.equal(names(content).length, 1);
   });
+
+  it("finds the right line for a job id that holds a dash, after a job whose id it extends", () => {
+    const content = wf(
+      "jobs:",
+      "  dogfood:",
+      "    steps:",
+      "      - run: echo hi",
+      "  dogfood-scan:",
+      "    env:",
+      "      T: ${{ secrets.T }}",
+      "    steps:",
+      "      - run: npm ci",
+    );
+    assert.deepEqual(names(content), [
+      "install scripts run with credentials: job dogfood-scan (ci.yml:9)",
+    ]);
+  });
 });
 
 describe("auditInstallScripts: flags OIDC grants", () => {

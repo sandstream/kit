@@ -120,11 +120,16 @@ export function scriptedInstalls(body: string[]): [number, string][] {
   return runCommands(body).filter(([, cmd]) => NPM_INSTALL.test(cmd) && !IGNORES_SCRIPTS.test(cmd));
 }
 
+/** `text` as a literal inside a RegExp: every metacharacter, the backslash included, escaped. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[\\^$.*+?()[\]{}|-]/g, "\\$&");
+}
+
 /** Line index (0-based) of each job's header in the workflow, in job order. */
 function jobHeaders(lines: string[], jobs: WorkflowJob[]): number[] {
   let from = lines.findIndex((l) => /^jobs\s*:/.test(l));
   return jobs.map((j) => {
-    const re = new RegExp(`^\\s+${j.id.replace(/[-]/g, "\\-")}\\s*:\\s*(#.*)?$`);
+    const re = new RegExp(`^\\s+${escapeRegExp(j.id)}\\s*:\\s*(#.*)?$`);
     from = lines.findIndex((l, n) => n > from && re.test(l));
     return from;
   });
