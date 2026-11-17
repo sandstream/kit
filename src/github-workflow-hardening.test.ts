@@ -249,3 +249,18 @@ describe("nightly GuardDog job", () => {
     );
   });
 });
+
+describe("dependency audit gate", () => {
+  it("runs the exception-aware gate after the build and never makes it optional", () => {
+    const security = workflow("security.yml");
+    const stage = security.slice(
+      security.indexOf("\n  deps:"),
+      security.indexOf("\n  supply-chain:"),
+    );
+    const build = stage.indexOf("run: npm run build");
+    const gate = stage.indexOf("run: node scripts/npm-audit-gate.mjs");
+    assert.ok(build >= 0 && gate > build, "the gate needs dist, so the build comes first");
+    assert.doesNotMatch(stage, /continue-on-error:\s*true/);
+    assert.doesNotMatch(stage, /npm audit[^\n]*\|\|/);
+  });
+});

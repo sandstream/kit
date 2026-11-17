@@ -32,10 +32,16 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci --ignore-scripts
+      - name: Build CLI
+        # The audit gate reads its exception rules from dist/audit-exceptions.js.
+        run: npm run build
       - name: npm audit (high+)
         # Matches pre-push hook policy (.kit.toml). Moderates tracked separately;
         # postcss/qs remaining moderates only fixable via next 9.3.3 downgrade (breaking).
-        run: npm audit --audit-level=high
+        # Same as `npm audit --audit-level=high`, except that audit-exceptions.json can cover a
+        # finding that has no patched version, per advisory id, with a reason and an end date
+        # within 90 days.
+        run: node scripts/npm-audit-gate.mjs
       - name: Snyk scan
         if: env.SNYK_TOKEN != ''
         uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
