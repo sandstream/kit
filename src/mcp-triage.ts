@@ -207,6 +207,12 @@ const DANGEROUS_CAPABILITY =
 const SECRET_PARAM =
   /(^|[_-])(token|secret|password|passwd|api[_-]?key|apikey|credential|private[_-]?key)([_-]|$)/i;
 
+/** The field whose text implies arbitrary exec or deletion, name first, or null. */
+function dangerousField(tool: McpToolDef): "name" | "description" | null {
+  if (DANGEROUS_CAPABILITY.test(tool.name ?? "")) return "name";
+  return DANGEROUS_CAPABILITY.test(tool.description ?? "") ? "description" : null;
+}
+
 /**
  * Static MCP-Security-Checklist findings over tool defs (SlowMist / OWASP MCP Top 10).
  * Deterministic + heuristic-confidence — advisory review signals, NOT verdict-flipping:
@@ -221,11 +227,11 @@ export function checklistFindings(tools: McpToolDef[]): McpToolFinding[] {
   const findings: McpToolFinding[] = [];
   for (const tool of tools) {
     const name = tool.name || "(unnamed)";
-    const inName = DANGEROUS_CAPABILITY.test(tool.name ?? "");
-    if (inName || DANGEROUS_CAPABILITY.test(tool.description ?? "")) {
+    const dangerous = dangerousField(tool);
+    if (dangerous) {
       findings.push({
         tool: name,
-        field: inName ? "name" : "description",
+        field: dangerous,
         label: "dangerous-capability (confirm least-privilege + human approval)",
         confidence: "heuristic",
       });
