@@ -92,7 +92,7 @@ export async function cmdTriage(): Promise<boolean> {
     console.log(`${c.bold}kit triage${c.reset} — Security evaluation before installing packages\n`);
     console.log("Usage:");
     console.log("  kit triage docker <image>           Evaluate Docker image (CVE + sandbox)");
-    console.log("  kit triage npm <package>             Evaluate npm package (registry + GitHub)");
+    console.log("  kit triage npm <package>             Evaluate npm package (registry metadata)");
     console.log(
       "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
     );
