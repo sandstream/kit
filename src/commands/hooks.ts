@@ -1,5 +1,5 @@
 // `kit hooks` commands (git hook install/check/add) — extracted from cli.ts (split step 6).
-import { loadConfig } from "../config.js";
+import { loadConfig, type HooksConfig } from "../config.js";
 import { resolveConfigPath, KIT_FILE } from "../cli-shared.js";
 import { isGitRepository, checkHooks, hookCheckStatus } from "../check-hooks.js";
 import { installHooks, uninstallHooks, type HookInstallResult } from "../hooks.js";
@@ -58,135 +58,126 @@ function printNoConfiguredHooks(subcommand: string | undefined): void {
   }
 }
 
+function printInstallResults(results: HookInstallResult[]): boolean {
+  let allOk = true;
+  for (const r of results) {
+    const ok = r.action !== "failed" && (r.action !== "skipped" || r.satisfied === true);
+    const icon =
+      r.action === "failed"
+        ? `${c.red}✗${c.reset}`
+        : ok
+          ? `${c.green}✓${c.reset}`
+          : `${c.yellow}!${c.reset}`;
+    const label =
+      r.action === "installed"
+        ? `${c.green}installed${c.reset}`
+        : r.action === "updated"
+          ? `${c.green}updated${c.reset}`
+          : r.action === "skipped"
+            ? `${c.dim}skipped${c.reset}`
+            : `${c.red}failed${c.reset}`;
+    console.log(`  ${icon} ${r.hookName}  ${label}  ${c.dim}${r.detail}${c.reset}`);
+    if (!ok) allOk = false;
+  }
+  return allOk;
+}
+
+async function installConfigured(hooks: HooksConfig): Promise<boolean> {
+  console.log(`${c.bold}${c.cyan}Installing git hooks...${c.reset}\n`);
+  // Ensure the self-healing wrapper exists before writing hooks, so the
+  // generated hooks reference ~/.kit/bin/kit (resolves in a non-login shell).
+  ensureKitWrapper();
+  const allOk = printInstallResults(await installHooks(hooks));
+  console.log();
+  return allOk;
+}
+
+// "outdated" would be the wrong word for a hook git never runs (BH-01): the content may be
+// perfect. Name the condition that actually stops enforcement.
+function hookStatusWord(r: Awaited<ReturnType<typeof checkHooks>>[number]): string {
+  if (!r.installed) return `${c.red}not installed${c.reset}`;
+  if (!r.executable) return `${c.red}not executable${c.reset}`;
+  if (!r.upToDate) return `${c.red}outdated${c.reset}`;
+  return `${c.green}up-to-date${c.reset}`;
+}
+
+async function checkConfigured(hooks: HooksConfig): Promise<boolean> {
+  console.log(`${c.bold}${c.cyan}Git Hooks${c.reset}\n`);
+  let allOk = true;
+  for (const r of await checkHooks(hooks)) {
+    const failed = hookCheckStatus(r) === "fail";
+    const icon = failed ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
+    console.log(`  ${icon} ${r.hookName}  ${hookStatusWord(r)}  ${c.dim}${r.detail}${c.reset}`);
+    if (failed) allOk = false;
+  }
+  if (!allOk) {
+    console.log(
+      `\n${c.dim}Run ${c.reset}${c.bold}kit hooks install${c.reset}${c.dim} to install/update hooks${c.reset}`,
+    );
+  }
+  console.log();
+  return allOk;
+}
+
+// `uninstallHooks` reuses action "installed" to mean "removed": render it as what actually
+// happened rather than leaking that quirk to the operator.
+function removedLabel(r: HookInstallResult): string {
+  if (r.action === "failed") return `${c.red}failed${c.reset}`;
+  if (r.action === "skipped") return `${c.dim}skipped${c.reset}`;
+  return `${c.green}removed${c.reset}`;
+}
+
+// `uninstallHooks` has existed and been exported since hooks shipped, with no caller: kit could
+// install git hooks and had no way to remove them, so the only route back was deleting files out
+// of .git/hooks by hand. Reported by self-audit rule 15 as unwired; this is the wire.
+async function uninstallConfigured(hooks: HooksConfig): Promise<boolean> {
+  console.log(`${c.bold}${c.cyan}Uninstalling git hooks...${c.reset}\n`);
+  // `installHooks` writes the configured hooks AND the bypass-detector sentinel pair
+  // (`pre-commit` writer + `post-commit` detector). Removing only the configured names leaves the
+  // post-commit detector behind, and with the sentinel writer gone it then reports every
+  // subsequent commit as "bypassed pre-commit (sentinel-missing)" forever. Found by running the
+  // uninstall and looking at .git/hooks afterwards rather than trusting the happy-path output.
+  const toRemove = [...new Set([...Object.keys(hooks), "pre-commit", "post-commit"])];
+  let allOk = true;
+  for (const r of await uninstallHooks(toRemove)) {
+    const icon = r.action === "failed" ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
+    console.log(`  ${icon} ${r.hookName}  ${removedLabel(r)}  ${c.dim}${r.detail}${c.reset}`);
+    if (r.action === "failed") allOk = false;
+  }
+  console.log();
+  if (allOk) {
+    console.log(
+      `${c.dim}Enforcement is now off for these hooks — re-install with ${c.reset}${c.bold}kit hooks install${c.reset}${c.dim}.${c.reset}\n`,
+    );
+  }
+  return allOk;
+}
+
 export async function cmdHooks(): Promise<boolean> {
   const subcommand = process.argv[3];
 
   // Built-in hooks bypass the .kit.toml config path so they're available
   // on any repo, including ones that haven't run `kit init` yet.
-  if (subcommand === "add") {
-    return cmdHooksAdd();
-  }
+  if (subcommand === "add") return cmdHooksAdd();
   // Session-start form (#671): silent when intact, one plain line otherwise, never fails.
-  if (subcommand === "context") {
-    return runHooksContext();
-  }
+  if (subcommand === "context") return runHooksContext();
 
   const config = await loadConfig(resolveConfigPath());
-
-  if (!config.hooks || Object.keys(config.hooks).length === 0) {
+  const hooks = config.hooks;
+  if (!hooks || Object.keys(hooks).length === 0) {
     printNoConfiguredHooks(subcommand);
     return true;
   }
-
   if (!isGitRepository()) {
     console.log(`${c.red}Not a git repository${c.reset}`);
     return false;
   }
-
-  if (subcommand === "install" || !subcommand) {
-    console.log(`${c.bold}${c.cyan}Installing git hooks...${c.reset}\n`);
-
-    // Ensure the self-healing wrapper exists before writing hooks, so the
-    // generated hooks reference ~/.kit/bin/kit (resolves in a non-login shell).
-    ensureKitWrapper();
-    const results = await installHooks(config.hooks);
-    let allOk = true;
-
-    for (const r of results) {
-      const ok = r.action !== "failed" && (r.action !== "skipped" || r.satisfied === true);
-      const icon =
-        r.action === "failed"
-          ? `${c.red}✗${c.reset}`
-          : ok
-            ? `${c.green}✓${c.reset}`
-            : `${c.yellow}!${c.reset}`;
-      const label =
-        r.action === "installed"
-          ? `${c.green}installed${c.reset}`
-          : r.action === "updated"
-            ? `${c.green}updated${c.reset}`
-            : r.action === "skipped"
-              ? `${c.dim}skipped${c.reset}`
-              : `${c.red}failed${c.reset}`;
-      console.log(`  ${icon} ${r.hookName}  ${label}  ${c.dim}${r.detail}${c.reset}`);
-      if (!ok) allOk = false;
-    }
-
-    console.log();
-    return allOk;
-  } else if (subcommand === "check") {
-    console.log(`${c.bold}${c.cyan}Git Hooks${c.reset}\n`);
-
-    const results = await checkHooks(config.hooks);
-    let allOk = true;
-
-    for (const r of results) {
-      const failed = hookCheckStatus(r) === "fail";
-      const icon = failed ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
-      // "outdated" would be the wrong word for a hook git never runs (BH-01): the
-      // content may be perfect. Name the condition that actually stops enforcement.
-      const status = !r.installed
-        ? `${c.red}not installed${c.reset}`
-        : !r.executable
-          ? `${c.red}not executable${c.reset}`
-          : !r.upToDate
-            ? `${c.red}outdated${c.reset}`
-            : `${c.green}up-to-date${c.reset}`;
-      console.log(`  ${icon} ${r.hookName}  ${status}  ${c.dim}${r.detail}${c.reset}`);
-      if (failed) allOk = false;
-    }
-
-    if (!allOk) {
-      console.log(
-        `\n${c.dim}Run ${c.reset}${c.bold}kit hooks install${c.reset}${c.dim} to install/update hooks${c.reset}`,
-      );
-    }
-
-    console.log();
-    return allOk;
-  } else if (subcommand === "uninstall") {
-    // `uninstallHooks` has existed and been exported since hooks shipped, with no
-    // caller: kit could install git hooks and had no way to remove them, so the only
-    // route back was deleting files out of .git/hooks by hand. Reported by self-audit
-    // rule 15 as unwired; this is the wire, not a new capability.
-    console.log(`${c.bold}${c.cyan}Uninstalling git hooks...${c.reset}\n`);
-
-    // `installHooks` writes the configured hooks AND the bypass-detector sentinel pair
-    // (`pre-commit` writer + `post-commit` detector). Removing only the configured names
-    // leaves the post-commit detector behind, and with the sentinel writer gone it then
-    // reports every subsequent commit as "bypassed pre-commit (sentinel-missing)" —
-    // forever. Found by running the uninstall and looking at .git/hooks afterwards
-    // rather than trusting the happy-path output.
-    const toRemove = [...new Set([...Object.keys(config.hooks), "pre-commit", "post-commit"])];
-    const results = await uninstallHooks(toRemove);
-    let allOk = true;
-
-    for (const r of results) {
-      const icon = r.action === "failed" ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
-      // `uninstallHooks` reuses action "installed" to mean "removed" — render it as
-      // what actually happened rather than leaking that quirk to the operator.
-      const label =
-        r.action === "failed"
-          ? `${c.red}failed${c.reset}`
-          : r.action === "skipped"
-            ? `${c.dim}skipped${c.reset}`
-            : `${c.green}removed${c.reset}`;
-      console.log(`  ${icon} ${r.hookName}  ${label}  ${c.dim}${r.detail}${c.reset}`);
-      if (r.action === "failed") allOk = false;
-    }
-
-    console.log();
-    if (allOk) {
-      console.log(
-        `${c.dim}Enforcement is now off for these hooks — re-install with ${c.reset}${c.bold}kit hooks install${c.reset}${c.dim}.${c.reset}\n`,
-      );
-    }
-    return allOk;
-  } else {
-    console.error(`Unknown hooks subcommand: ${subcommand}`);
-    console.error(`Usage: kit hooks [install|check|uninstall|add <name>]`);
-    return false;
-  }
+  if (subcommand === "install" || !subcommand) return installConfigured(hooks);
+  if (subcommand === "check") return checkConfigured(hooks);
+  if (subcommand === "uninstall") return uninstallConfigured(hooks);
+  console.error(`Unknown hooks subcommand: ${subcommand}`);
+  console.error(`Usage: kit hooks [install|check|uninstall|add <name>]`);
+  return false;
 }
 
 async function cmdHooksAdd(): Promise<boolean> {
