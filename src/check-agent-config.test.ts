@@ -73,3 +73,17 @@ describe("kit check runs the agent-config audit", () => {
     assert.equal(rows.filter((r) => r.status === "fail").length, 0);
   });
 });
+
+describe("kit check names a repository an agent tool pre-trusted", () => {
+  it("reports Claude Code's hasTrustDialogAccepted for this repository", async (t) => {
+    // Was: no row. Agent managers such as Orca write the trust for every repository they open,
+    // so the agent's own trust prompt, which gates project hooks and MCP servers, never appears.
+    const { root, home } = dirs(t);
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({ projects: { [root]: { hasTrustDialogAccepted: true } } }),
+    );
+    const rows = await checkAgentConfig(root, home, {});
+    assert.ok(rows.some((r) => r.name === "repository pre-trusted by an agent tool"));
+  });
+});
