@@ -78,6 +78,8 @@ export const SECURITY_RULES: Record<string, RuleRef> = {
     "A06_2021-Vulnerable_and_Outdated_Components",
     "A06:2021 Vulnerable and Outdated Components",
   ),
+  // An image a published analysis names as backdoored (check-docker-ioc.ts).
+  "local docker image IOCs": cwe(506, "Embedded Malicious Code"),
   "pinned versions": cwe(1104, "Use of Unmaintained Third Party Components"),
   // npm v12's `allowScripts` records which dependencies may run install scripts; an
   // unreviewed or outlived grant is exactly functionality pulled in from a sphere the
