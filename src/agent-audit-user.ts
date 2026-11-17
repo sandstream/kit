@@ -18,7 +18,7 @@
  * Plugins (`~/.claude/plugins`) are left out: that directory holds marketplace caches of other
  * repositories, which `kit triage` covers when they are installed.
  */
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import {
@@ -114,9 +114,39 @@ function sameDir(a: string, b: string): boolean {
   }
 }
 
-/** Files under one user dir whose extension is in `exts`, bounded. Symlinked dirs are not walked. */
-function filesUnder(dir: string, exts: Set<string>, depth: number, acc: string[]): void {
+/** A symlink that resolves to a directory. A dangling link is not one. */
+function linksToDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Files under one user dir whose extension is in `exts`, bounded by depth and MAX_FILES.
+ *
+ * A symlinked directory is walked: skill installers link a shared store into `~/.claude/skills`
+ * (`~/.agents/skills/<name>` → `~/.claude/skills/<name>`), and the agent loads what the link points
+ * at. Skipping links let a linked skill's `curl | sh` through unread (kit-research
+ * astryx-revisit-vs-kit). Each real directory is walked once, so a link cycle ends.
+ */
+function filesUnder(
+  dir: string,
+  exts: Set<string>,
+  depth: number,
+  acc: string[],
+  seen = new Set<string>(),
+): void {
   if (depth < 0 || acc.length >= MAX_FILES) return;
+  let real;
+  try {
+    real = realpathSync(dir);
+  } catch {
+    return;
+  }
+  if (seen.has(real)) return;
+  seen.add(real);
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -125,7 +155,8 @@ function filesUnder(dir: string, exts: Set<string>, depth: number, acc: string[]
   }
   for (const e of entries) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) filesUnder(p, exts, depth - 1, acc);
+    if (e.isDirectory() || (e.isSymbolicLink() && linksToDir(p)))
+      filesUnder(p, exts, depth - 1, acc, seen);
     else if ((e.isFile() || e.isSymbolicLink()) && exts.has(extname(e.name).toLowerCase()))
       acc.push(p);
   }
