@@ -110,7 +110,8 @@ function inspectionArgumentError(args: readonly string[]): string | undefined {
 
 /** Hook commands have no short options. Refuse them before policy activation. */
 function hookArgumentError(args: readonly string[]): string | undefined {
-  if (!["gate-bash", "gate-env", "gate-egress", "gate-fs"].includes(args[0])) return undefined;
+  if (!["gate-bash", "gate-env", "gate-egress", "gate-fs", "gate-limits"].includes(args[0]))
+    return undefined;
   const flag = args.slice(1).find((token) => /^-[^-]/.test(token));
   return flag ? sanitizeDisplayText(`unknown flag for kit ${args[0]}: ${flag}`) : undefined;
 }

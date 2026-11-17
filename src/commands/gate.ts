@@ -351,6 +351,46 @@ export async function cmdGateFs(): Promise<boolean> {
   );
 }
 
+/**
+ * `kit gate-limits` — PreToolUse per-session limits (session-limits.ts): wall-clock minutes, tool
+ * calls and child agents from `.kit.toml [governance.agent]`. Opt-in, matched to every tool. No
+ * limit set, or no session id in the payload → allow without counting.
+ */
+export async function cmdGateLimits(): Promise<boolean> {
+  const payload = await readHookPayload();
+  if (payload === null) return true; // unreadable envelope → never break the agent
+  const sessionId = sessionIdOf(payload);
+  const tool = (payload as { tool_name?: unknown }).tool_name;
+  if (!sessionId || typeof tool !== "string") return true;
+  const limits = await configuredSessionLimits();
+  const { hasLimits, decideSessionLimits, sessionStatePath, readSessionState, writeSessionState } =
+    await import("../session-limits.js");
+  if (!hasLimits(limits)) return true;
+  const { homedir } = await import("node:os");
+  const path = sessionStatePath(homedir(), sessionId);
+  const verdict = decideSessionLimits(limits, readSessionState(path), tool, new Date());
+  if ("next" in verdict) {
+    writeSessionState(path, verdict.next);
+    return true;
+  }
+  const why = `${verdict.refuse}; stop and hand the remaining work to a person`;
+  await auditGateDeny("gate-limits", why, sessionId);
+  return await gateDeny("limits-gate", why);
+}
+
+/** The per-session limits in `.kit.toml [governance.agent]`; none when there is no config. */
+async function configuredSessionLimits(): Promise<import("../session-limits.js").SessionLimits> {
+  const { loadConfig } = await import("../config.js");
+  const { resolve } = await import("node:path");
+  const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml")).catch(() => undefined);
+  const agent = cfg?.governance?.agent;
+  return {
+    maxSessionMinutes: agent?.max_session_minutes,
+    maxToolCalls: agent?.max_tool_calls_per_session,
+    maxChildAgents: agent?.max_child_agents,
+  };
+}
+
 /** The `--format <fmt>` value for gate-bash (`--format cline` | `--format=cline`). */
 function gateFormat(): string {
   const argv = process.argv;

@@ -6,7 +6,7 @@ import { WRAPPER_MARKER } from "./kit-wrapper.js";
 import { getKitVersionSync } from "./update-check.js";
 import { shellSplit } from "./utils/shellSplit.js";
 
-export const GATE_SUBCOMMANDS = ["gate-bash", "gate-env", "gate-egress", "gate-fs"];
+export const GATE_SUBCOMMANDS = ["gate-bash", "gate-env", "gate-egress", "gate-fs", "gate-limits"];
 
 export function commandIncludesSubcommand(command: string, sub: string): boolean {
   try {

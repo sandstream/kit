@@ -93,7 +93,7 @@ The 7.x line starts with one breaking change to the skill fingerprint.
   approval needs an interactive terminal, and a script that passed an ignored flag now gets a
   non-zero exit. macOS is unverified in CI. Full list in the [CHANGELOG](CHANGELOG.md).
 - **7.2.2: `kit triage pkg`, and more of what `kit triage instructions` finds.** `kit triage pkg
-  <file.pkg>` checks a macOS installer before it is opened: its SHA-256 against the publisher's list,
+<file.pkg>` checks a macOS installer before it is opened: its SHA-256 against the publisher's list,
   the signing Team ID against the publisher you expect (the Node.js Foundation is built in), and
   Apple's notarization. A package with no expected publisher never passes. `kit triage instructions`
   gets rules for secrets sent to a URL, requests for the system prompt and hidden activity, and says
@@ -109,7 +109,7 @@ The 7.x line starts with one breaking change to the skill fingerprint.
   `kit check` gets an `enforcement evidence` row that runs negative controls against the gates on every
   check and counts commits that skipped the hook, `runtime installs: node` that judges every Node install
   and the one PATH runs, and `anonymous database access` that lists the tables anon can read. `kit triage
-  npm` warns about a release younger than 14 days and waives a security patch that OSV lists as the first
+npm` warns about a release younger than 14 days and waives a security patch that OSV lists as the first
   fix. A new worktree gets the PreToolUse gates from a `post-checkout` hook. `kit watch` ranks open
   security pull requests, `[deploy.health]` tags findings `deployed` or `branch only`, `kit services`
   keeps leases for the local services agents start, and `[[scan.allow]]` records reviewed exceptions. The
@@ -163,7 +163,7 @@ verdict harder to fake. The releases that changed what kit does:
   new dependency debt fails while existing debt is baselined, and `kit usage` shows what
   kit knows and proves the floor still works.
 - **6.7: the flag floor.** Every command rejects flags it does not accept, `kit audit
-  verify --all` checks every audit log the machine sealed, and self-audit checks the
+verify --all` checks every audit log the machine sealed, and self-audit checks the
   documentation in both directions.
 
 The 5.0 foundations (hardware-rooted identity, an offline-verified control plane, one
@@ -323,7 +323,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive/manual) per service without logging in. See [service credential ownership](./docs/adr/0008-service-passkeys-and-tokens.md).
 - `kit secrets {set,migrate,rotate,propagate,onecli,validate}`: Secret lifecycle
 - `kit memory {index,search,stats,suggest,merge,save,threads,share,backup}`: Local-first, cross-harness second brain (per-harness `stats`, project recall, saved copilots) + `kit memory pal` pending-action ledger
-  - **Classified memory** — *partially wired, and this line says so rather than implying more.* Every memory row carries a sensitivity class column, and the disclosure logic is implemented and unit-tested: recall filters to classes no more restrictive than the asking context, a missing or unrecognized class is excluded from **every** context (fail-closed), and an invalid configured value resolves to `restricted` rather than silently widening disclosure. **What is not connected yet:** no call site supplies the per-project class or the recall context, so every row currently takes the built-in default (`internal`) and the configured/environment override is inert. Until that wiring lands, do not rely on this to keep a note out of another project — see the `documented env vars` check in `kit self-audit`, which is what caught it.
+  - **Classified memory** — _partially wired, and this line says so rather than implying more._ Every memory row carries a sensitivity class column, and the disclosure logic is implemented and unit-tested: recall filters to classes no more restrictive than the asking context, a missing or unrecognized class is excluded from **every** context (fail-closed), and an invalid configured value resolves to `restricted` rather than silently widening disclosure. **What is not connected yet:** no call site supplies the per-project class or the recall context, so every row currently takes the built-in default (`internal`) and the configured/environment override is inert. Until that wiring lands, do not rely on this to keep a note out of another project — see the `documented env vars` check in `kit self-audit`, which is what caught it.
 - `kit auth {elevate,setup-totp,status,revoke}`: Elevation gate + TOTP
 - `kit mcp {list,auth,set-token,clear}`: MCP-server orchestrator
 - `kit env {list,switch,current,diff}`: Environment routing + drift detection
@@ -334,9 +334,9 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `.kit-secretsignore`: Accept a reviewed secret finding by name (`<commit>:<file>:<detector>`, one per line). History is immutable, so a fixture committed once is a finding forever and the scan sits at `warn` permanently — a warning with no reachable green state is one nobody reads. Two properties keep it safe: an entry names **one commit**, so it can never wave through a future occurrence of the same string, and a **verified-live** finding is never ignorable regardless of what is listed
 - `kit hooks {install,add,sync}`: Git hooks + bypass detector
 - `kit governance` / `kit audit {secrets,verify,anchor,export}`: Policy + audit-log inspection; `anchor`/`verify` seal and check the external HMAC anchor
-- `[policy.agent_writes]`: Declares which vendor writes are pre-approved — **enforced** since 6.3.2 at kit's own choke points (`propagate()`, secret rotation) and since 6.4.0 inside the `kit-plugin-*` packages, which receive the resolved decision as an exported deny list and never see your config. It only ever **narrows**: the block is unsigned config anyone who can edit the repo — including an agent — could add a line to, so declaring an op never *satisfies* elevation, read-only or signed approval (`.kit-policy.toml` + `kit policy approve` are the grant-shaped mechanism, and require an org signature). An empty list is a lock, not a wildcard; every grant and refusal is audited with vendor, op, state and policy hash. See [`docs/POLICY.md`](./docs/POLICY.md)
+- `[policy.agent_writes]`: Declares which vendor writes are pre-approved — **enforced** since 6.3.2 at kit's own choke points (`propagate()`, secret rotation) and since 6.4.0 inside the `kit-plugin-*` packages, which receive the resolved decision as an exported deny list and never see your config. It only ever **narrows**: the block is unsigned config anyone who can edit the repo — including an agent — could add a line to, so declaring an op never _satisfies_ elevation, read-only or signed approval (`.kit-policy.toml` + `kit policy approve` are the grant-shaped mechanism, and require an org signature). An empty list is a lock, not a wildcard; every grant and refusal is audited with vendor, op, state and policy hash. See [`docs/POLICY.md`](./docs/POLICY.md)
 - `kit check --attest` (also `kit ci --attest` / `KIT_ATTEST=1`): Opt-in signed receipt of which scanners ran + the verdict; `kit check verify-attestation <file>` verifies it
-- `kit check compare <before.json> <after.json>`: Run-to-run diff of two `--json` runs — what actually changed since the last scan, which a baseline cannot tell you (freezing suppresses, it does not compare). **Lost coverage outranks a regression**: `fail → skip` means the check stopped running, so the finding is *unknown*, not fixed — a naive differ would call that an improvement. `--fail-on-worse` gates CI on the delta instead of the absolute verdict
+- `kit check compare <before.json> <after.json>`: Run-to-run diff of two `--json` runs — what actually changed since the last scan, which a baseline cannot tell you (freezing suppresses, it does not compare). **Lost coverage outranks a regression**: `fail → skip` means the check stopped running, so the finding is _unknown_, not fixed — a naive differ would call that an improvement. `--fail-on-worse` gates CI on the delta instead of the absolute verdict
 - `kit config migrate`: Migrate a versioned `.kit.toml` to the current schema (`--dry-run` default, auto-backup, re-validate-or-restore, `--check` for CI)
 - `kit airgap verify`: Prove every scanner that would run in air-gap mode resolves to a local artifact (no egress)
 - `kit browser {doctor,status,cdp-url,playwright-env}`: Which browser strategy a repo actually gets for verification — Playwright, system Chrome, or CDP — or the blocker in the way, plus the exports to wire a test runner (`--json` on each). kit owns local browser diagnostics, not app start
@@ -473,6 +473,10 @@ id = "agent-123"
 name = "Founding Engineer"
 max_tokens_per_day = 1000000
 max_operations_per_hour = 100
+# Per-session limits, enforced by `kit gate-limits` (opt in: kit agent-config --limits-gate)
+max_session_minutes = 120
+max_tool_calls_per_session = 500
+max_child_agents = 4
 
 [governance.audit]
 enabled = true
@@ -543,6 +547,7 @@ idempotent — re-runs update only the region between them):
 
 ```markdown
 <!-- BEGIN kit (managed block — edit outside the markers, not inside) -->
+
 ## kit
 
 This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, security gates). Hooks enforce the hard rules; what you need to know:
@@ -556,6 +561,7 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 - After a batch of edits: `kit check --category security`; halt and surface findings on `fail`.
 - Local services you start (containers, Supabase, dev servers): `kit services add <name> --kind <k> --ref <r>` right after, `kit services stop <name>` when done.
 - Everything else: `kit --help` — the commands are self-documenting.
+
 <!-- END kit -->
 ```
 
@@ -652,18 +658,18 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 
 ### Available MCP Tools
 
-| Tool            | Description                                                                                     |
-| --------------- | ----------------------------------------------------------------------------------------------- |
-| `kit_check`     | Run all checks, return structured status JSON                                                   |
-| `kit_review`    | Full repo audit — check + design + standards + ADR + skill gates as one structured report              |
-| `kit_fix`       | Auto-fix issues (install tools, generate lock files)                                            |
-| `kit_triage`    | Security-triage a dependency BEFORE installing it — a pass satisfies the install gate           |
-| `kit_memory`    | Search cross-session memory + the repo's curated shared decisions (search-only)                 |
-| `kit_secrets`   | Generate `.env.local` from configured sources (returns key names, never values)                 |
-| `kit_run`       | Run a command with the secret-loaded env — escape hatch for every other kit command             |
-| `kit_context`   | Gather project context (stack, services, env status)                                            |
-| `kit_map`       | Repo map: import-neighborhood slice around seed paths                                           |
-| `kit_init`      | Detect the stack and generate `.kit.toml` (dry-run supported)                                   |
+| Tool          | Description                                                                               |
+| ------------- | ----------------------------------------------------------------------------------------- |
+| `kit_check`   | Run all checks, return structured status JSON                                             |
+| `kit_review`  | Full repo audit — check + design + standards + ADR + skill gates as one structured report |
+| `kit_fix`     | Auto-fix issues (install tools, generate lock files)                                      |
+| `kit_triage`  | Security-triage a dependency BEFORE installing it — a pass satisfies the install gate     |
+| `kit_memory`  | Search cross-session memory + the repo's curated shared decisions (search-only)           |
+| `kit_secrets` | Generate `.env.local` from configured sources (returns key names, never values)           |
+| `kit_run`     | Run a command with the secret-loaded env — escape hatch for every other kit command       |
+| `kit_context` | Gather project context (stack, services, env status)                                      |
+| `kit_map`     | Repo map: import-neighborhood slice around seed paths                                     |
+| `kit_init`    | Detect the stack and generate `.kit.toml` (dry-run supported)                             |
 
 Full reference: [docs/MCP_TOOLS_REFERENCE.md](docs/MCP_TOOLS_REFERENCE.md) · usage guide: [docs/MCP_TOOLS_GUIDE.md](docs/MCP_TOOLS_GUIDE.md)
 

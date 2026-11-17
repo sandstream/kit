@@ -196,6 +196,10 @@ export interface GovernanceAgentConfig {
   name?: string;
   max_tokens_per_day?: number;
   max_operations_per_hour?: number;
+  /** Per-session limits read by `kit gate-limits` (session-limits.ts). */
+  max_session_minutes?: number;
+  max_tool_calls_per_session?: number;
+  max_child_agents?: number;
 }
 
 /**
@@ -696,6 +700,18 @@ const GovernanceConfigSchema = z
         max_operations_per_hour: z
           .number()
           .refine(isOperationLimit, "Expected a nonnegative safe integer operation limit")
+          .optional(),
+        max_session_minutes: z
+          .number()
+          .refine(isOperationLimit, "Expected a nonnegative safe integer minute limit")
+          .optional(),
+        max_tool_calls_per_session: z
+          .number()
+          .refine(isOperationLimit, "Expected a nonnegative safe integer call limit")
+          .optional(),
+        max_child_agents: z
+          .number()
+          .refine(isOperationLimit, "Expected a nonnegative safe integer agent limit")
           .optional(),
       })
       .passthrough()
