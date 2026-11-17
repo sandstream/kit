@@ -19,11 +19,13 @@ export async function checkAgentConfig(
   const { checkMcpLoopbackToken } = await import("./check-mcp-loopback-token.js");
   const { checkPreTrusted } = await import("./check-pretrusted.js");
   const { checkWorktreeInclude } = await import("./check-worktreeinclude.js");
+  const { checkGitEmail } = await import("./check-git-email.js");
   return [
     ...runAgentAudit(root),
     ...runUserAgentAudit(root, home, env),
     ...checkMcpLoopbackToken(root),
     ...checkPreTrusted(root, home, env),
     ...checkWorktreeInclude(root),
+    ...(await checkGitEmail(root)),
   ];
 }
