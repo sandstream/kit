@@ -27,6 +27,15 @@ describe("extractScriptTags", () => {
     ]);
   });
 
+  it("reads upper- and mixed-case HTML tags and attributes, as browsers do", () => {
+    const text =
+      '<SCRIPT SRC="https://a.example/x.js" INTEGRITY="sha384-abc"></SCRIPT><ScRiPt sRc=//b.example/y.js>';
+    assert.deepEqual(extractScriptTags(text), [
+      { src: "https://a.example/x.js", integrity: true },
+      { src: "//b.example/y.js", integrity: false },
+    ]);
+  });
+
   it("does not read data-src as src", () => {
     assert.deepEqual(extractScriptTags('<script data-src="https://a.example/x.js"></script>'), []);
   });

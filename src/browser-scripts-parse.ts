@@ -21,12 +21,13 @@ export interface ScriptUrl {
   reason?: string;
 }
 
-// `<script ...>` in HTML and templates, `<script ...>` and Next's `<Script ...>` in JSX. A JSX
-// attribute in braces may hold `>` (an arrow function), so braces are matched one level deep.
-const SCRIPT_TAG = /<(?:script|Script)\b((?:[^>{}]|\{[^{}]*\})*)>/g;
+// `<script ...>` in HTML and templates (in any case, as HTML allows), and `<script ...>` and
+// Next's `<Script ...>` in JSX. A JSX attribute in braces may hold `>` (an arrow function), so
+// braces are matched one level deep.
+const SCRIPT_TAG = /<script\b((?:[^>{}]|\{[^{}]*\})*)>/gi;
 const SRC_ATTR =
-  /(?:^|\s)src\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`$]*)["'`]\s*\}|([^\s"'{}>]+))/;
-const INTEGRITY_ATTR = /(?:^|\s)integrity\s*=/;
+  /(?:^|\s)src\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`$]*)["'`]\s*\}|([^\s"'{}>]+))/i;
+const INTEGRITY_ATTR = /(?:^|\s)integrity\s*=/i;
 
 /** Every `<script src>` / `<Script src>` whose src is a literal string. */
 export function extractScriptTags(text: string): ScriptTag[] {

@@ -6,7 +6,7 @@
  * form, and third-party code with no Content-Security-Policy anywhere in the repository.
  * Deterministic and bounded: no network, no model, capped file count and size.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import {
@@ -58,8 +58,8 @@ const HEADER_CONFIG = new Set([
   "staticwebapp.config.json",
   "firebase.json",
 ]);
-const TEST_PATH =
-  /(?:^|\/)(?:__tests__|__mocks__|fixtures?)\/|\.(?:test|spec|stories)\.[cm]?[jt]sx?$/i;
+const TEST_DIR = /(?:^|\/)(?:__tests__|__mocks__|fixtures?)\//i;
+const TEST_FILE = /\.(?:test|spec|stories)\.[cm]?[jt]sx?$/i;
 // Scripts in these files load on every page of a Next.js app.
 const LAYOUT = /(?:^|\/)(?:pages\/_(?:document|app)|app\/layout)\.[cm]?[jt]sx?$/i;
 
@@ -79,7 +79,7 @@ export interface BrowserScriptInventory {
 }
 
 function wanted(name: string, rel: string): boolean {
-  if (TEST_PATH.test(rel)) return false;
+  if (TEST_DIR.test(rel) || TEST_FILE.test(rel)) return false;
   return MARKUP.test(name) || CODE.test(name) || HEADER_CONFIG.has(name);
 }
 
@@ -110,18 +110,28 @@ function listFiles(root: string, limits: BrowserScriptLimits, errors: string[]):
   return files;
 }
 
+/** Read at most `max` bytes through one descriptor: no check-then-use on the path (CodeQL file race). */
 function readBounded(root: string, rel: string, max: number, errors: string[]): string | null {
-  const markup = MARKUP.test(rel);
+  let fd: number | undefined;
   try {
-    const path = join(root, rel);
-    if (statSync(path).size > max) {
-      if (markup) errors.push(`over ${Math.round(max / 1024)} KB: ${rel}`);
+    fd = openSync(join(root, rel), "r");
+    const buf = Buffer.alloc(max + 1);
+    let size = 0;
+    while (size <= max) {
+      const n = readSync(fd, buf, size, max + 1 - size, null);
+      if (n === 0) break;
+      size += n;
+    }
+    if (size > max) {
+      if (MARKUP.test(rel)) errors.push(`over ${Math.round(max / 1024)} KB: ${rel}`);
       return null;
     }
-    return readFileSync(path, "utf8");
+    return buf.toString("utf8", 0, size);
   } catch {
     errors.push(`cannot read ${rel}`);
     return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
