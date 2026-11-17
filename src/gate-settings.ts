@@ -29,7 +29,8 @@ export async function gateSettingsFile(cwd: string): Promise<string> {
   return tracked.ok ? LOCAL_SETTINGS : SHARED_SETTINGS;
 }
 
-function groupsIn(path: string): PreToolUseGroup[] {
+/** PreToolUse groups from one settings file; none when it is missing or unparseable. */
+export function groupsIn(path: string): PreToolUseGroup[] {
   try {
     const settings = JSON.parse(readFileSync(path, "utf-8")) as {
       hooks?: Record<string, PreToolUseGroup[]>;
