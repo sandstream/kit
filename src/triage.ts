@@ -31,6 +31,7 @@ export const TRIAGE_SCRIPTS = [
   "scripts/skill_scan.py",
   "scripts/plugin_scan.py",
   "scripts/docker_scan.py",
+  "scripts/docker_label.py",
   "scripts/npm_hooks.py",
 ] as const;
 /** Stamp of the kit version that produced the installed skill copy. Used to refresh a STALE
