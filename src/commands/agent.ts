@@ -21,6 +21,9 @@ import {
   loadUserRulesProfile,
 } from "../agent-config.js";
 import { describeStrictResult, installStrictSettings } from "../agent-config-strict.js";
+import { describeUserGates, installUserGates } from "../agent-config-user.js";
+import { ensureKitWrapper } from "../kit-wrapper.js";
+import { isReadOnlyMode } from "../read-only-mode.js";
 
 export async function cmdSkills(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
@@ -81,7 +84,29 @@ async function installPermissionsAndStrict(): ReturnType<typeof installKitPermis
   return installKitPermissions();
 }
 
-export async function cmdAgentConfig(): Promise<boolean> {
+/**
+ * `kit agent-config --user`: the PreToolUse gates in ~/.claude/settings.json only, so Claude Code
+ * runs them in every project on this machine. No project file is touched. The wrapper is refreshed
+ * first, as for the project gates, so the hook names `$HOME/.kit/bin/kit` and not a node path.
+ */
+async function cmdAgentConfigUser(): Promise<boolean> {
+  console.log(`${c.bold}${c.cyan}kit agent-config --user${c.reset}`);
+  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
+  if (!isReadOnlyMode()) ensureKitWrapper();
+  const result = await installUserGates();
+  for (const line of describeUserGates(result)) console.log(`  ${line}`);
+  return result.action !== "failed";
+}
+
+/**
+ * The `agent-config` handler. `--user` goes to its own function before cmdAgentConfig, whose size
+ * is frozen in the baseline (one more line there measured CCN 32 and 136 lines, a fresh finding).
+ */
+export function cmdAgentConfigEntry(): Promise<boolean> {
+  return hasFlag(process.argv, "--user") ? cmdAgentConfigUser() : cmdAgentConfig();
+}
+
+async function cmdAgentConfig(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit agent-config${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 

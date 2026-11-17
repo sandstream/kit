@@ -305,7 +305,7 @@ export async function checkGateLiveness(
   const name = "enforcement gate liveness";
   const category = "exposure" as const;
   const { gateLiveness } = await import("./agent-config.js");
-  const live = gateLiveness(cwd);
+  const live = (await import("./gate-liveness-user.js")).withUserGates(gateLiveness(cwd));
   const missing: string[] = [];
   if (!live.installGate) missing.push("install-gate (gate-bash)");
   if (!live.envGate) missing.push("env-write-gate (gate-env)");

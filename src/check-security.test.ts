@@ -315,6 +315,37 @@ describe("checkGateLiveness", () => {
       rmTemp(dir);
     }
   });
+
+  it("passes a checkout with no project gates when ~/.claude/settings.json wires both", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-live-user-proj-"));
+    const home = mkdtempSync(join(tmpdir(), "kit-live-user-home-"));
+    // os.homedir() reads HOME on POSIX and USERPROFILE on Windows; set both to the fake home.
+    const prev = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const cli = join(home, "cli.js");
+      writeFileSync(cli, "");
+      const cmd = (sub: string) => `"${process.execPath}" "${cli}" ${sub}`;
+      mkdirSync(join(home, ".claude"));
+      const hooks = {
+        PreToolUse: [
+          { matcher: "Bash", hooks: [{ type: "command", command: cmd("gate-bash") }] },
+          { matcher: "Write|Edit", hooks: [{ type: "command", command: cmd("gate-env") }] },
+        ],
+      };
+      writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ hooks }));
+      const result = await checkGateLiveness(dir, {});
+      assert.equal(result.status, "pass", result.detail);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      rmTemp(dir);
+      rmTemp(home);
+    }
+  });
 });
 
 describe("jvmProjectKind (#110)", () => {
