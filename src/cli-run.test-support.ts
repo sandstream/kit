@@ -17,6 +17,18 @@ export interface CliResult {
 }
 
 /**
+ * The test runner's env without the variables that mark an agent session (`agent-session.ts`).
+ * Run from inside Claude Code or Codex, the CLI would otherwise judge the fixture as an ungated
+ * agent session and fail `enforcement gate liveness`, where CI (no session) skips it.
+ */
+export function outsideAgentSession(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out = { ...env };
+  delete out.CLAUDECODE;
+  delete out.CODEX_THREAD_ID;
+  return out;
+}
+
+/**
  * Run the kit CLI in a given directory, capturing output and exit code.
  */
 export async function runCli(
@@ -33,7 +45,7 @@ export async function runCli(
     const { stdout, stderr } = await exec(process.execPath, [CLI_PATH, ...args], {
       cwd,
       env: {
-        ...process.env,
+        ...outsideAgentSession(),
         // Disable governance to avoid budget state side-effects
         KIT_CLAUDE_SETTINGS: join(agentStateDir, "claude-settings.json"),
         KIT_CODEX_HOOKS: join(agentStateDir, "codex-hooks.json"),
