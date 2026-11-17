@@ -794,7 +794,7 @@ def main(argv):
         print("  npm <pkg>        npm registry: existence, deprecation, age, maintainers, install scripts")
         print("  pip <pkg>        PyPI: existence, yanked, age, license")
         print("  repo <owner/repo|url>   GitHub: archived, maintenance, license, age")
-        print("  docker <image>   Docker Hub: existence, freshness, age, publisher")
+        print("  docker <image>   Docker Hub: existence, freshness, age, publisher, source label")
         print("  skill <path|name>   validate a local SKILL.md, else repo-check")
         return 0
     ttype = argv[0]
