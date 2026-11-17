@@ -2229,6 +2229,8 @@
       "kind": "command",
       "summary": "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust/pull/pull-revocations/approve) — identity-signed standard, org-distributable + enforced offline (experimental)",
       "x-kit-accepted-flags": [
+        "--artifact",
+        "--dest",
         "--env",
         "--force",
         "--help",

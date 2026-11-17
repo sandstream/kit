@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadOrCreateIdentity, identityId, recordRevocation } from "./identity.js";
@@ -112,6 +112,35 @@ describe("signed approval tokens", () => {
     const r = checkSignedApproval({ operation: OP, environment: ENV }, root, { dir: idDir });
     assert.equal(r.approved, false);
     assert.match(r.detail, /no approval tokens/);
+  });
+});
+
+describe("approval bound to an artifact and a destination", () => {
+  const DIGEST = "a".repeat(64);
+  const DEST = "news.example.org";
+  const check = (request: { digest?: string; dest?: string }) =>
+    checkSignedApproval({ operation: OP, environment: ENV, ...request }, root, { dir: idDir });
+
+  it("grants only the exact artifact and destination it names", () => {
+    mintApprovalToken(OP, ENV, 3600, { root, dir: idDir, binding: { digest: DIGEST, dest: DEST } });
+    assert.equal(check({ digest: DIGEST, dest: DEST }).approved, true);
+    assert.equal(check({ digest: "b".repeat(64), dest: DEST }).approved, false, "changed draft");
+    assert.equal(check({ digest: DIGEST, dest: "other.example.org" }).approved, false);
+    assert.equal(check({}).approved, false, "a request that names no artifact");
+  });
+
+  it("an unbound token still grants as before", () => {
+    mintApprovalToken(OP, ENV, 3600, { root, dir: idDir });
+    assert.equal(check({ digest: DIGEST, dest: DEST }).approved, true);
+  });
+
+  it("stripping the binding from the stored token breaks its signature", () => {
+    mintApprovalToken(OP, ENV, 3600, { root, dir: idDir, binding: { digest: DIGEST } });
+    const path = join(root, APPROVAL_TOKENS_FILE);
+    const token = JSON.parse(readFileSync(path, "utf8").trim()) as Record<string, unknown>;
+    delete token.digest;
+    writeFileSync(path, JSON.stringify(token) + "\n");
+    assert.equal(check({}).approved, false);
   });
 });
 
