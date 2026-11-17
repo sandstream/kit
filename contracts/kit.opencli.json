@@ -3325,7 +3325,7 @@
         },
         "npm": {
           "kind": "command",
-          "summary": "Evaluate npm package: registry + GitHub health",
+          "summary": "Evaluate npm package: registry metadata (deprecation, age, maintainers, license, install scripts)",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
