@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdPlugin } from "./plugins-cli.js";
 
-// eslint-disable-next-line no-control-regex
 const plain = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 interface Run {
@@ -81,7 +80,9 @@ describe("kit plugin output", () => {
     assert.equal(hit.code, 0);
     assert.match(hit.out, /^Search Results for "railway" — \d+ found\n/);
   });
+});
 
+describe("kit plugin names and unknown input", () => {
   it("info needs a name, rejects an unknown one, and shows details for a known one", async () => {
     const missing = await kitPlugin(["info"]);
     assert.equal(missing.code, 1);
