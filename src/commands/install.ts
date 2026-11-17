@@ -10,6 +10,7 @@ import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { consumeElevation } from "../elevation.js";
 import { withGovernance } from "../governance-middleware.js";
 import { installTools } from "../install.js";
+import { writeInstallWarnings } from "../triage-warnings.js";
 
 export async function cmdInstall(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
@@ -74,6 +75,7 @@ export async function cmdInstall(): Promise<boolean> {
         console.log(`  ${icon} ${r.name}  ${label}  ${c.dim}${r.detail}${c.reset}`);
         if (r.action === "failed" || r.action === "blocked") allOk = false;
       }
+      writeInstallWarnings(results);
 
       console.log();
       return allOk;
