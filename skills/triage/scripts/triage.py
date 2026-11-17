@@ -301,7 +301,7 @@ def triage_npm(rep):
         rep.critical("could not reach the npm registry (offline?) -- cannot verify")
         return
 
-    dist_tags = data.get("dist-tags") or {}
+    dist_tags = rep.npm_tags = data.get("dist-tags") or {}
     versions = data.get("versions") or {}
     times = data.get("time") or {}
     latest = dist_tags.get("latest")
@@ -350,17 +350,12 @@ def triage_npm(rep):
 
 
 
-# Registry-installed packages run these on `npm install` unless scripts are ignored. Named, not
-# scored: a 100/100 must still say the package runs code at install time.
-NPM_INSTALL_HOOKS = ("preinstall", "install", "postinstall")
-
-
 def triage_npm_scripts(rep):
+    # Install hooks and prerelease channels are scored warnings (npm_hooks.py; this file is frozen).
     triage_npm(rep)
-    scripts = (getattr(rep, "npm_meta", None) or {}).get("scripts") or {}
-    hooks = [h for h in NPM_INSTALL_HOOKS if h in scripts]
-    if hooks:
-        rep.fact(f"runs install script(s) on install: {', '.join(hooks)} (unless --ignore-scripts)")
+    hooks = _sibling("npm_hooks.py")
+    hooks.check_npm_install_hooks(rep)
+    hooks.check_npm_channel(rep, _split_npm_spec(rep.target)[1])
 
 
 def _split_pip_spec(target):
