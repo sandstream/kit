@@ -23,7 +23,7 @@ const ID_TOKEN_RULE = {
 };
 
 /** Actions that exchange the job's OIDC token. Matched on `uses: <owner>/<repo>[/path]@`. */
-export const OIDC_ACTIONS: readonly string[] = [
+const OIDC_ACTIONS: readonly string[] = [
   "aws-actions/configure-aws-credentials", // AWS role assumption via OIDC
   "google-github-actions/auth", // GCP workload identity federation
   "azure/login", // Azure federated credentials
@@ -37,7 +37,7 @@ export const OIDC_ACTIONS: readonly string[] = [
 ];
 
 /** Commands in a `run:` or script that ask for the OIDC token. */
-export const OIDC_COMMANDS: readonly { re: RegExp; what: string }[] = [
+const OIDC_COMMANDS: readonly { re: RegExp; what: string }[] = [
   { re: /\bnpm\s+publish\b/, what: "npm publish (trusted publishing / --provenance)" },
   { re: /\bNPM_CONFIG_PROVENANCE\b/i, what: "npm provenance" },
   { re: /\bcosign\s+(sign|attest)\b/, what: "cosign keyless sign/attest" },
