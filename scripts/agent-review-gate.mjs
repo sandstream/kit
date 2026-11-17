@@ -4,8 +4,9 @@
  *
  * When every check on a pull request's head commit has finished, the reviewer GitHub App:
  *   - APPROVES that exact commit when every check passed, no file is in a protected class
- *     (.github/kit-protected-paths.json, read from the default branch), and the change is
- *     under MAX_CHANGED_LINES;
+ *     (.github/kit-protected-paths.json, read from the default branch), no changed module is
+ *     imported by WIDE_IMPORTERS or more modules (src/review-protected-paths-wide.ts), and the
+ *     change is under MAX_CHANGED_LINES;
  *   - otherwise comments once on that commit with the reason, and approves nothing.
  *   It also approves nothing while the default branch's own CI has failed: a change merged onto a
  *   broken main stacks on the breakage (kit-research theo-t3-ten-videos-vs-kit, replay of 90 days:
@@ -74,6 +75,7 @@ export function decide({
   sha,
   checks,
   protectedPaths,
+  widePaths = [],
   changedLines,
   fileCount,
   truncated,
@@ -89,6 +91,13 @@ export function decide({
       .map((p) => `\`${p.path}\``)
       .join(", ");
     reasons.push(`touches protected paths (${classes}), which the owner approves: ${list}`);
+  }
+  if (widePaths.length) {
+    const list = widePaths
+      .slice(0, 10)
+      .map((p) => `\`${p.path}\` (${p.importers} importers)`)
+      .join(", ");
+    reasons.push(`changes modules many others import, which the owner approves: ${list}`);
   }
   if (truncated)
     reasons.push("the file list was truncated by the API, so not every path was classified");
@@ -255,6 +264,11 @@ async function decideAll(sha) {
     pathToFileURL(`${process.cwd()}/dist/review-protected-paths.js`).href
   );
   const rules = loadProtectedPathRules(process.cwd());
+  // Counted on this checkout (the default branch), so a pull request cannot shrink the count.
+  const { importerCounts, widePaths } = await import(
+    pathToFileURL(`${process.cwd()}/dist/review-protected-paths-wide.js`).href
+  );
+  const importers = importerCounts(process.cwd());
   const runs = (await paged(`/repos/${repo}/commits/${sha40(sha)}/check-runs`, token, "check_runs"))
     .items;
   const checks = checksState(runs);
@@ -274,6 +288,7 @@ async function decideAll(sha) {
       sha,
       checks,
       protectedPaths: classifyProtectedPaths(paths, rules),
+      widePaths: widePaths(paths, importers),
       changedLines: files.items.reduce((n, f) => n + (f.additions ?? 0) + (f.deletions ?? 0), 0),
       fileCount: files.items.length,
       truncated: files.truncated,
