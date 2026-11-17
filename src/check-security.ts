@@ -50,6 +50,7 @@ import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
 import { checkTranscriptSecrets } from "./check-transcripts.js";
 import { checkLicenses } from "./check-licenses.js";
+import { checkBrowserScripts } from "./check-browser-scripts.js";
 import { npmLockfileCover } from "./check-pinned-lockfile.js";
 
 const exec = promisify(execFile);
@@ -2611,6 +2612,7 @@ async function runPrimarySecurityChecks(
           checkTrivy(root),
           checkApkFloors(root),
           checkLicenses(root),
+          checkBrowserScripts(root),
           checkTrivyConfig(root),
           checkOsvScanner(root),
           checkMavenAudit(root),
