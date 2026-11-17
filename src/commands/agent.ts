@@ -17,6 +17,7 @@ import {
   installCodexKitProfile,
   installAllInstallGates,
   installBrokerGates,
+  installIdentityGate,
   installAiderRules,
   loadUserRulesProfile,
 } from "../agent-config.js";
@@ -225,6 +226,15 @@ async function cmdAgentConfig(): Promise<boolean> {
     } else {
       console.log(`    ${c.dim}· Claude Code skipped: ${r.detail ?? r.action}${c.reset}`);
     }
+  }
+  // Opt-in while experimental: refuse a network call that carries the user's own address.
+  if (hasFlag(process.argv, "--identity-gate")) {
+    const r = await installIdentityGate();
+    const shown =
+      r.action === "created" || r.action === "updated"
+        ? `${c.green}✓${c.reset} Claude Code ${c.dim}→ ${r.file} (gate-identity)${c.reset}`
+        : `${c.dim}· Claude Code ${r.action}: ${r.detail ?? r.file}${c.reset}`;
+    console.log(`\n  ${c.bold}identity gate${c.reset}\n    ${shown}`);
   }
   console.log(
     `\n${c.dim}Blocks regenerate in place on re-run; edit outside the markers freely. ` +

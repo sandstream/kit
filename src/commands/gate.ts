@@ -346,6 +346,43 @@ export async function cmdGateFs(): Promise<boolean> {
   );
 }
 
+/**
+ * `kit gate-identity` — PreToolUse identity-egress gate. Reads the pending tool call on stdin and
+ * refuses (exit 2) a network-shaped call that carries one of the user's own email addresses: the
+ * git `user.email`, or the Claude Code account address. Covers Bash, WebFetch, WebSearch, MCP
+ * tools, and a Write/Edit of a script with a network call. Decides by what a call carries, not
+ * where it goes, so it needs no signed scope. The pure decision is identity-egress.ts; the
+ * identity set is read only once a call is network-shaped, and its values never reach the
+ * refusal or the audit row.
+ */
+export async function cmdGateIdentity(): Promise<boolean> {
+  const payload = await readHookPayload();
+  if (payload === null) return true; // unreadable envelope → never break the agent
+  const p = payload as { tool_name?: unknown; tool_input?: unknown };
+  const tool = typeof p.tool_name === "string" ? p.tool_name : "";
+  if (!tool) return true;
+  const { identityEgress, networkCall } = await import("../identity-egress.js");
+  // Shape first: a call that is not network-shaped never reads git or ~/.claude.json.
+  const call = networkCall(tool, p.tool_input);
+  if (!call) return true;
+  const { identitySet } = await import("../transcript-identity.js");
+  const { homedir } = await import("node:os");
+  const finding = identityEgress(call, await identitySet(process.cwd(), homedir()));
+  if (!finding) return true;
+  const label = {
+    "git-email": "git user.email",
+    "account-email": "Claude Code account address",
+    "git-substitution": "git address (read from git config or git log)",
+    "git-name": "git user.name",
+  }[finding.kind];
+  const why = `${tool} call to ${finding.host} would send your ${label} over the network`;
+  await auditGateDeny("gate-identity", why, sessionIdOf(payload));
+  return await gateDeny(
+    "identity-gate",
+    `${why}\nUse a generic client name (no personal contact). If you mean to send it, run the command yourself.`,
+  );
+}
+
 /** The `--format <fmt>` value for gate-bash (`--format cline` | `--format=cline`). */
 function gateFormat(): string {
   const argv = process.argv;

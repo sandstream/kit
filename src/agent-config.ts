@@ -1012,6 +1012,49 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
 }
 
 /**
+ * Install the PreToolUse identity-egress gate (`kit gate-identity`) into `.claude/settings.json`:
+ * refuse a network-shaped tool call that carries the user's own email address. Opt-in
+ * (`kit agent-config --identity-gate`) while it is experimental. Matches Bash, WebFetch,
+ * WebSearch, MCP tools and script writes. Idempotent; preserves other hooks. Claude Code only.
+ */
+export async function installIdentityGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
+  const file = await gateSettingsFile(cwd);
+  const path = resolve(cwd, file);
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
+  if (!existsSync(resolve(cwd, ".claude")) && !existsSync(resolve(cwd, "CLAUDE.md"))) {
+    return { file, action: "skipped", detail: "no Claude Code project detected" };
+  }
+  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
+  let existed = false;
+  try {
+    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
+    existed = true;
+  } catch {
+    settings = {};
+  }
+  const pre = ((settings.hooks ??= {}).PreToolUse ??= []);
+  const desired = kitSubcommandInvocation("gate-identity");
+  const existing = refreshSettingsGateCommand(pre, "gate-identity", desired);
+  if (existing.found && !existing.updated) {
+    return { file, action: "unchanged", detail: "identity gate already wired" };
+  }
+  if (!existing.found) {
+    pre.push({
+      matcher: "Bash|WebFetch|WebSearch|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
+      hooks: [gateHook(desired)],
+    });
+  }
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return { file, action: existed ? "updated" : "created" };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Install the exec-broker PreToolUse gates (Pillar 3) into `.claude/settings.json`:
  * `kit gate-egress` (matcher `Bash`) blocks network targets outside the signed [scope].egress,
  * and `kit gate-fs` (matcher `Write|Edit|NotebookEdit`) blocks writes outside [scope].fs.

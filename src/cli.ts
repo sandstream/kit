@@ -71,6 +71,7 @@ import {
   cmdGateEnv,
   cmdGateEgress,
   cmdGateFs,
+  cmdGateIdentity,
   runGateFailClosed,
 } from "./commands/gate.js";
 import { cmdGuard, cmdGuardObserve } from "./commands/guard.js";
@@ -1006,11 +1007,16 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "experimental",
     help: "PreToolUse fs-gate (exec-broker): block (exit 2) Write/Edit outside the signed [scope].fs — fail-closed without a verified scope",
   },
+  "gate-identity": {
+    handler: cmdGateIdentity,
+    stability: "experimental",
+    help: "PreToolUse identity-gate: block (exit 2) a network-shaped tool call that carries your own email address (git user.email or the Claude Code account)",
+  },
 };
 
 // PreToolUse deny gates: an internal fault in one must DENY (exit 2), never fall through to the
 // generic exit-1 path (non-blocking → the op would proceed). Dispatched via runGateFailClosed.
-const GATE_VERBS = new Set(["gate-bash", "gate-env", "gate-egress", "gate-fs"]);
+const GATE_VERBS = new Set(["gate-bash", "gate-env", "gate-egress", "gate-fs", "gate-identity"]);
 
 // Derived surfaces — DO NOT hand-edit; add commands to COMMAND_REGISTRY above.
 // Single source of truth for kit's top-level command surface; referenced by main()
@@ -1048,6 +1054,7 @@ const AUDIENCE_OVERRIDES: Record<string, CommandAudience> = {
   "gate-egress": "harness",
   "gate-env": "harness",
   "gate-fs": "harness",
+  "gate-identity": "harness",
   "worktree-gates": "harness",
   // Invoked by the ~/.kit/shims wrappers — a protocol surface like the gates,
   // never chosen by a human or an agent.
