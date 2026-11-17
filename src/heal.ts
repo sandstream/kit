@@ -15,6 +15,7 @@
  * The `--agent` surface is just structured proposals for an external agent to
  * run; no model is embedded.
  */
+import { resolve } from "node:path";
 import { checkSecurity, type SecurityCheckResult } from "./check-security.js";
 import { installTools } from "./install.js";
 import { patchGitignore } from "./check-gitignore.js";
@@ -65,7 +66,28 @@ export function isFailClosed(r: SecurityCheckResult): boolean {
  * recipes cover the common cases; anything unmatched stays gated/manual (safe
  * default = don't auto-touch).
  */
-export function safeRecipe(r: SecurityCheckResult): (() => Promise<void>) | null {
+/** The version `.kit.toml` [tools] declares for `ref`, or undefined (no file, no entry, unreadable). */
+async function declaredToolVersion(ref: string): Promise<string | undefined> {
+  try {
+    const { loadConfig } = await import("./config.js");
+    const config = await loadConfig(resolve(process.cwd(), ".kit.toml"));
+    return config.tools?.[ref];
+  } catch {
+    return undefined;
+  }
+}
+
+export interface RecipeDeps {
+  install: typeof installTools;
+  declared: (ref: string) => Promise<string | undefined>;
+}
+
+const RECIPE_DEPS: RecipeDeps = { install: installTools, declared: declaredToolVersion };
+
+export function safeRecipe(
+  r: SecurityCheckResult,
+  rdeps: RecipeDeps = RECIPE_DEPS,
+): (() => Promise<void>) | null {
   if (isFailClosed(r)) return null;
   // A missing scanner/tool whose suggestion is `mise use <ref>` → install it,
   // but ONLY through the triage gate. If triage refuses, throw TriageBlocked so
@@ -74,7 +96,10 @@ export function safeRecipe(r: SecurityCheckResult): (() => Promise<void>) | null
   if (m) {
     const ref = m[1];
     return async () => {
-      const [res] = await installTools({ [ref]: "latest" });
+      // The version the project pinned, not whatever is newest: `latest` skipped the
+      // pin (and the cooling window the pin was chosen under) on every heal.
+      const version = (await rdeps.declared(ref)) ?? "latest";
+      const [res] = await rdeps.install({ [ref]: version });
       if (res?.action === "blocked") throw new TriageBlocked(ref, res.detail);
     };
   }

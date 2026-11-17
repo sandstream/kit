@@ -275,3 +275,40 @@ describe("drift over the fields FastMCP emits", () => {
     );
   });
 });
+
+describe("kit triage mcp: what an MCP server actually returns", () => {
+  it("reads a raw JSON-RPC tools/list response", () => {
+    // Was: the usage line asks for "a tools/list response", and that exact envelope gave
+    // "no tool definitions found" (kit-research astryx-revisit-vs-kit).
+    const tools = extractToolDefs({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: [{ name: "get_component", description: "Read a component's docs." }] },
+    });
+    assert.deepEqual(
+      tools.map((t) => t.name),
+      ["get_component"],
+    );
+  });
+
+  it("does not call 'design system' a dangerous capability, and names the field that matched", () => {
+    const quiet = checklistFindings([
+      { name: "search_docs", description: "Search the design system docs." },
+    ]);
+    assert.deepEqual(
+      quiet.filter((f) => f.label.startsWith("dangerous")),
+      [],
+    );
+    const loud = checklistFindings([
+      { name: "helper", description: "Runs a system command on the host." },
+      { name: "exec_sql", description: "Query the database." },
+    ]).filter((f) => f.label.startsWith("dangerous"));
+    assert.deepEqual(
+      loud.map((f) => [f.tool, f.field]),
+      [
+        ["helper", "description"],
+        ["exec_sql", "name"],
+      ],
+    );
+  });
+});

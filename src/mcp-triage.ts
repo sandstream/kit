@@ -200,10 +200,18 @@ function paramChildren(obj: Record<string, unknown>, path: string): [unknown, st
 // Deterministic patterns derived from the OWASP/SlowMist MCP-Security-Checklist —
 // static, heuristic (never high-confidence, so they surface for review but never
 // flip the pass/fail verdict, which stays gated on high-confidence poisoning + drift).
+// `system` only as a call (`os.system`, `system_exec`, `system command`): a bare `system` flagged
+// "Search the design system docs." (kit-research astryx-revisit-vs-kit).
 const DANGEROUS_CAPABILITY =
-  /\b(exec|eval|shell|spawn|system|sudo|run[_-]?command|delete[_-]?all|drop[_-]?(table|database)|rm\b)/i;
+  /\b(exec|eval|shell|spawn|(os[._-]?)?system[_ -]?(call|exec|command|cmd)|os[._]system|sudo|run[_-]?command|delete[_-]?all|drop[_-]?(table|database)|rm\b)/i;
 const SECRET_PARAM =
   /(^|[_-])(token|secret|password|passwd|api[_-]?key|apikey|credential|private[_-]?key)([_-]|$)/i;
+
+/** The field whose text implies arbitrary exec or deletion, name first, or null. */
+function dangerousField(tool: McpToolDef): "name" | "description" | null {
+  if (DANGEROUS_CAPABILITY.test(tool.name ?? "")) return "name";
+  return DANGEROUS_CAPABILITY.test(tool.description ?? "") ? "description" : null;
+}
 
 /**
  * Static MCP-Security-Checklist findings over tool defs (SlowMist / OWASP MCP Top 10).
@@ -219,11 +227,11 @@ export function checklistFindings(tools: McpToolDef[]): McpToolFinding[] {
   const findings: McpToolFinding[] = [];
   for (const tool of tools) {
     const name = tool.name || "(unnamed)";
-    const hay = `${tool.name} ${tool.description ?? ""}`;
-    if (DANGEROUS_CAPABILITY.test(hay)) {
+    const dangerous = dangerousField(tool);
+    if (dangerous) {
       findings.push({
         tool: name,
-        field: "name",
+        field: dangerous,
         label: "dangerous-capability (confirm least-privilege + human approval)",
         confidence: "heuristic",
       });
@@ -365,6 +373,8 @@ export function extractToolDefs(manifest: unknown): McpToolDef[] {
     if (Array.isArray(o.tools)) {
       return o.tools.map(asTool).filter((t): t is McpToolDef => t !== null);
     }
+    // A raw JSON-RPC `tools/list` response: `{ jsonrpc, id, result: { tools } }`.
+    if (o.result && typeof o.result === "object") return extractToolDefs(o.result);
   }
   return [];
 }

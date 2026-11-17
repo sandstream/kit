@@ -170,7 +170,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Ingestion gate for an untrusted file/tree: byte-level malware scan via the ClamAV delegate. malicious fails and an unverifiable gap fails (no scanner / scan error is never a pass)",
   "upstream check":
     "Latest versions and release notes of the services this project uses (npm + GitHub releases), compared with the installed version: what upgrade is due",
-  "triage npm": "Evaluate npm package: registry + GitHub health",
+  "triage npm":
+    "Evaluate npm package: registry metadata (deprecation, age, maintainers, license, install scripts)",
   "triage pip": "PyPI evaluation",
   "triage gem": "RubyGems release: OSV malicious records, cooling, age; install-time code not read",
   "triage docker": "Docker image: CVE + sandbox",

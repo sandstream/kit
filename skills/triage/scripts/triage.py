@@ -325,7 +325,7 @@ def triage_npm(rep):
                 )
                 return
 
-    meta = versions.get(target_ver, {}) if target_ver else {}
+    meta = rep.npm_meta = versions.get(target_ver, {}) if target_ver else {}
     if meta.get("deprecated"):
         rep.critical(f"version {target_ver} is DEPRECATED: {str(meta.get('deprecated'))[:80]}")
     created_days = _days_since(times.get("created"))
@@ -347,6 +347,20 @@ def triage_npm(rep):
     # never looked at the terms.
     if not (meta.get("license") or data.get("license")):
         rep.warn("no declared license -- review terms before use")
+
+
+
+# Registry-installed packages run these on `npm install` unless scripts are ignored. Named, not
+# scored: a 100/100 must still say the package runs code at install time.
+NPM_INSTALL_HOOKS = ("preinstall", "install", "postinstall")
+
+
+def triage_npm_scripts(rep):
+    triage_npm(rep)
+    scripts = (getattr(rep, "npm_meta", None) or {}).get("scripts") or {}
+    hooks = [h for h in NPM_INSTALL_HOOKS if h in scripts]
+    if hooks:
+        rep.fact(f"runs install script(s) on install: {', '.join(hooks)} (unless --ignore-scripts)")
 
 
 def _split_pip_spec(target):
@@ -782,7 +796,7 @@ def triage_skill(rep):
 def main(argv):
     if len(argv) < 1 or argv[0] == "tools":
         print("kit triage -- available checks:")
-        print("  npm <pkg>        npm registry: existence, deprecation, age, maintainers")
+        print("  npm <pkg>        npm registry: existence, deprecation, age, maintainers, install scripts")
         print("  pip <pkg>        PyPI: existence, yanked, age, license")
         print("  repo <owner/repo|url>   GitHub: archived, maintenance, license, age")
         print("  docker <image>   Docker Hub: existence, freshness, age, publisher")
@@ -795,7 +809,7 @@ def main(argv):
         return 0
     rep = Report(ttype, target)
     dispatch = {
-        "npm": triage_npm,
+        "npm": triage_npm_scripts,
         "pip": triage_pip,
         "repo": triage_repo,
         "docker": triage_docker,

@@ -71,7 +71,7 @@ const TRIAGE_TYPES = [
 
 const HELP_ROWS = [
   "  kit triage docker <image>           Evaluate Docker image (CVE + sandbox)",
-  "  kit triage npm <package>             Evaluate npm package (registry + GitHub)",
+  "  kit triage npm <package>             Evaluate npm package (registry metadata)",
   "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
   PIP_AND_GEM_HELP,
   "  kit triage brew <formula>            Evaluate Homebrew formula (resolves upstream repo, then repo-scores)",
