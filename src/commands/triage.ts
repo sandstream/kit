@@ -69,135 +69,88 @@ const TRIAGE_TYPES = [
   "check-skills",
 ];
 
-export async function cmdTriage(): Promise<boolean> {
-  const args = process.argv.slice(3);
-  const sandbox = hasFlag(args, "--sandbox");
-  const deep = hasFlag(args, "--deep");
-  const filtered = args.filter((a) => a !== "--sandbox" && a !== "--deep");
-  const typeArg = filtered[0];
-  // `check-deps` is a pre-commit subcommand handled below before we narrow
-  // to TriageType; the rest of this function works against TriageType only.
-  if (typeArg === "check-deps") {
-    return cmdTriageCheckDeps();
-  }
-  if (typeArg === "check-skills") {
-    return cmdTriageCheckSkills();
-  }
-  const subcommand = triageSubcommand(typeArg);
-  if (subcommand) return subcommand(filtered.slice(1));
-  const type = typeArg as TriageType;
-  const target = skillTargetFor(type, filtered[1]);
+const HELP_ROWS = [
+  "  kit triage docker <image>           Evaluate Docker image (CVE + sandbox)",
+  "  kit triage npm <package>             Evaluate npm package (registry + GitHub)",
+  "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
+  PIP_AND_GEM_HELP,
+  "  kit triage brew <formula>            Evaluate Homebrew formula (resolves upstream repo, then repo-scores)",
+  "  kit triage repo <github-url>         Evaluate GitHub repository",
+  "  kit triage model <path>              Evaluate an untrusted AI artifact (model weights / dataset) before loading",
+  "  kit triage model <path> --scan-bytes + byte-level malware scan via a local ClamAV delegate (clean/malicious/gap; never a silent pass)",
+  "  kit triage skill <path|name>         Evaluate Claude Code / agent skill",
+  "  kit triage skill <path|name> --deep  + SkillSpector (NVIDIA) static Stage 1 (no LLM, no egress) when installed",
+  "  kit triage mcp <server> --tools <f>  Evaluate MCP tool metadata (poisoning) + pin against drift",
+  "  kit triage plugin [name]             Triage kitPlugins (npm supply-chain + manifest-poisoning scan); all declared if no name",
+  "  kit triage vault-config              Triage the secret-backend selection (.kit.toml secrets.store + per-key source); never reads secret values",
+  "  kit triage all <target>              Auto-detect and run all checks",
+  "  kit triage tools                     Show installed security tools",
+  "  kit triage check-deps                Pre-commit gate: fail if staged deps lack triage entries",
+  "  kit triage check-skills              Pre-commit gate: fail if staged skills lack a --deep triage entry",
+  "  kit triage instructions [path]       Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks",
+  "  kit triage pkg <file.pkg>            Check a macOS installer: checksum, publisher Team ID, notarization (macOS)",
+];
 
-  if (!typeArg || typeArg === "--help" || typeArg === "-h") {
-    console.log(`${c.bold}kit triage${c.reset} — Security evaluation before installing packages\n`);
-    console.log("Usage:");
-    console.log("  kit triage docker <image>           Evaluate Docker image (CVE + sandbox)");
-    console.log("  kit triage npm <package>             Evaluate npm package (registry + GitHub)");
-    console.log(
-      "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
-    );
-    console.log(PIP_AND_GEM_HELP);
-    console.log(
-      "  kit triage brew <formula>            Evaluate Homebrew formula (resolves upstream repo, then repo-scores)",
-    );
-    console.log("  kit triage repo <github-url>         Evaluate GitHub repository");
-    console.log(
-      "  kit triage model <path>              Evaluate an untrusted AI artifact (model weights / dataset) before loading",
-    );
-    console.log(
-      "  kit triage model <path> --scan-bytes + byte-level malware scan via a local ClamAV delegate (clean/malicious/gap; never a silent pass)",
-    );
-    console.log("  kit triage skill <path|name>         Evaluate Claude Code / agent skill");
-    console.log(
-      "  kit triage skill <path|name> --deep  + SkillSpector (NVIDIA) static Stage 1 (no LLM, no egress) when installed",
-    );
-    console.log(
-      "  kit triage mcp <server> --tools <f>  Evaluate MCP tool metadata (poisoning) + pin against drift",
-    );
-    console.log(
-      "  kit triage plugin [name]             Triage kitPlugins (npm supply-chain + manifest-poisoning scan); all declared if no name",
-    );
-    console.log(
-      "  kit triage vault-config              Triage the secret-backend selection (.kit.toml secrets.store + per-key source); never reads secret values",
-    );
-    console.log("  kit triage all <target>              Auto-detect and run all checks");
-    console.log("  kit triage tools                     Show installed security tools");
-    console.log(
-      "  kit triage check-deps                Pre-commit gate: fail if staged deps lack triage entries",
-    );
-    console.log(
-      "  kit triage check-skills              Pre-commit gate: fail if staged skills lack a --deep triage entry",
-    );
-    console.log(
-      "  kit triage instructions [path]       Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks",
-    );
-    console.log(
-      "  kit triage pkg <file.pkg>            Check a macOS installer: checksum, publisher Team ID, notarization (macOS)",
-    );
-    console.log("");
-    console.log("Examples:");
-    console.log("  kit triage npm express");
-    console.log("  kit triage npm node-ipc --sandbox");
-    console.log("  kit triage docker stalwartlabs/stalwart");
-    console.log("  kit triage skill searxng");
-    return true;
-  }
+function printTriageHelp(): void {
+  console.log(`${c.bold}kit triage${c.reset} — Security evaluation before installing packages\n`);
+  console.log("Usage:");
+  for (const row of HELP_ROWS) console.log(row);
+  console.log("");
+  console.log("Examples:");
+  console.log("  kit triage npm express");
+  console.log("  kit triage npm node-ipc --sandbox");
+  console.log("  kit triage docker stalwartlabs/stalwart");
+  console.log("  kit triage skill searxng");
+}
 
-  const validTypes = ["docker", "npm", "pip", "brew", "repo", "skill", "all", "tools"];
-  if (!validTypes.includes(type)) {
-    console.error(`${c.red}Unknown triage type: ${type}${c.reset}`);
-    console.error(`Valid types: ${TRIAGE_TYPES.join(", ")}`);
+const severityTag = (severity: string): string =>
+  severity === "critical"
+    ? `${c.red}[CRIT]${c.reset}`
+    : severity === "warn"
+      ? `${c.yellow}[WARN]${c.reset}`
+      : `[info]`;
+
+/** `--sandbox` on npm: offline tarball inspection. Returns false on a critical finding or an error. */
+async function npmSandbox(target: string): Promise<boolean> {
+  const { triageNpmSandbox } = await import("../triage-sandbox.js");
+  console.log(`\n${c.bold}Sandbox inspection (offline):${c.reset}`);
+  try {
+    const sb = await triageNpmSandbox(target);
+    console.log(`  package: ${sb.package}${sb.version ? `@${sb.version}` : ""}`);
+    console.log(`  tarball: ${(sb.tarballSize / 1024).toFixed(1)} kB`);
+    console.log(`  install scripts: ${sb.hasInstallScripts ? "YES (review below)" : "none"}`);
+    if (sb.findings.length === 0) {
+      console.log(`  ${c.green}✓ no risk signals${c.reset}`);
+      return true;
+    }
+    for (const f of sb.findings)
+      console.log(`  ${severityTag(f.severity)} ${f.signal} — ${f.detail}`);
+    return !sb.findings.some((f) => f.severity === "critical");
+  } catch (err) {
+    console.error(
+      `  ${c.red}sandbox failed: ${err instanceof Error ? err.message : String(err)}${c.reset}`,
+    );
     return false;
   }
+}
 
-  if (type === "tools") {
-    const result = await listTriageTools();
-    console.log(result.output);
-    return true;
-  }
-
-  if (!target) {
-    console.error(`${c.red}Target required for triage ${type}${c.reset}`);
-    return false;
-  }
-
+/** Run the evaluation of one type and target, the optional sandbox and deep scans, and record a pass. */
+async function evaluate(
+  type: TriageType,
+  target: string,
+  sandbox: boolean,
+  deep: boolean,
+): Promise<boolean> {
   console.log(`${c.bold}Running triage on ${type}: ${redactSecrets(target)}${c.reset}\n`);
-  const result = await runTriage(type as TriageType, target);
+  const result = await runTriage(type, target);
   console.log(result.output);
 
-  // Sandbox is currently only meaningful for npm packages — extends the
+  // Sandbox is currently only meaningful for npm packages: it extends the
   // registry-metadata check with offline tarball inspection.
   let sandboxClean = true;
   if (sandbox && type === "npm") {
-    const { triageNpmSandbox } = await import("../triage-sandbox.js");
-    console.log(`\n${c.bold}Sandbox inspection (offline):${c.reset}`);
-    try {
-      const sb = await triageNpmSandbox(target);
-      console.log(`  package: ${sb.package}${sb.version ? `@${sb.version}` : ""}`);
-      console.log(`  tarball: ${(sb.tarballSize / 1024).toFixed(1)} kB`);
-      console.log(`  install scripts: ${sb.hasInstallScripts ? "YES (review below)" : "none"}`);
-      if (sb.findings.length === 0) {
-        console.log(`  ${c.green}✓ no risk signals${c.reset}`);
-      } else {
-        const critical = sb.findings.filter((f) => f.severity === "critical");
-        if (critical.length > 0) sandboxClean = false;
-        for (const f of sb.findings) {
-          const tag =
-            f.severity === "critical"
-              ? `${c.red}[CRIT]${c.reset}`
-              : f.severity === "warn"
-                ? `${c.yellow}[WARN]${c.reset}`
-                : `[info]`;
-          console.log(`  ${tag} ${f.signal} — ${f.detail}`);
-        }
-      }
-    } catch (err) {
-      console.error(
-        `  ${c.red}sandbox failed: ${err instanceof Error ? err.message : String(err)}${c.reset}`,
-      );
-      sandboxClean = false;
-    }
-  } else if (sandbox && type !== "npm") {
+    sandboxClean = await npmSandbox(target);
+  } else if (sandbox) {
     console.log(
       `\n${c.dim}(--sandbox currently only applies to npm; ignored for ${type})${c.reset}`,
     );
@@ -208,7 +161,7 @@ export async function cmdTriage(): Promise<boolean> {
   let deepRan = false;
   if (deep && type === "skill") {
     ({ clean: deepClean, ran: deepRan } = await deepSkillScan(target));
-  } else if (deep && type !== "skill") {
+  } else if (deep) {
     console.log(
       `\n${c.dim}(--deep currently only applies to skill; ignored for ${type})${c.reset}`,
     );
@@ -220,12 +173,49 @@ export async function cmdTriage(): Promise<boolean> {
   }
 
   // Record the triage outcome so the pre-commit triage-check can verify
-  // that every newly added dep was evaluated. Failed runs aren't logged —
+  // that every newly added dep was evaluated. Failed runs aren't logged:
   // a failed triage means the user explicitly chose not to install, so it
   // shouldn't unblock the commit.
-  if (overall && target) await recordWhatRan(type, target, sandbox, deepRan);
+  if (overall) await recordWhatRan(type, target, sandbox, deepRan);
 
   return overall;
+}
+
+export async function cmdTriage(): Promise<boolean> {
+  const args = process.argv.slice(3);
+  const sandbox = hasFlag(args, "--sandbox");
+  const deep = hasFlag(args, "--deep");
+  const filtered = args.filter((a) => a !== "--sandbox" && a !== "--deep");
+  const typeArg = filtered[0];
+  // `check-deps` is a pre-commit subcommand handled below before we narrow
+  // to TriageType; the rest of this function works against TriageType only.
+  if (typeArg === "check-deps") return cmdTriageCheckDeps();
+  if (typeArg === "check-skills") return cmdTriageCheckSkills();
+  const subcommand = triageSubcommand(typeArg);
+  if (subcommand) return subcommand(filtered.slice(1));
+  const type = typeArg as TriageType;
+  const target = skillTargetFor(type, filtered[1]);
+
+  if (!typeArg || typeArg === "--help" || typeArg === "-h") {
+    printTriageHelp();
+    return true;
+  }
+
+  const validTypes = ["docker", "npm", "pip", "brew", "repo", "skill", "all", "tools"];
+  if (!validTypes.includes(type)) {
+    console.error(`${c.red}Unknown triage type: ${type}${c.reset}`);
+    console.error(`Valid types: ${TRIAGE_TYPES.join(", ")}`);
+    return false;
+  }
+  if (type === "tools") {
+    console.log((await listTriageTools()).output);
+    return true;
+  }
+  if (!target) {
+    console.error(`${c.red}Target required for triage ${type}${c.reset}`);
+    return false;
+  }
+  return evaluate(type, target, sandbox, deep);
 }
 
 /** For `skill`, a bare name means the local `.claude/skills/<name>`; other types are unchanged. */
