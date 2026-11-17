@@ -105,7 +105,7 @@ describe("test-growth cap (fixture git repo)", () => {
 
   it("is a step of scripts/prepush.mjs and a CI job", () => {
     assert.match(readFileSync(join(root, "scripts", "prepush.mjs"), "utf8"), /"test-growth"/);
-    const ci = readFileSync(join(root, ".github", "workflows", "pr-hygiene.yml"), "utf8");
+    const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
     assert.match(ci, /node scripts\/test-growth\.mjs/);
   });
 });

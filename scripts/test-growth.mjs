@@ -6,7 +6,7 @@
 //
 //   node scripts/test-growth.mjs [--base <ref>] [--limit <n>]
 //
-// Run by scripts/prepush.mjs and by CI (.github/workflows/pr-hygiene.yml). Git runs through
+// Run by scripts/prepush.mjs and by CI (.github/workflows/ci.yml). Git runs through
 // execFile, with no shell.
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
