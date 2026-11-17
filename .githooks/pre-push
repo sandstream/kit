@@ -2,4 +2,5 @@
 # pre-push — last gate: scan every tracked file for internal references
 # before anything reaches the public remote.
 "$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --tracked || exit 1
-npm audit --audit-level=high || exit 1
+# Same as `npm audit --audit-level=high`, plus the time-limited exceptions in audit-exceptions.json.
+node "$(git rev-parse --show-toplevel)/scripts/npm-audit-gate.mjs" || exit 1

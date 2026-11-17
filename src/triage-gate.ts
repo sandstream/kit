@@ -17,6 +17,7 @@
  */
 import { runTriage, type TriageType, type TriageResult } from "./triage.js";
 import { appendTriagePass } from "./triage-receipt.js";
+import { warningsField } from "./triage-warnings.js";
 
 /** Core language runtimes managed by mise core — the trusted base, not triaged. */
 export const CORE_RUNTIMES = new Set([
@@ -74,6 +75,7 @@ export function triageTargetFor(tool: string): TriageMapping {
   const rest = ref.slice(idx + 1);
   if (scheme === "npm") return { kind: "triage", type: "npm", target: rest };
   if (scheme === "pip" || scheme === "pipx") return { kind: "triage", type: "pip", target: rest };
+  if (scheme === "gem") return { kind: "triage", type: "gem", target: rest };
   // Everything else that names a repo (aqua/ubi/go/github/cargo/...) → repo triage.
   const ownerRepo = extractOwnerRepo(rest);
   if (ownerRepo) return { kind: "triage", type: "repo", target: `https://github.com/${ownerRepo}` };
@@ -86,6 +88,8 @@ export interface GateVerdict {
   reason: string;
   triageType?: TriageType;
   triageTarget?: string;
+  /** On a pass: the triage report's `WARNING` lines (cooling, no licence, very new), if any. */
+  warnings?: string[];
 }
 
 export interface GateDeps {
@@ -171,6 +175,7 @@ export async function gateInstall(
       reason: `triage passed (${t.type} ${t.target})`,
       triageType: t.type,
       triageTarget: t.target,
+      ...warningsField(res.output),
     };
   }
   return {

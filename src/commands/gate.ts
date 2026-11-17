@@ -68,6 +68,8 @@ export async function cmdGateBash(): Promise<boolean> {
     );
     process.exit(2); // PreToolUse deny
   }
+  const { writePassWarnings } = await import("../triage-warnings.js");
+  await writePassWarnings("kit install-gate", verdict.checked);
   return stdoutAllow();
 }
 

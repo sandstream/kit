@@ -85,6 +85,8 @@ export const SECURITY_RULES: Record<string, RuleRef> = {
   // unreviewed or outlived grant is exactly functionality pulled in from a sphere the
   // project no longer controls.
   "install-script grants": cwe(829, "Inclusion of Functionality from Untrusted Control Sphere"),
+  // A `<script src>` from another origin runs with the page's authority in every visitor's browser.
+  "browser scripts": cwe(829, "Inclusion of Functionality from Untrusted Control Sphere"),
   "package-lock.json": owasp(
     "A08",
     "A08_2021-Software_and_Data_Integrity_Failures",

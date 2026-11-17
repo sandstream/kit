@@ -1,3 +1,4 @@
+import { auditDecision } from "./audit-exceptions.js";
 import { skipsBasicScan } from "./basic-scan-skip.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -49,6 +50,7 @@ import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
 import { checkTranscriptSecrets } from "./check-transcripts.js";
 import { checkLicenses } from "./check-licenses.js";
+import { checkBrowserScripts } from "./check-browser-scripts.js";
 import { npmLockfileCover } from "./check-pinned-lockfile.js";
 
 const exec = promisify(execFile);
@@ -431,6 +433,36 @@ export async function checkMemoryInjection(): Promise<SecurityCheckResult> {
 }
 
 /**
+ * The result for an npm audit report with high or critical findings. A time-limited exception in
+ * `audit-exceptions.json` (see audit-exceptions.ts) turns it into a pass only when it covers every
+ * counted finding; otherwise it stays a failure, with the reason the file did not help.
+ */
+async function highFindingsResult(
+  root: string,
+  auditResult: unknown,
+  high: number,
+  critical: number,
+): Promise<SecurityCheckResult> {
+  const counts = `${critical} critical, ${high} high vulnerabilities`;
+  const { covered, note } = await auditDecision(root, auditResult);
+  if (covered) {
+    return {
+      category: "dependency",
+      name: "npm audit",
+      status: "pass",
+      detail: `${counts}, all covered by a time-limited exception (${note})`,
+    };
+  }
+  return {
+    category: "dependency",
+    name: "npm audit",
+    status: "fail",
+    detail: note ? `${counts}; ${note}` : counts,
+    severity: critical > 0 ? "critical" : "high",
+  };
+}
+
+/**
  * Run npm audit and check for high/critical vulnerabilities
  */
 export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> {
@@ -523,15 +555,8 @@ export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> 
         const high = vulnerabilities.high || 0;
         const critical = vulnerabilities.critical || 0;
 
-        if (high > 0 || critical > 0) {
-          return {
-            category: "dependency",
-            name: "npm audit",
-            status: "fail",
-            detail: `${critical} critical, ${high} high vulnerabilities`,
-            severity: critical > 0 ? "critical" : "high",
-          };
-        }
+        if (high > 0 || critical > 0)
+          return await highFindingsResult(root, auditResult, high, critical);
       } catch {
         // JSON parse failed, treat as fail
       }
@@ -2587,6 +2612,7 @@ async function runPrimarySecurityChecks(
           checkTrivy(root),
           checkApkFloors(root),
           checkLicenses(root),
+          checkBrowserScripts(root),
           checkTrivyConfig(root),
           checkOsvScanner(root),
           checkMavenAudit(root),
