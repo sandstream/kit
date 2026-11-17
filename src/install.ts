@@ -8,6 +8,8 @@ export interface InstallResult {
   /** `blocked` = triage gate refused this install (watertight, fail-closed). */
   action: "installed" | "already_ok" | "failed" | "blocked";
   detail: string;
+  /** Warnings from a triage that passed (cooling, no licence, very new). */
+  warnings?: string[];
 }
 
 /**
@@ -122,6 +124,11 @@ async function miseInstall(
   }
 }
 
+/** A passing verdict's triage warnings, as a field to spread into its result. */
+function warningsOf(verdict: GateVerdict | undefined): { warnings?: string[] } {
+  return verdict?.warnings ? { warnings: verdict.warnings } : {};
+}
+
 export interface InstallDeps {
   checkTools: (tools: ToolConfig) => Promise<ToolStatus[]>;
   miseInstall: (tool: string, version: string) => Promise<{ ok: boolean; detail: string }>;
@@ -166,17 +173,16 @@ export async function installTools(
       continue;
     }
 
-    if (!opts.skipTriage) {
-      const verdict = await deps.gateInstall(status.name);
-      if (verdict.decision === "blocked") {
-        results.push({ name: status.name, action: "blocked", detail: verdict.reason });
-        continue;
-      }
+    const verdict = opts.skipTriage ? undefined : await deps.gateInstall(status.name);
+    if (verdict?.decision === "blocked") {
+      results.push({ name: status.name, action: "blocked", detail: verdict.reason });
+      continue;
     }
+    const warned = warningsOf(verdict);
 
     const { ok, detail } = await deps.miseInstall(status.name, status.required);
     if (!ok) {
-      results.push({ name: status.name, action: "failed", detail });
+      results.push({ name: status.name, action: "failed", detail, ...warned });
       continue;
     }
 
@@ -187,12 +193,14 @@ export async function installTools(
         name: status.name,
         action: "installed",
         detail: `${verified.installed} satisfies ${status.required}`,
+        ...warned,
       });
     } else {
       results.push({
         name: status.name,
         action: "failed",
         detail: `Installed ${verified.installed ?? "unknown"} but need ${status.required}`,
+        ...warned,
       });
     }
   }

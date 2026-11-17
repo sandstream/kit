@@ -17,6 +17,7 @@
  */
 import { runTriage, type TriageType, type TriageResult } from "./triage.js";
 import { appendTriagePass } from "./triage-receipt.js";
+import { warningsField } from "./triage-warnings.js";
 
 /** Core language runtimes managed by mise core — the trusted base, not triaged. */
 export const CORE_RUNTIMES = new Set([
@@ -86,6 +87,8 @@ export interface GateVerdict {
   reason: string;
   triageType?: TriageType;
   triageTarget?: string;
+  /** On a pass: the triage report's `WARNING` lines (cooling, no licence, very new), if any. */
+  warnings?: string[];
 }
 
 export interface GateDeps {
@@ -171,6 +174,7 @@ export async function gateInstall(
       reason: `triage passed (${t.type} ${t.target})`,
       triageType: t.type,
       triageTarget: t.target,
+      ...warningsField(res.output),
     };
   }
   return {
