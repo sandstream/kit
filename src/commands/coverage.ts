@@ -325,6 +325,7 @@ function aggregateAdvisories(
     "self-audit/env-trust": "env-gated check relaxations",
     "self-audit/flag-validation": "command modules that accept unknown flags",
     "self-audit/unwired-code": "exported functions with no production call site",
+    "self-audit/unreferenced-export-protected": "exports on protected paths no other file names",
   };
   const byClass = new Map<string, number>();
   for (const a of advisories) byClass.set(a.category, (byClass.get(a.category) ?? 0) + 1);

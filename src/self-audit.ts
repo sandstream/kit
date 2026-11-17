@@ -22,6 +22,7 @@ import { walkSourceFiles } from "./source-walk.js";
 import { runCiScriptAudit } from "./self-audit-ci.js";
 import { runDocsClaimsAudit } from "./self-audit-docs.js";
 import { runWiringAudit } from "./self-audit-wiring.js";
+import { slopRules } from "./self-audit-slop.js";
 import { ruleForSelfAudit } from "./rules/catalog.js";
 export { resolveKitRoot } from "./self-audit-root.js";
 
@@ -1168,6 +1169,7 @@ export const SELF_AUDIT_RULES: SelfAuditRule[] = [
   R13,
   R14,
   R15,
+  ...slopRules(() => SELF_AUDIT_RULES.length),
 ];
 
 // ---------------------------------------------------------------------------
