@@ -26,6 +26,9 @@ import { verdictPassed } from "./triage.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 import { iso, localServices, lock, report, tree, vuln } from "./triage-cooling.test-support.js";
 
+/** A .kit.toml that turns enforcement off, so the cooling period only warns. */
+const OPT_OUT = "[supply_chain]\nmin_release_age_enforce = false\n";
+
 describe("npmName and lockedVersion", () => {
   it("strips a version spec and keeps a scope", () => {
     assert.equal(npmName("express@4"), "express");
@@ -131,13 +134,33 @@ describe("coolingCheck (pure, with an injected advisory lookup)", () => {
 describe("applyCooling: the warning and its limits", () => {
   const { publish, project, run, registry, url } = localServices();
 
-  it("warns about a young release, names the newest older version, and still passes", async () => {
+  it("holds back a young release by default, with no .kit.toml and no environment", async () => {
     publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
     const r = await run(project({ "package.json": "{}" }), "1.0.1");
+    assert.match(r.output, /CRITICAL: cooling: 1\.0\.1 was published 2 days ago, limit 14/);
+    assert.match(r.output, /fixture@1\.0\.0/);
+    assert.equal(r.passed, false);
+    assert.equal(verdictPassed(r.output), false);
+  });
+
+  it("only warns when .kit.toml opts out, and still names the newest older version", async () => {
+    publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
+    const cwd = project({ ".kit.toml": OPT_OUT, "package.json": "{}" });
+    const r = await run(cwd, "1.0.1");
     assert.match(r.output, /WARNING: cooling: 1\.0\.1 was published 2 days ago, limit 14/);
     assert.match(r.output, /fixture@1\.0\.0/);
     assert.equal(r.passed, true);
     assert.equal(verdictPassed(r.output), true);
+  });
+
+  it("only warns when KIT_COOLING_ENFORCE=0, which wins over .kit.toml like the day limit does", async () => {
+    publish({ "1.0.0": 300, "1.0.1": 2 }, "1.0.1");
+    const cwd = project({ ".kit.toml": "[supply_chain]\nmin_release_age_enforce = true\n" });
+    const r = await run(cwd, "1.0.1", { KIT_COOLING_ENFORCE: "0" });
+    assert.match(r.output, /WARNING: cooling: 1\.0\.1/);
+    assert.equal(r.passed, true);
+    const on = await run(project({ ".kit.toml": OPT_OUT }), "1.0.1", { KIT_COOLING_ENFORCE: "1" });
+    assert.equal(on.passed, false);
   });
 
   it("asks the registry for a scoped package under its own path", async () => {
@@ -154,7 +177,7 @@ describe("applyCooling: the warning and its limits", () => {
     const cwd = project({ "package.json": "{}" });
     const input = { passed: true, output: report("1.0.1") };
     const r = await applyCooling(cwd, "npm", "@scope/fixture@1", input, deps);
-    assert.match(r.output, /WARNING: cooling: 1\.0\.1 was published 2 days ago/);
+    assert.match(r.output, /CRITICAL: cooling: 1\.0\.1 was published 2 days ago/);
   });
 
   it("does not warn about a release older than the limit", async () => {
@@ -302,7 +325,7 @@ describe("applyCooling: what the waiver must not allow", () => {
   });
 
   it("says the registry could not be read again, instead of staying silent", async () => {
-    const r = await run(project({ "package.json": "{}" }), "1.0.1");
+    const r = await run(project({ ".kit.toml": OPT_OUT, "package.json": "{}" }), "1.0.1");
     assert.match(r.output, /NOT CHECKED: cooling/);
     assert.equal(r.passed, true);
   });
@@ -346,7 +369,7 @@ describe("applyCooling: enforcement and air-gap fail closed", () => {
       { passed: true, output: report("1.0.1") },
       deps,
     );
-    assert.match(r.output, /WARNING: cooling: 1\.0\.1 was published 2 days ago/);
+    assert.match(r.output, /CRITICAL: cooling: 1\.0\.1 was published 2 days ago/);
   });
 
   it("makes no request at all when air-gap is on and no registry mirror is named", async () => {
@@ -370,7 +393,7 @@ describe("applyCooling: enforcement and air-gap fail closed", () => {
   });
 
   it("without enforcement an unreadable registry is reported as not checked, and the pass stays", async () => {
-    const r = await run(project({ "package.json": "{}" }), "1.0.1");
+    const r = await run(project({ [enforce]: OPT_OUT, "package.json": "{}" }), "1.0.1");
     assert.match(r.output, /NOT CHECKED: cooling/);
     assert.equal(r.passed, true);
   });
