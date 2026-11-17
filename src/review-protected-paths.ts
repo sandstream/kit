@@ -63,6 +63,11 @@ export const DEFAULT_PROTECTED_PATH_RULES: ProtectedPathRules = {
       "src/hook-floor.ts",
       "src/environment.ts",
       "src/commands/auth.ts",
+      // The widest modules a gate reads: the config every gate is configured from (132
+      // importers) and the audit log every gate deny is written to. kit-research
+      // loops-and-graphs-vs-kit: both were approved on the same terms as a leaf file.
+      "src/config.ts",
+      "src/audit.ts",
     ],
     prefix: [
       // Every module the install gate is built from, not only its entry file.
