@@ -92,3 +92,31 @@ describe("triage skill: frontmatter is parsed, not substring-matched", () => {
     });
   }
 });
+
+// kit-research pstack-vs-kit: a local pack (`skills/<name>/SKILL.md`) fell through to repo triage,
+// whose refusal said to run `kit triage skill <dir>`, the command that had just run.
+describe("triage skill: a local pack is triaged skill by skill", () => {
+  it("names each skill in its findings and never sends the operator back to the same command", async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-skill-pack-"));
+    t.after(() => rmTemp(dir));
+    const fm = (name: string) => `---\nname: ${name}\ndescription: d\n---\nbody\n`;
+    mkdirSync(join(dir, "skills", "good"), { recursive: true });
+    mkdirSync(join(dir, "skills", "bad"), { recursive: true });
+    writeFileSync(join(dir, "skills", "good", "SKILL.md"), fm("good"));
+    writeFileSync(join(dir, "skills", "bad", "SKILL.md"), "no frontmatter\n");
+    const r = await triage(["skill", dir], t);
+    if (r === null) return;
+    assert.match(r.out, /triaged 2 skill\(s\) in the pack/);
+    assert.match(r.out, /skills\/bad: SKILL\.md has no YAML frontmatter/);
+    assert.doesNotMatch(r.out, /use `kit triage skill <dir>`/);
+  });
+
+  it("a local directory with no skill says so", async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-skill-none-"));
+    t.after(() => rmTemp(dir));
+    const r = await triage(["skill", dir], t);
+    if (r === null) return;
+    assert.match(r.out, /no SKILL\.md in/);
+    assert.doesNotMatch(r.out, /use `kit triage skill <dir>`/);
+  });
+});
