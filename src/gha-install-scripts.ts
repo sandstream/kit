@@ -63,7 +63,7 @@ export interface WorkflowCredentials {
   envSecrets: string[];
 }
 
-export function workflowCredentials(lines: string[]): WorkflowCredentials {
+function workflowCredentials(lines: string[]): WorkflowCredentials {
   return {
     idToken: grantsIdTokenWrite(keyBlock(lines, 0, "permissions")),
     envSecrets: secretNames(keyBlock(lines, 0, "env") ?? []),
@@ -71,7 +71,7 @@ export function workflowCredentials(lines: string[]): WorkflowCredentials {
 }
 
 /** The credentials one job holds, in words, or [] when it holds none kit can see. */
-export function jobCredentials(job: WorkflowJob, top: WorkflowCredentials): string[] {
+function jobCredentials(job: WorkflowJob, top: WorkflowCredentials): string[] {
   const body = job.body.split("\n");
   const keyIndent = indentOf(body.find(isContent) ?? "");
   const own = keyBlock(body, keyIndent, "permissions");
