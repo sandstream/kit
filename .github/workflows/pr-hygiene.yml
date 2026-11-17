@@ -8,6 +8,10 @@ name: PR hygiene
 # snapshot then failed a PR whose text was already clean. On `opened` it waits 30 s first, so
 # that replacement lands. Every later edit runs the check again. The text reaches the script
 # through the environment and is never interpolated into it.
+#
+# The test-growth job fails a PR that adds more than 400 net new lines to src/**/*.test.ts and
+# *.test-support.ts, unless a commit carries a `Test-Growth: <reason>` trailer
+# (scripts/test-growth.mjs, also a step of scripts/prepush.mjs).
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
@@ -36,3 +40,15 @@ jobs:
             echo "::error title=Session URL in the PR text::The PR title or body contains a claude.ai/code/session_ URL. Remove it. It is internal session metadata and this repository is public (CLAUDE.md, Public artifacts)."
             exit 1
           fi
+
+  test-growth:
+    name: Test growth within the cap, or a stated reason
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Over 400 net new test lines needs a Test-Growth trailer
+        run: node scripts/test-growth.mjs --base origin/main
