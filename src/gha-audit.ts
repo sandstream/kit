@@ -8,6 +8,7 @@
  *     commit SHA (tj-actions/changed-files CVE-2025-30066, ~23k repos).
  *   - "pwn request": a privileged trigger (`pull_request_target`, `workflow_run`,
  *     `issue_comment`) plus a step that brings pull-request code in (src/gha-pwn.ts).
+ *   - `id-token: write` granted at workflow level, or on a job that never uses it (src/gha-id-token.ts).
  *   - `npm ci` / `npm install` without `--ignore-scripts` in a job that holds a secret or
  *     `id-token: write` (src/gha-install-scripts.ts).
  *   - `pull_request_target`, which GitHub blocks in public repositories from 2026-12-02 unless
@@ -19,6 +20,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { auditSkippableGates } from "./gha-skip-gate.js";
+import { auditIdToken } from "./gha-id-token.js";
 import { auditInstallScripts } from "./gha-install-scripts.js";
 import { PRT_DEFAULT_BLOCK_DATE, pwnRequest, workflowTriggers } from "./gha-pwn.js";
 
@@ -68,6 +70,7 @@ export function auditWorkflow(content: string, file: string): SecurityCheckResul
   out.push(...pwnRows(content, file));
 
   out.push(...auditSkippableGates(content, file));
+  out.push(...auditIdToken(content, file));
   out.push(...auditInstallScripts(content, file));
   return out;
 }
@@ -155,7 +158,7 @@ export function runGhaAudit(cwd: string): SecurityCheckResult[] {
       category: "supply-chain",
       name: "gha-audit",
       status: "pass",
-      detail: `${files.length} workflow(s): all actions pinned, no pwn-request, no skippable gate, no scripted install with credentials`,
+      detail: `${files.length} workflow(s): all actions pinned, no pwn-request, no skippable gate, no wide id-token, no scripted install with credentials`,
     });
   }
   return out;

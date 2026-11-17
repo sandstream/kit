@@ -1,7 +1,7 @@
 /**
  * The cooling period (Z6). A release younger than the limit is a supply-chain risk, because a
- * compromised release is usually caught within days. `kit triage npm` and `kit triage pip` warn about one, and say
- * which version has been public long enough.
+ * compromised release is usually caught within days. `kit triage npm` and `kit triage pip` hold one back
+ * (or only warn, with `min_release_age_enforce = false`), and say which version has been public long enough.
  *
  * A security patch must not wait. The warning is waived only when the advisory source (OSV) says the
  * candidate is the FIRST published release that fixes an advisory for the version the lockfile pins
@@ -25,7 +25,10 @@ export interface SupplyChainConfig {
   internal_scopes?: string[];
   /** Days a release must have been public before triage stops warning. Default 14, 0 turns it off. */
   min_release_age_days?: number;
-  /** True: a release inside the cooling period holds back the pass instead of only warning. */
+  /**
+   * A release inside the cooling period holds back the pass instead of only warning. Default true;
+   * false turns the hold into a warning.
+   */
   min_release_age_enforce?: boolean;
 }
 
@@ -328,6 +331,18 @@ export function limitFrom(cfg: SupplyChainConfig, env: NodeJS.ProcessEnv): numbe
     : DEFAULT_COOLING_DAYS;
 }
 
+/**
+ * Whether the cooling period holds back the pass. On unless turned off: KIT_COOLING_ENFORCE=1 or 0
+ * decides for one run, as KIT_MIN_RELEASE_AGE_DAYS does for the limit, and otherwise only an explicit
+ * `min_release_age_enforce = false` in .kit.toml makes it a warning.
+ */
+export function enforceFrom(cfg: SupplyChainConfig, env: NodeJS.ProcessEnv): boolean {
+  const raw = env.KIT_COOLING_ENFORCE?.trim();
+  if (raw === "1") return true;
+  if (raw === "0") return false;
+  return cfg.min_release_age_enforce !== false;
+}
+
 function osvFor(
   deps: CoolingDeps,
   airGap: boolean,
@@ -415,7 +430,7 @@ export async function applyCooling(
   const cfg = await supplyChainConfig(cwd);
   const limitDays = limitFrom(cfg, deps.env);
   if (limitDays === 0) return result;
-  const enforce = cfg.min_release_age_enforce === true || deps.env.KIT_COOLING_ENFORCE === "1";
+  const enforce = enforceFrom(cfg, deps.env);
   const fold = (r: CoolingResult) => ({
     passed: r.held ? false : result.passed,
     output: withCoolingLines(result.output, r),
