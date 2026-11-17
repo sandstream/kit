@@ -61,6 +61,20 @@ const all =
   (line: string): boolean =>
     patterns.every((p) => p.test(line)) && !(verbs && forbidden(verbs).test(line));
 
+const MD_IMAGE_EXFIL = all(
+  [MD_IMAGE_QUERY, EMIT, REPLY],
+  "append|render|include|add|output|print|emit|show",
+);
+
+/**
+ * The query-string markdown image that `text` tells an agent to put into its replies, or null.
+ * The one place the `markdown-image-exfil` shape lives: `kit triage instructions`, the memory
+ * injection scan and `kit triage mcp` tool descriptions all ask it. Pure.
+ */
+export function markdownImageExfil(text: string): string | null {
+  return MD_IMAGE_EXFIL(text) ? (MD_IMAGE_QUERY.exec(text)?.[0] ?? null) : null;
+}
+
 /** Each added rule with its test, in report order. */
 const RULES: [InstructionRule, (line: string) => boolean][] = [
   ["secret-to-outbound", all([BULK_SECRET, TARGET], TAKE)],
@@ -74,10 +88,7 @@ const RULES: [InstructionRule, (line: string) => boolean][] = [
     (line) => HIDE_ACTIVITY.test(line) || HIDE_FINDINGS.test(line) || UNTOLD.test(line),
   ],
   ["remote-instructions", all([ANY_URL, FETCH, OBEY], "follow|obey|execute|fetch|load|run")],
-  [
-    "markdown-image-exfil",
-    all([MD_IMAGE_QUERY, EMIT, REPLY], "append|render|include|add|output|print|emit|show"),
-  ],
+  ["markdown-image-exfil", MD_IMAGE_EXFIL],
 ];
 
 /** Rules, besides the first set, that one instruction line breaks. Pure. */
