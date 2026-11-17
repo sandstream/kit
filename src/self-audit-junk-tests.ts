@@ -52,21 +52,28 @@ function closeBrace(text: string, open: number): number {
   let depth = 0;
   for (let i = open; i < text.length; i++) {
     const ch = text[i];
-    if (ch === "/" && text[i + 1] === "/") {
-      const nl = text.indexOf("\n", i);
-      if (nl === -1) return -1;
-      i = nl;
-    } else if (ch === "/" && text[i + 1] === "*") {
-      const end = text.indexOf("*/", i + 2);
-      if (end === -1) return -1;
-      i = end + 1;
-    } else if (ch === '"' || ch === "'" || ch === "`") {
-      i = skipString(text, i);
-      if (i === -1) return -1;
-    } else if (ch === opener) depth++;
+    const skipped = skipNonCode(text, i);
+    if (skipped === -1) return -1;
+    if (skipped !== i) i = skipped;
+    else if (ch === opener) depth++;
     else if (ch === closer && --depth === 0) return i + 1;
   }
   return -1;
+}
+
+/**
+ * When a comment or string starts at `i`, the index of its last character (-1 if it never
+ * ends); otherwise `i` itself.
+ */
+function skipNonCode(text: string, i: number): number {
+  const ch = text[i];
+  if (ch === "/" && text[i + 1] === "/") return text.indexOf("\n", i);
+  if (ch === "/" && text[i + 1] === "*") {
+    const end = text.indexOf("*/", i + 2);
+    return end === -1 ? -1 : end + 1;
+  }
+  if (ch === '"' || ch === "'" || ch === "`") return skipString(text, i);
+  return i;
 }
 
 /** Index of the closing quote of the string opened at `start`. Template `${…}` is entered. */
