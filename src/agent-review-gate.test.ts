@@ -38,6 +38,7 @@ interface Gate {
     sha: string;
     checks: ChecksState;
     protectedPaths: { path: string; classes: string[] }[];
+    widePaths?: { path: string; importers: number }[];
     changedLines: number;
     fileCount: number;
     truncated: boolean;
@@ -201,5 +202,27 @@ describe("agent review gate: the reviewed commit is still the head", () => {
       checks.some((i) => i > model && i < post),
       "a check between the model review and the post",
     );
+  });
+});
+
+describe("agent review gate: the wide lane", () => {
+  const green = { state: "green", failed: [], total: 27 };
+
+  it("does not approve a change to a module many others import", async () => {
+    // kit-research loops-and-graphs-vs-kit: src/config.ts (132 importers) was approved on checks
+    // alone, like a file nothing imports.
+    const { decide } = await load();
+    const d = decide({
+      ...base,
+      checks: green,
+      widePaths: [{ path: "src/config.ts", importers: 132 }],
+    });
+    assert.equal(d.event, "COMMENT");
+    assert.match(d.body, /many others import.*`src\/config\.ts` \(132 importers\)/);
+  });
+
+  it("approves as before when no changed module is wide", async () => {
+    const { decide } = await load();
+    assert.equal(decide({ ...base, checks: green, widePaths: [] }).event, "APPROVE");
   });
 });
