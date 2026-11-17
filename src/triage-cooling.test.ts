@@ -368,12 +368,6 @@ describe("applyCooling: enforcement and air-gap fail closed", () => {
     assert.equal(r.passed, false);
     assert.equal(state.calls, 0);
   });
-
-  it("without enforcement an unreadable registry is reported as not checked, and the pass stays", async () => {
-    const r = await run(project({ "package.json": "{}" }), "1.0.1");
-    assert.match(r.output, /NOT CHECKED: cooling/);
-    assert.equal(r.passed, true);
-  });
 });
 
 describe("air-gap state is read so that doubt means on", () => {

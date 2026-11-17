@@ -88,7 +88,7 @@ describe("trusted-publishing wizard — runs in the shell it will be run in", ()
   });
 
   it("is executable", () => {
-    accessSync(WIZARD, constants.X_OK);
+    assert.doesNotThrow(() => accessSync(WIZARD, constants.X_OK));
   });
 
   it("is discoverable — RELEASING.md points at it", () => {
