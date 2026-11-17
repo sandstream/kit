@@ -186,14 +186,15 @@ describe("triageFromLog and machineFromAnchor", () => {
 describe("memoryFromDb", () => {
   const require_ = createRequire(import.meta.url);
 
-  it("reads the store read-only and reports tokens as unknown when the rows carry none", () => {
+  it("reads the store read-only and reports tokens as unknown when the rows carry none", (t) => {
     let sqlite: typeof import("node:sqlite");
     try {
       sqlite = require_("node:sqlite") as typeof import("node:sqlite");
     } catch {
       // A runtime without node:sqlite is a legitimate skip — but it must be a skip with a reason,
       // never a silent pass.
-      return void assert.ok(true, "node:sqlite unavailable on this runtime");
+      t.skip("node:sqlite unavailable on this runtime");
+      return;
     }
     const dir = scratch();
     const dbPath = join(dir, "memory.db");

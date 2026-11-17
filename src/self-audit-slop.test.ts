@@ -8,11 +8,15 @@ import { slopRules } from "./self-audit-slop.js";
 import { SELF_AUDIT_RULES } from "./self-audit.js";
 
 describe("self-audit-slop — registration", () => {
-  it("defines both rules as error-severity and enabled", () => {
+  it("defines each rule as error-severity and enabled", () => {
     const rules = slopRules(() => 0);
     assert.deepEqual(
       rules.map((r) => `${r.id}:${r.severity}:${r.enabled}`),
-      ["R16-unreferenced-exports:error:true", "R17-count-claims:error:true"],
+      [
+        "R16-unreferenced-exports:error:true",
+        "R17-count-claims:error:true",
+        "R18-junk-tests:error:true",
+      ],
     );
   });
 
@@ -20,6 +24,7 @@ describe("self-audit-slop — registration", () => {
     const ids = SELF_AUDIT_RULES.map((r) => r.id);
     assert.ok(ids.includes("R16-unreferenced-exports"));
     assert.ok(ids.includes("R17-count-claims"));
+    assert.ok(ids.includes("R18-junk-tests"));
   });
 
   it("is listed by `kit self-audit --list-rules`", () => {
@@ -29,5 +34,6 @@ describe("self-audit-slop — registration", () => {
     }).stdout;
     assert.match(out, /R16-unreferenced-exports/);
     assert.match(out, /R17-count-claims/);
+    assert.match(out, /R18-junk-tests/);
   });
 });
