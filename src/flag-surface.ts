@@ -81,7 +81,9 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   audit: [
     "--all",
     "--external",
+    "--fail-on-network",
     "--format",
+    "--identity",
     "--json",
     "--key",
     "--limit",

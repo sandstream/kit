@@ -114,6 +114,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "audit anchor":
     "Seal the audit log with the machine-local HMAC key. --external requires KIT_EXTERNAL_ANCHOR_CMD and KIT_EXTERNAL_ANCHOR_VERIFY_CMD before publication.",
   "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",
+  "audit transcripts":
+    "Count agent tool calls in ~/.claude/projects transcripts that carried your git or Claude account identity, and which were network-shaped (--identity, --json, --fail-on-network); offline, never prints a value",
   "auth elevate":
     "Confirm project approval in a terminal (--scope <name>, --ttl-minutes <1..240>); --list-scopes [--json] lists scope definitions without approval",
   "auth status": "Show this project's local approval marker (--json for structured output)",

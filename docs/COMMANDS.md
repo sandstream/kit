@@ -1,8 +1,7 @@
 # kit commands
 
 > Complete reference for every `kit <subcommand>`. Last updated 2026-11-04 (kit 7.2.0).
-> Pair this with `docs/THREAT_MODEL.md` (what data flows where) and
-> `docs/DATA_FLOW.md` (exact reads/writes per op).
+> Pair this with `docs/THREAT_MODEL.md` (what data flows where) and `docs/DATA_FLOW.md` (exact reads/writes per op).
 
 > **Machine-readable surface:** `contracts/kit.opencli.json` describes every
 > command with its stability tier (`x-kit-stability`), MCP exposure
@@ -422,6 +421,7 @@ Leases for the local services agents start: who started which container, Supabas
 | `kit audit verify --all [--json] [--require-external]`                                               | Verify all machine-local anchored logs. The external requirement applies to every log and rejects an empty index or missing log. Without that requirement, missing temporary logs remain expected attrition. Stalled seals fail under strict mode.                                       |
 | `kit audit anchor [--external]`                                                                      | Seal the log with the local HMAC key. External sealing requires both operator commands and verifies the receipt before publishing the anchor. Protected verifier configuration and independent authority policy remain necessary.                                                        |
 | `kit audit export [--format cef\|syslog\|json]`                                                      | Emit the audit log for a SIEM.                                                                                                                                                                                                                                                           |
+| `kit audit transcripts --identity [--json] [--fail-on-network]`                                      | Offline. Counts agent tool calls in `~/.claude/projects` transcripts whose input holds your git email or name or Claude account address: by kind, tool, and host for network-shaped calls (`curl`, a URL, `User-Agent`, `WebFetch`, `mcp__`). Never prints a value.                      |
 | `kit decisions add --decision <text> --confidence <0..1> --assumed <text> --would-have-asked <text>` | Record one choice the run made where the spec was silent. kit never writes the content — that is model work — it provides the form and refuses a malformed entry. Appends to `.kit/decisions.jsonl` (per-run, gitignored by default); refused under `KIT_READ_ONLY=1`.                   |
 | `kit decisions list [--json] [--unreviewed]`                                                         | What this run recorded, plus any line that cannot be read (a ledger that hides its unreadable lines lies by omission).                                                                                                                                                                   |
 | `kit decisions verify [--json]`                                                                      | The gate's verdict on its own exit code — the same function `kit check` calls. Missing or empty ledger under `[decisions] require = true` is a `didNotRun` fail; a malformed entry is a plain fail; content is never judged.                                                             |

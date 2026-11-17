@@ -142,6 +142,7 @@
     "audit anchor",
     "audit export",
     "audit secrets",
+    "audit transcripts",
     "audit verify",
     "auth",
     "auth elevate",

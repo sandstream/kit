@@ -9,6 +9,7 @@ import { resolveConfigPath } from "../cli-shared.js";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue, flagInt } from "../utils/flags.js";
 import { sanitizeDisplayText } from "../display-text.js";
+import { cmdAuditTranscripts } from "./audit-transcripts.js";
 
 /** Key names `[deploy.<target>]` declares in any environment, or none when it declares nothing. */
 async function declaredAt(target: string): Promise<string[]> {
@@ -489,13 +490,19 @@ async function cmdAuditAnchor(): Promise<boolean> {
   }
 }
 
+/** Subcommands dispatched by name; each reads its own flags from argv. */
+const AUDIT_SUBCOMMANDS = new Map<string, () => Promise<boolean>>([
+  ["secrets", cmdAuditSecrets],
+  ["transcripts", () => cmdAuditTranscripts()],
+]);
+
 export async function cmdAudit(): Promise<boolean> {
   const args = process.argv.slice(3);
 
-  // Sub-sub: kit audit secrets [--since-days N] [--key NAME] [--target NAME] [--json]
-  if (args[0] === "secrets") {
-    return cmdAuditSecrets();
-  }
+  // Sub-sub: kit audit secrets [--since-days N] [--key NAME] [--target NAME] [--json],
+  // kit audit transcripts --identity [--json] [--fail-on-network] (see AUDIT_SUBCOMMANDS).
+  const sub = AUDIT_SUBCOMMANDS.get(args[0]);
+  if (sub) return sub();
 
   // Sub-sub: kit audit verify - keyless chain + external HMAC anchor.
   if (args[0] === "verify") {
