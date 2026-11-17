@@ -3,7 +3,6 @@
 // exceptions in audit-exceptions.json can cover findings that have no patched version.
 // The rules live in src/audit-exceptions.ts (build first). Exit 0 = clean or fully covered.
 import { spawnSync } from "node:child_process";
-import { auditDecision } from "../dist/audit-exceptions.js";
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const run = spawnSync(npm, ["audit", "--audit-level=high", "--json"], {
@@ -27,7 +26,15 @@ try {
 
 const meta = report.metadata?.vulnerabilities ?? {};
 const counts = `${meta.critical ?? 0} critical, ${meta.high ?? 0} high vulnerabilities`;
-const { covered, note } = await auditDecision(process.cwd(), report);
+// No build, no exceptions: the gate then behaves exactly like a bare `npm audit`.
+let decision = { covered: false, note: "" };
+try {
+  const { auditDecision } = await import("../dist/audit-exceptions.js");
+  decision = await auditDecision(process.cwd(), report);
+} catch {
+  decision.note = "exceptions not read (run npm run build)";
+}
+const { covered, note } = decision;
 if (covered) {
   console.log(`npm audit: ${counts}, all covered by a time-limited exception (${note})`);
   process.exit(0);
