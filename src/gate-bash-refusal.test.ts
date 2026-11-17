@@ -64,6 +64,15 @@ describe("gate-bash refusal wording (compiled CLI)", () => {
     assert.match(r.stderr, /Triage it first/);
   });
 
+  it("refuses a command that cannot be undone with exit 2, asks for the person, no triage advice", () => {
+    const r = gateBash("git push --force origin feature");
+    assert.equal(r.exitCode, 2);
+    assert.match(r.stderr, /cannot be undone: force push/);
+    assert.match(r.stderr, /Ask the person to run it/);
+    assert.doesNotMatch(r.stderr, /Triage it first/);
+    assert.equal(gateBash("git push origin feature").exitCode, 0);
+  });
+
   it("still allows a commit message whose backticks are single-quoted (no substitution)", () => {
     const r = gateBash("git commit -qam 'naming the permission `deployment:env:view` here'");
     assert.equal(r.exitCode, 0, r.stderr);

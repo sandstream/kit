@@ -42,8 +42,7 @@ import {
 } from "./install-gate-flags.js";
 
 import { explainUnverifiable } from "./install-gate-refusals.js";
-import { installScriptBypass, installScriptBypassReason } from "./install-gate-scripts.js";
-import { gitHookBypass, hookBypassReason } from "./install-gate-hooks.js";
+import { policyRefusal } from "./install-gate-irreversible.js";
 import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { windowsShellBodies } from "./install-gate-shells.js";
 import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
@@ -1253,10 +1252,8 @@ export async function decideBashGate(
   deps?: GateDeps,
   cwd?: string,
 ): Promise<BashGateVerdict> {
-  const grant = installScriptBypass(command);
-  if (grant) return { block: true, reason: installScriptBypassReason(grant), checked: [] };
-  const bypass = gitHookBypass(command);
-  if (bypass) return { block: true, reason: hookBypassReason(bypass), checked: [] };
+  const refused = policyRefusal(command, splitHeredocs(command));
+  if (refused) return { block: true, reason: refused, checked: [] };
   const probe = parseInstallCommand(command);
   if (!probe.isInstall && !probe.bareInstall) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };
