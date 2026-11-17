@@ -2,7 +2,7 @@
  * User-level agent surfaces, loaded into every session in every project, where nothing in a
  * project's history records a change: they are often synced from another repository by a script,
  * or rewritten by an agent. `runAgentAudit` reads the project's own `.claude/` only.
- *   - Claude Code: `~/.claude/skills`, `commands`, `agents` and `~/.claude/CLAUDE.md`.
+ *   - Claude Code: `~/.claude/skills`, `commands`, `agents`, `rules` and `~/.claude/CLAUDE.md`.
  *   - Codex (developers.openai.com/codex, 2026-11-08): global instructions in the Codex home
  *     (`$CODEX_HOME`, default `~/.codex`) as `AGENTS.override.md` or else `AGENTS.md`; user skills in
  *     `~/.agents/skills`, and in `<codex home>/skills` where older Codex versions installed them.
@@ -34,6 +34,8 @@ const USER_AGENT_DIRS = [
   { dir: join(".claude", "skills"), label: "user skill" },
   { dir: join(".claude", "commands"), label: "user command" },
   { dir: join(".claude", "agents"), label: "user subagent" },
+  // Loaded into every session in every project (code.claude.com/docs/en/memory, "User-level rules").
+  { dir: join(".claude", "rules"), label: "user rule" },
 ];
 
 /** One user-level directory: where it is, what it holds, and how a path in it is shown. */

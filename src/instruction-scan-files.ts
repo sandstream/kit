@@ -51,7 +51,10 @@ export function isInstructionFile(relPath: string): boolean {
   const parts = relPath.split(/[\\/]+/);
   const name = parts.at(-1) ?? "";
   if (INSTRUCTION_NAMES.has(name)) return true;
-  return name.endsWith(".mdc") && parts.includes(".cursor") && parts.includes("rules");
+  if (name.endsWith(".mdc") && parts.includes(".cursor") && parts.includes("rules")) return true;
+  // Claude Code loads every `.md` under `.claude/rules/`, recursively (code.claude.com/docs/en/memory).
+  const claude = parts.indexOf(".claude");
+  return name.endsWith(".md") && claude !== -1 && parts[claude + 1] === "rules";
 }
 
 function relativePath(root: string, path: string): string {
