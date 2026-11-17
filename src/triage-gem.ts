@@ -11,14 +11,17 @@
  * What it cannot see is said, not implied: the registry API does not say whether a gem has a
  * native extension, and no gem code is downloaded or read.
  */
+import { join } from "node:path";
 import {
   coolingCheck,
+  defaultCoolingDeps,
   enforceFrom,
   limitFrom,
   supplyChainConfig,
   type CoolingDeps,
   type OsvVuln,
 } from "./triage-cooling.js";
+import { readRegularFileIfPresent } from "./upstream-safe-read.js";
 
 const GEM_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const DAY_MS = 86_400_000;
@@ -114,6 +117,18 @@ export interface GemTriageDeps extends CoolingDeps {
   /** Gemfile.lock text of the project, or null when there is none. */
   lockfile: (cwd: string) => string | null;
 }
+
+/** The live registry, OSV and the project's Gemfile.lock. */
+export const defaultGemDeps: GemTriageDeps = {
+  ...defaultCoolingDeps,
+  lockfile: (cwd) => {
+    try {
+      return readRegularFileIfPresent(join(cwd, "Gemfile.lock"));
+    } catch {
+      return null;
+    }
+  },
+};
 
 export interface GemTriageResult {
   passed: boolean;

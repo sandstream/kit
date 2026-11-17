@@ -75,6 +75,7 @@ export function triageTargetFor(tool: string): TriageMapping {
   const rest = ref.slice(idx + 1);
   if (scheme === "npm") return { kind: "triage", type: "npm", target: rest };
   if (scheme === "pip" || scheme === "pipx") return { kind: "triage", type: "pip", target: rest };
+  if (scheme === "gem") return { kind: "triage", type: "gem", target: rest };
   // Everything else that names a repo (aqua/ubi/go/github/cargo/...) → repo triage.
   const ownerRepo = extractOwnerRepo(rest);
   if (ownerRepo) return { kind: "triage", type: "repo", target: `https://github.com/${ownerRepo}` };
