@@ -2603,9 +2603,9 @@ async function appendHostSecurityChecks(
   root: string,
 ): Promise<void> {
   results.push(...(await checkServiceExposure()));
+  results.push(...(await (await import("./check-ai-devservers.js")).checkAiDevServers()));
   const { checkDiskEncryption, checkMemoryDirSafety } = await import("./check-disk-encryption.js");
-  results.push(await checkDiskEncryption());
-  results.push(checkMemoryDirSafety());
+  results.push(await checkDiskEncryption(), checkMemoryDirSafety());
   results.push(await checkMemoryInjection(), await checkMemoryHooksLiveness());
   results.push(await checkTranscriptSecrets(undefined, root));
   results.push(await checkGateLiveness(root), await checkGitHookFloor(root));
