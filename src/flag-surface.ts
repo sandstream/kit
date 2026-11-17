@@ -79,6 +79,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--write",
   ],
   audit: [
+    "--accept-rollback",
     "--all",
     "--external",
     "--fail-on-network",

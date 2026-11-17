@@ -291,7 +291,7 @@ export async function anchorAuditLog(
   logPath: string,
   content: string,
   dir?: string,
-  opts: { external?: boolean } = {},
+  opts: { external?: boolean; acceptRollback?: boolean } = {},
 ): Promise<AnchorRecord> {
   const { withAuditWriteLock } = await import("./audit-write-lock.js");
   return withAuditWriteLock(logPath, async (canonical) => {
@@ -300,8 +300,30 @@ export async function anchorAuditLog(
         "The audit log changed after the snapshot was read. Read it again before anchoring.",
       );
     }
+    if (!opts.acceptRollback) await refuseResealOverAlarm(canonical, content, dir);
     return sealAuditLog(canonical, content, dir, opts);
   });
+}
+
+/**
+ * An explicit re-seal must not erase the alarm `kit audit verify` would raise, just as the
+ * append-time auto-advance does not (#fix4). A truncated, rewritten or unparseable sealed prefix
+ * is refused; a rotated key and a first seal are not. A person who has inspected the log accepts
+ * it as the new baseline with `--accept-rollback` (kit-research `agent-swarms-security-guide-vs-kit`).
+ */
+async function refuseResealOverAlarm(
+  logPath: string,
+  content: string,
+  dir?: string,
+): Promise<void> {
+  const existing = await readAnchorRecord(logPath, dir);
+  if (!existing) return;
+  const result = verifyAgainstAnchor(content, existing, await tryReadAuditAnchorKey(dir));
+  if (["truncated", "tip-mismatch", "unparseable"].includes(result.status)) {
+    throw new Error(
+      `refusing to re-seal: ${result.reason}. Inspect the log first; to accept it as the new baseline, run 'kit audit anchor --accept-rollback' yourself`,
+    );
+  }
 }
 
 async function sealAuditLog(
