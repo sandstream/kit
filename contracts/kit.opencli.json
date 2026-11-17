@@ -229,7 +229,7 @@
         },
         "transcripts": {
           "kind": "command",
-          "summary": "Count agent tool calls in ~/.claude/projects transcripts that carried your git or Claude account identity, and which were network-shaped (--identity, --json, --fail-on-network); offline, never prints a value",
+          "summary": "Experimental. Count agent tool calls in ~/.claude/projects transcripts that carried your git or Claude account identity, and which were network-shaped (--identity, --json, --fail-on-network); offline, never prints a value",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
