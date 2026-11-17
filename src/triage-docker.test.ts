@@ -26,6 +26,9 @@ const TRIAGE_PY = resolve(
   "triage.py",
 );
 const REPO = { pull_count: 5_000_000, last_updated: new Date().toISOString() };
+// Hub's repository API as measured on 2026-11-17: `is_official` is null even for official
+// images, and the Docker Official Images are the ones under the `library` namespace.
+const OFFICIAL = { ...REPO, namespace: "library", is_official: null };
 const DAY = 86_400_000;
 // The shape of the backdoored ARTEX image (FBI FLASH 2026-11-13): thousands of pulls within a
 // month of the repository's registration. Shape only; the name is not the real one.
@@ -54,7 +57,8 @@ before(async () => {
       res.end(JSON.stringify(body));
     };
     if (path.includes(":")) return send(400, { message: "invalid repository name" }); // as Hub does
-    if (/^(qdrant\/qdrant|library\/nginx)\/?$/.test(path)) return send(200, REPO);
+    if (/^qdrant\/qdrant\/?$/.test(path)) return send(200, { ...REPO, namespace: "qdrant" });
+    if (/^library\/nginx\/?$/.test(path)) return send(200, OFFICIAL);
     if (/^example\/young-popular\/?$/.test(path)) return send(200, YOUNG_POPULAR);
     if (/^example\/established\/?$/.test(path)) return send(200, ESTABLISHED);
     if (TAGS.has(path.replace(/\/$/, ""))) return send(200, { name: path.split("/").pop() });
@@ -122,5 +126,22 @@ describe("kit triage docker: pull count is not provenance", () => {
     assert.doesNotMatch(out, /very new/);
     assert.match(out, /pull count is reputation, not provenance/);
     assert.match(out, /TRIAGE PASSED/);
+  });
+});
+
+describe("kit triage docker: official images", () => {
+  it("recognises an official image by its library namespace, as Hub no longer sets is_official", async (t) => {
+    // Was: official=False for nginx, and the unofficial-publisher checks ran on it.
+    const out = await triage(t, "nginx:1.27");
+    if (out === null) return;
+    assert.match(out, /library\/nginx: 5000000 pulls, official=True/);
+    assert.doesNotMatch(out, /pull count is reputation, not provenance/);
+  });
+
+  it("still treats an image under any other namespace as unofficial", async (t) => {
+    const out = await triage(t, "qdrant/qdrant");
+    if (out === null) return;
+    assert.match(out, /official=False/);
+    assert.match(out, /pull count is reputation, not provenance/);
   });
 });
