@@ -73,3 +73,14 @@ describe("kit check runs the agent-config audit", () => {
     assert.equal(rows.filter((r) => r.status === "fail").length, 0);
   });
 });
+
+describe("kit check names a loopback HTTP MCP server that sends no token", () => {
+  it("warns on a loopback http:// MCP server with no auth header", async (t) => {
+    // Was: only the agent audit's "kit cannot see what the server binds to" row (low).
+    const { root, home } = dirs(t);
+    const url = "http:" + "//127.0.0.1:6277/mcp";
+    writeFileSync(join(root, ".mcp.json"), JSON.stringify({ mcpServers: { local: { url } } }));
+    const rows = await checkAgentConfig(root, home, {});
+    assert.ok(rows.some((r) => r.status === "warn" && r.name.startsWith("loopback MCP without")));
+  });
+});

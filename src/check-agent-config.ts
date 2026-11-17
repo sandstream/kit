@@ -16,5 +16,10 @@ export async function checkAgentConfig(
 ): Promise<SecurityCheckResult[]> {
   const { runAgentAudit } = await import("./agent-audit.js");
   const { runUserAgentAudit } = await import("./agent-audit-user.js");
-  return [...runAgentAudit(root), ...runUserAgentAudit(root, home, env)];
+  const { checkMcpLoopbackToken } = await import("./check-mcp-loopback-token.js");
+  return [
+    ...runAgentAudit(root),
+    ...runUserAgentAudit(root, home, env),
+    ...checkMcpLoopbackToken(root),
+  ];
 }
