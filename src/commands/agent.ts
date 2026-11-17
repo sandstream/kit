@@ -20,6 +20,7 @@ import {
   installAiderRules,
   loadUserRulesProfile,
 } from "../agent-config.js";
+import { describeStrictResult, installStrictSettings } from "../agent-config-strict.js";
 
 export async function cmdSkills(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
@@ -121,6 +122,12 @@ export async function cmdAgentConfig(): Promise<boolean> {
   } else if (perms.action === "failed") {
     console.log(`\n  ${c.yellow}!${c.reset} could not update ${perms.file}: ${perms.detail}`);
   }
+  // The strict layer Claude Code enforces itself: deny rules for credential dirs, .env* and
+  // destructive git, plus the OS sandbox (not on native Windows, where it does not run).
+  const strict = await installStrictSettings();
+  console.log(`\n  ${c.bold}Deny rules + sandbox${c.reset} ${c.dim}(Claude Code)${c.reset}`);
+  for (const line of describeStrictResult(strict)) console.log(`    ${line}`);
+  if (strict.action === "failed") failed = true;
   // Codex does not expose Claude-style command allowlists. Install a personal
   // profile instead: low-friction workspace automation without committing a risk
   // preference to the repo.
