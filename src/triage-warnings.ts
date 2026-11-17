@@ -9,7 +9,6 @@
  */
 
 /** Control characters (C0, DEL, C1) that must not reach a terminal from registry-supplied text. */
-// eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 
 /**
