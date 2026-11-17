@@ -5,7 +5,9 @@
  * ignored `.claude/`, so a linked worktree starts without them and an agent working there runs
  * ungated on the very machine where the gates were installed. `kit check` reports that
  * (`enforcement gate liveness`), but reporting it is not enough: the session that needs the gates
- * has already started by then, and a hook added during a session is not active in it.
+ * has already started by then. (A hook written during a session does apply to it: measured with
+ * Claude Code 2.1.326, see src/session-gates.ts. A session in a worktree still starts ungated
+ * unless something writes the gates first.)
  *
  * This installs them when the worktree is created (the `post-checkout` hook calls it), and only
  * mirrors a main checkout that already has them: it never imposes gates on a project that chose none.

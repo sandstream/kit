@@ -161,6 +161,8 @@ export async function cmdHooks(): Promise<boolean> {
   if (subcommand === "add") return cmdHooksAdd();
   // Session-start form (#671): silent when intact, one plain line otherwise, never fails.
   if (subcommand === "context") return runHooksContext();
+  // A repository's committed SessionStart hook: wire the PreToolUse gates in this checkout.
+  if (subcommand === "gates") return (await import("../session-gates.js")).runHooksGates();
 
   const config = await loadConfig(resolveConfigPath());
   const hooks = config.hooks;

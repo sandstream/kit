@@ -1,0 +1,3 @@
+### Added
+
+- **`kit hooks gates`, and kit's own repository wires its gates at session start.** A committed PreToolUse gate cannot be both portable and live: kit's liveness rule rejects a bare `kit`, and the forms it accepts name one machine's paths. So kit's `.claude/settings.json` commits a `SessionStart` hook, `kit hooks gates`, which wires `gate-bash` and `gate-env` in the resolved form when the checkout is kit-managed and has none. Measured with Claude Code 2.1.326: a gate written by a `SessionStart` hook blocks the first tool call of that same session. A fresh clone or cloud session of kit is gated from its first command.
