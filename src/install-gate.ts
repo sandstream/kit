@@ -45,6 +45,7 @@ import { explainUnverifiable } from "./install-gate-refusals.js";
 import { policyRefusal } from "./install-gate-irreversible.js";
 import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { windowsShellBodies } from "./install-gate-shells.js";
+import { installNotes, withNotes } from "./install-gate-notes.js";
 import { gemInstall } from "./install-gate-gem.js";
 import { githubRepoRef, notePipedPayloads } from "./install-gate-pipe-interp.js";
 import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
@@ -1196,6 +1197,7 @@ export interface BashGateVerdict {
   block: boolean;
   reason: string;
   checked: GateVerdict[];
+  notes?: string[]; // what an allowed command runs untriaged: install-gate-notes.ts
 }
 
 /** Does `<cwd>/node_modules/.bin/<name>` exist? Exactly what a plain `npx <name>`
@@ -1231,6 +1233,15 @@ function refIsBareName(ref: string, bare: string): boolean {
  */
 
 export async function decideBashGate(
+  command: string,
+  deps?: GateDeps,
+  cwd?: string,
+): Promise<BashGateVerdict> {
+  const verdict = await gateVerdict(command, deps, cwd);
+  return withNotes(verdict, installNotes(command, cwd, parseInstallCommand(command).bareSegments));
+}
+
+async function gateVerdict(
   command: string,
   deps?: GateDeps,
   cwd?: string,
