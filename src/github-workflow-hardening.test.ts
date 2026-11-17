@@ -227,3 +227,25 @@ describe("GitHub workflow standards gate", () => {
     );
   });
 });
+
+describe("nightly GuardDog job", () => {
+  it("pins Python before the nightly GuardDog install", () => {
+    // The runner image moved to Python 3.14, where pygit2 (a guarddog dependency) has no wheel
+    // and fails to build. Four nightly sweeps in a row failed at the install step.
+    const security = workflow("security.yml");
+    const job = security.slice(
+      security.indexOf("\n  guarddog-nightly:"),
+      security.indexOf("\n  sast:"),
+    );
+    const setup = job.indexOf("actions/setup-python@");
+    assert.ok(setup >= 0, "guarddog-nightly must pin Python with actions/setup-python");
+    assert.match(
+      job.slice(setup),
+      /actions\/setup-python@[a-f0-9]{40}[^\n]*\n\s+with:\n\s+python-version: "3\.12"/,
+    );
+    assert.ok(
+      setup < job.indexOf("pipx install guarddog"),
+      "Python must be pinned before pipx runs",
+    );
+  });
+});

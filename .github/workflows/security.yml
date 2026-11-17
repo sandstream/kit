@@ -92,6 +92,9 @@ jobs:
       - run: npm ci
       - name: Build CLI
         run: npm run build
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
       - name: Install guarddog + semgrep
         run: |
           python3 -m pip install --user pipx==1.17.2
