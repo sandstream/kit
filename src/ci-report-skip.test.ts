@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 
 import { statusIcon, statusRank } from "./commands/ci.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { outsideAgentSession } from "./cli-run.test-support.js";
 
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
@@ -43,7 +44,7 @@ function runCi(dir: string, args: string[], env: Record<string, string> = {}): s
     cwd: dir,
     encoding: "utf-8",
     env: {
-      ...process.env,
+      ...outsideAgentSession(),
       KIT_HIDE_HOOK_SKIP_BANNER: "1",
       KIT_AUDIT_ANCHOR: "0",
       // The unset secret and unverifiable Git protection are blockers; unrelated skips are not.

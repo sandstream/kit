@@ -294,8 +294,14 @@ export async function checkGitHookFloor(cwd?: string): Promise<SecurityCheckResu
  * checkout has neither, and an agent working there runs ungated on the very machine where
  * the gates were installed. Worktree-per-task harnesses (T3 Code, Claude Code worktrees)
  * produce exactly that, so it fails like a lost gate rather than skipping.
+ *
+ * An agent session (`env`, see `agent-session.ts`) in a kit-managed checkout that never installed
+ * the gates fails too: a fresh cloud clone otherwise runs every tool call ungated behind a skip.
  */
-export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResult> {
+export async function checkGateLiveness(
+  cwd?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SecurityCheckResult> {
   const name = "enforcement gate liveness";
   const category = "exposure" as const;
   const { gateLiveness } = await import("./agent-config.js");
@@ -328,6 +334,9 @@ export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResu
         detail: `this is a linked git worktree of ${main}: the gates are installed there, not here, so an agent working in this worktree runs ungated. Run: kit agent-config (in this worktree)`,
       };
     }
+    const { ungatedSessionDetail } = await import("./agent-session.js");
+    const session = ungatedSessionDetail(here, env);
+    if (session) return { category, name, status: "fail", severity: "high", detail: session };
     return {
       category,
       name,
