@@ -24,6 +24,11 @@ pull-request workflow finishes. Once every check on the head commit has finished
   broker and OpenCode gates, `docs/adr/` with the code that enforces it, `.kit-baseline.json`,
   `scripts/prepush*`, `eslint.config.js`, `.semgrepignore` and `.kit-secretsignore`. The rules come
   from the default branch, never from the pull request;
+- no changed module is _wide_: imported by 20 or more non-test modules
+  (`src/review-protected-paths-wide.ts`, counted on the default branch so a pull request cannot
+  shrink the count). A file many others depend on goes to a person as a protected path does.
+  Measured before building (kit-research `loops-and-graphs-vs-kit`): 15 modules are wide, and over
+  the 300 most recent commits on main 2 touched one that was not already protected;
 - the file list is complete, and the change is under 1,500 lines;
 - the default branch is not red: the newest `build-and-test` result on its head commit did not
   fail. A merge onto a broken main stacks on the breakage, so while main is red a person approves.
@@ -55,6 +60,7 @@ Then, for a pull request the agent opens:
 | ------------------------------------------------------------ | ----------------------------- | ------------------------------------------- |
 | no protected path, every check passes                        | the reviewer App              | the agent                                   |
 | a protected path (release, `.github/`, secrets, permissions) | the owner, as a normal review | the owner or the agent, after that approval |
+| a wide module (20 or more importers)                         | the owner, as a normal review | the owner or the agent, after that approval |
 
 The agent never approves its own pull request: it is the author. The owner's admin bypass stays
 for the owner's own pull requests, and the agent cannot use it.

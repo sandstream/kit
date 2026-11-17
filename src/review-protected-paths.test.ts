@@ -106,3 +106,18 @@ it("protects the guardrails an agent could otherwise loosen in a pull request", 
   assert.deepEqual(unprotected, []);
   assert.deepEqual(classifyProtectedPaths(["src/environment-report.ts"], rules), []);
 });
+
+it("protects the config and audit modules every gate reads, but not their neighbours", () => {
+  // kit-research loops-and-graphs-vs-kit: src/config.ts (132 importers) and src/audit.ts (the log
+  // every gate deny goes to) were approved on checks alone, like a file nothing imports.
+  for (const rules of [loadProtectedPathRules(process.cwd()), DEFAULT_PROTECTED_PATH_RULES]) {
+    assert.deepEqual(classifyProtectedPaths(["src/config.ts", "src/audit.ts"], rules), [
+      { path: "src/config.ts", classes: ["permissions"] },
+      { path: "src/audit.ts", classes: ["permissions"] },
+    ]);
+    assert.deepEqual(
+      classifyProtectedPaths(["src/config-migrate.ts", "src/audit-log-view.ts"], rules),
+      [],
+    );
+  }
+});
