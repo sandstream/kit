@@ -379,7 +379,7 @@ describe("publish.yml — documented release gates execute before publication", 
   });
 
   it("requires audit and a fail-closed supply-chain scan", () => {
-    assert.match(beforePublish("npm audit (high+)"), /run: npm audit --audit-level=high/);
+    assert.match(beforePublish("npm audit (high+)"), /run: node scripts\/npm-audit-gate\.mjs/);
     const supply = beforePublish("Bumblebee supply-chain gate");
     assert.match(supply, /KIT_BUMBLEBEE_REQUIRED:\s*"1"/);
     assert.match(supply, /node scripts\/run-supply-chain-check\.mjs/);
@@ -504,5 +504,18 @@ describe("publish.yml and RELEASING.md agree on which packages may publish", () 
         `${name}: verified=${verified.has(name)} skipped=${isSkipped}`,
       );
     }
+  });
+});
+
+describe("publish.yml audit gate with exceptions", () => {
+  it("builds before the gate, because the gate reads its rules from dist, and never loosens it", () => {
+    const build = EXECUTED.indexOf("- name: Build the CLI for the audit gate");
+    const gate = EXECUTED.indexOf("- name: npm audit (high+)");
+    assert.ok(build >= 0 && gate > build, "the audit gate needs dist, so the build comes first");
+    assert.match(stepBody("Build the CLI for the audit gate"), /run: npm run build\s*$/m);
+    assert.doesNotMatch(
+      stepBody("npm audit (high+)"),
+      /--audit-level=(moderate|low|critical)|\|\|/,
+    );
   });
 });

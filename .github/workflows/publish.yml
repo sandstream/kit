@@ -213,9 +213,16 @@ jobs:
           fi
           echo "Tag $TAG signature verified."
 
+      - name: Build the CLI for the audit gate
+        # The gate reads its exception rules from dist/audit-exceptions.js. "Build production
+        # artifacts" below cleans dist and rebuilds it, so this build never reaches the tarball.
+        run: npm run build
+
       - name: npm audit (high+)
-        # Refuse to publish a tarball that ships a known-high CVE.
-        run: npm audit --audit-level=high
+        # Refuse to publish a tarball that ships a known-high CVE. Same as
+        # `npm audit --audit-level=high`, except that audit-exceptions.json can cover a finding
+        # that has no patched version: one advisory id, a reason, an end date within 90 days.
+        run: node scripts/npm-audit-gate.mjs
 
       - name: Bumblebee supply-chain gate
         # Refuse to publish if any installed pkg matches a known-compromise
