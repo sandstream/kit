@@ -1,20 +1,6 @@
 // `kit triage gem <name>[@version]`: a RubyGems release, checked before it is installed.
-import { join } from "node:path";
 import { c } from "../utils/colors.js";
-import { defaultCoolingDeps } from "../triage-cooling.js";
-import { triageGem, type GemTriageDeps } from "../triage-gem.js";
-import { readRegularFileIfPresent } from "../upstream-safe-read.js";
-
-const defaultGemDeps: GemTriageDeps = {
-  ...defaultCoolingDeps,
-  lockfile: (cwd) => {
-    try {
-      return readRegularFileIfPresent(join(cwd, "Gemfile.lock"));
-    } catch {
-      return null;
-    }
-  },
-};
+import { defaultGemDeps, triageGem, type GemTriageDeps } from "../triage-gem.js";
 
 export async function cmdTriageGem(
   args: string[],

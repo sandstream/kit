@@ -153,7 +153,8 @@ async function installedScriptMatchesBundled(targetDir: string): Promise<boolean
   }
 }
 
-export type TriageType = "docker" | "npm" | "pip" | "repo" | "skill" | "brew" | "all" | "tools";
+export type TriageType =
+  "docker" | "npm" | "pip" | "gem" | "repo" | "skill" | "brew" | "all" | "tools";
 
 export { triageNpmSandbox, type SandboxResult };
 
@@ -349,13 +350,25 @@ async function triageBrew(formula: string, cwd: string): Promise<TriageResult> {
   };
 }
 
+/** RubyGems triage runs in TypeScript (triage-gem.ts), not in triage.py. */
+async function runGemTriage(target: string, cwd: string): Promise<TriageResult> {
+  const { triageGem, defaultGemDeps } = await import("./triage-gem.js");
+  return { target, type: "gem", ...(await triageGem(cwd, target, defaultGemDeps)) };
+}
+
+/** Types triaged in TypeScript instead of triage.py. */
+const NATIVE_TRIAGE: Partial<
+  Record<TriageType, (target: string, cwd: string) => Promise<TriageResult>>
+> = { brew: triageBrew, gem: runGemTriage };
+
 export async function runTriage(
   type: TriageType,
   target: string,
   opts: { cwd?: string } = {},
 ): Promise<TriageResult> {
   const cwd = resolve(opts.cwd ?? process.cwd());
-  if (type === "brew") return triageBrew(target, cwd);
+  const native = NATIVE_TRIAGE[type];
+  if (native) return native(target, cwd);
   const scriptExists = await ensureTriageScript();
   if (!scriptExists) {
     return {
