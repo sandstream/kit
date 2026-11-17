@@ -79,6 +79,21 @@ function removesEscape(char: string, next: string | undefined, quote: string): b
   return !quote || '\\$"`\n'.includes(next);
 }
 
+/** A list separator: `;`, a newline, `&`, `&&` or `||`. A single `|` (and `|&`) is a pipe. */
+function listBoundary(text: string, i: number): boolean {
+  const char = text[i];
+  if (char === ";" || char === "\n") return true;
+  if (char === "|") return text[i - 1] === "|" || text[i + 1] === "|";
+  return char === "&" && !/[>|]/.test(text[i - 1] ?? "") && text[i + 1] !== ">";
+}
+
+/** Each pipeline's stages, as text. `a | b && c` is `[["a ", " b "], [" c"]]`. */
+export function shellPipelines(text: string): string[][] {
+  return splitUnquoted(text, listBoundary).map((pipeline) =>
+    splitUnquoted(pipeline, (value, i) => value[i] === "|").map((s) => s.replace(/^&/, "")),
+  );
+}
+
 /** Shell redirections such as 2>&1 and &>file do not separate commands. */
 export function shellSegments(text: string): string[] {
   return splitUnquoted(text, (value, i) => {

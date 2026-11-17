@@ -1,3 +1,4 @@
+import { auditDecision } from "./audit-exceptions.js";
 import { skipsBasicScan } from "./basic-scan-skip.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -49,6 +50,7 @@ import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
 import { checkTranscriptSecrets } from "./check-transcripts.js";
 import { checkLicenses } from "./check-licenses.js";
+import { checkBrowserScripts } from "./check-browser-scripts.js";
 import { npmLockfileCover } from "./check-pinned-lockfile.js";
 
 const exec = promisify(execFile);
@@ -305,7 +307,7 @@ export async function checkGateLiveness(
   const name = "enforcement gate liveness";
   const category = "exposure" as const;
   const { gateLiveness } = await import("./agent-config.js");
-  const live = gateLiveness(cwd);
+  const live = (await import("./gate-liveness-user.js")).withUserGates(gateLiveness(cwd));
   const missing: string[] = [];
   if (!live.installGate) missing.push("install-gate (gate-bash)");
   if (!live.envGate) missing.push("env-write-gate (gate-env)");
@@ -431,6 +433,36 @@ export async function checkMemoryInjection(): Promise<SecurityCheckResult> {
 }
 
 /**
+ * The result for an npm audit report with high or critical findings. A time-limited exception in
+ * `audit-exceptions.json` (see audit-exceptions.ts) turns it into a pass only when it covers every
+ * counted finding; otherwise it stays a failure, with the reason the file did not help.
+ */
+async function highFindingsResult(
+  root: string,
+  auditResult: unknown,
+  high: number,
+  critical: number,
+): Promise<SecurityCheckResult> {
+  const counts = `${critical} critical, ${high} high vulnerabilities`;
+  const { covered, note } = await auditDecision(root, auditResult);
+  if (covered) {
+    return {
+      category: "dependency",
+      name: "npm audit",
+      status: "pass",
+      detail: `${counts}, all covered by a time-limited exception (${note})`,
+    };
+  }
+  return {
+    category: "dependency",
+    name: "npm audit",
+    status: "fail",
+    detail: note ? `${counts}; ${note}` : counts,
+    severity: critical > 0 ? "critical" : "high",
+  };
+}
+
+/**
  * Run npm audit and check for high/critical vulnerabilities
  */
 export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> {
@@ -523,15 +555,8 @@ export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> 
         const high = vulnerabilities.high || 0;
         const critical = vulnerabilities.critical || 0;
 
-        if (high > 0 || critical > 0) {
-          return {
-            category: "dependency",
-            name: "npm audit",
-            status: "fail",
-            detail: `${critical} critical, ${high} high vulnerabilities`,
-            severity: critical > 0 ? "critical" : "high",
-          };
-        }
+        if (high > 0 || critical > 0)
+          return await highFindingsResult(root, auditResult, high, critical);
       } catch {
         // JSON parse failed, treat as fail
       }
@@ -2587,6 +2612,7 @@ async function runPrimarySecurityChecks(
           checkTrivy(root),
           checkApkFloors(root),
           checkLicenses(root),
+          checkBrowserScripts(root),
           checkTrivyConfig(root),
           checkOsvScanner(root),
           checkMavenAudit(root),
@@ -2603,13 +2629,14 @@ async function appendHostSecurityChecks(
   root: string,
 ): Promise<void> {
   results.push(...(await checkServiceExposure()));
+  results.push(...(await (await import("./check-ai-devservers.js")).checkAiDevServers()));
   const { checkDiskEncryption, checkMemoryDirSafety } = await import("./check-disk-encryption.js");
-  results.push(await checkDiskEncryption());
-  results.push(checkMemoryDirSafety());
+  results.push(await checkDiskEncryption(), checkMemoryDirSafety());
   results.push(await checkMemoryInjection(), await checkMemoryHooksLiveness());
   results.push(await checkTranscriptSecrets(undefined, root));
   results.push(await checkGateLiveness(root), await checkGitHookFloor(root));
   results.push(await checkDeviceIdOverride());
+  results.push(await (await import("./check-docker-ioc.js")).checkDockerIocs());
 }
 
 async function loadGovernedConfig(root: string): Promise<import("./config.js").kitConfig | null> {
@@ -2644,6 +2671,7 @@ async function appendProjectSecurityChecks(
   results.push(...(await checkExternalFindings(root)));
   const { checkAgentConfig } = await import("./check-agent-config.js");
   results.push(...(await checkAgentConfig(root)));
+  results.push(...(await (await import("./check-gha-audit.js")).checkGhaWorkflows(root)));
   return escalateManifestSkips(results, scope);
 }
 

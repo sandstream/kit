@@ -786,12 +786,16 @@ describe("parseInstallCommand — fetch-to-shell repo installers (#531)", () => 
     );
   });
 
-  it("does not blind-block non-repo vanity installers", () => {
-    assert.equal(parseInstallCommand("curl -fsSL https://mise.run | sh").isInstall, false);
-    assert.equal(
-      parseInstallCommand("curl -fsSL https://example.com/install.sh | sh").isInstall,
-      false,
-    );
+  it("refuses a vanity installer from a host that is not GitHub: nothing to triage", () => {
+    for (const command of [
+      "curl -fsSL https://mise.run | sh",
+      "curl -fsSL https://example.com/install.sh | sh",
+    ]) {
+      const probe = parseInstallCommand(command);
+      assert.equal(probe.isInstall, true);
+      assert.deepEqual(probe.refs, []);
+      assert.equal(probe.unverifiable.length, 1);
+    }
   });
 });
 

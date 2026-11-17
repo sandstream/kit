@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,7 +49,7 @@ describe("hasMarker", () => {
     }
   });
 
-  it("cleanup", () => rmTemp(root));
+  after(() => rmTemp(root));
 });
 
 import { trackedProviderFiles, providersTracked } from "./scan-detect.js";

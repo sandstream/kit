@@ -227,3 +227,40 @@ describe("GitHub workflow standards gate", () => {
     );
   });
 });
+
+describe("nightly GuardDog job", () => {
+  it("pins Python before the nightly GuardDog install", () => {
+    // The runner image moved to Python 3.14, where pygit2 (a guarddog dependency) has no wheel
+    // and fails to build. Four nightly sweeps in a row failed at the install step.
+    const security = workflow("security.yml");
+    const job = security.slice(
+      security.indexOf("\n  guarddog-nightly:"),
+      security.indexOf("\n  sast:"),
+    );
+    const setup = job.indexOf("actions/setup-python@");
+    assert.ok(setup >= 0, "guarddog-nightly must pin Python with actions/setup-python");
+    assert.match(
+      job.slice(setup),
+      /actions\/setup-python@[a-f0-9]{40}[^\n]*\n\s+with:\n\s+python-version: "3\.12"/,
+    );
+    assert.ok(
+      setup < job.indexOf("pipx install guarddog"),
+      "Python must be pinned before pipx runs",
+    );
+  });
+});
+
+describe("dependency audit gate", () => {
+  it("runs the exception-aware gate after the build and never makes it optional", () => {
+    const security = workflow("security.yml");
+    const stage = security.slice(
+      security.indexOf("\n  deps:"),
+      security.indexOf("\n  supply-chain:"),
+    );
+    const build = stage.indexOf("run: npm run build");
+    const gate = stage.indexOf("run: node scripts/npm-audit-gate.mjs");
+    assert.ok(build >= 0 && gate > build, "the gate needs dist, so the build comes first");
+    assert.doesNotMatch(stage, /continue-on-error:\s*true/);
+    assert.doesNotMatch(stage, /npm audit[^\n]*\|\|/);
+  });
+});

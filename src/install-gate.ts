@@ -46,6 +46,7 @@ import { policyRefusal } from "./install-gate-irreversible.js";
 import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { windowsShellBodies } from "./install-gate-shells.js";
 import { gemInstall } from "./install-gate-gem.js";
+import { githubRepoRef, notePipedPayloads } from "./install-gate-pipe-interp.js";
 import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
 
 export { ownerRepoArg, explainUnverifiable };
@@ -734,6 +735,7 @@ export function parseInstallCommand(command: string): InstallProbe {
       }
     }
     for (const segment of shellSegments(cmd)) scanSegment(segment, probe);
+    notePipedPayloads(cmd, probe);
   }
 
   // De-dup (npm i a a, or a && a).
@@ -857,32 +859,12 @@ function hasExecCallFlag(tokens: string[]): boolean {
 const REPO_FETCHER_PACKAGES = new Set(["skills"]);
 
 const HTTP_URL_RE = /https?:\/\/[^\s'"`<>|;&)]+/gi;
-const FETCH_TO_SHELL_PIPE_RE =
-  /\b(?:curl|wget)\b[^\n|;&]{0,2000}\bhttps?:\/\/[^\s'"`<>|;&)]+[^\n|;&]{0,2000}\|\s*(?:(?:sudo|doas|env|command)\s+(?:[^\s=]+=\S+\s+)*)?(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish)\b/g;
 const SHELL_BINS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish"]);
-
-function githubRepoRefFromUrl(rawUrl: string): string | null {
-  try {
-    const u = new URL(rawUrl.replace(/[),.]+$/, ""));
-    const host = u.hostname.toLowerCase().replace(/^www\./, "");
-    const parts = u.pathname.split("/").filter(Boolean);
-    const owner =
-      host === "github.com" || host === "raw.githubusercontent.com" ? parts[0] : undefined;
-    const repo =
-      host === "github.com" || host === "raw.githubusercontent.com" ? parts[1] : undefined;
-    if (!owner || !repo) return null;
-    const cleanRepo = repo.replace(/\.git$/, "");
-    if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(cleanRepo)) return null;
-    return `github:${owner}/${cleanRepo}`;
-  } catch {
-    return null;
-  }
-}
 
 function repoRefsFromUrls(text: string): string[] {
   const refs: string[] = [];
   for (const m of text.matchAll(HTTP_URL_RE)) {
-    const ref = githubRepoRefFromUrl(m[0]);
+    const ref = githubRepoRef(m[0]);
     if (ref) refs.push(ref);
   }
   return refs;
@@ -949,8 +931,7 @@ function directScriptTarget(tokens: string[]): string | null {
 }
 
 function repoFetchToShellRefs(command: string): string[] {
-  const refs: string[] = [];
-  for (const m of command.matchAll(FETCH_TO_SHELL_PIPE_RE)) refs.push(...repoRefsFromUrls(m[0]));
+  const refs: string[] = []; // a script piped to a shell: install-gate-pipe-interp.ts
 
   const downloads = new Map<string, string[]>();
   for (const segment of shellSegments(command)) {
