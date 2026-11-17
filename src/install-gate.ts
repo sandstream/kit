@@ -19,6 +19,7 @@
  * (#779) but `gem install` is not routed here yet: that is an owner decision. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
+import { mayChangeDirectory } from "./install-gate-cwd.js";
 import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
 import { existsSync } from "node:fs";
@@ -1270,7 +1271,8 @@ export async function decideBashGate(
     const bare = checkBareInstall(command, cwd, probe.bareSegments);
     if (bare.block) return { block: true, reason: bare.reason, checked: [] };
   }
-  const shadowed = cwd ? probe.runnerBinCandidates.filter((name) => hasLocalBin(cwd, name)) : [];
+  const local = cwd && !mayChangeDirectory(command) ? cwd : undefined; // the bin dir npx reads
+  const shadowed = local ? probe.runnerBinCandidates.filter((n) => hasLocalBin(local, n)) : [];
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
   const checked: GateVerdict[] = [];
   for (const ref of refs) {
