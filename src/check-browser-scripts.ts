@@ -19,7 +19,7 @@ import {
   type ScriptUrl,
 } from "./browser-scripts-parse.js";
 
-export const BROWSER_SCRIPTS_NAME = "browser scripts";
+const BROWSER_SCRIPTS_NAME = "browser scripts";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -239,7 +239,7 @@ function cleanDetail(inv: BrowserScriptInventory): string {
 }
 
 /** Judge an inventory into the single `browser scripts` row. */
-export function judgeBrowserScripts(inv: BrowserScriptInventory): SecurityCheckResult {
+function judgeBrowserScripts(inv: BrowserScriptInventory): SecurityCheckResult {
   const base = { category: "supply-chain" as const, name: BROWSER_SCRIPTS_NAME };
   const gap = inv.errors.length
     ? `${inv.errors.length} path(s) not scanned: ${short(inv.errors)}`

@@ -47,5 +47,5 @@ treated as bundles and skipped.
 
 ## Not yet
 
-A lockfile of browser scripts (`.kit/browser-scripts.json`) that `kit verify-pull` would diff, so
+A lockfile of browser scripts (`.kit/browser-scripts.json`) that `kit security verify-pull` would diff, so
 that a new origin or a newly mutable URL shows up like a new dependency, is not built.
