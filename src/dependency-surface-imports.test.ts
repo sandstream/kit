@@ -211,3 +211,32 @@ describe("styleImportedPackages", () => {
     ]);
   });
 });
+
+describe("scanSurfaceUsage: files over the size cap", () => {
+  it("ignores a source file larger than the cap and still reads the others", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-surface-big-"));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "small.ts"), 'import z from "zod";\n');
+    // A bundled or generated file: over 1 MB, and it holds an import that must not be counted.
+    writeFileSync(join(dir, "src", "bundle.js"), `import y from "yup";\n${"x".repeat(1_100_000)}`);
+    try {
+      const u = await scanSurfaceUsage(dir, {});
+      assert.equal(u.importSites.get("zod"), 1);
+      assert.equal(u.importSites.get("yup"), undefined);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("does not fail on a file that disappears between listing and reading", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-surface-gone-"));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "a.ts"), 'import z from "zod";\n');
+    try {
+      const u = await scanSurfaceUsage(dir, {});
+      assert.equal(u.importSites.get("zod"), 1);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});

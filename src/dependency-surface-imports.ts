@@ -6,7 +6,7 @@
  * into a syntax tree and nothing is run, so a dynamic specifier or a tool started from somewhere
  * else is invisible here, and the caller says so.
  */
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { join, relative } from "node:path";
 import type { ProjectManifest, SurfaceUsage } from "./dependency-surface.js";
@@ -99,10 +99,22 @@ async function walk(dir: string, files: string[], cap: number): Promise<boolean>
   return false;
 }
 
+/**
+ * Read a file as text unless it is over `cap` bytes. The size is read from the open handle, not from
+ * a separate stat, so the file that was measured is the file that is read.
+ */
 async function readCapped(path: string, cap: number): Promise<string> {
-  const info = await stat(path).catch(() => null);
-  if (!info || !info.isFile() || info.size > cap) return "";
-  return readFile(path, "utf8").catch(() => "");
+  const handle = await open(path, "r").catch(() => null);
+  if (!handle) return "";
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > cap) return "";
+    return await handle.readFile("utf8");
+  } catch {
+    return "";
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 async function configText(root: string): Promise<string> {
