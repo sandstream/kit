@@ -131,3 +131,56 @@ export async function cmdPanic(): Promise<boolean> {
   );
   return true;
 }
+
+/**
+ * `kit panic --stop`: every gated agent on this machine is refused at its next tool call until a
+ * person runs `kit panic --resume` (stop-switch.ts). It does not rotate keys; run plain
+ * `kit panic` for that. Prints the secrets checklist, since a copied credential outlives a stop.
+ */
+async function panicStop(): Promise<boolean> {
+  const { writeStop } = await import("../stop-switch.js");
+  const { homedir } = await import("node:os");
+  const reason = flagValue(process.argv, "--reason") ?? "panic --stop";
+  const state = writeStop(homedir(), reason);
+  await appendAuditEventDirect({
+    operation: "panic.stop",
+    environment: "local",
+    success: true,
+    metadata: { reason, since: state.since },
+  });
+  console.log(`${c.red}${c.bold}⚠ kit panic --stop${c.reset} ${c.dim}(${state.since})${c.reset}`);
+  console.log(
+    `${c.green}✓${c.reset} every PreToolUse gate on this machine now refuses every tool call. Agents without kit's gates are not stopped; end those sessions yourself.`,
+  );
+  console.log(
+    `${c.dim}A stopped agent does not invalidate a credential it already copied: rotate what it could read (kit secrets rotate), then lift the stop with${c.reset} ${c.bold}kit panic --resume${c.reset}`,
+  );
+  return true;
+}
+
+/**
+ * The `panic` handler: `--stop` and `--resume` run on their own, ahead of the key rotation that
+ * plain `kit panic` does. A separate entry so cmdPanic keeps its baseline-frozen size.
+ */
+export function cmdPanicEntry(): Promise<boolean> {
+  if (hasFlag(process.argv, "--stop")) return panicStop();
+  if (hasFlag(process.argv, "--resume")) return panicResume();
+  return cmdPanic();
+}
+
+async function panicResume(): Promise<boolean> {
+  const { clearStop } = await import("../stop-switch.js");
+  const { homedir } = await import("node:os");
+  if (!clearStop(homedir())) {
+    console.log(`${c.dim}no stop in effect${c.reset}`);
+    return true;
+  }
+  await appendAuditEventDirect({
+    operation: "panic.resume",
+    environment: "local",
+    success: true,
+    metadata: {},
+  });
+  console.log(`${c.green}✓${c.reset} stop lifted; the gates decide tool calls again`);
+  return true;
+}

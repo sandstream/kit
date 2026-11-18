@@ -30,7 +30,7 @@ import { cmdGhaAudit } from "./commands/gha-audit.js";
 import { cmdUpstream } from "./commands/upstream.js";
 import { HELP_CATEGORIES as CATEGORIES } from "./help-categories.js";
 import { cmdIdentity } from "./commands/identity.js";
-import { cmdPanic } from "./commands/panic.js";
+import { cmdPanicEntry } from "./commands/panic.js";
 import { cmdPolicy } from "./commands/policy.js";
 import { cmdSbom } from "./commands/sbom.js";
 import { cmdSecurity } from "./commands/security.js";
@@ -834,9 +834,9 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     help: "Cold-start an ephemeral environment: setup → identity → policy pull → profile import → memory restore (--policy-source <dir> or KIT_POLICY_SOURCE with an org anchor; --json receipt) (experimental)",
   },
   panic: {
-    handler: cmdPanic,
+    handler: cmdPanicEntry,
     stability: "experimental",
-    help: "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist (experimental)",
+    help: "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist; --stop makes every gate refuse every tool call until --resume (experimental)",
   },
   policy: {
     handler: cmdPolicy,

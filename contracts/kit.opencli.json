@@ -2142,7 +2142,7 @@
     },
     "panic": {
       "kind": "command",
-      "summary": "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist (experimental)",
+      "summary": "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist; --stop makes every gate refuse every tool call until --resume (experimental)",
       "x-kit-accepted-flags": [
         "--env",
         "--help",
@@ -2151,6 +2151,8 @@
         "--read-only",
         "--readonly",
         "--reason",
+        "--resume",
+        "--stop",
         "--version"
       ],
       "x-kit-args-modeled": true,
