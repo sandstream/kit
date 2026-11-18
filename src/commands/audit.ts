@@ -469,8 +469,9 @@ async function cmdAuditAnchor(): Promise<boolean> {
     return false;
   }
   const external = hasFlag(process.argv.slice(3), "--external");
+  const acceptRollback = hasFlag(process.argv.slice(3), "--accept-rollback");
   try {
-    const rec = await anchorAuditLog(logPath, content, undefined, { external });
+    const rec = await anchorAuditLog(logPath, content, undefined, { external, acceptRollback });
     console.log(
       `${c.green}✓ audit log anchored${c.reset}  ${c.dim}${rec.count} entries sealed (${rec.algo})${c.reset}`,
     );
