@@ -84,7 +84,7 @@ describe("Docker plugin runtime", () => {
  * MR-1: the runtime stage used to copy the BUILDER's node_modules, which is `npm ci` with
  * devDependencies. The published CLI image therefore shipped typescript, eslint and
  * esbuild: 170 packages, 93.6MB, none of them reachable at runtime, in a 460MB image whose
- * own header claimed "~100MB". kit has four runtime dependencies.
+ * own header claimed "~100MB". kit has three runtime dependencies.
  */
 describe("Docker runtime ships production dependencies only (MR-1)", () => {
   const runtimeStage = async (): Promise<{ dockerfile: string; runtime: string }> => {

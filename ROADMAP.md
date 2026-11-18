@@ -337,12 +337,13 @@ unguarded, and checking it walked back a suspected gap — but three of them rou
 `src/exec-broker/policy-cwd.test.ts`; mutation-proved (dropping the `cwd` argument fails 6,
 replacing the foreign-tree deny with `if (false)` fails 2).
 
-### Shrink the inherited dependency surface — 94 installed, 9 loaded
+### Shrink the inherited dependency surface — 92 installed, 9 loaded
 
-Measured, and guarded by `src/mcp-dependency-surface.test.ts`: kit's four direct production
-dependencies pull in **94** packages, of which **90 are reachable ONLY through**
-`@modelcontextprotocol/sdk` (91 via the SDK in total; without it the other three direct deps bring
-4). Re-measured at SDK 1.30.0 — this section said 120/91 for the 1.29 tree, and the install count
+Measured, and guarded by `src/mcp-dependency-surface.test.ts`: kit's three direct production
+dependencies pull in **92** packages, of which **90 are reachable ONLY through**
+`@modelcontextprotocol/sdk` (91 via the SDK in total; without it the other two direct deps bring
+2). `@upstash/redis` and the one package it pulled in were removed on 2026-11-18 (94 to 92): no code imported
+it. Re-measured at SDK 1.30.0 — this section said 120/91 for the 1.29 tree, and the install count
 moved under the `@hono/node-server` 1.x → 2.x bump while the LOADED count did not. The loaded number
 is now asserted against this heading by the guard test, because a count that lives only in prose
 drifts and a drifted number in a supply-chain argument is worse than no number.
@@ -390,7 +391,7 @@ Four options, in the order I'd try them:
 4. **Document and accept** — done: `docs/DATA_FLOW.md` and the A06 rows in `docs/OWASP_2025.md`
    carry both numbers and the trace method.
 
-The measurement, for anyone re-deriving it: a lockfile reachability walk from the four direct
+The measurement, for anyone re-deriving it: a lockfile reachability walk from the three direct
 production deps gives the install counts, and the loaded set needs BOTH module systems traced — a
 `register()`ed ESM `resolve` hook and a `Module._load` patch. An ESM-only tracer reports 5 packages
 and misses `fast-uri`, because `ajv` is CommonJS and reaches it through an internal `require()`. That

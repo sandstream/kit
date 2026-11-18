@@ -1,6 +1,6 @@
 ---
 id: ADR-0002
-title: Dependency floor — four runtime deps, stdlib otherwise
+title: Dependency floor — three runtime deps, stdlib otherwise
 status: accepted
 enforced_by: [src/dependency-floor.test.ts]
 ---
@@ -11,7 +11,7 @@ enforced_by: [src/dependency-floor.test.ts]
 
 kit is a supply-chain gate; its own supply chain is the first thing an auditor
 reads. The runtime dependency set stays at the minimum that cannot reasonably
-be stdlib (`@modelcontextprotocol/sdk`, `@upstash/redis`, `smol-toml`, `zod`).
+be stdlib (`@modelcontextprotocol/sdk`, `smol-toml`, `zod`).
 Utility libraries are forbidden — Node's stdlib covers them (`node:` builtins,
 global `fetch`, `structuredClone`, …).
 
@@ -20,6 +20,18 @@ global `fetch`, `structuredClone`, …).
 Adding a runtime dependency is an ADR-level decision, not a convenience call.
 The rule below blocks the common utility imports outright; anything else new
 must argue its case in a PR that updates this ADR.
+
+## Amended 2026-11-18: three runtime deps
+
+`@upstash/redis` is removed. No production code imported it: the Upstash adapter calls
+`api.upstash.com` with the global `fetch`, and `service-registry.ts` only holds the package name
+as a string to detect in other people's projects. It still shipped, with one package of its own, so
+the installed production tree went from 94 to 92 packages. The floor is now `@modelcontextprotocol/sdk`,
+`smol-toml` and `zod`.
+
+`src/dependency-floor.test.ts` gained the check that was missing: every declared runtime
+dependency must be imported by production code. A manifest entry nothing imports is surface, not a
+dependency, and the old floor test could not see it.
 
 ## Where the floor is actually enforced — and why not here
 

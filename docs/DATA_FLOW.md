@@ -224,18 +224,17 @@ Examples of paths kit can write:
 Plus the standard `node_modules/`, `dist/`, etc. during build — but those are
 not kit-specific.
 
-## Dependency surface: 94 installed, 9 loaded
+## Dependency surface: 92 installed, 9 loaded
 
 A reader auditing what kit can reach should know the gap between what `npm install`
 puts on disk and what the process ever executes. Both numbers are measured, not
 estimated; the second is a guard (`src/mcp-dependency-surface.test.ts`).
 
-kit has **four** direct production dependencies:
+kit has **three** direct production dependencies:
 
 | Dependency                  | Transitive closure                                          |
 | --------------------------- | ----------------------------------------------------------- |
 | `@modelcontextprotocol/sdk` | **91 packages** (90 of them reachable through nothing else) |
-| `@upstash/redis`            | 2                                                           |
 | `smol-toml`                 | 1                                                           |
 | `zod`                       | 1                                                           |
 

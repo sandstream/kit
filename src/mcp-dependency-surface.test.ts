@@ -1,9 +1,9 @@
 /**
- * kit installs 94 production packages and LOADS 9 of them.
+ * kit installs 92 production packages and LOADS 9 of them.
  *
- * kit's four direct production dependencies are `@modelcontextprotocol/sdk`, `@upstash/redis`,
- * `smol-toml` and `zod`. 90 of the 94 packages in the tree are reachable ONLY through the SDK
- * (91 via the SDK in total; the other three direct deps close over 4), because it
+ * kit's three direct production dependencies are `@modelcontextprotocol/sdk`, `smol-toml` and
+ * `zod`. 90 of the 92 packages in the tree are reachable ONLY through the SDK
+ * (91 via the SDK in total; the other two direct deps close over 2), because it
  * declares 17 HARD dependencies (`optionalDependencies: {}`) that include a complete HTTP server
  * and OAuth stack — express 5, express-rate-limit, cors, hono, @hono/node-server, raw-body,
  * content-type, eventsource, jose, pkce-challenge — for the Streamable-HTTP and SSE transports.
