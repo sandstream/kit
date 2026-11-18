@@ -145,3 +145,13 @@ describe("kit triage docker: official images", () => {
     assert.match(out, /pull count is reputation, not provenance/);
   });
 });
+
+describe("kit triage docker: what it does not read", () => {
+  it("declares the image's vulnerabilities not checked, so a PASS never reads as a clean scan", async (t) => {
+    // nginx:1.31.8 carries CVE-2026-123633 and CVE-2026-123007 and passed 100/100 with nothing said.
+    const out = await triage(t, "nginx:1.27");
+    if (out === null) return;
+    assert.match(out, /NOT CHECKED: known vulnerabilities in the image -- .*kit scan/);
+    assert.match(out, /^Coverage: PARTIAL/m);
+  });
+});
