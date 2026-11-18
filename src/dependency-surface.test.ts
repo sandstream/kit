@@ -351,3 +351,47 @@ describe("analyseSurface: exclusions and ordering", () => {
     assert.ok(!r?.findings.some((f) => f.subject === "@types/react-window"));
   });
 });
+
+describe("analyseSurface: a framework that takes most of the shipped tree", () => {
+  const leaves = (prefix: string, n: number): string[] =>
+    Array.from({ length: n }, (_, i) => `${prefix}-${i}`);
+
+  function tree(frameworkSites: number): ReturnType<typeof analyseSurface> {
+    const own = leaves("fw", 60);
+    const packages: Record<string, NpmLockEntry> = {
+      "": {},
+      "node_modules/framework": pkg("1.0.0", {
+        dependencies: Object.fromEntries(own.map((n) => [n, "^1"])),
+      }),
+      "node_modules/small": pkg("1.0.0"),
+    };
+    for (const n of own) packages[`node_modules/${n}`] = pkg("1.0.0");
+    return analyseSurface({
+      lock: { lockfileVersion: 3, packages },
+      manifest: { dependencies: { framework: "1.0.0", small: "1.0.0" } },
+      usage: usage({ framework: frameworkSites, small: 4 }),
+    });
+  }
+
+  it("flags a widely imported dependency that accounts for most of what ships", () => {
+    const f = tree(40)?.findings.find((x) => x.rule === "dominant");
+    assert.ok(f, "60 of 62 shipped packages come only through it");
+    assert.match(
+      f.message,
+      /framework: 60 of the 62 shipped packages \(97%\) come only through it/,
+    );
+    assert.match(f.message, /imported in 40 files/);
+  });
+
+  it("does not flag it twice when it is already heavy", () => {
+    const r = tree(2);
+    assert.ok(r?.findings.some((x) => x.rule === "heavy" && x.subject === "framework"));
+    assert.ok(!r?.findings.some((x) => x.rule === "dominant"));
+  });
+
+  it("does not flag a dependency that takes a small share, or only development tools", () => {
+    const { lock, manifest } = fixture();
+    const r = analyseSurface({ lock, manifest, usage: usage({ big: 40, small: 40 }, "tool") });
+    assert.ok(!r?.findings.some((x) => x.rule === "dominant"));
+  });
+});

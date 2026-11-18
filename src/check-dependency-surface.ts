@@ -9,19 +9,22 @@
  * positives first.
  */
 import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import {
-  analyseSurface,
+  analyseGraph,
+  graphFromNpmLock,
+  type DepGraph,
   type NpmLock,
   type ProjectManifest,
   type SurfaceFinding,
   type SurfaceReport,
 } from "./dependency-surface.js";
+import { graphFromYarnLock } from "./dependency-surface-yarn.js";
 import { scanSurfaceUsage } from "./dependency-surface-imports.js";
 
 const NAME = "dependency surface";
-const OTHER_LOCKFILES = ["yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"];
+const OTHER_LOCKFILES = ["pnpm-lock.yaml", "bun.lock", "bun.lockb"];
 const BLIND_SPOTS =
   "Reads imports, scripts and configs: dynamic imports, tools started from elsewhere and packages a framework loads by convention are not seen, so these are suggestions";
 
@@ -45,13 +48,14 @@ async function readJson<T>(path: string): Promise<T | null> {
 
 function summaryRow(
   report: SurfaceReport,
-  scanned: { truncated: boolean; files: number },
+  source: string,
+  scanned: { truncated: boolean; files: number; workspaceRoot: boolean },
 ): SecurityCheckResult {
   const t = report.totals;
   const heaviest = [...report.direct].sort((a, b) => b.brings - a.brings)[0];
   const parts = [
     `${t.direct} direct (${t.directProd} prod, ${t.directDev} dev)`,
-    `${t.all} packages in the lockfile: ${t.shipped} shipped, ${t.devOnly} development only`,
+    `${t.all} packages in ${source}: ${t.shipped} shipped, ${t.devOnly} development only`,
   ];
   if (heaviest && heaviest.brings > 0) {
     parts.push(
@@ -64,11 +68,22 @@ function summaryRow(
       : `${new Set(report.findings.map((f) => f.rule)).size} thing(s) worth a look`,
   );
   const limit = scanned.truncated ? ` Scanned the first ${scanned.files} source files only.` : "";
+  const unresolved =
+    report.unresolvedDirect.length > 0
+      ? ` Not found in ${source}: ${listedNames(report.unresolvedDirect, ", ")}.`
+      : "";
+  const workspace = scanned.workspaceRoot
+    ? " This is a workspace root: the packages it names have their own dependencies, which are not counted as direct."
+    : "";
+  const missing =
+    report.cannotSee.length > 0
+      ? ` Not checked, because ${source} does not carry it: ${report.cannotSee.join(" and ")}.`
+      : "";
   return {
     category: "dependency",
     name: NAME,
     status: "pass",
-    detail: `${parts.join("; ")}. ${BLIND_SPOTS}.${limit}`,
+    detail: `${parts.join("; ")}. ${BLIND_SPOTS}.${limit}${missing}${unresolved}${workspace}`,
   };
 }
 
@@ -84,6 +99,12 @@ function groupDetail(rule: string, group: SurfaceFinding[]): string {
     return `${group.length} runtime ${group.length === 1 ? "dependency is" : "dependencies are"} imported nowhere and named in no script or config: ${listedNames(
       group.map((f) => f.subject),
       ", ",
+    )}`;
+  }
+  if (rule === "dominant") {
+    return `${group.length === 1 ? "a dependency takes" : `${group.length} dependencies take`} a large share of what ships: ${listedNames(
+      group.map((f) => f.message),
+      "; ",
     )}`;
   }
   if (rule === "heavy") {
@@ -109,37 +130,117 @@ function findingRows(findings: SurfaceFinding[]): SecurityCheckResult[] {
   }));
 }
 
+/** The lockfile to read and the graph it gives, or the row that says why it could not be read. */
+async function loadGraph(
+  dir: string,
+  manifest: ProjectManifest,
+): Promise<{ graph: DepGraph; source: string } | SecurityCheckResult | null> {
+  const lockPath = join(dir, "package-lock.json");
+  if (await exists(lockPath)) {
+    const lock = await readJson<NpmLock>(lockPath);
+    if (!lock) return skip("package-lock.json could not be read");
+    const graph = graphFromNpmLock(lock, manifest);
+    if (!graph) {
+      return skip(
+        `lockfileVersion ${lock.lockfileVersion ?? "?"} has no package list; npm 7 or newer writes one`,
+      );
+    }
+    return { graph, source: "package-lock.json" };
+  }
+  const yarnPath = join(dir, "yarn.lock");
+  if (await exists(yarnPath)) {
+    const text = await readFile(yarnPath, "utf8").catch(() => "");
+    const graph = graphFromYarnLock(text, manifest);
+    if (!graph)
+      return skip("yarn.lock is neither the classic nor the berry format, so it was not read");
+    return { graph, source: "yarn.lock" };
+  }
+  for (const other of OTHER_LOCKFILES) {
+    if (await exists(join(dir, other))) {
+      return skip(
+        `this analysis reads package-lock.json and yarn.lock; found ${other}, which is not read yet`,
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * A lockfile that is missing most of the project's direct dependencies is out of date or belongs to
+ * another project. Totals read from it would be wrong, so say that and measure nothing.
+ */
+function staleLockfile(
+  report: SurfaceReport,
+  manifest: ProjectManifest,
+  source: string,
+): SecurityCheckResult | null {
+  const declared =
+    Object.keys(manifest.dependencies ?? {}).length +
+    Object.keys(manifest.devDependencies ?? {}).length;
+  const missing = report.unresolvedDirect;
+  if (missing.length < 3 || missing.length * 4 < declared) return null;
+  return skip(
+    `${missing.length} of ${declared} direct dependencies are not in ${source} (${listedNames(missing, ", ")}): it is out of date or belongs to another project, so nothing was measured`,
+  );
+}
+
+const MAX_PARENTS = 5;
+
+/** Ancestor folders that declare a workspace (a `workspaces` field or a lerna.json), nearest first. */
+async function workspaceRoots(root: string): Promise<string[]> {
+  const found: string[] = [];
+  let dir = root;
+  for (let i = 0; i < MAX_PARENTS; i++) {
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+    const manifest = await readJson<ProjectManifest>(join(dir, "package.json"));
+    if (
+      manifest &&
+      (manifest.workspaces !== undefined || (await exists(join(dir, "lerna.json"))))
+    ) {
+      found.push(dir);
+    }
+  }
+  return found;
+}
+
+const posix = (p: string): string => p.split("\\").join("/");
+
 export async function checkDependencySurface(root: string): Promise<SecurityCheckResult[]> {
   const manifestPath = join(root, "package.json");
   if (!(await exists(manifestPath))) return [];
-
-  const lockPath = join(root, "package-lock.json");
-  if (!(await exists(lockPath))) {
-    for (const other of OTHER_LOCKFILES) {
-      if (await exists(join(root, other))) {
-        return [
-          skip(`this analysis reads package-lock.json only; found ${other}, which is not read yet`),
-        ];
-      }
-    }
-    return [];
-  }
-
   const manifest = await readJson<ProjectManifest>(manifestPath);
-  const lock = await readJson<NpmLock>(lockPath);
-  if (!manifest || !lock) return [skip("package.json or package-lock.json could not be read")];
+  if (!manifest) return [skip("package.json could not be read")];
 
-  const usage = await scanSurfaceUsage(root, manifest);
-  const report = analyseSurface({ lock, manifest, usage });
-  if (!report) {
+  // The project's own lockfile first. A member of a workspace often has none, or a stale leftover,
+  // and the lockfile that governs it is the workspace root's.
+  let failure: SecurityCheckResult | null = null;
+  let usage: Awaited<ReturnType<typeof scanSurfaceUsage>> | null = null;
+  for (const dir of [root, ...(await workspaceRoots(root))]) {
+    const loaded = await loadGraph(dir, manifest);
+    if (loaded === null) continue;
+    if ("status" in loaded) {
+      failure ??= loaded;
+      continue;
+    }
+    usage ??= await scanSurfaceUsage(root, manifest);
+    const report = analyseGraph({ graph: loaded.graph, manifest, usage });
+    const source = dir === root ? loaded.source : `${posix(relative(root, dir))}/${loaded.source}`;
+    const stale = staleLockfile(report, manifest, source);
+    if (stale) {
+      failure ??= stale;
+      continue;
+    }
     return [
-      skip(
-        `lockfileVersion ${lock.lockfileVersion ?? "?"} has no package list; npm 7 or newer writes one`,
-      ),
+      summaryRow(report, source, {
+        truncated: usage.truncated,
+        files: usage.filesScanned,
+        workspaceRoot:
+          manifest.workspaces !== undefined || (await exists(join(root, "lerna.json"))),
+      }),
+      ...findingRows(report.findings),
     ];
   }
-  return [
-    summaryRow(report, { truncated: usage.truncated, files: usage.filesScanned }),
-    ...findingRows(report.findings),
-  ];
+  return failure ? [failure] : [];
 }

@@ -36,6 +36,8 @@ export interface ProjectManifest {
   devDependencies?: Record<string, string>;
   engines?: { node?: string };
   scripts?: Record<string, string>;
+  /** Present in a monorepo root. The packages it names have their own dependencies. */
+  workspaces?: unknown;
 }
 
 /** What the project's own files say about its dependencies. */
@@ -71,7 +73,8 @@ export interface SurfaceTotals {
   devOnly: number;
 }
 
-export type SurfaceRule = "unused" | "heavy" | "node-pin" | "duplicates" | "install-scripts";
+export type SurfaceRule =
+  "unused" | "heavy" | "dominant" | "node-pin" | "duplicates" | "install-scripts";
 
 export interface SurfaceFinding {
   rule: SurfaceRule;
@@ -87,6 +90,35 @@ export interface SurfaceReport {
   totals: SurfaceTotals;
   direct: DirectDependency[];
   findings: SurfaceFinding[];
+  /** What this lockfile format does not carry, so the rules that need it did not run. */
+  cannotSee: string[];
+  /** Direct dependencies from package.json that the lockfile does not hold (a stale lockfile). */
+  unresolvedDirect: string[];
+}
+
+/** One installed package, whatever lockfile it came from. */
+export interface GraphNode {
+  id: string;
+  name: string;
+  version: string;
+  /** True when no runtime dependency reaches it. */
+  dev: boolean;
+  /** Ids of the packages it needs. */
+  deps: string[];
+  bins: string[];
+  engines?: string;
+  hasInstallScript: boolean;
+  /** Built for one operating system or CPU, so optional and not installed everywhere. */
+  platformOnly: boolean;
+}
+
+/** The installed tree as a graph. npm and yarn lockfiles both become one of these. */
+export interface DepGraph {
+  nodes: Map<string, GraphNode>;
+  /** The project's direct dependencies: package name to node id. */
+  direct: Map<string, string>;
+  /** Facts the lockfile format does not hold: "engines", "install scripts". */
+  cannotSee: string[];
 }
 
 /**
@@ -96,6 +128,13 @@ export interface SurfaceReport {
  */
 const HEAVY_ONLY_THROUGH = 15;
 const HEAVY_MAX_IMPORT_SITES = 3;
+/**
+ * A runtime dependency is "dominant" when the packages only it needs are at least this many and
+ * this share of everything that ships, however widely it is imported. A framework is a dependency
+ * too: its weight is worth setting against the size of the app, not only against how often it is used.
+ */
+const DOMINANT_MIN_ONLY_THROUGH = 30;
+const DOMINANT_MIN_SHARE = 0.25;
 const LISTED = 5;
 
 const nameOf = (loc: string): string => loc.replace(/^.*node_modules\//, "");
@@ -120,44 +159,70 @@ function resolveFrom(
   }
 }
 
-/** The package names reachable from one location, not counting the location itself. */
-function closureOf(
-  packages: Record<string, NpmLockEntry>,
-  start: string,
-  direct: ReadonlySet<string>,
-): Set<string> {
+function binNamesOf(entry: NpmLockEntry): string[] {
+  return entry.bin && typeof entry.bin !== "string" ? Object.keys(entry.bin) : [];
+}
+
+/** Turn an npm lockfile (version 2 or 3) into a graph. Null when it has no flat package list. */
+export function graphFromNpmLock(lock: NpmLock, manifest: ProjectManifest): DepGraph | null {
+  const packages = lock.packages;
+  if (!packages) return null;
+  const directNames = new Set([
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.devDependencies ?? {}),
+  ]);
+  const nodes = new Map<string, GraphNode>();
+  for (const [loc, entry] of Object.entries(packages)) {
+    if (!isThirdParty(loc, entry)) continue;
+    // A peer the project depends on directly is the project's own weight, not this package's.
+    const peers = Object.fromEntries(
+      Object.entries(entry.peerDependencies ?? {}).filter(([name]) => !directNames.has(name)),
+    );
+    const wanted = { ...entry.dependencies, ...entry.optionalDependencies, ...peers };
+    const deps = Object.keys(wanted)
+      .map((name) => resolveFrom(packages, loc, name))
+      .filter((id): id is string => id !== null);
+    nodes.set(loc, {
+      id: loc,
+      name: nameOf(loc),
+      version: entry.version ?? "",
+      dev: entry.dev === true,
+      deps,
+      bins: binNamesOf(entry),
+      engines: entry.engines?.node,
+      hasInstallScript: entry.hasInstallScript === true,
+      platformOnly: entry.optional === true || entry.os !== undefined || entry.cpu !== undefined,
+    });
+  }
+  const direct = new Map<string, string>();
+  for (const name of directNames) {
+    const id = resolveFrom(packages, "", name);
+    if (id) direct.set(name, id);
+  }
+  return { nodes, direct, cannotSee: [] };
+}
+
+/** The package names reachable from one node, not counting the node itself. */
+function closureOf(graph: DepGraph, start: string): Set<string> {
   const seen = new Set<string>();
   const stack = [start];
   while (stack.length > 0) {
-    const loc = stack.pop() as string;
-    if (seen.has(loc)) continue;
-    seen.add(loc);
-    const e = packages[loc];
-    // A peer the project depends on directly is the project's own weight, not this package's.
-    const peers = Object.fromEntries(
-      Object.entries(e.peerDependencies ?? {}).filter(([name]) => !direct.has(name)),
-    );
-    const deps = { ...e.dependencies, ...e.optionalDependencies, ...peers };
-    for (const dep of Object.keys(deps)) {
-      const next = resolveFrom(packages, loc, dep);
-      if (next) stack.push(next);
-    }
+    const id = stack.pop() as string;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const dep of graph.nodes.get(id)?.deps ?? []) stack.push(dep);
   }
   seen.delete(start);
-  return new Set([...seen].map(nameOf));
+  return new Set([...seen].map((id) => graph.nodes.get(id)?.name ?? id));
 }
 
-function totalsOf(
-  packages: Record<string, NpmLockEntry>,
-  manifest: ProjectManifest,
-): SurfaceTotals {
+function totalsOf(graph: DepGraph, manifest: ProjectManifest): SurfaceTotals {
   const all = new Set<string>();
   const dev = new Set<string>();
   const shipped = new Set<string>();
-  for (const [loc, entry] of Object.entries(packages)) {
-    if (!isThirdParty(loc, entry)) continue;
-    all.add(nameOf(loc));
-    (entry.dev ? dev : shipped).add(nameOf(loc));
+  for (const node of graph.nodes.values()) {
+    all.add(node.name);
+    (node.dev ? dev : shipped).add(node.name);
   }
   const directProd = Object.keys(manifest.dependencies ?? {}).length;
   const directDev = Object.keys(manifest.devDependencies ?? {}).length;
@@ -172,7 +237,7 @@ function totalsOf(
 }
 
 function directDependencies(
-  packages: Record<string, NpmLockEntry>,
+  graph: DepGraph,
   manifest: ProjectManifest,
   usage: SurfaceUsage,
 ): DirectDependency[] {
@@ -181,10 +246,9 @@ function directDependencies(
     ...Object.keys(manifest.devDependencies ?? {}).map((n): [string, "prod" | "dev"] => [n, "dev"]),
   ];
   const closures = new Map<string, Set<string>>();
-  const directNames = new Set(declared.map(([name]) => name));
   for (const [name] of declared) {
-    const loc = resolveFrom(packages, "", name);
-    if (loc) closures.set(name, closureOf(packages, loc, directNames));
+    const id = graph.direct.get(name);
+    if (id) closures.set(name, closureOf(graph, id));
   }
   return declared
     .filter(([name]) => closures.has(name))
@@ -209,11 +273,6 @@ function directDependencies(
 
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-function binNames(entry: NpmLockEntry | undefined): string[] {
-  if (!entry?.bin) return [];
-  return typeof entry.bin === "string" ? [] : Object.keys(entry.bin);
-}
-
 /** True when the package or one of its commands is named in the scripts, configs or workflows. */
 function mentioned(name: string, bins: string[], text: string): boolean {
   return [name, ...bins].some((n) =>
@@ -223,7 +282,7 @@ function mentioned(name: string, bins: string[], text: string): boolean {
 
 function unusedFindings(
   direct: DirectDependency[],
-  packages: Record<string, NpmLockEntry>,
+  graph: DepGraph,
   usage: SurfaceUsage,
 ): SurfaceFinding[] {
   // Runtime dependencies only. A development tool is often run without being named by a script
@@ -232,8 +291,8 @@ function unusedFindings(
   return direct
     .filter((d) => d.kind === "prod" && d.importSites === 0 && !d.name.startsWith("@types/"))
     .filter((d) => {
-      const entry = packages[`node_modules/${d.name}`];
-      return !mentioned(d.name, binNames(entry), usage.scriptText);
+      const node = graph.nodes.get(graph.direct.get(d.name) ?? "");
+      return !mentioned(d.name, node?.bins ?? [], usage.scriptText);
     })
     .map((d) => ({
       rule: "unused" as const,
@@ -276,6 +335,27 @@ function heavyFindings(direct: DirectDependency[]): SurfaceFinding[] {
     }));
 }
 
+function dominantFindings(direct: DirectDependency[], shipped: number): SurfaceFinding[] {
+  if (shipped === 0) return [];
+  return direct
+    .filter(
+      (d) =>
+        d.kind === "prod" &&
+        d.onlyThrough >= DOMINANT_MIN_ONLY_THROUGH &&
+        d.onlyThrough / shipped >= DOMINANT_MIN_SHARE &&
+        d.productionSites > HEAVY_MAX_IMPORT_SITES,
+    )
+    .sort((a, b) => b.onlyThrough - a.onlyThrough || a.name.localeCompare(b.name))
+    .map((d) => ({
+      rule: "dominant" as const,
+      subject: d.name,
+      message: `${d.name}: ${d.onlyThrough} of the ${shipped} shipped packages (${Math.round((d.onlyThrough / shipped) * 100)}%) come only through it; ${useText(d)}`,
+      suggestion:
+        "A framework is a dependency too. Check that the app needs what it brings, and what it would take to build the part you use.",
+      weight: d.onlyThrough,
+    }));
+}
+
 /** The highest Node major an `engines.node` range allows. Infinity when open-ended or unreadable. */
 export function maxNodeMajor(range: string): number {
   let highest = 0;
@@ -304,19 +384,13 @@ function listed(items: string[]): string {
   return items.length > LISTED ? `${shown}, +${items.length - LISTED} more` : shown;
 }
 
-function nodePinFindings(
-  packages: Record<string, NpmLockEntry>,
-  manifest: ProjectManifest,
-): SurfaceFinding[] {
+function nodePinFindings(graph: DepGraph, manifest: ProjectManifest): SurfaceFinding[] {
   const floor = nodeFloor(manifest);
-  if (floor === undefined) return [];
+  if (floor === undefined || graph.cannotSee.includes("engines")) return [];
   const held = new Map<string, string>();
-  for (const [loc, entry] of Object.entries(packages)) {
-    const range = entry.engines?.node;
-    if (!range || !isThirdParty(loc, entry) || maxNodeMajor(range) >= floor) continue;
-    // A package built for one operating system or CPU is optional and never installed elsewhere.
-    if (entry.optional || entry.os || entry.cpu) continue;
-    held.set(nameOf(loc), range);
+  for (const node of graph.nodes.values()) {
+    if (!node.engines || node.platformOnly || maxNodeMajor(node.engines) >= floor) continue;
+    held.set(node.name, node.engines);
   }
   if (held.size === 0) return [];
   const names = [...held].map(([n, r]) => `${n} (${r})`).sort();
@@ -332,13 +406,13 @@ function nodePinFindings(
   ];
 }
 
-function duplicateFindings(packages: Record<string, NpmLockEntry>): SurfaceFinding[] {
+function duplicateFindings(graph: DepGraph): SurfaceFinding[] {
   const versions = new Map<string, Set<string>>();
-  for (const [loc, entry] of Object.entries(packages)) {
-    if (!isThirdParty(loc, entry) || !entry.version) continue;
-    const set = versions.get(nameOf(loc)) ?? new Set<string>();
-    set.add(entry.version);
-    versions.set(nameOf(loc), set);
+  for (const node of graph.nodes.values()) {
+    if (!node.version) continue;
+    const set = versions.get(node.name) ?? new Set<string>();
+    set.add(node.version);
+    versions.set(node.name, set);
   }
   const dupes = [...versions]
     .filter(([, set]) => set.size > 1)
@@ -356,10 +430,11 @@ function duplicateFindings(packages: Record<string, NpmLockEntry>): SurfaceFindi
   ];
 }
 
-function installScriptFindings(packages: Record<string, NpmLockEntry>): SurfaceFinding[] {
+function installScriptFindings(graph: DepGraph): SurfaceFinding[] {
+  if (graph.cannotSee.includes("install scripts")) return [];
   const names = new Set<string>();
-  for (const [loc, entry] of Object.entries(packages)) {
-    if (isThirdParty(loc, entry) && !entry.dev && entry.hasInstallScript) names.add(nameOf(loc));
+  for (const node of graph.nodes.values()) {
+    if (!node.dev && node.hasInstallScript) names.add(node.name);
   }
   if (names.size === 0) return [];
   return [
@@ -374,25 +449,40 @@ function installScriptFindings(packages: Record<string, NpmLockEntry>): SurfaceF
   ];
 }
 
-/** Measure the dependency tree. Null when the lockfile has no flat package list to read. */
+/** Measure a dependency graph. The one analysis npm and yarn lockfiles both feed. */
+export function analyseGraph(input: {
+  graph: DepGraph;
+  manifest: ProjectManifest;
+  usage: SurfaceUsage;
+}): SurfaceReport {
+  const { graph, manifest, usage } = input;
+  const direct = directDependencies(graph, manifest, usage);
+  const totals = totalsOf(graph, manifest);
+  return {
+    totals,
+    direct,
+    findings: [
+      ...unusedFindings(direct, graph, usage),
+      ...heavyFindings(direct),
+      ...dominantFindings(direct, totals.shipped),
+      ...nodePinFindings(graph, manifest),
+      ...duplicateFindings(graph),
+      ...installScriptFindings(graph),
+    ],
+    cannotSee: graph.cannotSee,
+    unresolvedDirect: [
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.devDependencies ?? {}),
+    ].filter((name) => !graph.direct.has(name)),
+  };
+}
+
+/** Measure an npm lockfile. Null when it carries no package list (version 1). */
 export function analyseSurface(input: {
   lock: NpmLock;
   manifest: ProjectManifest;
   usage: SurfaceUsage;
 }): SurfaceReport | null {
-  const { lock, manifest, usage } = input;
-  const packages = lock.packages;
-  if (!packages) return null;
-  const direct = directDependencies(packages, manifest, usage);
-  return {
-    totals: totalsOf(packages, manifest),
-    direct,
-    findings: [
-      ...unusedFindings(direct, packages, usage),
-      ...heavyFindings(direct),
-      ...nodePinFindings(packages, manifest),
-      ...duplicateFindings(packages),
-      ...installScriptFindings(packages),
-    ],
-  };
+  const graph = graphFromNpmLock(input.lock, input.manifest);
+  return graph ? analyseGraph({ graph, manifest: input.manifest, usage: input.usage }) : null;
 }

@@ -38,6 +38,9 @@ const CONFIG_NAME =
 const MAX_FILE_BYTES = 1_000_000;
 const MAX_CONFIG_BYTES = 200_000;
 const DEFAULT_MAX_FILES = 20_000;
+/** Longest the scan may spend reading source, so `kit check` is never held up by a slow disk. */
+const DEFAULT_MAX_MILLIS = 8_000;
+const READ_BATCH = 32;
 /** Total source text read, so a huge tree cannot make a check run for minutes. */
 export const DEFAULT_MAX_BYTES = 64_000_000;
 
@@ -126,31 +129,57 @@ async function configText(root: string): Promise<string> {
  * Count the source files that import each package, and gather the text of scripts, configs and
  * workflows. Stops at `maxFiles` source files and says so in `truncated`.
  */
+/** Count one file's imports, and again as a production import when it is not a test file. */
+function recordImports(
+  file: string,
+  text: string,
+  relativePath: string,
+  all: Map<string, number>,
+  production: Map<string, number>,
+): void {
+  const names = STYLE.test(file) ? styleImportedPackages(text) : importedPackages(text);
+  const isProduction = !TEST_FILE.test(relativePath);
+  for (const name of names) {
+    all.set(name, (all.get(name) ?? 0) + 1);
+    if (isProduction) production.set(name, (production.get(name) ?? 0) + 1);
+  }
+}
+
 export async function scanSurfaceUsage(
   root: string,
   manifest: ProjectManifest,
-  opts: { maxFiles?: number; maxBytes?: number } = {},
+  opts: { maxFiles?: number; maxBytes?: number; maxMillis?: number } = {},
 ): Promise<SurfaceUsage & { truncated: boolean; filesScanned: number }> {
-  const cap = opts.maxFiles ?? DEFAULT_MAX_FILES;
   const files: string[] = [];
-  const truncated = await walk(root, files, cap);
+  const listCapped = await walk(root, files, opts.maxFiles ?? DEFAULT_MAX_FILES);
   const importSites = new Map<string, number>();
   const productionImportSites = new Map<string, number>();
-  const budget = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const byteBudget = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const timeBudget = opts.maxMillis ?? DEFAULT_MAX_MILLIS;
+  const started = Date.now();
   let bytes = 0;
-  let overBudget = false;
-  for (const file of files) {
-    const text = await readCapped(file, MAX_FILE_BYTES);
-    bytes += text.length;
-    if (bytes > budget) {
-      overBudget = true;
-      break;
-    }
-    const production = !TEST_FILE.test(relative(root, file));
-    const names = STYLE.test(file) ? styleImportedPackages(text) : importedPackages(text);
-    for (const name of names) {
-      importSites.set(name, (importSites.get(name) ?? 0) + 1);
-      if (production) productionImportSites.set(name, (productionImportSites.get(name) ?? 0) + 1);
+  let scanned = 0;
+  let stopped = false;
+  // Read in parallel batches: a cold disk is slow per file, not per byte. A budget on time and on
+  // bytes keeps a huge tree from stalling the check that asked for the numbers.
+  for (let i = 0; i < files.length && !stopped; i += READ_BATCH) {
+    if (Date.now() - started >= timeBudget) break;
+    const batch = files.slice(i, i + READ_BATCH);
+    const texts = await Promise.all(batch.map((file) => readCapped(file, MAX_FILE_BYTES)));
+    for (let j = 0; j < batch.length; j++) {
+      bytes += texts[j].length;
+      if (bytes > byteBudget) {
+        stopped = true;
+        break;
+      }
+      scanned++;
+      recordImports(
+        batch[j],
+        texts[j],
+        relative(root, batch[j]),
+        importSites,
+        productionImportSites,
+      );
     }
   }
   const scripts = Object.values(manifest.scripts ?? {}).join("\n");
@@ -158,7 +187,7 @@ export async function scanSurfaceUsage(
     importSites,
     productionImportSites,
     scriptText: `${scripts}\n${await configText(root)}`,
-    truncated: truncated || overBudget,
-    filesScanned: files.length,
+    truncated: listCapped || scanned < files.length,
+    filesScanned: scanned,
   };
 }

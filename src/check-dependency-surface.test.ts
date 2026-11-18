@@ -77,8 +77,8 @@ describe("checkDependencySurface", () => {
     }
   });
 
-  it("skips honestly for a yarn or pnpm project, naming the lockfile it did not read", async () => {
-    for (const file of ["yarn.lock", "pnpm-lock.yaml"]) {
+  it("skips honestly for a pnpm or bun project, naming the lockfile it did not read", async () => {
+    for (const file of ["pnpm-lock.yaml", "bun.lock"]) {
       const dir = project({ "package.json": { dependencies: { used: "1.0.0" } }, [file]: "" });
       try {
         const rows = await checkDependencySurface(dir);
@@ -167,6 +167,239 @@ describe("checkDependencySurface rows", () => {
     try {
       const unused = (await checkDependencySurface(dir)).find((r) => r.name === `${NAME}: unused`);
       assert.match(unused?.detail ?? "", /\+3 more/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("checkDependencySurface with yarn.lock", () => {
+  const YARN = `# yarn lockfile v1
+
+
+idle@^1.0.0:
+  version "1.0.0"
+
+used@^1.0.0:
+  version "1.0.0"
+  dependencies:
+    shared "^1.0.0"
+
+shared@^1.0.0:
+  version "1.0.0"
+`;
+
+  it("measures a yarn project and says what yarn.lock cannot tell it", async () => {
+    const dir = project({
+      "package.json": { dependencies: { used: "^1.0.0", idle: "^1.0.0" } },
+      "yarn.lock": YARN,
+      "src/a.js": 'import u from "used";\n',
+    });
+    try {
+      const rows = await checkDependencySurface(dir);
+      const summary = rows.find((r) => r.name === NAME);
+      assert.ok(summary);
+      assert.equal(summary.status, "pass");
+      assert.match(summary.detail, /2 direct \(2 prod, 0 dev\)/);
+      assert.match(summary.detail, /3 packages/);
+      assert.match(summary.detail, /yarn\.lock/);
+      assert.match(summary.detail, /engines and install scripts/);
+      const unused = rows.find((r) => r.name === `${NAME}: unused`);
+      assert.match(unused?.detail ?? "", /idle/);
+      for (const r of rows) assert.equal(r.status, "pass", `${r.name} must not move the verdict`);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("checkDependencySurface with yarn.lock, unreadable and mixed", () => {
+  const YARN = `# yarn lockfile v1\n\nidle@^1.0.0:\n  version "1.0.0"\n\nused@^1.0.0:\n  version "1.0.0"\n  dependencies:\n    shared "^1.0.0"\n\nshared@^1.0.0:\n  version "1.0.0"\n`;
+
+  it("skips, naming yarn.lock, when the file is neither the classic nor the berry format", async () => {
+    const dir = project({
+      "package.json": { dependencies: { used: "^1.0.0" } },
+      "yarn.lock": "something else entirely\n",
+    });
+    try {
+      const rows = await checkDependencySurface(dir);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].status, "skip");
+      assert.match(rows[0].detail, /yarn\.lock/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("prefers package-lock.json when a project has both", async () => {
+    const dir = project({
+      "package.json": { dependencies: { used: "1.0.0" } },
+      "package-lock.json": {
+        lockfileVersion: 3,
+        packages: { "": {}, "node_modules/used": { version: "1.0.0" } },
+      },
+      "yarn.lock": YARN,
+      "src/a.js": 'import u from "used";\n',
+    });
+    try {
+      const summary = (await checkDependencySurface(dir)).find((r) => r.name === NAME);
+      assert.match(
+        summary?.detail ?? "",
+        /1 packages? in package-lock\.json|1 packages? in the lockfile/,
+      );
+      assert.doesNotMatch(summary?.detail ?? "", /yarn\.lock/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("checkDependencySurface when package.json and the lockfile disagree", () => {
+  const YARN = `# yarn lockfile v1
+
+
+used@^1.0.0:
+  version "1.0.0"
+`;
+
+  it("refuses to measure when most direct dependencies are missing from the lockfile", async () => {
+    const dir = project({
+      "package.json": {
+        dependencies: { used: "^1.0.0", a: "^1.0.0", b: "^1.0.0", c: "^1.0.0" },
+      },
+      "yarn.lock": YARN,
+    });
+    try {
+      const rows = await checkDependencySurface(dir);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].status, "skip");
+      assert.match(rows[0].detail, /3 of 4 direct dependencies/);
+      assert.match(rows[0].detail, /out of date|another project/);
+      assert.match(rows[0].detail, /\ba\b/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("measures, and names the one it could not find, when only a minority is missing", async () => {
+    const lock = `# yarn lockfile v1\n\nused@^1.0.0:\n  version "1.0.0"\n\nmore@^1.0.0:\n  version "1.0.0"\n\nthird@^1.0.0:\n  version "1.0.0"\n\nfourth@^1.0.0:\n  version "1.0.0"\n`;
+    const dir = project({
+      "package.json": {
+        dependencies: {
+          used: "^1.0.0",
+          more: "^1.0.0",
+          third: "^1.0.0",
+          fourth: "^1.0.0",
+          odd: "workspace:*",
+        },
+      },
+      "yarn.lock": lock,
+    });
+    try {
+      const summary = (await checkDependencySurface(dir)).find((r) => r.name === NAME);
+      assert.ok(summary);
+      assert.match(summary.detail, /Not found in yarn\.lock: odd/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("says when the project is a workspace root, whose packages are not counted as direct", async () => {
+    const dir = project({
+      "package.json": { workspaces: ["packages/*"], devDependencies: { used: "^1.0.0" } },
+      "yarn.lock": YARN,
+    });
+    try {
+      const summary = (await checkDependencySurface(dir)).find((r) => r.name === NAME);
+      assert.match(summary?.detail ?? "", /workspace root/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("checkDependencySurface in a workspace", () => {
+  const ROOT_LOCK = `# yarn lockfile v1
+
+
+used@^1.0.0:
+  version "1.0.0"
+  dependencies:
+    shared "^1.0.0"
+
+shared@^1.0.0:
+  version "1.0.0"
+
+other-member-only@^2.0.0:
+  version "2.0.0"
+`;
+  const STALE_LOCK = `# yarn lockfile v1\n\nold@^1.0.0:\n  version "1.0.0"\n`;
+
+  it("reads the workspace root's lockfile when the member has none, and counts only what it reaches", async () => {
+    const dir = project({
+      "package.json": { workspaces: ["packages/*"] },
+      "yarn.lock": ROOT_LOCK,
+      "packages/app/package.json": { dependencies: { used: "^1.0.0" } },
+      "packages/app/src/a.js": 'import u from "used";\n',
+    });
+    try {
+      const rows = await checkDependencySurface(join(dir, "packages", "app"));
+      const summary = rows.find((r) => r.name === NAME);
+      assert.ok(summary);
+      assert.match(summary.detail, /2 packages in \.\.\/\.\.\/yarn\.lock/);
+      assert.doesNotMatch(summary.detail, /other-member-only/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("falls back to the workspace root when the member's own lockfile is stale", async () => {
+    const dir = project({
+      "package.json": { workspaces: ["packages/*"] },
+      "yarn.lock": ROOT_LOCK,
+      "packages/app/package.json": {
+        dependencies: { used: "^1.0.0", shared: "^1.0.0", more: "^1.0.0" },
+      },
+      "packages/app/yarn.lock": STALE_LOCK,
+    });
+    try {
+      const rows = await checkDependencySurface(join(dir, "packages", "app"));
+      assert.equal(rows[0].status, "pass");
+      assert.match(rows[0].detail, /in \.\.\/\.\.\/yarn\.lock/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("checkDependencySurface in a workspace, which lockfile counts", () => {
+  const ROOT_LOCK = `# yarn lockfile v1\n\nused@^1.0.0:\n  version "1.0.0"\n  dependencies:\n    shared "^1.0.0"\n\nshared@^1.0.0:\n  version "1.0.0"\n`;
+
+  it("does not borrow the lockfile of a parent folder that is not a workspace root", async () => {
+    const dir = project({
+      "package.json": { dependencies: { used: "^1.0.0" } },
+      "yarn.lock": ROOT_LOCK,
+      "packages/app/package.json": { dependencies: { used: "^1.0.0" } },
+    });
+    try {
+      assert.deepEqual(await checkDependencySurface(join(dir, "packages", "app")), []);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("recognises a lerna root as a workspace root", async () => {
+    const dir = project({
+      "package.json": { devDependencies: { lerna: "^4.0.0" } },
+      "lerna.json": { version: "independent" },
+      "yarn.lock": ROOT_LOCK,
+      "packages/app/package.json": { dependencies: { used: "^1.0.0" } },
+    });
+    try {
+      const summary = (await checkDependencySurface(join(dir, "packages", "app"))).find(
+        (r) => r.name === NAME,
+      );
+      assert.match(summary?.detail ?? "", /\.\.\/\.\.\/yarn\.lock/);
     } finally {
       rmTemp(dir);
     }
