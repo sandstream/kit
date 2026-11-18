@@ -1,7 +1,7 @@
 /**
  * ADR-0002's claim, enforced.
  *
- * WHY THIS FILE EXISTS. ADR-0002 is titled "Dependency floor — four runtime deps, stdlib
+ * WHY THIS FILE EXISTS. ADR-0002 is titled "Dependency floor — three runtime deps, stdlib
  * otherwise", and CLAUDE.md lists it among kit's deterministic rules. Its `kit-enforce`
  * block enforces something narrower: a `forbid_import` deny-list of twelve named packages
  * (lodash, axios, moment, …) checked in `src/**`. Measured — by accidentally adding a
@@ -29,19 +29,14 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The floor ADR-0002 declares. Changing this set requires amending that ADR. */
-const RUNTIME_DEPENDENCIES = [
-  "@modelcontextprotocol/sdk",
-  "@upstash/redis",
-  "smol-toml",
-  "zod",
-] as const;
+const RUNTIME_DEPENDENCIES = ["@modelcontextprotocol/sdk", "smol-toml", "zod"] as const;
 
 function manifest(): { dependencies?: Record<string, string> } {
   return JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf-8")) as {
@@ -72,5 +67,39 @@ describe("ADR-0002 dependency floor", () => {
         `${name} is pinned as "${range}" — ADR-0002's floor is only meaningful if the versions cannot float`,
       );
     }
+  });
+});
+
+/** Production source files under src/: every .ts except tests and test support. */
+function productionSources(dir = join(REPO_ROOT, "src")): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return productionSources(path);
+    return /\.ts$/.test(entry.name) && !/\.test(-support)?\.ts$/.test(entry.name) ? [path] : [];
+  });
+}
+
+describe("ADR-0002 dependency floor, the other direction", () => {
+  // The first test above sees the manifest and the second its versions. Neither sees a package
+  // that is declared and never imported. `@upstash/redis` sat in the manifest like that, pulling
+  // in two packages for code that calls Upstash with fetch. Each declared dependency must be
+  // imported by production code, or it is not a dependency: it is surface.
+  it("every declared runtime dependency is imported by production code", () => {
+    const sources = productionSources().map((file) => ({
+      file: relative(REPO_ROOT, file),
+      text: readFileSync(file, "utf-8"),
+    }));
+    const unused = RUNTIME_DEPENDENCIES.filter((name) => {
+      const quoted = new RegExp(
+        `(?:from|import\\()\\s*["']${name.replace("/", "\\/")}(?:/[^"']*)?["']`,
+      );
+      return !sources.some((s) => quoted.test(s.text));
+    });
+    assert.deepEqual(
+      unused,
+      [],
+      `declared in package.json but imported nowhere in src/: ${unused.join(", ")}. ` +
+        "Remove it from package.json, or use it. An unused dependency still ships, and still has advisories.",
+    );
   });
 });

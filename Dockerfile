@@ -33,7 +33,7 @@ RUN npm run build
 # Stage 2: Production dependencies only.
 # Resolved from the same committed lockfile as the builder, so the runtime tree is
 # reproducible rather than a pruned leftover of the build tree. Scripts are ignored:
-# all four runtime deps are pure JS, and an install script in the image build is
+# all three runtime deps are pure JS, and an install script in the image build is
 # exactly the supply-chain surface kit's own install gate exists to refuse.
 FROM node-base AS prod-deps
 
