@@ -129,11 +129,43 @@ match the Node floor (`dependabot.yml` says so).
 - [ ] A new runtime dependency needs the written justification the rule asks for: which package,
       which version, what it does, how much of it kit uses, and what would replace it.
 
+## Phase 5: the same analysis as part of `kit review`, for any repository
+
+Today `kit review` is check, design, standards, adr and skill. None of them answers "which of
+these dependencies are heavier than the use we get from them". The nearest pieces are `kit check`
+(advisories, pinned versions, cooling period), `kit supply-chain` (install-time triage), `kit sbom`
+(a list) and `kit self-audit` (kit's own dead exports). The measurement in Phase 3 was made with a
+throwaway script. It should be a deterministic, zero-LLM analysis that anyone gets when kit runs in
+a repository, with a short list of what could be better.
+
+- [ ] **What it reports (all from the lockfile and the source, nothing executed):**
+  direct and total packages, split into shipped and development; for each direct dependency the
+  packages it brings and the packages reachable only through it; a declared dependency that no
+  source file imports; a dependency with a large closure and few import sites (the "5 percent"
+  case); packages that need an older Node than the project's floor, or an engines range that pins
+  the project to an old Node (the case that held a customer app on Node 16); several versions of the
+  same package; packages with install scripts; advisories counted per direct dependency, so the
+  heavy source of them is visible.
+- [ ] **What it says it cannot see**, so a missing finding is never read as a clean one: dynamic
+  imports, a tool used only from a script or a config file (`eslint`, `prettier`), and code reached
+  through a re-export. A development tool is judged against `scripts` and config files, not only
+  imports.
+- [ ] **Advisory, not a gate, in the first version.** Findings carry a severity of `info` or
+  `warn`. A gate comes only after it has run on several real repositories without false positives.
+- [ ] **Ecosystems:** `package-lock.json` first (kit's own repository is the test case). `yarn.lock`
+  second, because the app that prompted the rule uses it. Python and others later.
+- [ ] **Validate on a second repository** before it ships: run it on a real app with a large tree
+  and compare the numbers with a manual count and with `npm ls`.
+- [ ] Where it lives: a stage of `kit review` and a category of `kit check`, decided in the first
+  PR together with the ADR note that the rule `few-dependencies` is now measured by kit.
+
 ## Decisions
 
 1. Phase 1: **done**, in #935.
 2. Phase 2: run the spike? Recommended: yes.
 3. Phase 3: measure only? Recommended: yes.
+4. Phase 5: build the analysis into `kit review`? Recommended: yes, starting with kit's own
+   repository and `package-lock.json`.
 
 ## Not verified
 
