@@ -30,7 +30,8 @@ and can have faults, although the app never runs it.
 - **`smol-toml` (1 package, 18 files) and `zod` (1 package, 7 files)** are used widely and are
   small. TOML parsing is substantial work. Both stay unless a phase says otherwise.
 - **123 of the 232 packages in the lockfile are development only.** The ESLint chain is the largest
-  part, and it was the source of the `picomatch` advisory that blocked merges on 18 November.
+  part, and it was the source of the `picomatch` advisory that blocked merges on 18 November. The
+  per-dependency numbers are in Phase 3.
 - **The 13 adapter packages have no runtime dependencies** (checked against the published
   manifests). Nothing to do there.
 
@@ -70,14 +71,50 @@ answer. The mitigation is the small surface, the conformance test against the SD
 and the stop signal above. Writing it ourselves also removes the SDK's HTTP stack from the
 advisory list, but the stack was never loaded, so the gain is inherited surface, not a live path.
 
-## Phase 3: measure the development tools, change nothing yet
+## Phase 3: the development tools (measured 2026-11-18, decisions open)
 
-- [ ] Count the packages each development dependency brings (`eslint` with `typescript-eslint`,
-      `prettier`, `fast-check`, `tsx`, `@types/node`, `typescript`), with the lockfile method used
-      for production.
-- [ ] Record, per tool, what kit would lose without it, and whether `kit standards` already covers
-      it.
-- [ ] Peter decides from the numbers. No removal without a decision.
+Measured from the lockfile on main (212 third-party package names reachable from the root, before
+Phase 1): for each direct dependency, the packages it brings and the packages that are reachable
+only through it.
+
+| Direct dependency            | Kind | Brings | Only through it |
+| ---------------------------- | ---- | -----: | --------------: |
+| `@modelcontextprotocol/sdk`  | prod |     91 |              79 |
+| `@upstash/redis`             | prod |      2 |               2 |
+| `smol-toml`                  | prod |      1 |               1 |
+| `zod`                        | prod |      1 |               0 |
+| `eslint`                     | dev  |     76 |              56 |
+| `tsx`                        | dev  |     29 |              29 |
+| `typescript-eslint`          | dev  |     27 |              16 |
+| `@types/node`                | dev  |      2 |               2 |
+| `fast-check`                 | dev  |      2 |               2 |
+| `@eslint/js`, `globals`, `prettier`, `typescript` | dev | 1 each | 1 each |
+
+Candidates, in order of gain over risk. None is done. Each needs Peter's decision.
+
+- [ ] **`tsx` (29 packages, all only through it).** It exists for one script, `npm run dev`
+      (`tsx src/cli.ts`). That script is named in `CONTRIBUTING.md`, `docker-compose.yml`,
+      `docs/ADAPTER_GUIDE.md` and `docs/MIGRATION_GUIDE.md`. Replace it with a build and `node
+      dist/cli.js`, and change those four files. Node's own type stripping does not replace it
+      directly: kit's imports end in `.js` while the files are `.ts`, and tsx is what maps one to
+      the other. Gain: 29 dev packages. Cost: a slower edit loop.
+- [ ] **`picomatch`, `fdir`, `tinyglobby` (3 packages, dev).** They exist only because
+      `@typescript-eslint/typescript-estree` requires `tinyglobby`, which requires `fdir` and
+      `picomatch`. `picomatch` has no patched release (GHSA-fc5q-39xc-vjpf, waived until
+      2026-12-17). It cannot be replaced on its own. It goes only if `typescript-eslint` goes, or
+      if a release of `typescript-eslint` stops needing it.
+- [ ] **ESLint with `typescript-eslint` (about 100 packages, 72 only through them).** The largest
+      development cost and the source of the picomatch advisory. First list which rules kit relies
+      on and whether `tsc` strict, `kit standards` or `kit self-audit` already cover them. Replace
+      only what is covered. This is the decision with the most gain and the most risk.
+- [ ] **The Docker image carries its own copy of `picomatch`.** It is the copy bundled inside the
+      global npm (`/usr/local/lib/node_modules/npm/node_modules/tinyglobby/...`), waived in the
+      image scan until 2026-12-17. Plugin installs need npm, so it cannot simply be removed. The
+      Dockerfile already swaps one bundled package by hand (`undici`); that route is closed here,
+      because no fixed `picomatch` exists to swap in.
+- [ ] Keep: `fast-check` (2 packages, 2 test files), `prettier`, `typescript`, `@types/node`
+      (kept at 22, the Node floor), `smol-toml`, `zod`. Each is one or two packages that do real
+      work.
 
 **Known constraint.** `typescript-eslint` cannot run on TypeScript 7 yet (it refuses it, and
 tracks support for 7.1). TypeScript 6.0.3 is the highest version the lint stack allows. A move to
