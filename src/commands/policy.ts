@@ -5,6 +5,7 @@
 // and offline-verifiable. Distinct from `.kit.toml [policy.agent_writes]` (the 2.x
 // per-repo agent-write pre-approval) — this is the org-level standard.
 import { existsSync, writeFileSync, readFileSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import * as readline from "node:readline/promises";
 import { c } from "../utils/colors.js";
@@ -77,7 +78,7 @@ export async function cmdPolicy(): Promise<boolean> {
 }
 
 /**
- * `kit policy approve <operation> [--env <env>] [--ttl <seconds>]` — mint a signed, time-boxed
+ * `kit policy approve <operation> [--env <env>] [--ttl <seconds>] [--artifact <file>] [--dest <target>]` — mint a signed, time-boxed
  * approval token for an operation. An approval stands for a person, so it needs one: a terminal
  * and the operation's name typed back. An agent's tool call, CI and piped input are refused; no
  * flag or variable skips this. Signed through the resolved keystore, so a hardware mandate
@@ -88,7 +89,7 @@ async function policyApprove(root: string): Promise<boolean> {
   const operation = process.argv[4];
   if (!operation || operation.startsWith("-")) {
     console.error(
-      `${c.red}usage: kit policy approve <operation> [--env <env>] [--ttl <seconds>]${c.reset}`,
+      `${c.red}usage: kit policy approve <operation> [--env <env>] [--ttl <seconds>] [--artifact <file>] [--dest <target>]${c.reset}`,
     );
     return false;
   }
@@ -105,9 +106,15 @@ async function policyApprove(root: string): Promise<boolean> {
     console.error(`${c.red}✗ ${(e as Error).message}${c.reset}`);
     return false;
   }
+  const binding = approvalBinding();
+  if (binding === null) return false;
   if (!(await personConfirms(operation, environment, ttl))) return false;
   try {
-    const tk = mintApprovalToken(operation, environment, ttl, { root, signer: res.store });
+    const tk = mintApprovalToken(operation, environment, ttl, {
+      root,
+      signer: res.store,
+      binding,
+    });
     console.log(
       `${c.green}✓${c.reset} minted approval for ${c.bold}${operation}${c.reset} ${c.dim}(env ${environment}, expires ${tk.expires}) as ${tk.kid} → ${join(root, APPROVAL_TOKENS_FILE)}${c.reset}`,
     );
@@ -119,6 +126,27 @@ async function policyApprove(root: string): Promise<boolean> {
     console.error(`${c.red}✗ approve failed: ${(e as Error).message}${c.reset}`);
     return false;
   }
+}
+
+/**
+ * `--artifact <file>` binds the approval to the sha256 of that file's bytes, and `--dest <target>`
+ * to one destination. Null (after printing why) when the artifact cannot be read.
+ */
+function approvalBinding(): { digest?: string; dest?: string } | null {
+  const artifact = flagValue(process.argv, "--artifact");
+  const dest = flagValue(process.argv, "--dest");
+  const binding: { digest?: string; dest?: string } = {};
+  if (dest !== undefined) binding.dest = dest;
+  if (artifact === undefined) return binding;
+  try {
+    binding.digest = createHash("sha256").update(readFileSync(artifact)).digest("hex");
+  } catch (e) {
+    console.error(
+      `${c.red}✗ cannot read --artifact ${artifact}: ${(e as Error).message}${c.reset}`,
+    );
+    return null;
+  }
+  return binding;
 }
 
 /** Refuse unless a person is at a terminal and types the operation's name back. */

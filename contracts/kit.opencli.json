@@ -124,6 +124,7 @@
         "--help",
         "--install-gate",
         "--limit",
+        "--limits-gate",
         "--no-install-gate",
         "--non-interactive",
         "--read-only",
@@ -1207,6 +1208,36 @@
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
+    "gate-limits": {
+      "kind": "command",
+      "summary": "PreToolUse limits-gate: block (exit 2) a tool call once the session passes [governance.agent] max_session_minutes, max_tool_calls_per_session or max_child_agents",
+      "x-kit-accepted-flags": [
+        "--all",
+        "--allow-scripts-pending",
+        "--call",
+        "--command",
+        "--dry-run",
+        "--env",
+        "--format",
+        "--help",
+        "--non-interactive",
+        "--output",
+        "--output-document",
+        "--read-only",
+        "--readonly",
+        "--version",
+        "--with"
+      ],
+      "x-kit-args-modeled": true,
+      "x-kit-audience": "harness",
+      "x-kit-flags-without-values": [
+        "--help",
+        "--non-interactive",
+        "--version"
+      ],
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "gha-audit": {
       "kind": "command",
       "summary": "CI hardening lint — unpinned actions/images + pwn-request/remote-include (GitHub Actions, GitLab CI, Bitbucket Pipelines)",
@@ -2232,6 +2263,8 @@
       "kind": "command",
       "summary": "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust/pull/pull-revocations/approve) — identity-signed standard, org-distributable + enforced offline (experimental)",
       "x-kit-accepted-flags": [
+        "--artifact",
+        "--dest",
         "--env",
         "--force",
         "--help",
@@ -3102,6 +3135,7 @@
         "--env",
         "--help",
         "--limit",
+        "--limits-gate",
         "--no-install-gate",
         "--non-interactive",
         "--read-only",
@@ -3240,6 +3274,7 @@
         "--env",
         "--help",
         "--limit",
+        "--limits-gate",
         "--no-install-gate",
         "--non-interactive",
         "--read-only",

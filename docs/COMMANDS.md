@@ -1,7 +1,6 @@
 # kit commands
 
-> Complete reference for every `kit <subcommand>`. Last updated 2026-11-04 (kit 7.2.0).
-> Pair this with `docs/THREAT_MODEL.md` (what data flows where) and `docs/DATA_FLOW.md` (exact reads/writes per op).
+> Complete reference for every `kit <subcommand>`. Last updated 2026-11-04 (kit 7.2.0). Pair this with `docs/THREAT_MODEL.md` (what data flows where) and `docs/DATA_FLOW.md` (exact reads/writes per op).
 
 > **Machine-readable surface:** `contracts/kit.opencli.json` describes every
 > command with its stability tier (`x-kit-stability`), MCP exposure
@@ -382,6 +381,7 @@ Declare `GITHUB_TOKEN` or `GITLAB_TOKEN` under `[secrets.keys]` in `.kit.toml`. 
 | `kit gate-env`                                            | Harness protocol command (PreToolUse env gate): reads an agent's pending Write/Edit on stdin and blocks (exit 2) plaintext secrets aimed at `.env*` files. Also refuses a Write/Edit to `.kit-audit.jsonl`, `.kit-approvals.jsonl` or anything under `~/.kit/`.                                                                                                                                                                                                                                                                |
 | `kit gate-egress`                                         | Harness protocol command (PreToolUse egress gate, exec-broker): blocks (exit 2) Bash network targets outside the signed `[scope].egress`; fails closed without a verified scope.                                                                                                                                                                                                                                                                                                                                               |
 | `kit gate-fs`                                             | Harness protocol command (PreToolUse fs gate, exec-broker): blocks (exit 2) Write/Edit outside the signed `[scope].fs`; fails closed without a verified scope.                                                                                                                                                                                                                                                                                                                                                                 |
+| `kit gate-limits`                                         | Harness protocol command (PreToolUse limits gate): counts each session's tool calls in `~/.kit/sessions/` and blocks (exit 2) once `.kit.toml [governance.agent]` `max_session_minutes`, `max_tool_calls_per_session` or `max_child_agents` (Task/Agent calls) is reached. Allows everything until a limit is set; a payload without a session id is not counted. Opt in with `kit agent-config --limits-gate`.                                                                                                                |
 
 ## Packages + plugins
 

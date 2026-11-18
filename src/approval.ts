@@ -11,6 +11,10 @@ export interface ApprovalRequest {
   reason: string;
   agent_id?: string;
   metadata?: Record<string, unknown>;
+  /** sha256 (hex) of the exact artifact this operation acts on, when it acts on one. */
+  digest?: string;
+  /** The destination this operation sends to (a host, an account, a channel), when it has one. */
+  dest?: string;
 }
 
 export interface ApprovalResponse {
@@ -127,10 +131,7 @@ export async function requestApproval(
   // Control-plane approval routing (Pillar 2 §4.5): honor a valid, offline-verifiable SIGNED
   // approval token before prompting. Opt-in (no token store ⇒ falls through), fail-closed (only an
   // org-authority-signed, unexpired, op+env-matching, non-revoked token grants) — never auto-approves.
-  const routed = checkSignedApproval(
-    { operation: request.operation, environment: request.environment },
-    process.cwd(),
-  );
+  const routed = checkSignedApproval(request, process.cwd());
   if (routed.approved) {
     console.log(`✓ approved via signed approval token (${routed.detail})`);
     return true;

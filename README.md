@@ -473,6 +473,10 @@ id = "agent-123"
 name = "Founding Engineer"
 max_tokens_per_day = 1000000
 max_operations_per_hour = 100
+# Per-session limits, enforced by `kit gate-limits` (opt in: kit agent-config --limits-gate)
+max_session_minutes = 120
+max_tool_calls_per_session = 500
+max_child_agents = 4
 
 [governance.audit]
 enabled = true
