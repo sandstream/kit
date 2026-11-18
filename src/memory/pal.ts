@@ -17,7 +17,7 @@
 import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, basename, isAbsolute } from "node:path";
+import { join, basename, isAbsolute, parse } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   readActionHistory,
@@ -283,27 +283,49 @@ export function palList(db: DatabaseSync, opts: PalListOptions = {}): PendingAct
     .map(inspectAction);
 }
 
+/**
+ * True when `path` lies on a drive or mount that is not there right now (an unplugged disk, an
+ * unmounted share). Its folders are unreachable, not deleted, so nothing there may be closed.
+ */
+export function volumeMissing(path: string): boolean {
+  const root = parse(path).root;
+  if (root && !existsSync(root)) return true;
+  const mount = /^\/(?:Volumes|mnt|media|run\/media\/[^/]+)\/[^/]+/.exec(
+    path.replaceAll("\\", "/"),
+  );
+  return mount !== null && !existsSync(mount[0]);
+}
+
 export interface PalPruneResult {
+  /** Findings closed because the folder they describe is gone. */
   closed: string[];
+  /** Other open items whose folder is gone. They are kept: they describe the code, not the folder. */
+  kept: string[];
 }
 
 /**
- * Close open items created on THIS device whose origin project path no longer
- * exists — i.e. the work lived in an ephemeral / since-deleted directory, so the
- * reminder is dead. Only this device's items are pruned (we can't judge another
- * device's paths). Rows with no recorded origin_root are left untouched.
+ * Close this device's scanner findings whose origin folder no longer exists. A finding describes
+ * one folder at one moment (a scratch directory, a removed worktree), so once the folder is gone
+ * nothing can fix or re-scan it. Bug reports, plans and other items are NOT closed: they say
+ * something about the code, which outlives the folder they were typed in. They are returned in
+ * `kept` so they can be re-homed. A path on a volume that is not mounted may be absent without
+ * being deleted, so it is left alone (see volumeMissing). Only this device's items are judged (we cannot
+ * see another device's paths), and rows with no recorded origin_root are untouched.
  */
 export function palPrune(db: DatabaseSync): PalPruneResult {
   const rows = db
     .prepare(
-      "SELECT id, origin_root FROM pending_actions WHERE status='open' AND origin_root IS NOT NULL AND origin_device = ? AND import_state IS NULL",
+      "SELECT id, kind, origin_root FROM pending_actions WHERE status='open' AND origin_root IS NOT NULL AND origin_device = ? AND import_state IS NULL",
     )
-    .all(deviceId()) as { id: string; origin_root: string }[];
+    .all(deviceId()) as { id: string; kind: string | null; origin_root: string }[];
   const closed: string[] = [];
+  const kept: string[] = [];
   for (const r of rows) {
-    if (!existsSync(r.origin_root) && palDone(db, r.id)) closed.push(r.id);
+    if (existsSync(r.origin_root) || volumeMissing(r.origin_root)) continue;
+    if (r.kind !== "finding") kept.push(r.id);
+    else if (palDone(db, r.id)) closed.push(r.id);
   }
-  return { closed };
+  return { closed, kept };
 }
 
 /** One scanner finding to track. `dedupKey` is stable per finding within its

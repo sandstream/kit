@@ -110,6 +110,12 @@ tamper-proof against a same-UID local principal: an attacker running as the same
 user can read `~/.kit/audit-anchor.key` AND the anchor record, recompute the tip,
 and re-seal a forged log. Do not describe this as tamper-proof.
 
+An agent's own tool calls are refused before they reach the trail: `kit gate-bash` and `kit gate-env`
+refuse a command or write that changes `.kit-audit.jsonl`, `.kit-approvals.jsonl` or `~/.kit/`, any
+command that names the anchor key or record, and `kit audit anchor` or `kit panic` run by the agent
+(`src/trail-guard.ts`). A script the agent wrote earlier, or any process outside the gated tools,
+is not covered; external anchoring is that boundary.
+
 ## 2.5. Identity signatures on audit entries (`kit identity` + `kit audit verify`)
 
 The HMAC anchor is the INTEGRITY layer (was anything edited / rolled back). It is

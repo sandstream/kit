@@ -248,6 +248,21 @@ function renderPalVerification(report: AutoVerifyResult, jsonMode: boolean): boo
   return report.unverified.length === 0;
 }
 
+/** Close findings of removed folders; list the other open items that were made in one. */
+function printPrune(r: ReturnType<typeof palPrune>): boolean {
+  console.log(
+    r.closed.length
+      ? `${c.green}✓${c.reset} pruned ${c.bold}${r.closed.length}${c.reset} finding(s) of removed folders`
+      : `${c.dim}nothing to prune, no finding's folder is gone${c.reset}`,
+  );
+  if (r.kept.length) {
+    console.log(
+      `${c.yellow}!${c.reset} ${r.kept.length} other open item(s) were made in a folder that is gone and are kept: ${c.dim}${r.kept.join(", ")}${c.reset}`,
+    );
+  }
+  return true;
+}
+
 async function memPal(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   const action = process.argv[4] && !process.argv[4].startsWith("--") ? process.argv[4] : "list";
@@ -315,17 +330,7 @@ async function memPal(): Promise<boolean> {
       );
       return true;
     }
-    if (action === "prune") {
-      // Close this device's open items whose origin project dir is gone (ephemeral
-      // / deleted scratch) — clears stale "blocked-on-you" nags.
-      const r = palPrune(db);
-      console.log(
-        r.closed.length
-          ? `${c.green}✓${c.reset} pruned ${c.bold}${r.closed.length}${c.reset} dead-origin item(s): ${c.dim}${r.closed.join(", ")}${c.reset}`
-          : `${c.dim}nothing to prune — every open item's origin still exists${c.reset}`,
-      );
-      return true;
-    }
+    if (action === "prune") return printPrune(palPrune(db));
     palUsageError(
       "Use: kit memory pal [list|show|add|configure|claim|renew|takeover|release|reopen|done|snooze|resolve|forget|verify|import|prune]",
     );

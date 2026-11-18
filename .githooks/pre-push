@@ -3,4 +3,5 @@
 # before anything reaches the public remote.
 "$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --tracked || exit 1
 # Same as `npm audit --audit-level=high`, plus the time-limited exceptions in audit-exceptions.json.
-node "$(git rev-parse --show-toplevel)/scripts/npm-audit-gate.mjs" || exit 1
+# Git runs this from the top of the working tree, so the path matches the command in .kit.toml.
+node scripts/npm-audit-gate.mjs || exit 1

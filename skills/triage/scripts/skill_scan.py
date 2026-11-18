@@ -58,35 +58,73 @@ def _frontmatter_keys(text):
     return None
 
 
+SKILL_PACK_DEPTH = 4  # skills/<name>/SKILL.md, automations/<a>/skills/<name>/SKILL.md
+SKILL_PACK_LIMIT = 200
+
+
 def triage_local_skill(rep):
-    """Validate a local skill (a SKILL.md or its directory). False when the target is not local."""
+    """Validate a local skill (a SKILL.md or its directory), or every skill in a local pack. False
+    when the target is not local."""
     target = rep.target
     # A Claude Code plugin is triaged as a plugin: its hooks and scripts carry the behaviour.
     if os.path.isfile(os.path.join(target, ".claude-plugin", "plugin.json")):
         _plugin_scan().triage_local_plugin(rep, _secrets_in)
         return True
     path = next((p for p in (target, os.path.join(target, "SKILL.md")) if os.path.isfile(p)), None)
-    if not path:
+    if path:
+        _triage_skill_file(rep, path, path != target, "")
+        return True
+    if not (os.path.isdir(target) or is_local_path(target)):
         return False
+    # A pack (`skills/<name>/SKILL.md`) is triaged skill by skill. Without this a local pack fell
+    # through to repo triage, whose refusal told the operator to run the command they had just run
+    # (kit-research `pstack-vs-kit`).
+    skills = _skills_under(target) if os.path.isdir(target) else []
+    if not skills:
+        rep.critical(f"no SKILL.md in '{target}' or the {SKILL_PACK_DEPTH} directory levels below it")
+        return True
+    for skill_md in skills[:SKILL_PACK_LIMIT]:
+        rel = os.path.relpath(os.path.dirname(skill_md), target).replace(os.sep, "/")
+        _triage_skill_file(rep, skill_md, True, f"{rel}: ")
+    if len(skills) > SKILL_PACK_LIMIT:
+        rep.warn(f"only the first {SKILL_PACK_LIMIT} of {len(skills)} skills were triaged")
+    rep.fact(f"triaged {min(len(skills), SKILL_PACK_LIMIT)} skill(s) in the pack at {target}")
+    return True
+
+
+def _skills_under(root):
+    """Every SKILL.md up to SKILL_PACK_DEPTH levels below `root`, in a stable order."""
+    found = []
+    base = root.rstrip("/\\").count(os.sep)
+    for current, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in (".git", "node_modules"))
+        if current.count(os.sep) - base >= SKILL_PACK_DEPTH:
+            dirs[:] = []
+        if current != root and "SKILL.md" in files:
+            found.append(os.path.join(current, "SKILL.md"))
+    return found
+
+
+def _triage_skill_file(rep, path, scan_dir, label):
+    """Frontmatter and secrets of one SKILL.md, and its directory's other files when `scan_dir`."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             text = f.read()
     except OSError as e:
-        rep.critical(f"cannot read skill at '{path}': {e}")
-        return True
+        rep.critical(f"{label}cannot read skill at '{path}': {e}")
+        return
     keys = _frontmatter_keys(text)
     if keys is None:
-        rep.critical("SKILL.md has no YAML frontmatter (--- ... ---)")
+        rep.critical(f"{label}SKILL.md has no YAML frontmatter (--- ... ---)")
         keys = set()
     if "name" not in keys:
-        rep.warn("frontmatter missing 'name:'")
+        rep.warn(f"{label}frontmatter missing 'name:'")
     if "description" not in keys:
-        rep.warn("frontmatter missing 'description:'")
-    _secrets_in(rep, "skill body", text)
-    if path != target:
-        _scan_other_files(rep, os.path.dirname(path), path)
+        rep.warn(f"{label}frontmatter missing 'description:'")
+    _secrets_in(rep, f"{label}skill body", text)
+    if scan_dir:
+        _scan_other_files(rep, os.path.dirname(path), path, label)
     rep.fact(f"validated local skill at {path} ({len(text)} bytes)")
-    return True
 
 
 def _secrets_in(rep, label, text):
@@ -95,7 +133,7 @@ def _secrets_in(rep, label, text):
             rep.critical(f"possible secret in {label}: {kind}")
 
 
-def _scan_other_files(rep, skill_dir, skill_md):
+def _scan_other_files(rep, skill_dir, skill_md, label=""):
     """A skill's scripts are its code: a verdict that read only the prose would pass a skill
     whose script was never opened. Files that cannot be read as text are named, not skipped."""
     read, unread = 0, []
@@ -115,8 +153,8 @@ def _scan_other_files(rep, skill_dir, skill_md):
                 unread.append(rel)
                 continue
             read += 1
-            _secrets_in(rep, rel, body)
-    rep.fact(f"scanned {read} other file(s) in the skill directory")
+            _secrets_in(rep, f"{label}{rel}", body)
+    rep.fact(f"{label}scanned {read} other file(s) in the skill directory")
     if unread:
         more = f" and {len(unread) - 10} more" if len(unread) > 10 else ""
-        rep.warn(f"not scanned (binary, symlink or over 1 MB): {', '.join(unread[:10])}{more}")
+        rep.warn(f"{label}not scanned (binary, symlink or over 1 MB): {', '.join(unread[:10])}{more}")

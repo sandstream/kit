@@ -249,6 +249,7 @@
       "kind": "group",
       "summary": "View audit log of kit operations",
       "x-kit-accepted-flags": [
+        "--accept-rollback",
         "--all",
         "--env",
         "--external",

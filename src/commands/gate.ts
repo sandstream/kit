@@ -53,6 +53,9 @@ export async function cmdGateBash(): Promise<boolean> {
   if (!command) {
     return stdoutAllow(); // no shell command in this tool call → allow
   }
+  const { trailCommandRefusal } = await import("../trail-guard.js");
+  const { homedir } = await import("node:os");
+  if (await refuseTrail("gate-bash", trailCommandRefusal(command, homedir()), payload)) return true;
   const verdict = await decideBashGate(command, undefined, process.cwd());
   if (verdict.block) {
     await auditGateDeny("gate-bash", verdict.reason, sessionIdOf(payload));
@@ -71,6 +74,27 @@ export async function cmdGateBash(): Promise<boolean> {
   const { writePassWarnings } = await import("../triage-warnings.js");
   await writePassWarnings("kit install-gate", verdict.checked);
   return stdoutAllow(verdict.notes);
+}
+
+/**
+ * Refuse a tool call that would change kit's own trail (trail-guard.ts). Returns false when there
+ * is nothing to refuse; otherwise audits the deny and blocks (stdout JSON or exit 2).
+ */
+async function refuseTrail(
+  gate: string,
+  reason: string | null,
+  payload: unknown,
+): Promise<boolean> {
+  if (!reason) return false;
+  await auditGateDeny(gate, `trail-guard: ${reason}`, sessionIdOf(payload));
+  const message = `kit trail-guard: ${reason}. If this is intended, run it yourself (in Claude Code, prefix it with !).`;
+  if (stdoutDeny(message)) return true;
+  const { writeSync } = await import("node:fs");
+  writeSync(
+    2,
+    `kit trail-guard: BLOCKED: ${reason}\nIf this is intended, run it yourself (in Claude Code, prefix it with !).\n`,
+  );
+  process.exit(2); // PreToolUse deny
 }
 
 /**
@@ -120,6 +144,10 @@ export async function cmdGateEnv(): Promise<boolean> {
   const { extractWriteFromHookPayload, decideEnvWriteGate } = await import("../env-write-gate.js");
   const write = extractWriteFromHookPayload(payload);
   if (!write) return true; // not a file write → allow
+  const { trailWriteRefusal } = await import("../trail-guard.js");
+  const { homedir } = await import("node:os");
+  const trail = trailWriteRefusal(write.filePath, process.cwd(), homedir());
+  if (await refuseTrail("gate-env", trail, payload)) return true;
   const verdict = decideEnvWriteGate(write.filePath, write.text);
   if (verdict.block) {
     await auditGateDeny("gate-env", verdict.reason ?? "secret write", sessionIdOf(payload));
