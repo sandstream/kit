@@ -99,6 +99,8 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           limit-severities-for-sarif: true
+          # Time-limited, path-scoped waivers only. See the header of the file.
+          trivyignores: .trivyignore.yaml
           version: v0.76.1
 
       - name: Explain failed image scan
