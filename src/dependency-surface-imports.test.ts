@@ -212,6 +212,42 @@ describe("styleImportedPackages", () => {
   });
 });
 
+describe("scanSurfaceUsage: time budget", () => {
+  it("stops at its time budget and says so, so a slow disk cannot stall kit check", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-surface-time-"));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    for (let i = 0; i < 40; i++) {
+      writeFileSync(join(dir, "src", `f${i}.ts`), 'import z from "zod";\n');
+    }
+    try {
+      const u = await scanSurfaceUsage(dir, {}, { maxMillis: 0 });
+      assert.equal(u.truncated, true);
+      assert.ok((u.importSites.get("zod") ?? 0) < 40);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("reads every file when the budget is generous, with the same counts as one at a time", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-surface-par-"));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    for (let i = 0; i < 70; i++) {
+      writeFileSync(
+        join(dir, "src", `f${i}.ts`),
+        `import z from "zod";\n${i % 2 ? 'import y from "yup";\n' : ""}`,
+      );
+    }
+    try {
+      const u = await scanSurfaceUsage(dir, {}, { maxMillis: 60_000 });
+      assert.equal(u.truncated, false);
+      assert.equal(u.importSites.get("zod"), 70);
+      assert.equal(u.importSites.get("yup"), 35);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
 describe("scanSurfaceUsage: files over the size cap", () => {
   it("ignores a source file larger than the cap and still reads the others", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-surface-big-"));
@@ -228,7 +264,7 @@ describe("scanSurfaceUsage: files over the size cap", () => {
     }
   });
 
-  it("does not fail on a file that disappears between listing and reading", async () => {
+  it("reads a normal file through one open handle", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-surface-gone-"));
     mkdirSync(join(dir, "src"), { recursive: true });
     writeFileSync(join(dir, "src", "a.ts"), 'import z from "zod";\n');
