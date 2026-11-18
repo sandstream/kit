@@ -1,3 +1,0 @@
-### Added
-
-- **Time-limited exceptions for `npm audit` findings that have no patched version.** `npm audit` has no ignore list, so one unfixable advisory turned the dependency check red on every pull request. `audit-exceptions.json` can now name an advisory id with a reason and an end date at most 90 days ahead. It covers only the named advisory and the packages that inherit it. It never lowers the threshold, an expired or malformed entry changes nothing, and a report whose package list does not explain every counted finding stays a failure. `kit check` and the CI dependency stage both read it, and say which advisory is excepted until when. The first entry covers `picomatch` GHSA-fc5q-39xc-vjpf (dev toolchain only, no patched release) until 2026-12-17.

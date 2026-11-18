@@ -1,3 +1,0 @@
-### Added
-
-- **`kit check --category security` has a `browser scripts` row.** It lists the external `<script src>` a project ships to browsers (HTML, templates, JSX and Next.js `<Script>`) and fails when a third-party script sits on a page with a card form, the case of the November 2026 Optimizely skimmer. It warns on mutable CDN URLs (`@latest`, no version, `@<major>`), on version-pinned CDN files without `integrity`, and on third-party scripts with no Content-Security-Policy anywhere in the repository. No network, no model; bounded reads. See [docs/BROWSER_SCRIPTS.md](docs/BROWSER_SCRIPTS.md).
