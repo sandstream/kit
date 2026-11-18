@@ -176,19 +176,16 @@ class Report:
         if self.notrun:
             # Without this line a 100/100 with a skipped probe is indistinguishable from a
             # 100/100 with everything green -- which is the defect (#489).
-            probes = ", ".join(probe for probe, _, _ in self.notrun)
             # "cannot run for this ecosystem" is a permanent claim. Do not make it about a
             # source that merely happened to be unreachable — a retry may well fix that one.
-            all_transient = all(transient for _, _, transient in self.notrun)
-            scope = (
-                "could not run in this run (source unreachable; retrying may resolve them)"
-                if all_transient
-                else "cannot run for this ecosystem"
-            )
-            print(
-                f"Coverage: PARTIAL -- {len(self.notrun)} probe(s) {scope} "
-                f"({probes}); the score covers only what was checked"
-            )
+            # A mix names both groups, each with its own probes.
+            groups = [(kind, ", ".join(p for p, _, tr in self.notrun if tr == transient))
+                      for kind, transient in (("cannot run for this ecosystem", False),
+                      ("could not run in this run (source unreachable; retrying may resolve them)",
+                       True))]
+            scope = "; ".join(f"{kind} ({probes})" for kind, probes in groups if probes)
+            print(f"Coverage: PARTIAL -- {len(self.notrun)} probe(s) {scope}; "
+                  "the score covers only what was checked")
         if not self.criticals:
             print("TRIAGE PASSED")
         else:

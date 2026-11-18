@@ -31,6 +31,11 @@ def triage_docker(rep, t):
         return
     official = _is_official(data, api_repo)
     rep.fact(f"{api_repo}: {data.get('pull_count', 0)} pulls, official={official}")
+    # Hub metadata lists no packages, so a tag with a known RCE passed 100/100 with nothing said
+    # (nginx:1.31.8, CVE-2026-123633 and CVE-2026-123007; kit-research nginx-http2-rce-and-oss-scanner-vs-kit).
+    rep.notchecked("known vulnerabilities in the image",
+                   "Docker Hub metadata does not list the image's packages; scan the image with "
+                   "`kit scan` (trivy, osv-scanner) before running it")
     last_days = t._days_since(data.get("last_updated"))
     if last_days is not None and last_days > t.ABANDONED_DAYS:
         rep.warn(f"image not updated in {last_days} days -- stale base / unpatched CVEs likely")
