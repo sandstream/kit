@@ -17,6 +17,7 @@ import {
   installCodexKitProfile,
   installAllInstallGates,
   installBrokerGates,
+  installLimitsGate,
   installAiderRules,
   loadUserRulesProfile,
 } from "../agent-config.js";
@@ -102,8 +103,22 @@ async function cmdAgentConfigUser(): Promise<boolean> {
  * The `agent-config` handler. `--user` goes to its own function before cmdAgentConfig, whose size
  * is frozen in the baseline (one more line there measured CCN 32 and 136 lines, a fresh finding).
  */
-export function cmdAgentConfigEntry(): Promise<boolean> {
-  return hasFlag(process.argv, "--user") ? cmdAgentConfigUser() : cmdAgentConfig();
+export async function cmdAgentConfigEntry(): Promise<boolean> {
+  if (hasFlag(process.argv, "--user")) return cmdAgentConfigUser();
+  const ok = await cmdAgentConfig();
+  // Opt-in gates, after the defaults; here so cmdAgentConfig keeps its frozen size.
+  if (hasFlag(process.argv, "--limits-gate")) await reportLimitsGate();
+  return ok;
+}
+
+/** Install `kit gate-limits` (`--limits-gate`) and print a line for it. */
+async function reportLimitsGate(): Promise<void> {
+  const r = await installLimitsGate();
+  const shown =
+    r.action === "created" || r.action === "updated"
+      ? `${c.green}✓${c.reset} Claude Code ${c.dim}→ ${r.file} (gate-limits)${c.reset}`
+      : `${c.dim}· Claude Code ${r.action}: ${r.detail ?? r.file}${c.reset}`;
+  console.log(`\n  ${c.bold}limits gate${c.reset}\n    ${shown}`);
 }
 
 async function cmdAgentConfig(): Promise<boolean> {
