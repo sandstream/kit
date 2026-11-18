@@ -1,3 +1,0 @@
-### Changed
-
-- **The cooling period now holds back a young release by default.** `[supply_chain].min_release_age_enforce` defaults to `true`, so `kit triage npm|pip|gem` and the install gate refuse a release published less than `min_release_age_days` (default 14) ago, and name the newest version that is old enough. A release whose publish time cannot be read (registry unreachable, or air-gap with no mirror named) is held too. The OSV waiver for the first release that fixes an advisory on your locked version is unchanged. To get the old warn-only behaviour, set `min_release_age_enforce = false` under `[supply_chain]` in `.kit.toml`, or `KIT_COOLING_ENFORCE=0` for one run; `min_release_age_days = 0` turns the cooling period off.

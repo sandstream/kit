@@ -77,6 +77,23 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.5.0: kit gates more, and says what it could not check.** The agent gates refuse commands that
+  cannot be undone (a force push, a push to `main`, `git reset --hard`) and decoded or downloaded text
+  piped into an interpreter. They also gate `gem install` and `bundle add`, and read installs run
+  through Windows shells. `kit agent-config --user` writes deny rules, the sandbox and gate hooks for
+  every checkout on the machine, `kit hooks gates` wires the gates at session start, `kit panic --stop`
+  halts every gated agent until `--resume`, and `kit gate-limits` caps time, tool calls and child
+  agents per session. `kit check` has new rows: a planted agent hook, browser scripts, an AI dev server
+  beyond loopback, `.worktreeinclude` copying `.env`, Docker images against published IOCs, and a
+  loopback MCP server that sends no token. `kit gha-audit` flags a wide `id-token: write` and install
+  scripts in CI. `kit triage` reads markdown-image exfiltration, a local skill pack and the install
+  scripts an npm package runs. `kit self-audit` fails dead exports and tests that test nothing. A
+  time-limited `audit-exceptions.json` can cover an `npm audit` finding that has no patched release.
+  Four things to know before you update: the cooling period now holds back a release younger than
+  14 days by default (`min_release_age_enforce = false` restores warn-only); a script that force-pushes
+  or pipes a download into an interpreter now exits 2 under `kit gate-bash`; an agent session in a
+  kit-managed checkout that never installed the gates now fails `kit check`; and `kit mcp web`
+  exposes kit read-only. macOS is unverified in CI. Full list in the [CHANGELOG](CHANGELOG.md).
 - **7.4.0: record accepted licenses and public tables, with a reason.** `[licenses.allow]` accepts a
   reviewed copyleft package (exact license and a reason), and `[anon_access.public]` declares tables
   that anon reads on purpose. A committed, in-sync lockfile makes `^` and `~` ranges count as pinned.

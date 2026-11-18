@@ -1,3 +1,0 @@
-### Fixed
-
-- **The install gate and `kit install` now print triage warnings when they let an install through.** `kit triage` can pass a package and still warn (a release inside the cooling period, no declared licence, a very new package). `kit gate-bash` and `kit install` dropped those lines, so an agent installing through the gate saw nothing: `pip install a2ui-agent-sdk` exited 0 with no output while `kit triage pip a2ui-agent-sdk` warned twice. Each warning is now one plain stderr line that names the package, such as `… warning: pip:a2ui-agent-sdk: no declared license -- review terms before use`. Exit codes and the Cline/Antigravity stdout replies do not change.
