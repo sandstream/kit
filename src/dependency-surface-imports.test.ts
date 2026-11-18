@@ -216,8 +216,9 @@ describe("scanSurfaceUsage: time budget", () => {
   it("stops at its time budget and says so, so a slow disk cannot stall kit check", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-surface-time-"));
     mkdirSync(join(dir, "src"), { recursive: true });
-    for (let i = 0; i < 40; i++)
+    for (let i = 0; i < 40; i++) {
       writeFileSync(join(dir, "src", `f${i}.ts`), 'import z from "zod";\n');
+    }
     try {
       const u = await scanSurfaceUsage(dir, {}, { maxMillis: 0 });
       assert.equal(u.truncated, true);
@@ -241,6 +242,35 @@ describe("scanSurfaceUsage: time budget", () => {
       assert.equal(u.truncated, false);
       assert.equal(u.importSites.get("zod"), 70);
       assert.equal(u.importSites.get("yup"), 35);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("scanSurfaceUsage: files over the size cap", () => {
+  it("ignores a source file larger than the cap and still reads the others", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-surface-big-"));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "small.ts"), 'import z from "zod";\n');
+    // A bundled or generated file: over 1 MB, and it holds an import that must not be counted.
+    writeFileSync(join(dir, "src", "bundle.js"), `import y from "yup";\n${"x".repeat(1_100_000)}`);
+    try {
+      const u = await scanSurfaceUsage(dir, {});
+      assert.equal(u.importSites.get("zod"), 1);
+      assert.equal(u.importSites.get("yup"), undefined);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("reads a normal file through one open handle", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-surface-gone-"));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "a.ts"), 'import z from "zod";\n');
+    try {
+      const u = await scanSurfaceUsage(dir, {});
+      assert.equal(u.importSites.get("zod"), 1);
     } finally {
       rmTemp(dir);
     }
