@@ -47,10 +47,13 @@ interface DiscoveryState {
   stopped: boolean;
 }
 
+/** INSTRUCTION_NAMES lower-cased: macOS and Windows open `agents.md` when an agent asks for `AGENTS.md`. */
+const INSTRUCTION_NAMES_LOWER = new Set([...INSTRUCTION_NAMES].map((n) => n.toLowerCase()));
+
 export function isInstructionFile(relPath: string): boolean {
   const parts = relPath.split(/[\\/]+/);
   const name = parts.at(-1) ?? "";
-  if (INSTRUCTION_NAMES.has(name)) return true;
+  if (INSTRUCTION_NAMES_LOWER.has(name.toLowerCase())) return true;
   if (name.endsWith(".mdc") && parts.includes(".cursor") && parts.includes("rules")) return true;
   // Claude Code loads every `.md` under `.claude/rules/`, recursively (code.claude.com/docs/en/memory).
   const claude = parts.indexOf(".claude");

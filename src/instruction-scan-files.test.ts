@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { readInstructionFile, scanInstructions } from "./instruction-scan.js";
+import { isInstructionFile } from "./instruction-scan-files.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 it("accepts the exact byte limit and preserves UTF-8 across read chunks", (t) => {
@@ -72,3 +73,10 @@ it(
     assert.deepEqual(scanInstructions(root, true).unread, ["AGENTS.md", "CLAUDE.md"]);
   },
 );
+
+it("matches instruction file names in any case: macOS and Windows open agents.md for AGENTS.md", () => {
+  assert.equal(isInstructionFile("agents.md"), true);
+  assert.equal(isInstructionFile("docs/Claude.md"), true);
+  assert.equal(isInstructionFile("node_modules/xstate/docs/agents.md"), true);
+  assert.equal(isInstructionFile("docs/agent-notes.md"), false);
+});
