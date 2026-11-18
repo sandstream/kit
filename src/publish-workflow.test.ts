@@ -519,3 +519,12 @@ describe("publish.yml audit gate with exceptions", () => {
     );
   });
 });
+
+describe("publish.yml SBOM upload to the release", () => {
+  it("lets the job read the workflow artifact the SBOM action attaches to the release", () => {
+    // sbom-action uploads each SBOM as a workflow artifact, then downloads it again to attach it to
+    // the release. The 7.5.0 run uploaded the artifact and then got "Not Found" on the download, so
+    // the release had no SBOM. A job with `permissions` set gives every unnamed scope `none`.
+    assert.match(WORKFLOW, /^ {6}actions:\s*read\b/m);
+  });
+});
