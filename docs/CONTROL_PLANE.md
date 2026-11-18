@@ -50,6 +50,11 @@ artifacts your _existing_ trusted keys signed. Add a key with
 - **Approvals are org-signed + time-boxed.** `requestApproval` honors a signed token only if it is
   from an org authority, unexpired, matches the exact operation+environment, and the signer isn't
   revoked — otherwise it falls back to interactive approval. Never auto-approves.
+- **An approval can be bound to one artifact and one destination.** `kit policy approve <op>
+--artifact <file> --dest <target>` signs the sha256 of the file's bytes and the destination into
+  the token. Such a token grants only a request that carries the same digest and destination, so a
+  changed draft needs a new approval. A token without a binding grants as before. Callers pass
+  `digest` and `dest` on the approval request; no kit operation does so yet.
 - **An approval needs a person.** `kit policy approve` mints a token only at a terminal, after the
   operation's name is typed back; an agent's tool call, CI and piped input are refused, and no flag
   or variable skips it. It signs through the resolved keystore, so `require_hardware_identity`

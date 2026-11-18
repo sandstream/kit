@@ -43,6 +43,19 @@ export interface ApprovalToken {
   expires: string;
   /** base64 Ed25519 signature over `approvalStatement(...)`. */
   sig: string;
+  /**
+   * Optional binding to one artifact: the sha256 (hex) of the exact bytes approved. A token that
+   * carries it grants only a request for the same digest, so a changed draft needs a new approval.
+   */
+  digest?: string;
+  /** Optional binding to one destination (a host, an account, a channel), compared exactly. */
+  dest?: string;
+}
+
+/** What a token may be bound to beyond operation and environment. */
+export interface ApprovalBinding {
+  digest?: string;
+  dest?: string;
 }
 
 /** Canonical bytes signed for an approval token — stable across machines for offline verify. */
@@ -51,8 +64,20 @@ export function approvalStatement(
   environment: string,
   ts: string,
   expires: string,
+  binding: ApprovalBinding = {},
 ): string {
-  return `kit-approve\nop=${operation}\nenv=${environment}\nts=${ts}\nexp=${expires}`;
+  // A binding is appended only when present, so tokens minted before it existed still verify.
+  const bound =
+    (binding.digest !== undefined ? `\ndigest=${binding.digest}` : "") +
+    (binding.dest !== undefined ? `\ndest=${binding.dest}` : "");
+  return `kit-approve\nop=${operation}\nenv=${environment}\nts=${ts}\nexp=${expires}${bound}`;
+}
+
+/** A token's binding holds for a request when every field the token carries matches exactly. */
+function bindingHolds(token: ApprovalBinding, request: ApprovalBinding): boolean {
+  if (token.digest !== undefined && token.digest !== request.digest) return false;
+  if (token.dest !== undefined && token.dest !== request.dest) return false;
+  return true;
 }
 
 function tokensPath(root: string): string {
@@ -90,7 +115,13 @@ export function mintApprovalToken(
   operation: string,
   environment: string,
   ttlSeconds: number,
-  opts: { root?: string; dir?: string; now?: Date; signer?: ApprovalSigner } = {},
+  opts: {
+    root?: string;
+    dir?: string;
+    now?: Date;
+    signer?: ApprovalSigner;
+    binding?: ApprovalBinding;
+  } = {},
 ): ApprovalToken {
   const root = opts.root ?? process.cwd();
   const signerPub = opts.signer?.publicKeyPem();
@@ -99,11 +130,12 @@ export function mintApprovalToken(
   const now = opts.now ?? new Date();
   const ts = now.toISOString();
   const expires = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
-  const statement = approvalStatement(operation, environment, ts, expires);
+  const binding = opts.binding ?? {};
+  const statement = approvalStatement(operation, environment, ts, expires, binding);
   const sig = (
     opts.signer ? opts.signer.sign(statement) : signWithIdentity(statement, opts.dir)
   ).toString("base64");
-  const token: ApprovalToken = { operation, environment, kid, ts, expires, sig };
+  const token: ApprovalToken = { operation, environment, kid, ts, expires, sig, ...binding };
   const path = tokensPath(root);
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, JSON.stringify(token) + "\n", { encoding: "utf-8", mode: 0o600 });
@@ -138,7 +170,7 @@ function loadTokens(root: string): ApprovalToken[] {
  * non-revoked signer. Returns the grant + a human detail (never throws).
  */
 export function checkSignedApproval(
-  request: { operation: string; environment: string },
+  request: { operation: string; environment: string } & ApprovalBinding,
   root: string,
   opts: { dir?: string; now?: Date } = {},
 ): ApprovalCheck {
@@ -155,13 +187,17 @@ export function checkSignedApproval(
 
   for (const tk of tokens) {
     if (tk.operation !== request.operation || tk.environment !== request.environment) continue;
+    if (!bindingHolds(tk, request)) continue; // bound to another artifact or destination
     if (!authorities.has(tk.kid)) continue; // approver is not an org authority
     const expMs = Date.parse(tk.expires);
     if (!Number.isFinite(expMs) || expMs <= nowMs) continue; // expired / unparseable
     const pub = trustedKeys.get(tk.kid);
     if (!pub) continue;
     const ok = verifySignature(
-      approvalStatement(tk.operation, tk.environment, tk.ts, tk.expires),
+      approvalStatement(tk.operation, tk.environment, tk.ts, tk.expires, {
+        digest: tk.digest,
+        dest: tk.dest,
+      }),
       Buffer.from(tk.sig, "base64"),
       pub,
     );
