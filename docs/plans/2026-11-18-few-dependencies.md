@@ -69,9 +69,13 @@ The decision is Peter's. The recommendation is to run the spike and decide on it
       spike found and copied: the `execution: { taskSupport: "forbidden" }` field the SDK puts on
       every tool, and the `MCP error -32602: ` prefix the SDK puts on the text of an unknown-tool
       or bad-argument result.
-- [ ] **Not checked, and it decides.** A real client that is not the SDK's: Claude Code, Codex, and
-      the ChatGPT tunnel from `kit mcp web`. Nothing here ran them. `kit mcp --read-only` byte for
-      byte is also unchecked, because the spike is not wired in. Do both before switching.
+- [x] **A real client, Claude Code 2.1.327 (19 November 2026).** It connected to the new server,
+      listed all ten kit tools and one extra, and called two of them (`kit_context` on a project
+      directory and a tool with no arguments) with correct results. The server was built from the
+      real registrations, as in the tests.
+- [ ] **Not checked, and it decides.** Codex (`codex-cli` 0.167.2 could not run: the workspace is
+      out of credits) and the ChatGPT tunnel from `kit mcp web`. `kit mcp --read-only` byte for
+      byte is also unchecked, because the spike is not wired in. Do these before switching.
 - [ ] If it goes ahead: switch `src/mcp-server.ts`, keep `kit mcp --read-only` and `kit mcp web`
       unchanged, move the SDK to `devDependencies`, amend ADR-0002 to two runtime dependencies,
       and rewrite `src/mcp-dependency-surface.test.ts` (its loaded-set guard no longer applies).
