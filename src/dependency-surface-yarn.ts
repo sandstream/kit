@@ -9,7 +9,13 @@
  * development only when no runtime dependency of the project reaches it, and the graph says which
  * facts it cannot give, so the rules that need them do not run and are not read as clean.
  */
-import type { DepGraph, GraphNode, ProjectManifest } from "./dependency-surface.js";
+import {
+  keepReachable,
+  markDevOnly,
+  type DepGraph,
+  type GraphNode,
+  type ProjectManifest,
+} from "./dependency-surface.js";
 
 export interface YarnEntry {
   /** Every `name@range` this entry answers, as written in the lockfile. */
@@ -115,31 +121,6 @@ function resolveDescriptor(
     byDescriptor.get(`${name}@npm:${range}`) ??
     byDescriptor.get(`${name}@${range.replace(/^npm:/, "")}`)
   );
-}
-
-/** Mark as development only every node that no runtime dependency of the project reaches. */
-function markDevOnly(nodes: Map<string, GraphNode>, runtimeRoots: string[]): void {
-  const reached = new Set<string>();
-  const stack = [...runtimeRoots];
-  while (stack.length > 0) {
-    const id = stack.pop() as string;
-    if (reached.has(id)) continue;
-    reached.add(id);
-    for (const dep of nodes.get(id)?.deps ?? []) stack.push(dep);
-  }
-  for (const node of nodes.values()) node.dev = !reached.has(node.id);
-}
-
-function keepReachable(nodes: Map<string, GraphNode>, roots: string[]): void {
-  const reached = new Set<string>();
-  const stack = [...roots];
-  while (stack.length > 0) {
-    const id = stack.pop() as string;
-    if (reached.has(id)) continue;
-    reached.add(id);
-    for (const dep of nodes.get(id)?.deps ?? []) stack.push(dep);
-  }
-  for (const id of [...nodes.keys()]) if (!reached.has(id)) nodes.delete(id);
 }
 
 /** Turn a yarn lockfile into a graph. Null when the text is not a yarn lockfile. */

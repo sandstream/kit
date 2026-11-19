@@ -1,0 +1,3 @@
+### Added
+
+- **The `dependency surface` check reads `pnpm-lock.yaml`.** It reads format 9, which pnpm 9 and pnpm 10 write, by hand, so kit still takes in no YAML library. The lockfile holds engines, install scripts and the platform a package is built for, so those rules run. It holds no bin names, so the row says that bin names were not checked. A lockfile of another format, or a file that is not a pnpm lockfile, is skipped with a row that names the file and the format, and is not guessed at. Checked against the lockfile of a real app: 542 packages by the check and 542 distinct package names counted separately.
