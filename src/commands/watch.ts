@@ -77,9 +77,11 @@ async function cmdWatchRun(): Promise<boolean> {
   }
   console.log(`${c.bold}kit watch${c.reset}  ${c.dim}${cache.repo || "no repository"}${c.reset}`);
   if (cache.unverified) console.log(`  ${c.yellow}unverified: ${cache.unverified}${c.reset}`);
+  if (cache.kevNote) console.log(`  ${c.yellow}! ${cache.kevNote}${c.reset}`);
   else if (cache.ranked.length === 0) console.log(`  ${c.dim}no open security PRs${c.reset}`);
   for (const pr of cache.ranked) {
-    console.log(`  ${c.bold}#${pr.number}${c.reset} ${pr.severity} ci:${pr.ci}  ${pr.title}`);
+    const kev = pr.kev ? `${c.red}${c.bold}KEV${c.reset} ` : "";
+    console.log(`  ${c.bold}#${pr.number}${c.reset} ${kev}${pr.severity} ci:${pr.ci}  ${pr.title}`);
   }
   if (opened.length > 0)
     console.log(`  ${c.green}✓${c.reset} opened ${opened.length} action item(s)`);

@@ -23,7 +23,12 @@ export interface WatchCache {
   repo: string;
   ranked: RankedPr[];
   unverified?: string;
+  /** Why CISA KEV did not mark the ranking this run (the ranking itself still holds). */
+  kevNote?: string;
 }
+
+/** CVE ids → the ones in CISA KEV, plus a note when KEV could not be checked. */
+export type KevLookup = (cves: string[]) => Promise<{ kev: Set<string>; note?: string }>;
 
 export type GhRunner = (args: string[]) => Promise<{ ok: boolean; stdout: string }>;
 
@@ -41,7 +46,8 @@ function validRanked(v: unknown): RankedPr[] {
       typeof r.title === "string" &&
       typeof r.updatedAt === "string"
     ) {
-      out.push(r as RankedPr);
+      const { kev, ...rest } = r as RankedPr;
+      out.push(kev === true ? { ...rest, kev: true } : rest);
     }
   }
   return out;
@@ -62,6 +68,7 @@ export function readWatchCache(cwd: string): WatchCache | null {
       repo: typeof c.repo === "string" ? c.repo : "",
       ranked: validRanked(c.ranked),
       ...(typeof c.unverified === "string" ? { unverified: c.unverified } : {}),
+      ...(typeof c.kevNote === "string" ? { kevNote: c.kevNote.slice(0, 200) } : {}),
     };
   } catch {
     return null;
@@ -103,9 +110,10 @@ export function watchSegment(cache: WatchCache | null, now: number): string | nu
 export function palTitlesFor(ranked: RankedPr[], openTitles: string[]): string[] {
   const titles: string[] = [];
   for (const pr of ranked) {
-    if (pr.severity !== "critical" && pr.severity !== "high") continue;
+    if (!pr.kev && pr.severity !== "critical" && pr.severity !== "high") continue;
     if (openTitles.some((t) => t.startsWith(`Security PR #${pr.number} `))) continue;
-    titles.push(`Security PR #${pr.number} (${pr.severity}, ci:${pr.ci}): ${pr.title}`);
+    const kev = pr.kev ? "KEV, " : "";
+    titles.push(`Security PR #${pr.number} (${kev}${pr.severity}, ci:${pr.ci}): ${pr.title}`);
   }
   return titles;
 }
@@ -122,8 +130,10 @@ interface RawAlert {
     package?: { name?: string };
     first_patched_version?: { identifier?: string } | null;
   };
-  security_advisory?: { severity?: string };
+  security_advisory?: { severity?: string; cve_id?: string | null };
 }
+
+const CVE_ID = /^CVE-\d{4}-\d{4,7}$/;
 
 const SEVERITIES = new Set<string>(["critical", "high", "medium", "low"]);
 
@@ -148,8 +158,14 @@ function toAlerts(raw: RawAlert[]): SecurityAlert[] {
     const name = a.security_vulnerability?.package?.name;
     const patched = a.security_vulnerability?.first_patched_version?.identifier;
     const severity = a.security_advisory?.severity;
+    const cve = a.security_advisory?.cve_id?.toUpperCase();
     if (name && patched && severity && SEVERITIES.has(severity)) {
-      out.push({ name, patched, severity: severity as Severity });
+      out.push({
+        name,
+        patched,
+        severity: severity as Severity,
+        ...(cve && CVE_ID.test(cve) ? { cve } : {}),
+      });
     }
   }
   return out;
@@ -165,7 +181,22 @@ function parseList<T>(res: { ok: boolean; stdout: string }): T[] | null {
   }
 }
 
-export async function gatherWatch(gh: GhRunner, now: () => number): Promise<WatchCache> {
+/** The real lookup: CISA KEV through the shared exploit-intel cache. Off with KIT_EXPLOIT_INTEL=0. */
+export const defaultKevLookup: KevLookup = async (cves) => {
+  if (process.env.KIT_EXPLOIT_INTEL === "0") return { kev: new Set() };
+  const { defaultIntelDeps, loadExploitIntel } = await import("./exploit-intel.js");
+  const { resolveAirGap } = await import("./airgap/config.js");
+  const offline = resolveAirGap(undefined, process.env).enabled;
+  const intel = await loadExploitIntel(cves, defaultIntelDeps(offline));
+  const note = intel.kevChecked ? undefined : intel.notes.find((n) => n.includes("KEV"));
+  return { kev: new Set(intel.kev.keys()), ...(note ? { note } : {}) };
+};
+
+export async function gatherWatch(
+  gh: GhRunner,
+  now: () => number,
+  kevLookup: KevLookup = defaultKevLookup,
+): Promise<WatchCache> {
   const at = new Date(now()).toISOString();
   const repoRes = await gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
   const repo = repoRes.stdout.trim();
@@ -189,7 +220,15 @@ export async function gatherWatch(gh: GhRunner, now: () => number): Promise<Watc
     await gh(["api", `repos/${repo}/dependabot/alerts?state=open&per_page=100`]),
   );
   if (!alerts) return { at, repo, ranked: [], unverified: "no dependabot alerts access" };
-  return { at, repo, ranked: rankSecurityPrs(prs.map(toOpenPr), toAlerts(alerts)) };
+  const parsed = toAlerts(alerts);
+  const cves = parsed.flatMap((a) => (a.cve ? [a.cve] : []));
+  const { kev, note } = await kevLookup(cves);
+  return {
+    at,
+    repo,
+    ranked: rankSecurityPrs(prs.map(toOpenPr), parsed, kev),
+    ...(note ? { kevNote: note } : {}),
+  };
 }
 
 // ── Scheduler entries ──────────────────────────────────────────────────────

@@ -496,6 +496,8 @@ export interface kitConfig {
     delegates?: string[];
     images?: string[]; // container images `kit scan` also scans (osv-scanner + trivy)
     images_from_dockerfiles?: boolean; // also scan the images of the Dockerfiles' FROM lines
+    /** `kit scan` marks findings with CISA KEV and FIRST EPSS (network, cached 24 h). Default on. */
+    exploit_intel?: boolean;
     /**
      * Client-exposed env names (VITE_*, NEXT_PUBLIC_*, …) that are secret-shaped by name but
      * genuinely safe to publish, each mapped to the REASON. The reason is required: an allowlist
@@ -931,6 +933,7 @@ export const kitConfigSchema = z
         guarddog: z.boolean().optional(),
         strict_pins: z.boolean().optional(),
         delegates: z.array(z.string()).optional(),
+        exploit_intel: z.boolean().optional(),
       })
       .passthrough()
       .optional(),

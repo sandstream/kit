@@ -56,6 +56,20 @@ describe("mergeFindings", () => {
     assert.equal(shared.severity, "high"); // max of medium/high
     assert.deepEqual(shared.scanners.sort(), ["snyk", "trivy"]);
   });
+  it("unions the aliases of the findings it collapses", () => {
+    const merged = mergeFindings([
+      {
+        id: "osv-scanner",
+        findings: [{ ...f("x: GHSA-aaaa-bbbb-cccc", "high"), aliases: ["CVE-2021-1"] }],
+      },
+      {
+        id: "grype",
+        findings: [{ ...f("x GHSA-aaaa-bbbb-cccc", "high"), aliases: ["CVE-2021-2"] }],
+      },
+    ]);
+    assert.equal(merged.length, 1);
+    assert.deepEqual(merged[0].aliases, ["CVE-2021-1", "CVE-2021-2"]);
+  });
   it("sorts by severity (critical first)", () => {
     const merged = mergeFindings([
       { id: "a", findings: [f("low: CVE-2020-1", "low"), f("crit: CVE-2020-2", "critical")] },

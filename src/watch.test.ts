@@ -78,31 +78,31 @@ describe("palTitlesFor", () => {
   });
 });
 
-describe("gatherWatch", () => {
-  const prsJson = JSON.stringify([
-    {
-      number: 3,
-      title: "bump vite from 6.4.1 to 6.4.5",
-      updatedAt: "2026-11-01T00:00:00Z",
-      author: { login: "dependabot", is_bot: true },
-      statusCheckRollup: [{ conclusion: "FAILURE", status: "COMPLETED" }],
+const prsJson = JSON.stringify([
+  {
+    number: 3,
+    title: "bump vite from 6.4.1 to 6.4.5",
+    updatedAt: "2026-11-01T00:00:00Z",
+    author: { login: "dependabot", is_bot: true },
+    statusCheckRollup: [{ conclusion: "FAILURE", status: "COMPLETED" }],
+  },
+]);
+const alertsJson = JSON.stringify([
+  {
+    security_vulnerability: {
+      package: { name: "vite" },
+      first_patched_version: { identifier: "6.4.5" },
     },
-  ]);
-  const alertsJson = JSON.stringify([
-    {
-      security_vulnerability: {
-        package: { name: "vite" },
-        first_patched_version: { identifier: "6.4.5" },
-      },
-      security_advisory: { severity: "critical" },
-    },
-  ]);
-  const gh = (alerts: { ok: boolean; stdout: string }) => async (args: string[]) => {
-    if (args[0] === "repo") return { ok: true, stdout: "o/r\n" };
-    if (args[0] === "pr") return { ok: true, stdout: prsJson };
-    return alerts;
-  };
+    security_advisory: { severity: "critical" },
+  },
+]);
+const gh = (alerts: { ok: boolean; stdout: string }) => async (args: string[]) => {
+  if (args[0] === "repo") return { ok: true, stdout: "o/r\n" };
+  if (args[0] === "pr") return { ok: true, stdout: prsJson };
+  return alerts;
+};
 
+describe("gatherWatch", () => {
   it("ranks a PR that fixes an open advisory", async () => {
     const out = await gatherWatch(gh({ ok: true, stdout: alertsJson }), () => NOW);
     assert.equal(out.repo, "o/r");
@@ -123,6 +123,77 @@ describe("gatherWatch", () => {
       () => NOW,
     );
     assert.match(out.unverified ?? "", /repository/);
+  });
+});
+
+describe("gatherWatch: CISA KEV", () => {
+  it("marks and ranks first a PR that fixes a CVE in CISA KEV", async () => {
+    const prs = JSON.stringify([
+      JSON.parse(prsJson)[0],
+      {
+        number: 4,
+        title: "bump lodash from 4.17.11 to 4.17.21",
+        updatedAt: "2026-11-02T00:00:00Z",
+        author: { login: "dependabot", is_bot: true },
+        statusCheckRollup: [],
+      },
+    ]);
+    const alerts = JSON.stringify([
+      JSON.parse(alertsJson)[0],
+      {
+        security_vulnerability: {
+          package: { name: "lodash" },
+          first_patched_version: { identifier: "4.17.21" },
+        },
+        security_advisory: { severity: "medium", cve_id: "cve-2021-23337" },
+      },
+    ]);
+    const asked: string[][] = [];
+    const out = await gatherWatch(
+      async (args) =>
+        args[0] === "repo"
+          ? { ok: true, stdout: "o/r\n" }
+          : args[0] === "pr"
+            ? { ok: true, stdout: prs }
+            : { ok: true, stdout: alerts },
+      () => NOW,
+      async (cves) => {
+        asked.push(cves);
+        return { kev: new Set(["CVE-2021-23337"]) };
+      },
+    );
+    assert.deepEqual(asked, [["CVE-2021-23337"]]);
+    assert.deepEqual(
+      out.ranked.map((r) => [r.number, r.severity, r.kev ?? false]),
+      [
+        [4, "medium", true],
+        [3, "critical", false],
+      ],
+    );
+    assert.equal(out.kevNote, undefined);
+    assert.equal(watchSegment(out, NOW), "sec-prs:2 KEV medium #4 ci:none");
+    assert.deepEqual(palTitlesFor(out.ranked, []), [
+      "Security PR #4 (KEV, medium, ci:none): bump lodash to 4.17.21",
+      "Security PR #3 (critical, ci:failing): bump vite to 6.4.5",
+    ]);
+    // The mark survives the cache round trip.
+    const dir = mkdtempSync(join(tmpdir(), "kit-watch-kev-"));
+    try {
+      writeWatchCache(dir, out);
+      assert.equal(readWatchCache(dir)?.ranked[0]?.kev, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the ranking and records why when KEV cannot be checked", async () => {
+    const out = await gatherWatch(
+      gh({ ok: true, stdout: alertsJson }),
+      () => NOW,
+      async () => ({ kev: new Set(), note: "CISA KEV could not be fetched: HTTP 503" }),
+    );
+    assert.equal(out.ranked.length, 1);
+    assert.equal(out.kevNote, "CISA KEV could not be fetched: HTTP 503");
   });
 });
 

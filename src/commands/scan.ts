@@ -12,8 +12,17 @@ import { resolveProjectPaths } from "../projects-config.js";
 import { expandPerProject } from "../scan-projects.js";
 import type { AirGapPlan, MergedFinding, ScanGate, ScannerDef, ScannerRun } from "../scanners.js";
 
+/** Whether CISA KEV and FIRST EPSS answered this run, and why not. */
+interface IntelSummary {
+  enabled: boolean;
+  kevChecked: boolean;
+  epssChecked: boolean;
+  notes: string[];
+}
+
 /** What the findings and the scanner-health gate add up to, before it is printed. */
 interface ScanVerdict {
+  intel: IntelSummary;
   runs: ScannerRun[];
   findings: MergedFinding[];
   suppressed: number;
@@ -256,8 +265,12 @@ async function judgeScan(
   const { suppressBaselined, scanHealthGate } = await import("../scanners.js");
   const { loadBaseline, baselineGet } = await import("../baseline.js");
   const accepted = new Set(baselineGet(await loadBaseline(cwd), "scan", "findings"));
-  const { kept: findings, suppressed } = suppressBaselined(merged, accepted);
-  const bad = findings.filter((m) => m.severity === "critical" || m.severity === "high").length;
+  const { kept, suppressed } = suppressBaselined(merged, accepted);
+  const { findings, intel } = await withExploitIntel(kept, config);
+  // A CVE in CISA KEV is exploited in the wild: it fails the scan whatever its severity label says.
+  const bad = findings.filter(
+    (m) => m.kev || m.severity === "critical" || m.severity === "high",
+  ).length;
 
   // Scanner-HEALTH gate (separate from findings): a scanner that did not actually
   // run (crashed/absent/no-token) must be able to force a non-zero exit so a green
@@ -266,7 +279,44 @@ async function judgeScan(
   const strict = hasFlag(process.argv, "--strict") || envTruthy(process.env.KIT_CI_STRICT);
   const requiredScanners = config.governance?.scan?.required_scanners ?? [];
   const gate = scanHealthGate(runs, { strict, requiredScanners });
-  return { runs, findings, suppressed, bad, gate, strict, ok: bad === 0 && gate.ok };
+  // A feed that did not answer is a scanner that did not run: a warning, and a failure in strict.
+  for (const note of intel.notes) {
+    if (strict && !(intel.kevChecked && intel.epssChecked)) gate.failures.push(note);
+    else gate.warnings.push(note);
+  }
+  if (gate.failures.length > 0) gate.ok = false;
+  return { intel, runs, findings, suppressed, bad, gate, strict, ok: bad === 0 && gate.ok };
+}
+
+/**
+ * Mark findings with CISA KEV and FIRST EPSS and order them KEV first. Off with
+ * `[scan] exploit_intel = false` or KIT_EXPLOIT_INTEL=0; air gap reads only the cache.
+ */
+async function withExploitIntel(
+  findings: MergedFinding[],
+  config: kitConfig,
+): Promise<{ findings: MergedFinding[]; intel: IntelSummary }> {
+  const off = config.scan?.exploit_intel === false || process.env.KIT_EXPLOIT_INTEL === "0";
+  if (off) {
+    return {
+      findings,
+      intel: { enabled: false, kevChecked: false, epssChecked: false, notes: [] },
+    };
+  }
+  const { applyIntel, cveIdsOf, defaultIntelDeps, loadExploitIntel } =
+    await import("../exploit-intel.js");
+  const { resolveAirGap } = await import("../airgap/config.js");
+  const offline = resolveAirGap(config.air_gap, process.env).enabled;
+  const intel = await loadExploitIntel(findings.flatMap(cveIdsOf), defaultIntelDeps(offline));
+  return {
+    findings: applyIntel(findings, intel),
+    intel: {
+      enabled: true,
+      kevChecked: intel.kevChecked,
+      epssChecked: intel.epssChecked,
+      notes: intel.notes,
+    },
+  };
 }
 
 async function printVerdict(v: ScanVerdict): Promise<void> {
@@ -276,9 +326,13 @@ async function printVerdict(v: ScanVerdict): Promise<void> {
     return;
   }
   if (hasFlag(process.argv, "--json")) {
-    const { runs, findings, suppressed, ok, gate, strict } = v;
+    const { runs, findings, suppressed, ok, gate, strict, intel } = v;
     console.log(
-      JSON.stringify({ runs, findings, suppressed, ok, scannerGate: gate, strict }, null, 2),
+      JSON.stringify(
+        { runs, findings, suppressed, ok, scannerGate: gate, strict, exploitIntel: intel },
+        null,
+        2,
+      ),
     );
     return;
   }
@@ -289,7 +343,12 @@ async function printVerdict(v: ScanVerdict): Promise<void> {
   printRuns(v.runs);
   console.log("");
   printFindings(v.findings, v.suppressed);
-  if (v.bad > 0) console.log(`${c.red}${v.bad} high/critical${c.reset}`);
+  const kev = v.findings.filter((f) => f.kev).length;
+  if (v.bad > 0) {
+    console.log(
+      `${c.red}${v.bad} high/critical${kev > 0 ? ` (${kev} in CISA KEV: exploited in the wild)` : ""}${c.reset}`,
+    );
+  }
   printGate(v.gate);
 }
 
@@ -322,8 +381,12 @@ function printFindings(findings: MergedFinding[], suppressed: number): void {
     const sev = m.severity ?? "low";
     const color =
       sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
+    const kev = m.kev
+      ? ` ${c.red}${c.bold}KEV${m.kev.ransomware ? "+ransomware" : ""}${c.reset}`
+      : "";
+    const epss = m.epss ? `  ${c.dim}EPSS ${m.epss.score.toFixed(2)}${c.reset}` : "";
     console.log(
-      `  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${m.name}  ${c.dim}[${m.scanners.join("+")}]${c.reset}`,
+      `  ${color}${sev.toUpperCase().padEnd(8)}${c.reset}${kev} ${m.name}${epss}  ${c.dim}[${m.scanners.join("+")}]${c.reset}`,
     );
   }
 }

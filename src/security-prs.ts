@@ -21,6 +21,8 @@ export interface SecurityAlert {
   name: string;
   severity: Severity;
   patched: string;
+  /** The advisory's CVE id, when it has one (for CISA KEV). */
+  cve?: string;
 }
 
 export interface RankedPr {
@@ -29,6 +31,8 @@ export interface RankedPr {
   severity: Severity;
   ci: CiState;
   updatedAt: string;
+  /** The PR fixes a CVE in CISA KEV: exploited in the wild. */
+  kev?: true;
 }
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low"];
@@ -68,7 +72,11 @@ function versionAtLeast(version: string, floor: string): boolean {
   return true;
 }
 
-export function rankSecurityPrs(prs: OpenPr[], alerts: SecurityAlert[]): RankedPr[] {
+export function rankSecurityPrs(
+  prs: OpenPr[],
+  alerts: SecurityAlert[],
+  kev: ReadonlySet<string> = new Set(),
+): RankedPr[] {
   const ranked: RankedPr[] = [];
   for (const pr of prs) {
     // Anyone can title a PR "bump x from 1 to 2"; only Dependabot's own PRs count.
@@ -85,10 +93,13 @@ export function rankSecurityPrs(prs: OpenPr[], alerts: SecurityAlert[]): RankedP
       severity: fixed[0].severity,
       ci: ciState(pr.checks),
       updatedAt: pr.updatedAt,
+      ...(fixed.some((a) => a.cve && kev.has(a.cve)) ? { kev: true as const } : {}),
     });
   }
+  // KEV first: a known-exploited CVE outranks a higher severity label that nobody exploits.
   return ranked.sort(
     (x, y) =>
+      Number(Boolean(y.kev)) - Number(Boolean(x.kev)) ||
       SEVERITY_ORDER.indexOf(x.severity) - SEVERITY_ORDER.indexOf(y.severity) ||
       x.updatedAt.localeCompare(y.updatedAt),
   );
@@ -98,5 +109,5 @@ export function rankSecurityPrs(prs: OpenPr[], alerts: SecurityAlert[]): RankedP
 export function securityPrsLine(ranked: RankedPr[]): string | null {
   const top = ranked[0];
   if (!top) return null;
-  return `sec-prs:${ranked.length} ${top.severity} #${top.number} ci:${top.ci}`;
+  return `sec-prs:${ranked.length} ${top.kev ? "KEV " : ""}${top.severity} #${top.number} ci:${top.ci}`;
 }

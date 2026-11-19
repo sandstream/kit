@@ -142,6 +142,8 @@ export interface SecurityCheckResult extends Partial<{ hasFindings: true; scanIn
    * instead of the human-facing result name. Only set on self-audit results.
    */
   ruleId?: string;
+  /** Other advisory ids (CVE/GHSA) the scanner reported for the same vulnerability. */
+  aliases?: string[];
 }
 
 export interface GateOpts {

@@ -91,6 +91,28 @@ describe("parseOsv", () => {
     assert.match(out[0].detail, /Prototype pollution/);
   });
 
+  it("keeps CVE/GHSA aliases so KEV and EPSS can match an advisory keyed by GHSA", () => {
+    const out = parseOsv(
+      JSON.stringify({
+        results: [
+          {
+            packages: [
+              {
+                package: { name: "x", version: "1.0.0" },
+                vulnerabilities: [
+                  { id: "GHSA-aaaa-bbbb-cccc", aliases: ["cve-2021-44228", "not\u001b[2Jid", 7] },
+                  { id: "GHSA-dddd-eeee-ffff" },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    assert.deepEqual(out[0].aliases, ["CVE-2021-44228"]);
+    assert.equal("aliases" in out[1], false);
+  });
+
   it("returns [] on garbage", () => {
     assert.deepEqual(parseOsv("nope"), []);
   });
