@@ -58,6 +58,13 @@ describe("judgeEvidence", () => {
     assert.match(r.detail, /another tool|settings file/i);
   });
 
+  it("does not claim the wired commands are kit: the controls ran kit's own build", () => {
+    // kit-research verify-against-real-state: a stub that exits 0, wired with an absolute path,
+    // passed liveness and this row. The row must say the wired command itself was not proven.
+    const r = judgeEvidence(facts());
+    assert.match(r.detail, /Not proven: that the wired commands run kit's gate/);
+  });
+
   it("fails, naming the control, when a negative control did not hold", () => {
     const r = judgeEvidence(
       facts({
