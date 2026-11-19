@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ReadBuffer } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { StdioMcpServer } from "./mcp-stdio.js";
+import { StdioMcpServer, serveStdio } from "./mcp-stdio.js";
 
 /** Drive the SDK server and kit's own stdio server with the same JSON-RPC messages. */
 
@@ -59,7 +59,7 @@ export function sdkWire(register: (s: Registrar) => void): Promise<Wire> {
 export async function ownWireFor(server: StdioMcpServer): Promise<Wire> {
   const input = new PassThrough();
   const output = new PassThrough();
-  const done = server.connect(input, output);
+  const done = serveStdio(server, input, output);
   const q = queue();
   const buffer = new ReadBuffer();
   output.on("data", (chunk: Buffer) => {

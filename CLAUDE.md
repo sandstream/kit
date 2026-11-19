@@ -85,7 +85,7 @@ rules — not prose:
 
 - **ADR-0001** no model-client import anywhere in `src/**` (the zero-LLM core).
 - **ADR-0002** no new runtime dependency from the forbidden list — stdlib otherwise.
-  The *floor itself* (exactly three runtime deps, all pinned) is **not** expressible in the
+  The *floor itself* (exactly two runtime deps, all pinned) is **not** expressible in the
   `kit-enforce` grammar and is enforced by `src/dependency-floor.test.ts`; the ADR says why.
 - **ADR-0003** the check path imports no coverage-framework mappings.
 - **ADR-0006** `src/utils/**` imports nothing from the repo — derived by `kit adr derive`

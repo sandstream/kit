@@ -10,7 +10,7 @@ import type {
   TransportSendOptions,
 } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { StdioMcpServer } from "./mcp-stdio.js";
+import { StdioMcpServer, serveStdio } from "./mcp-stdio.js";
 import {
   INFO,
   INSTRUCTIONS,
@@ -101,7 +101,7 @@ describe("StdioMcpServer initialize", () => {
     fixtureTools(server as unknown as Registrar);
     const toServer = new PassThrough();
     const toClient = new PassThrough();
-    const done = server.connect(toServer, toClient);
+    const done = serveStdio(server, toServer, toClient);
     const buffer = new ReadBuffer();
     const transport: Transport = {
       onmessage: undefined,
@@ -221,7 +221,7 @@ describe("StdioMcpServer framing", () => {
     fixtureTools(server as unknown as Registrar);
     const input = new PassThrough();
     const output = new PassThrough();
-    const done = server.connect(input, output);
+    const done = serveStdio(server, input, output);
     const got: string[] = [];
     output.on("data", (c: Buffer) => got.push(c.toString()));
     input.write("not json\n");
@@ -237,7 +237,7 @@ describe("StdioMcpServer framing", () => {
     fixtureTools(server as unknown as Registrar);
     const input = new PassThrough();
     const output = new PassThrough();
-    const done = server.connect(input, output);
+    const done = serveStdio(server, input, output);
     const got: string[] = [];
     output.on("data", (c: Buffer) => got.push(c.toString()));
     const line = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
@@ -266,10 +266,10 @@ describe("StdioMcpServer in its own process", () => {
   it("serves the SDK's stdio client over real standard input and output, and exits when input ends", async () => {
     const module = new URL("./mcp-stdio.js", import.meta.url).href;
     const code = `
-      import { StdioMcpServer } from ${JSON.stringify(module)};
+      import { StdioMcpServer, serveStdio } from ${JSON.stringify(module)};
       const s = new StdioMcpServer({ name: "kit", version: "0.1.0" }, { instructions: "hi" });
       s.registerTool("hello", { description: "Say hello." }, async () => ({ content: [{ type: "text", text: "hello" }] }));
-      await s.connect(process.stdin, process.stdout);
+      await serveStdio(s, process.stdin, process.stdout);
     `;
     const transport = new StdioClientTransport({
       command: process.execPath,

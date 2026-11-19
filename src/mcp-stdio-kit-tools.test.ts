@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpServer, KIT_MCP_TOOLS } from "./mcp-server.js";
 import { StdioMcpServer, type ToolConfig } from "./mcp-stdio.js";
 import {
@@ -12,6 +12,7 @@ import {
   ownWireFor,
   sdkWireFor,
   type Msg,
+  type Registrar,
   type Wire,
 } from "./mcp-stdio.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
@@ -19,49 +20,33 @@ import { rmTemp } from "./temp-cleanup.test-support.js";
 /**
  * The ten real kit tools, served by the SDK and by kit's own stdio server.
  *
- * The own server is not wired into kit. This test builds it from the registrations of the real
- * server (`createMcpServer`), so each tool keeps its real schema, description and handler.
+ * `createMcpServer` is the real server and builds the own one. The SDK side is built from the
+ * registrations of the real server, so each tool keeps its real schema, description and handler.
  */
 
 interface Registered {
-  title?: string;
-  description?: string;
-  inputSchema?: { shape: ToolConfig["inputSchema"] };
-  annotations?: ToolConfig["annotations"];
-  _meta?: ToolConfig["_meta"];
-  handler: Parameters<StdioMcpServer["registerTool"]>[2];
+  config: ToolConfig;
+  handler: (...args: never[]) => unknown;
 }
 
-const registered = (s: McpServer): [string, Registered][] =>
-  Object.entries(
-    (s as unknown as { _registeredTools: Record<string, Registered> })._registeredTools,
-  );
+const registrations = (s: StdioMcpServer): [string, Registered][] => [
+  ...(s as unknown as { tools: Map<string, Registered> }).tools,
+];
 
-/** Both servers, built from the same registrations. Returns the wires and the instructions. */
+/** Both servers, built from the same registrations. */
 async function kitWires(): Promise<{ sdk: Wire; own: Wire }> {
-  const real = createMcpServer();
-  const sdkSide = createMcpServer();
-  const probe = await sdkWireFor(sdkSide);
-  const init = (await handshake(probe)) as { result: { instructions: string } };
-  await probe.close();
-  const own = new StdioMcpServer(
+  const own = createMcpServer();
+  const sdk = new McpServer(
     { name: "kit", version: "0.1.0" },
-    { instructions: init.result.instructions },
+    {
+      capabilities: { tools: {} },
+      instructions: (own as unknown as { options: { instructions?: string } }).options.instructions,
+    },
   );
-  for (const [name, t] of registered(real)) {
-    own.registerTool(
-      name,
-      {
-        title: t.title,
-        description: t.description,
-        inputSchema: t.inputSchema?.shape,
-        annotations: t.annotations,
-        _meta: t._meta,
-      },
-      t.handler,
-    );
+  for (const [name, t] of registrations(own)) {
+    (sdk as unknown as Registrar).registerTool(name, t.config as never, t.handler as never);
   }
-  return { sdk: await sdkWireFor(createMcpServer()), own: await ownWireFor(own) };
+  return { sdk: await sdkWireFor(sdk), own: await ownWireFor(createMcpServer()) };
 }
 
 /** What kit_check says that does not change from one run to the next. */

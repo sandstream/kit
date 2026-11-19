@@ -1,6 +1,6 @@
 ---
 id: ADR-0002
-title: Dependency floor — three runtime deps, stdlib otherwise
+title: Dependency floor — two runtime deps, stdlib otherwise
 status: accepted
 enforced_by: [src/dependency-floor.test.ts]
 ---
@@ -11,7 +11,7 @@ enforced_by: [src/dependency-floor.test.ts]
 
 kit is a supply-chain gate; its own supply chain is the first thing an auditor
 reads. The runtime dependency set stays at the minimum that cannot reasonably
-be stdlib (`@modelcontextprotocol/sdk`, `smol-toml`, `zod`).
+be stdlib (`smol-toml`, `zod`).
 Utility libraries are forbidden — Node's stdlib covers them (`node:` builtins,
 global `fetch`, `structuredClone`, …).
 
@@ -20,6 +20,15 @@ global `fetch`, `structuredClone`, …).
 Adding a runtime dependency is an ADR-level decision, not a convenience call.
 The rule below blocks the common utility imports outright; anything else new
 must argue its case in a PR that updates this ADR.
+
+## Amended 2026-11-19: two runtime deps
+
+`@modelcontextprotocol/sdk` moves to `devDependencies`. kit serves MCP over stdio with
+`src/mcp-stdio.ts` (JSON-RPC 2.0, one message per line; `initialize`, `ping`, `tools/list`,
+`tools/call`), which imports only `zod` and Node. The SDK stays in the tests as the reference:
+`src/mcp-stdio.test.ts` and `src/mcp-stdio-kit-tools.test.ts` send the same messages to both servers
+and compare every answer. The installed production tree goes from 92 packages to 2. The floor is
+now `smol-toml` and `zod`. Plan and evidence: `docs/plans/2026-11-18-few-dependencies.md`.
 
 ## Amended 2026-11-18: three runtime deps
 
