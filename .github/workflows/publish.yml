@@ -29,6 +29,7 @@ jobs:
       contents: write # checkout + create release / upload SBOM assets
       id-token: write # npm provenance via OIDC (SLSA attestation)
       attestations: write # GitHub artifact attestations
+      actions: read # sbom-action downloads the SBOM artifact it uploaded, to attach it to the release
 
     steps:
       # SHA-pinned actions — protects against tag-rewrite supply-chain attacks.

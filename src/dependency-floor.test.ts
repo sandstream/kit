@@ -1,7 +1,7 @@
 /**
  * ADR-0002's claim, enforced.
  *
- * WHY THIS FILE EXISTS. ADR-0002 is titled "Dependency floor — three runtime deps, stdlib
+ * WHY THIS FILE EXISTS. ADR-0002 is titled "Dependency floor — two runtime deps, stdlib
  * otherwise", and CLAUDE.md lists it among kit's deterministic rules. Its `kit-enforce`
  * block enforces something narrower: a `forbid_import` deny-list of twelve named packages
  * (lodash, axios, moment, …) checked in `src/**`. Measured — by accidentally adding a
@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The floor ADR-0002 declares. Changing this set requires amending that ADR. */
-const RUNTIME_DEPENDENCIES = ["@modelcontextprotocol/sdk", "smol-toml", "zod"] as const;
+const RUNTIME_DEPENDENCIES = ["smol-toml", "zod"] as const;
 
 function manifest(): { dependencies?: Record<string, string> } {
   return JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf-8")) as {

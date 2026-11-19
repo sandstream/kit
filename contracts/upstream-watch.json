@@ -296,7 +296,7 @@
     {
       "id": "scanner/semgrep",
       "owner": ".github/workflows/security.yml",
-      "pinned": "1.185.0",
+      "pinned": "1.183.0",
       "track": "minor",
       "source": {
         "kind": "pypi",

@@ -224,48 +224,32 @@ Examples of paths kit can write:
 Plus the standard `node_modules/`, `dist/`, etc. during build — but those are
 not kit-specific.
 
-## Dependency surface: 92 installed, 9 loaded
+## Dependency surface: 2 installed, 2 loaded
 
 A reader auditing what kit can reach should know the gap between what `npm install`
 puts on disk and what the process ever executes. Both numbers are measured, not
 estimated; the second is a guard (`src/mcp-dependency-surface.test.ts`).
 
-kit has **three** direct production dependencies:
+kit has **two** direct production dependencies, and each is one package:
 
-| Dependency                  | Transitive closure                                          |
-| --------------------------- | ----------------------------------------------------------- |
-| `@modelcontextprotocol/sdk` | **91 packages** (90 of them reachable through nothing else) |
-| `smol-toml`                 | 1                                                           |
-| `zod`                       | 1                                                           |
+| Dependency  | Transitive closure |
+| ----------- | ------------------ |
+| `smol-toml` | 1                  |
+| `zod`       | 1                  |
 
-Counts re-measured at SDK 1.30.0. They read 120/91 for the 1.29 tree; the install side moved with
-the `@hono/node-server` 1.x → 2.x bump and the loaded side did not. The loaded number is gated
-against `ROADMAP.md` by the guard test, since a count that lives only in prose drifts.
+Until 2026-11-19 kit served MCP through `@modelcontextprotocol/sdk`, which accounted for 91 of the
+94 installed packages, among them a complete HTTP server and OAuth stack for transports kit never
+used. kit speaks **stdio**, over a pipe, and never starts a listener, so it now serves that with
+`src/mcp-stdio.ts`, which imports only `zod` and Node. The SDK is a development dependency that
+the tests use as the reference server.
 
-The SDK declares 17 **hard** dependencies (`optionalDependencies: {}`), among them a
-complete HTTP server and OAuth stack — express 5, express-rate-limit, cors, hono,
-`@hono/node-server`, raw-body, content-type, eventsource, jose, pkce-challenge — for
-the Streamable-HTTP and SSE transports. kit imports exactly `server/mcp.js` and
-`server/stdio.js`: it speaks **stdio**, over a pipe, and never starts a listener.
+Traced while booting the server, listing tools and calling two of them, the packages actually
+loaded are the two declared ones: `zod` and `smol-toml`. The guard fails if anything else shows up.
 
-Traced while booting the server, listing tools and calling two of them, the packages
-actually loaded are **9 of the 94**:
-
-```
-@modelcontextprotocol/sdk   zod   zod-to-json-schema   smol-toml
-ajv   ajv-formats   fast-deep-equal   fast-uri   json-schema-traverse
-```
-
-None of the twelve HTTP/OAuth packages load, at startup or during a tool call. That
-is inherited surface rather than executed code — which is exactly the distinction
-that decides how to read a CVE in it. Two of the four advisories cleared in
-6.x (`hono`, `ip-address`) sit in never-loaded code; `fast-uri` does **not**, because ajv
-reaches it when compiling the tool schemas.
-
-> The trace needs BOTH an ESM `resolve` hook and a `Module._load` patch. `ajv` is
-> CommonJS, so an ESM-only tracer reports 6 packages, silently omits `fast-uri`, and
-> yields a rigorous-looking wrong answer. The test's sanity gate therefore asserts a
-> CJS-only package is visible _before_ it is allowed to assert anything is absent.
+> The trace needs BOTH an ESM `resolve` hook and a `Module._load` patch. A CommonJS package
+> reached through `require()` is invisible to an ESM-only tracer, which then yields a
+> rigorous-looking wrong answer. The test's sanity gate therefore asserts a CJS-only package is
+> visible _before_ it is allowed to assert anything is absent.
 
 ## What's intentionally NOT shown here
 

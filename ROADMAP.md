@@ -337,66 +337,28 @@ unguarded, and checking it walked back a suspected gap — but three of them rou
 `src/exec-broker/policy-cwd.test.ts`; mutation-proved (dropping the `cwd` argument fails 6,
 replacing the foreign-tree deny with `if (false)` fails 2).
 
-### Shrink the inherited dependency surface — 92 installed, 9 loaded
+### Shrink the inherited dependency surface — 2 installed, 2 loaded
 
-Measured, and guarded by `src/mcp-dependency-surface.test.ts`: kit's three direct production
-dependencies pull in **92** packages, of which **90 are reachable ONLY through**
-`@modelcontextprotocol/sdk` (91 via the SDK in total; without it the other two direct deps bring
-2). `@upstash/redis` and the one package it pulled in were removed on 2026-11-18 (94 to 92): no code imported
-it. Re-measured at SDK 1.30.0 — this section said 120/91 for the 1.29 tree, and the install count
-moved under the `@hono/node-server` 1.x → 2.x bump while the LOADED count did not. The loaded number
-is now asserted against this heading by the guard test, because a count that lives only in prose
-drifts and a drifted number in a supply-chain argument is worse than no number.
-The SDK declares 17 hard dependencies with `optionalDependencies: {}`, including a whole HTTP
-server and OAuth stack (express 5, express-rate-limit, cors, hono, `@hono/node-server`, raw-body,
-content-type, eventsource, jose, pkce-challenge) for the Streamable-HTTP/SSE transports. kit speaks
-stdio and **loads none of them** — traced across both module systems, at startup and during tool
-calls.
+Done on 2026-11-19, and guarded by `src/mcp-dependency-surface.test.ts`. kit's two direct
+production dependencies, `smol-toml` and `zod`, install **2** packages, and the MCP server loads
+both. Until then `@modelcontextprotocol/sdk` accounted for 91 of 94 installed packages (92 after
+`@upstash/redis` was removed on 2026-11-18). It declares 17 hard dependencies, among them a whole
+HTTP server and OAuth stack (express 5, express-rate-limit, cors, hono, `@hono/node-server`,
+raw-body, content-type, eventsource, jose, pkce-challenge) for transports kit does not use. kit
+speaks stdio and loaded none of them, but they shipped, had to be updated, and produced advisories
+(three of the four cleared on the `cwd` branch came from that tree).
 
-Why it is a roadmap item and not just a curiosity: three of the four dependency advisories cleared
-on the `cwd` branch came from that tree, and for a tool whose own pitch is supply-chain governance
-— `kit triage` refuses untriaged installs — shipping ~12 never-executed webserver packages is its
-own thesis pointed at itself. Each bump was correct; none of them touched the cause.
+kit now serves MCP with `src/mcp-stdio.ts`, 287 lines that import only `zod` and Node. The SDK is
+a development dependency, and the tests use it as the reference: `src/mcp-stdio.test.ts` and
+`src/mcp-stdio-kit-tools.test.ts` send the same messages to the SDK server and to kit's server and
+compare every answer, for fixture tools and for the ten real kit tools. The loaded number is
+asserted against this heading by the guard test, because a count that lives only in prose drifts.
 
-Four options, in the order I'd try them:
-
-1. **Nothing, short term.** They are hard deps with no `optionalDependencies`, so npm installs the
-   set regardless. Bumping is the only immediate answer, and that is what the branch did.
-2. ~~**Ask upstream**~~ **Done — the ask already existed, so kit added evidence instead of a
-   duplicate.** [`modelcontextprotocol/typescript-sdk#1924`](https://github.com/modelcontextprotocol/typescript-sdk/issues/1924)
-   ("Optional install of HTTP/SSE transport deps (express, hono) for stdio-only servers", open since
-   2026-04-17) asks for exactly this, with the same three options. Filing the draft that used to sit
-   below would have been a third "+1" on a thread that already had two.
-
-   What kit contributed instead ([comment](https://github.com/modelcontextprotocol/typescript-sdk/issues/1924#issuecomment-5177704605)):
-   the issue and its comment both argue from INSTALL counts, and nobody had shown which packages
-   execute. kit's trace does — 9 of 94 load, all twelve HTTP/OAuth packages installed and none
-   loaded — plus the argument that matters more than disk footprint: of the three advisories kit
-   cleared from that subtree, `hono` and `ip-address` were unreachable while `fast-uri` (via `ajv`)
-   was genuinely on the live path, and only a runtime trace can tell those apart. The SDK's tree is
-   not all dead weight for a stdio consumer, which is why the ask is specifically about the
-   separable HTTP/OAuth set rather than "fewer dependencies".
-
-   A note that was wrong here for a day: this said the issue "cannot be filed from kit's own
-   tooling — any repository outside the allowlist answers 403". Measured before acting on it:
-   `gh issue list --repo modelcontextprotocol/typescript-sdk` exits 0. The 403 belonged to a
-   different constraint (a cloud session's GitHub token is scoped to its one attached repo) and had
-   been copied onto a local-session item where it did not apply. Worth remembering as its own
-   defect class: a limitation recorded without the condition it depends on reads as permanent.
-3. **Vendor the stdio transport.** It is newline-delimited JSON-RPC over stdin/stdout — small.
-   Dropping the SDK would take the tree from 94 to 4 production packages (the other three direct
-   deps' closure). The cost is real: kit would own protocol conformance and lose `McpServer`'s
-   registration and schema validation, which is a load-bearing dependency swap deserving its own
-   costing, not a snap decision.
-4. **Document and accept** — done: `docs/DATA_FLOW.md` and the A06 rows in `docs/OWASP_2025.md`
-   carry both numbers and the trace method.
-
-The measurement, for anyone re-deriving it: a lockfile reachability walk from the three direct
-production deps gives the install counts, and the loaded set needs BOTH module systems traced — a
-`register()`ed ESM `resolve` hook and a `Module._load` patch. An ESM-only tracer reports 5 packages
-and misses `fast-uri`, because `ajv` is CommonJS and reaches it through an internal `require()`. That
-half-blind version was written first and produced a confident wrong answer, which is why the guard
-test asserts it can see `fast-uri` BEFORE any of its absence claims are allowed to mean anything.
+How it was decided, and what was checked against which client, is in
+`docs/plans/2026-11-18-few-dependencies.md` (Phase 2). The upstream request for optional HTTP
+transport dependencies,
+[`modelcontextprotocol/typescript-sdk#1924`](https://github.com/modelcontextprotocol/typescript-sdk/issues/1924),
+is still open, and kit's evidence comment on it stands.
 
 ### Read the anchor record — N working trees currently give N green verdicts ([#470](https://github.com/sandstream/kit/issues/470))
 `kit audit verify` answers for ONE working tree. Two real worktrees of this repo on the same commit

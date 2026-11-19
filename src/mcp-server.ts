@@ -1,5 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StdioMcpServer, serveStdio } from "./mcp-stdio.js";
 import { z } from "zod";
 import { resolve, join, relative } from "node:path";
 import { loadConfig } from "./config.js";
@@ -183,10 +182,10 @@ function governanceRefusal(reason: string): {
   };
 }
 
-export function createMcpServer(): McpServer {
-  const server = new McpServer(
+export function createMcpServer(): StdioMcpServer {
+  const server = new StdioMcpServer(
     { name: "kit", version: "0.1.0" },
-    { capabilities: { tools: {} }, instructions: KIT_MCP_INSTRUCTIONS },
+    { instructions: KIT_MCP_INSTRUCTIONS },
   );
 
   // One registrar per tool — keeps this composition flat (was a 774-line
@@ -206,12 +205,10 @@ export function createMcpServer(): McpServer {
 }
 
 export async function startMcpServer(): Promise<void> {
-  const server = createMcpServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await serveStdio(createMcpServer(), process.stdin, process.stdout);
 }
 
-function register_kit_check(server: McpServer): void {
+function register_kit_check(server: StdioMcpServer): void {
   // kit_check — run all checks, return structured JSON. Collection + verdict come
   // from the shared core (check-run.ts) — the SAME path `kit check` runs, so the
   // two surfaces can never disagree on what runs or what "green" means.
@@ -265,7 +262,7 @@ function register_kit_check(server: McpServer): void {
   );
 }
 
-function register_kit_review(server: McpServer): void {
+function register_kit_review(server: StdioMcpServer): void {
   // kit_review — the full repo audit (check + design + standards + ADR + skill) as ONE
   // structured report, via the same collectReview core `kit review` renders.
   // Replaces kit_standards on the MCP surface (that stage is one of its four).
@@ -326,7 +323,7 @@ function register_kit_review(server: McpServer): void {
   );
 }
 
-function register_kit_secrets(server: McpServer): void {
+function register_kit_secrets(server: StdioMcpServer): void {
   // kit_secrets — generate .env.local from config
   server.registerTool(
     "kit_secrets",
@@ -397,7 +394,7 @@ function register_kit_secrets(server: McpServer): void {
   );
 }
 
-function register_kit_fix(server: McpServer): void {
+function register_kit_fix(server: StdioMcpServer): void {
   // Repair tools, lock files, secret placeholders, and Git ignore protection.
   server.registerTool(
     "kit_fix",
@@ -467,7 +464,7 @@ function register_kit_fix(server: McpServer): void {
   );
 }
 
-function register_kit_init(server: McpServer): void {
+function register_kit_init(server: StdioMcpServer): void {
   // kit_init — detect stack, generate .kit.toml, optionally write it
   server.registerTool(
     "kit_init",
@@ -505,7 +502,7 @@ function register_kit_init(server: McpServer): void {
   );
 }
 
-function register_kit_run(server: McpServer): void {
+function register_kit_run(server: StdioMcpServer): void {
   // kit_run — execute a command with project env vars loaded
   server.registerTool(
     "kit_run",
@@ -580,7 +577,7 @@ function register_kit_run(server: McpServer): void {
   );
 }
 
-function register_kit_context(server: McpServer): void {
+function register_kit_context(server: StdioMcpServer): void {
   // kit_context — gather structured project context for agents
   server.registerTool(
     "kit_context",
@@ -617,7 +614,7 @@ function register_kit_context(server: McpServer): void {
   );
 }
 
-function register_kit_map(server: McpServer): void {
+function register_kit_map(server: StdioMcpServer): void {
   // kit_map — deterministic repo-map: the relevant slice around a seed file (read-only). Shares the
   // exact core (mapReport) with the `kit map` CLI, so the two surfaces can't disagree.
   server.registerTool(
@@ -664,7 +661,7 @@ function register_kit_map(server: McpServer): void {
   );
 }
 
-function register_kit_triage(server: McpServer): void {
+function register_kit_triage(server: StdioMcpServer): void {
   // kit_triage — security-evaluate a package/image/repo/skill BEFORE it is
   // installed. This closes a dead end: the install gate blocks untriaged
   // packages with the instruction "run kit triage first", which a shell-less
@@ -731,7 +728,7 @@ function register_kit_triage(server: McpServer): void {
   );
 }
 
-function register_kit_memory(server: McpServer): void {
+function register_kit_memory(server: StdioMcpServer): void {
   // kit_memory — search cross-session conversation memory (and the curated
   // shared tier that travels with the repo). Search-only by design: writes to
   // the trusted store stay on the CLI/indexer path, so an MCP client can never

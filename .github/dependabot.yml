@@ -20,7 +20,7 @@
 #     (scripts/lockfile-changed-packages.sh), and fails closed instead of cutting the list short.
 #   - devDependencies only, grouped into one weekly PR, so the gate runs once on one reviewable
 #     diff. Nothing merges on its own: the PR waits for a human like any other.
-#   - Runtime dependencies are NOT bumped by Dependabot. There are exactly three, pinned, and
+#   - Runtime dependencies are NOT bumped by Dependabot. There are exactly two, pinned, and
 #     ADR-0002 plus src/dependency-floor.test.ts govern them; a change there is a reviewed
 #     decision, not a weekly chore.
 version: 2

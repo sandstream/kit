@@ -50,17 +50,32 @@ Result: 94 to 92 packages. Three runtime dependencies.
 
 The decision is Peter's. The recommendation is to run the spike and decide on its evidence.
 
-- [ ] **Spike, one PR, nothing wired in.** A small server for JSON-RPC 2.0 over stdio, in its own
-      file: `initialize` (with protocol version negotiation), `tools/list`, `tools/call`, `ping`,
-      the notifications a client sends, and the standard error codes. No HTTP. No dependencies.
-- [ ] **Conformance by test.** The tests keep `@modelcontextprotocol/sdk` as a development
-      dependency and drive the new server with its own `Client` over a linked pair. Every one of
-      the ten tools is called through both servers with the same input and the outputs are
-      compared.
-- [ ] **Stop signal.** Abandon the replacement if the spike needs more than about 400 lines, if a
-      real client (Claude Code, Codex, the ChatGPT tunnel started by `kit mcp web`) behaves
-      differently from the SDK server on `initialize` or `tools/list`, or if the read-only mode
-      cannot be kept byte-for-byte.
+- [x] **Spike, one PR, nothing wired in.** `src/mcp-stdio.ts`, 240 lines, imports only `zod` and
+      Node. It serves `initialize` (with protocol version negotiation), `ping`, `tools/list` and
+      `tools/call`, and answers an unknown method with `-32601`. No HTTP. It leaves out resources,
+      prompts, sampling, tasks, output schemas, progress and cancellation, because no kit tool uses
+      them.
+- [x] **Conformance by test.** `src/mcp-stdio.test.ts` drives the SDK server and the new one with
+      the same messages and compares what comes back: initialize for every supported protocol
+      version and an unknown one, `ping`, `tools/list` (names, titles, descriptions, JSON Schemas,
+      annotations), `tools/call` (results, a throwing handler, an unknown tool, six kinds of bad
+      arguments), overlapping requests, framing (split lines, CRLF, a line that is not JSON), and
+      a real SDK `Client` over real process stdio. `src/mcp-stdio-kit-tools.test.ts` does the same
+      for the ten real kit tools, built from the registrations of `createMcpServer`: the lists are
+      identical, bad arguments give the same text on all ten, and `kit_context`, `kit_map`,
+      `kit_init` (dry run) and the `kit_check` verdict give the same answer.
+- [x] **Stop signal, checked so far.** 240 lines against the limit of about 400. The new server
+      exits by itself, with code 0, when standard input ends. Differences from the SDK that the
+      spike found and copied: the `execution: { taskSupport: "forbidden" }` field the SDK puts on
+      every tool, and the `MCP error -32602: ` prefix the SDK puts on the text of an unknown-tool
+      or bad-argument result.
+- [x] **A real client, Claude Code 2.1.327 (19 November 2026).** It connected to the new server,
+      listed all ten kit tools and one extra, and called two of them (`kit_context` on a project
+      directory and a tool with no arguments) with correct results. The server was built from the
+      real registrations, as in the tests.
+- [ ] **Not checked, and it decides.** Codex (`codex-cli` 0.167.2 could not run: the workspace is
+      out of credits) and the ChatGPT tunnel from `kit mcp web`. `kit mcp --read-only` byte for
+      byte is also unchecked, because the spike is not wired in. Do these before switching.
 - [ ] If it goes ahead: switch `src/mcp-server.ts`, keep `kit mcp --read-only` and `kit mcp web`
       unchanged, move the SDK to `devDependencies`, amend ADR-0002 to two runtime dependencies,
       and rewrite `src/mcp-dependency-surface.test.ts` (its loaded-set guard no longer applies).
@@ -100,18 +115,19 @@ Candidates, in order of gain over risk. None is done. Each needs Peter's decisio
       the other. Gain: 29 dev packages. Cost: a slower edit loop.
 - [ ] **`picomatch`, `fdir`, `tinyglobby` (3 packages, dev).** They exist only because
       `@typescript-eslint/typescript-estree` requires `tinyglobby`, which requires `fdir` and
-      `picomatch`. `picomatch` has no patched release (GHSA-fc5q-39xc-vjpf, waived until
-      2026-12-17). It cannot be replaced on its own. It goes only if `typescript-eslint` goes, or
-      if a release of `typescript-eslint` stops needing it.
+      `picomatch`. The advisory that made this urgent (GHSA-fc5q-39xc-vjpf) was withdrawn by GitHub
+      on 2026-11-18, and both waivers for it are removed. The three packages are still small
+      development weight. They cannot be replaced on their own: they go only if `typescript-eslint`
+      goes, or if a release of it stops needing them.
 - [ ] **ESLint with `typescript-eslint` (about 100 packages, 72 only through them).** The largest
       development cost and the source of the picomatch advisory. First list which rules kit relies
       on and whether `tsc` strict, `kit standards` or `kit self-audit` already cover them. Replace
       only what is covered. This is the decision with the most gain and the most risk.
 - [ ] **The Docker image carries its own copy of `picomatch`.** It is the copy bundled inside the
-      global npm (`/usr/local/lib/node_modules/npm/node_modules/tinyglobby/...`), waived in the
-      image scan until 2026-12-17. Plugin installs need npm, so it cannot simply be removed. The
-      Dockerfile already swaps one bundled package by hand (`undici`); that route is closed here,
-      because no fixed `picomatch` exists to swap in.
+      global npm (`/usr/local/lib/node_modules/npm/node_modules/tinyglobby/...`). Its waiver in the
+      image scan is removed together with the withdrawn advisory. Plugin installs need npm, so the
+      copy cannot simply be removed. If an advisory returns, the Dockerfile already swaps one
+      bundled package by hand (`undici`).
 - [ ] Keep: `fast-check` (2 packages, 2 test files), `prettier`, `typescript`, `@types/node`
       (kept at 22, the Node floor), `smol-toml`, `zod`. Each is one or two packages that do real
       work.
