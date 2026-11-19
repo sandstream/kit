@@ -207,7 +207,7 @@ export function kevLookupFor(settings: KevSettings): KevLookup {
 }
 
 /** The lookup with env settings only, for callers that have no project config. */
-export const defaultKevLookup: KevLookup = kevLookupFor({});
+const defaultKevLookup: KevLookup = kevLookupFor({});
 
 export async function gatherWatch(
   gh: GhRunner,
