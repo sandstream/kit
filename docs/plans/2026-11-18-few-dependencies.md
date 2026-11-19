@@ -50,17 +50,28 @@ Result: 94 to 92 packages. Three runtime dependencies.
 
 The decision is Peter's. The recommendation is to run the spike and decide on its evidence.
 
-- [ ] **Spike, one PR, nothing wired in.** A small server for JSON-RPC 2.0 over stdio, in its own
-      file: `initialize` (with protocol version negotiation), `tools/list`, `tools/call`, `ping`,
-      the notifications a client sends, and the standard error codes. No HTTP. No dependencies.
-- [ ] **Conformance by test.** The tests keep `@modelcontextprotocol/sdk` as a development
-      dependency and drive the new server with its own `Client` over a linked pair. Every one of
-      the ten tools is called through both servers with the same input and the outputs are
-      compared.
-- [ ] **Stop signal.** Abandon the replacement if the spike needs more than about 400 lines, if a
-      real client (Claude Code, Codex, the ChatGPT tunnel started by `kit mcp web`) behaves
-      differently from the SDK server on `initialize` or `tools/list`, or if the read-only mode
-      cannot be kept byte-for-byte.
+- [x] **Spike, one PR, nothing wired in.** `src/mcp-stdio.ts`, 240 lines, imports only `zod` and
+      Node. It serves `initialize` (with protocol version negotiation), `ping`, `tools/list` and
+      `tools/call`, and answers an unknown method with `-32601`. No HTTP. It leaves out resources,
+      prompts, sampling, tasks, output schemas, progress and cancellation, because no kit tool uses
+      them.
+- [x] **Conformance by test.** `src/mcp-stdio.test.ts` drives the SDK server and the new one with
+      the same messages and compares what comes back: initialize for every supported protocol
+      version and an unknown one, `ping`, `tools/list` (names, titles, descriptions, JSON Schemas,
+      annotations), `tools/call` (results, a throwing handler, an unknown tool, six kinds of bad
+      arguments), overlapping requests, framing (split lines, CRLF, a line that is not JSON), and
+      a real SDK `Client` over real process stdio. `src/mcp-stdio-kit-tools.test.ts` does the same
+      for the ten real kit tools, built from the registrations of `createMcpServer`: the lists are
+      identical, bad arguments give the same text on all ten, and `kit_context`, `kit_map`,
+      `kit_init` (dry run) and the `kit_check` verdict give the same answer.
+- [x] **Stop signal, checked so far.** 240 lines against the limit of about 400. The new server
+      exits by itself, with code 0, when standard input ends. Differences from the SDK that the
+      spike found and copied: the `execution: { taskSupport: "forbidden" }` field the SDK puts on
+      every tool, and the `MCP error -32602: ` prefix the SDK puts on the text of an unknown-tool
+      or bad-argument result.
+- [ ] **Not checked, and it decides.** A real client that is not the SDK's: Claude Code, Codex, and
+      the ChatGPT tunnel from `kit mcp web`. Nothing here ran them. `kit mcp --read-only` byte for
+      byte is also unchecked, because the spike is not wired in. Do both before switching.
 - [ ] If it goes ahead: switch `src/mcp-server.ts`, keep `kit mcp --read-only` and `kit mcp web`
       unchanged, move the SDK to `devDependencies`, amend ADR-0002 to two runtime dependencies,
       and rewrite `src/mcp-dependency-surface.test.ts` (its loaded-set guard no longer applies).
