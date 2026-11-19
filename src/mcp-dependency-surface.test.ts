@@ -1,27 +1,20 @@
 /**
- * kit installs 92 production packages and LOADS 9 of them.
+ * kit installs 2 production packages, and its MCP server loads only those.
  *
- * kit's three direct production dependencies are `@modelcontextprotocol/sdk`, `smol-toml` and
- * `zod`. 90 of the 92 packages in the tree are reachable ONLY through the SDK
- * (91 via the SDK in total; the other two direct deps close over 2), because it
- * declares 17 HARD dependencies (`optionalDependencies: {}`) that include a complete HTTP server
- * and OAuth stack — express 5, express-rate-limit, cors, hono, @hono/node-server, raw-body,
- * content-type, eventsource, jose, pkce-challenge — for the Streamable-HTTP and SSE transports.
- * kit speaks stdio. It imports exactly `server/mcp.js` and `server/stdio.js` in production.
+ * Until 19 November 2026 kit served MCP through `@modelcontextprotocol/sdk`, which accounted for
+ * 91 of 94 installed packages: a complete HTTP server and OAuth stack (express, hono, jose and
+ * others) for transports kit does not use. kit now serves stdio with `src/mcp-stdio.ts`, and the
+ * SDK is a development dependency that only the tests use. See
+ * docs/plans/2026-11-18-few-dependencies.md.
  *
- * Three of the four dependency advisories this repo cleared in one sitting came from that tree:
- * fast-uri (via ajv), ip-address (via express-rate-limit) and hono itself. So "which of these does
- * kit actually execute?" stopped being idle curiosity and became the question that decides whether
- * a given advisory is a live code path or inherited surface.
- *
- * This test answers it mechanically instead of by reading the import graph, and it is a GUARD, not
- * a report: if a future SDK release starts pulling the HTTP stack into the stdio path, this fails.
+ * This is a GUARD, not a report. It traces which `node_modules` packages the server really loads,
+ * and fails if one that is not a declared runtime dependency shows up. That is how the SDK, or any
+ * package pulled in by a later change, would be caught on the live path.
  *
  * METHOD NOTE, because the first version of this measurement produced a false negative. An ESM
- * `resolve` hook alone reports 6 packages and MISSES fast-uri — `ajv` is CommonJS, so its internal
- * `require("fast-uri")` is invisible to the module-resolution hooks. The `Module._load` patch below
- * is what makes the CJS subtrees visible. A tracer that sees half the module system produces a
- * confident, rigorous-looking, wrong answer.
+ * `resolve` hook alone misses packages that are reached through `require()`, which is invisible to
+ * the module-resolution hooks. The `Module._load` patch below makes CommonJS visible. A tracer that
+ * sees half the module system produces a confident, rigorous-looking, wrong answer.
  */
 
 import { describe, it } from "node:test";
@@ -32,22 +25,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { rmTemp } from "./temp-cleanup.test-support.js";
-
-/** The SDK's HTTP-transport and OAuth dependencies. kit must never load any of them. */
-const HTTP_OAUTH_STACK = [
-  "hono",
-  "@hono/node-server",
-  "express",
-  "express-rate-limit",
-  "cors",
-  "raw-body",
-  "content-type",
-  "eventsource",
-  "eventsource-parser",
-  "jose",
-  "pkce-challenge",
-  "ip-address",
-] as const;
 
 /**
  * Boot an MCP server in a child process with both module systems traced, and return the set of
@@ -116,54 +93,52 @@ function tracePackagesLoaded(body: string): Set<string> {
 }
 
 const SERVER_DIST = pathToFileURL(resolve(import.meta.dirname, "mcp-server.js")).href;
+const STDIO_DIST = pathToFileURL(resolve(import.meta.dirname, "mcp-stdio.js")).href;
 
-/**
- * Bare specifiers in the generated runner would resolve against ITS location — a temp dir with no
- * node_modules — not against the process's cwd. Resolve them here, from inside the repo, and embed
- * the absolute URLs. (The first version of this test failed with ERR_MODULE_NOT_FOUND for exactly
- * this reason; the earlier throwaway probe only worked because it symlinked node_modules.)
- */
-const sdk = (subpath: string): string =>
-  import.meta.resolve(`@modelcontextprotocol/sdk/${subpath}`);
-const SDK_IN_MEMORY = sdk("inMemory.js");
-const SDK_CLIENT = sdk("client/index.js");
+/** The only packages the server may load. Held equal to `dependencies` by dependency-floor.test.ts. */
+const RUNTIME_DEPENDENCIES = ["smol-toml", "zod"];
 
-describe("kit's MCP server loads none of the SDK's HTTP/OAuth stack", () => {
-  it("building and connecting the server loads only the stdio + schema path", () => {
+/** Start the server on in-process streams and send it a list of JSON-RPC requests. */
+const serve = (requests: object[]): string =>
+  [
+    `const { createMcpServer } = await import(${JSON.stringify(SERVER_DIST)});`,
+    `const { stdioTransport } = await import(${JSON.stringify(STDIO_DIST)});`,
+    'const { PassThrough } = await import("node:stream");',
+    "const input = new PassThrough(), output = new PassThrough();",
+    "const server = createMcpServer();",
+    "await server.connect(stdioTransport(input, output));",
+    ...requests.map((r) => `input.write(${JSON.stringify(`${JSON.stringify(r)}\n`)});`),
+    "input.end(); await server.closed;",
+  ].join("\n");
+
+const request = (id: number, method: string, params?: object): object => ({
+  jsonrpc: "2.0",
+  id,
+  method,
+  ...(params ? { params } : {}),
+});
+
+describe("kit's MCP server loads only its declared runtime dependencies", () => {
+  it("the tracer sees both halves of the module system, so absence means something", () => {
+    // A tracer that recorded nothing would satisfy every absence assertion below. `zod` proves the
+    // ESM half; `fast-uri` is CommonJS-only and is reached by a plain require(), which only the
+    // Module._load patch can see. Blinding the tracer to either half has to fail HERE.
     const loaded = tracePackagesLoaded(
       [
-        `const { createMcpServer } = await import(${JSON.stringify(SERVER_DIST)});`,
-        `const { InMemoryTransport } = await import(${JSON.stringify(SDK_IN_MEMORY)});`,
-        "const server = createMcpServer();",
-        "const [, st] = InMemoryTransport.createLinkedPair();",
-        "await server.connect(st);",
+        'import { createRequire } from "node:module";',
+        `await import(${JSON.stringify(import.meta.resolve("zod"))});`,
+        `createRequire(${JSON.stringify(import.meta.url)})("fast-uri");`,
       ].join("\n"),
     );
+    assert.ok(loaded.has("zod"), "the ESM half must see zod");
+    assert.ok(loaded.has("fast-uri"), "the CommonJS half must see a package reached by require()");
+  });
 
-    // SANITY FIRST. A tracer that recorded nothing would satisfy every negative assertion below,
-    // so the test has to prove it can see anything at all before it is allowed to prove absence.
-    assert.ok(
-      loaded.has("@modelcontextprotocol/sdk"),
-      `the tracer saw nothing — it must observe the SDK itself (saw: ${[...loaded].join(", ")})`,
-    );
+  it("building and starting the server loads nothing beyond zod and smol-toml", () => {
+    const loaded = tracePackagesLoaded(serve([]));
     assert.ok(loaded.has("zod"), "zod builds the tool schemas and must be observed");
-    // BOTH halves of the tracer must be proven before absence means anything. `ajv` is reachable
-    // through the ESM hook, so requiring it does not prove the CJS patch works — `fast-uri` is
-    // only ever reached by ajv's internal require(), so it is the one that does. Blinding the
-    // tracer to CommonJS has to fail HERE, not only in the fast-uri test below, or these negative
-    // assertions would hold for a tracer that sees half the module system.
-    assert.ok(loaded.has("ajv"), "ajv validates the schemas and must be observed (ESM half)");
-    assert.ok(
-      loaded.has("fast-uri"),
-      "fast-uri is CJS-only — its absence means the tracer is blind to require(), not that the package is unused",
-    );
-
-    const leaked = HTTP_OAUTH_STACK.filter((p) => loaded.has(p));
-    assert.deepEqual(
-      leaked,
-      [],
-      `kit speaks stdio and must not load an HTTP/OAuth transport: ${leaked.join(", ")}`,
-    );
+    const extra = [...loaded].filter((p) => !RUNTIME_DEPENDENCIES.includes(p));
+    assert.deepEqual(extra, [], `not a declared runtime dependency: ${extra.join(", ")}`);
   });
 
   it("listing tools and calling two of them loads nothing further", () => {
@@ -178,64 +153,27 @@ describe("kit's MCP server loads none of the SDK's HTTP/OAuth stack", () => {
         // Never let a probe mint or touch the real ~/.kit identity key.
         'process.env.KIT_IDENTITY_DIR = join(d, ".id");',
         "process.chdir(d);",
-        `const { createMcpServer } = await import(${JSON.stringify(SERVER_DIST)});`,
-        `const { Client } = await import(${JSON.stringify(SDK_CLIENT)});`,
-        `const { InMemoryTransport } = await import(${JSON.stringify(SDK_IN_MEMORY)});`,
-        "const server = createMcpServer();",
-        "const [ct, st] = InMemoryTransport.createLinkedPair();",
-        'const client = new Client({ name: "p", version: "1.0.0" }, { capabilities: {} });',
-        "await server.connect(st); await client.connect(ct);",
-        "await client.listTools();",
-        'await client.callTool({ name: "kit_context", arguments: {} });',
-        'await client.callTool({ name: "kit_memory", arguments: { query: "x", limit: 1 } });',
-        "await client.close();",
+        serve([
+          request(1, "initialize", {
+            protocolVersion: "2025-11-25",
+            capabilities: {},
+            clientInfo: { name: "p", version: "1" },
+          }),
+          request(2, "tools/list", {}),
+          request(3, "tools/call", { name: "kit_context", arguments: {} }),
+          request(4, "tools/call", { name: "kit_memory", arguments: { query: "x", limit: 1 } }),
+        ]),
       ].join("\n"),
     );
-
-    assert.ok(loaded.has("@modelcontextprotocol/sdk"), "sanity: the tracer must see the SDK");
-    const leaked = HTTP_OAUTH_STACK.filter((p) => loaded.has(p));
-    assert.deepEqual(
-      leaked,
-      [],
-      `a tool call must not reach an HTTP/OAuth transport either: ${leaked.join(", ")}`,
-    );
-  });
-
-  it("ajv and fast-uri ARE on the live path — the advisory class that is not merely inherited", () => {
-    // Recorded as an assertion rather than a comment because I got this wrong once. When the
-    // fast-uri advisory (GHSA-7p8r-x3mc-p8w7) was bumped, the commit message implied the package
-    // was as untouched as hono. It is not: ajv compiles kit's ten tool schemas on every server
-    // start and resolves `$ref` URIs through fast-uri. If a future refactor moves schema
-    // validation off ajv this test should be updated deliberately, not silently.
-    const loaded = tracePackagesLoaded(
-      [
-        `const { createMcpServer } = await import(${JSON.stringify(SERVER_DIST)});`,
-        "createMcpServer();",
-      ].join("\n"),
-    );
-    assert.ok(loaded.has("ajv"), "ajv is on the live path");
-    assert.ok(
-      loaded.has("fast-uri"),
-      "fast-uri is reached through ajv — visible only with the CJS half of the trace",
-    );
+    const extra = [...loaded].filter((p) => !RUNTIME_DEPENDENCIES.includes(p));
+    assert.deepEqual(extra, [], `a tool call must not load: ${extra.join(", ")}`);
   });
 
   it("the loaded count ROADMAP advertises is the count this test measures", () => {
-    // The numbers in the ROADMAP heading were prose, and prose drifts: it claimed "120 installed,
-    // 9 loaded" for the 1.29 tree and still said 120 after the SDK 1.30 bump moved the install
-    // count to 94. The loaded count did NOT move, which is exactly why it is worth pinning — it is
-    // the number the upstream argument rests on, and a drifted number in a supply-chain argument is
-    // worse than no number.
-    //
     // Only the LOADED count is gated. The install count depends on the lockfile and on npm's
-    // hoisting, so pinning it would fail on an unrelated dependency bump and teach people to edit
-    // the assertion rather than read it.
-    const loaded = tracePackagesLoaded(
-      [
-        `const { createMcpServer } = await import(${JSON.stringify(SERVER_DIST)});`,
-        "createMcpServer();",
-      ].join("\n"),
-    );
+    // hoisting, so pinning it here would fail on an unrelated dependency bump. The floor test holds
+    // the declared dependencies instead.
+    const loaded = tracePackagesLoaded(serve([]));
     const roadmap = readFileSync(resolve(import.meta.dirname, "..", "ROADMAP.md"), "utf-8");
     const heading =
       /### Shrink the inherited dependency surface — (\d+) installed, (\d+) loaded/.exec(roadmap);

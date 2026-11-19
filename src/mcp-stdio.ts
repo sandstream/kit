@@ -47,15 +47,35 @@ export interface ToolResult {
   [key: string]: unknown;
 }
 
+/**
+ * A message channel. The shape is the SDK's `Transport`, so a test can serve this server over the
+ * SDK's in-memory pair. Methods (not function properties) so that the SDK's own types fit.
+ */
+export interface McpTransport {
+  onmessage?(message: never): void;
+  onclose?(): void;
+  start(): Promise<void>;
+  send(message: never): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** What a handler is given besides its arguments. */
+export interface ToolExtra {
+  signal: AbortSignal;
+}
+
 type ToolHandler = (...args: never[]) => ToolResult | Promise<ToolResult>;
+
+/** A handler's type follows the tool's input schema: arguments as parsed, or none without one. */
+type HandlerFor<S extends z.ZodRawShape | undefined> = S extends z.ZodRawShape
+  ? (args: z.output<z.ZodObject<S>>, extra: ToolExtra) => ToolResult | Promise<ToolResult>
+  : (extra: ToolExtra) => ToolResult | Promise<ToolResult>;
 
 interface Tool {
   config: ToolConfig;
   schema: z.ZodObject | undefined;
   handler: ToolHandler;
 }
-
-type Id = string | number;
 
 class RpcError extends Error {
   constructor(
@@ -91,57 +111,50 @@ export class StdioMcpServer {
     private readonly options: { instructions?: string } = {},
   ) {}
 
-  registerTool(name: string, config: ToolConfig, handler: ToolHandler): void {
+  registerTool<S extends z.ZodRawShape | undefined = undefined>(
+    name: string,
+    config: Omit<ToolConfig, "inputSchema"> & { inputSchema?: S },
+    handler: HandlerFor<S>,
+  ): void {
     if ("outputSchema" in config) {
       throw new Error(`Tool ${name}: outputSchema is not supported by this server`);
     }
     if (this.tools.has(name)) throw new Error(`Tool ${name} is already registered`);
     const schema = config.inputSchema ? z.object(config.inputSchema) : undefined;
-    this.tools.set(name, { config, schema, handler });
+    this.tools.set(name, { config, schema, handler: handler as ToolHandler });
   }
+
+  /** Resolves when the transport the server is connected to has closed and every answer is sent. */
+  closed: Promise<void> = Promise.resolve();
+  private transport: McpTransport | undefined;
 
   /**
-   * Serve `input` until it ends, answering on `output`. Resolves after the last answer is written.
-   * Requests run at the same time, as in the SDK, and each answer carries its own id.
+   * Start serving on a transport. Requests run at the same time, as in the SDK, and each answer
+   * carries its own id. Resolves when the transport has started.
    */
-  connect(input: Readable, output: Writable): Promise<void> {
-    output.on("error", () => undefined); // the client went away: nobody is left to tell
+  async connect(transport: McpTransport): Promise<void> {
     const pending = new Set<Promise<void>>();
-    let buffer = Buffer.alloc(0);
-
-    const dispatch = (line: string): void => {
-      const job = this.handleLine(line, (message) => {
-        output.write(`${JSON.stringify(message)}\n`);
-      }).finally(() => pending.delete(job));
+    let done: () => void = () => undefined;
+    this.closed = new Promise((resolve) => (done = resolve));
+    this.transport = transport;
+    (transport as { onmessage?: (m: unknown) => void }).onmessage = (message) => {
+      const job = this.handleMessage(message, (reply) => transport.send(reply as never)).finally(
+        () => pending.delete(job),
+      );
       pending.add(job);
     };
-
-    return new Promise((resolve) => {
-      input.on("data", (chunk: Buffer) => {
-        if (buffer.length + chunk.length > MAX_BUFFER_BYTES) {
-          buffer = Buffer.alloc(0); // a message this large is refused, as the SDK does
-          return;
-        }
-        buffer = Buffer.concat([buffer, chunk]);
-        for (let at = buffer.indexOf(10); at !== -1; at = buffer.indexOf(10)) {
-          const line = buffer.toString("utf8", 0, at).replace(/\r$/, "");
-          buffer = buffer.subarray(at + 1);
-          if (line.trim()) dispatch(line);
-        }
-      });
-      const finish = (): void => void Promise.all(pending).then(() => resolve());
-      input.on("end", finish);
-      input.on("close", finish);
-    });
+    transport.onclose = () => void Promise.all(pending).then(done);
+    await transport.start();
   }
 
-  private async handleLine(line: string, send: (message: object) => void): Promise<void> {
-    let message: unknown;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      return; // not JSON: the SDK reports it to onerror and sends no reply
-    }
+  async close(): Promise<void> {
+    await this.transport?.close();
+  }
+
+  private async handleMessage(
+    message: unknown,
+    send: (reply: object) => Promise<void>,
+  ): Promise<void> {
     if (!isRecord(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
       return; // a response to nothing we asked, or not JSON-RPC
     }
@@ -149,17 +162,17 @@ export class StdioMcpServer {
     if (typeof id !== "string" && typeof id !== "number") return; // a notification: no reply
     try {
       const result = await this.handleRequest(message.method, message.params);
-      send({ jsonrpc: "2.0", id, result });
+      await send({ jsonrpc: "2.0", id, result });
     } catch (error) {
       const known = error instanceof RpcError;
-      send({
+      await send({
         jsonrpc: "2.0",
-        id: id as Id,
+        id,
         error: {
           code: known ? error.code : INTERNAL_ERROR,
           message: error instanceof Error ? error.message : "Internal error",
         },
-      });
+      }).catch(() => undefined); // the client went away: nobody is left to tell
     }
   }
 
@@ -237,4 +250,52 @@ export class StdioMcpServer {
       return toolError(error instanceof Error ? error.message : String(error));
     }
   }
+}
+
+/** One JSON message per line on a pair of streams: what an agent's stdio client speaks. */
+export function stdioTransport(input: Readable, output: Writable): McpTransport {
+  const transport: McpTransport & { onmessage?(message: object): void } = {
+    async start() {
+      output.on("error", () => undefined); // the client went away: nobody is left to tell
+      let buffer = Buffer.alloc(0);
+      input.on("data", (chunk: Buffer) => {
+        if (buffer.length + chunk.length > MAX_BUFFER_BYTES) {
+          buffer = Buffer.alloc(0); // a message this large is refused, as the SDK does
+          return;
+        }
+        buffer = Buffer.concat([buffer, chunk]);
+        for (let at = buffer.indexOf(10); at !== -1; at = buffer.indexOf(10)) {
+          const line = buffer.toString("utf8", 0, at).replace(/\r$/, "");
+          buffer = buffer.subarray(at + 1);
+          let message: unknown;
+          try {
+            message = JSON.parse(line);
+          } catch {
+            continue; // not JSON: the SDK reports it to onerror and sends no reply
+          }
+          (transport.onmessage as ((m: unknown) => void) | undefined)?.(message);
+        }
+      });
+      const finish = (): void => transport.onclose?.();
+      input.once("end", finish);
+      input.once("close", finish);
+    },
+    async send(message) {
+      output.write(`${JSON.stringify(message)}\n`);
+    },
+    async close() {
+      input.pause();
+    },
+  };
+  return transport;
+}
+
+/** Serve on standard input and output until input ends and the last answer is written. */
+export async function serveStdio(
+  server: StdioMcpServer,
+  input: Readable,
+  output: Writable,
+): Promise<void> {
+  await server.connect(stdioTransport(input, output));
+  await server.closed;
 }
