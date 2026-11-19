@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   cronLine,
   gatherWatch,
+  kevLookupFor,
   launchdPlist,
   palTitlesFor,
   readWatchCache,
@@ -302,5 +303,37 @@ describe("watch cache on disk", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("kevLookupFor: project settings", () => {
+  async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+    const keys = ["KIT_EXPLOIT_INTEL", "KIT_EXPLOIT_INTEL_CACHE", "KIT_AIRGAP"];
+    const saved = keys.map((k) => process.env[k]);
+    keys.forEach((k) => delete process.env[k]);
+    Object.assign(process.env, env);
+    try {
+      return await fn();
+    } finally {
+      keys.forEach((k, i) =>
+        saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i]),
+      );
+    }
+  }
+  const noCache = join(tmpdir(), `kit-no-intel-${process.pid}.json`);
+
+  it("is off with [scan] exploit_intel = false", async () => {
+    const r = await withEnv({ KIT_EXPLOIT_INTEL_CACHE: noCache }, () =>
+      kevLookupFor({ scan: { exploit_intel: false } })(["CVE-2021-44228"]),
+    );
+    assert.deepEqual(r, { kev: new Set() });
+  });
+
+  it("honors [air_gap] enabled from config: no fetch, a note instead", async () => {
+    const r = await withEnv({ KIT_EXPLOIT_INTEL_CACHE: noCache }, () =>
+      kevLookupFor({ air_gap: { enabled: true } })(["CVE-2021-44228"]),
+    );
+    assert.equal(r.kev.size, 0);
+    assert.match(r.note ?? "", /air gap/);
   });
 });

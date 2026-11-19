@@ -16,6 +16,8 @@ import { isReadOnlyMode } from "../read-only-mode.js";
 import {
   cronLine,
   gatherWatch,
+  kevLookupFor,
+  type KevSettings,
   launchdPlist,
   palTitlesFor,
   readWatchCache,
@@ -59,12 +61,21 @@ async function openPalItems(titles: string[]): Promise<string[]> {
   }
 }
 
+/** `.kit.toml` when it exists, so `[air_gap]` and `[scan] exploit_intel` reach the KEV lookup. */
+async function projectSettings(): Promise<KevSettings> {
+  const { resolveConfigPath } = await import("../cli-shared.js");
+  const path = resolveConfigPath();
+  if (!existsSync(path)) return {};
+  const { loadConfig } = await import("../config.js");
+  return loadConfig(path);
+}
+
 async function cmdWatchRun(): Promise<boolean> {
   const gh = async (args: string[]) => {
     const r = await execFileNoThrow("gh", args, { timeout: 30_000 });
     return { ok: r.ok, stdout: r.stdout };
   };
-  const cache = await gatherWatch(gh, Date.now);
+  const cache = await gatherWatch(gh, Date.now, kevLookupFor(await projectSettings()));
   const readOnly = isReadOnlyMode();
   if (!readOnly) writeWatchCache(process.cwd(), cache);
   let opened: string[] = [];

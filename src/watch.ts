@@ -6,6 +6,7 @@
  */
 import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import type { kitConfig } from "./config.js";
 import {
   rankSecurityPrs,
   securityPrsLine,
@@ -181,16 +182,32 @@ function parseList<T>(res: { ok: boolean; stdout: string }): T[] | null {
   }
 }
 
-/** The real lookup: CISA KEV through the shared exploit-intel cache. Off with KIT_EXPLOIT_INTEL=0. */
-export const defaultKevLookup: KevLookup = async (cves) => {
-  if (process.env.KIT_EXPLOIT_INTEL === "0") return { kev: new Set() };
-  const { defaultIntelDeps, loadExploitIntel } = await import("./exploit-intel.js");
-  const { resolveAirGap } = await import("./airgap/config.js");
-  const offline = resolveAirGap(undefined, process.env).enabled;
-  const intel = await loadExploitIntel(cves, defaultIntelDeps(offline));
-  const note = intel.kevChecked ? undefined : intel.notes.find((n) => n.includes("KEV"));
-  return { kev: new Set(intel.kev.keys()), ...(note ? { note } : {}) };
-};
+/** The project settings the KEV lookup honors: `[air_gap]` and `[scan] exploit_intel`. */
+export interface KevSettings {
+  air_gap?: kitConfig["air_gap"];
+  scan?: { exploit_intel?: boolean };
+}
+
+/**
+ * The real lookup: CISA KEV through the shared exploit-intel cache. Off with
+ * `[scan] exploit_intel = false` or KIT_EXPLOIT_INTEL=0; air gap (config or env) reads only the cache.
+ */
+export function kevLookupFor(settings: KevSettings): KevLookup {
+  return async (cves) => {
+    if (settings.scan?.exploit_intel === false || process.env.KIT_EXPLOIT_INTEL === "0") {
+      return { kev: new Set() };
+    }
+    const { defaultIntelDeps, loadExploitIntel } = await import("./exploit-intel.js");
+    const { resolveAirGap } = await import("./airgap/config.js");
+    const offline = resolveAirGap(settings.air_gap, process.env).enabled;
+    const intel = await loadExploitIntel(cves, defaultIntelDeps(offline));
+    const note = intel.kevChecked ? undefined : intel.notes.find((n) => n.includes("KEV"));
+    return { kev: new Set(intel.kev.keys()), ...(note ? { note } : {}) };
+  };
+}
+
+/** The lookup with env settings only, for callers that have no project config. */
+export const defaultKevLookup: KevLookup = kevLookupFor({});
 
 export async function gatherWatch(
   gh: GhRunner,
