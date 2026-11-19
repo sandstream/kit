@@ -1,7 +1,1 @@
-[
-  {
-    "advisory": "GHSA-fc5q-39xc-vjpf",
-    "reason": "picomatch ReDoS (all versions up to 4.0.7, no patched release exists). Reached only through the typescript-eslint dev toolchain (tinyglobby, fdir), which matches kit's own file paths. Not in the published package: npm ls picomatch --prod is empty. Re-check when picomatch publishes a fix.",
-    "expires": "2026-12-17"
-  }
-]
+[]
