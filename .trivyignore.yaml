@@ -2,9 +2,8 @@
 # CRITICAL). Trivy stops honouring an entry on its expired_at date, so the scan goes red again
 # by itself. Each entry is one CVE id at one exact path. A second copy of the package elsewhere
 # in the image still fails. Checked by src/trivy-exceptions.test.ts.
-vulnerabilities:
-  - id: CVE-2026-112366
-    paths:
-      - "usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json"
-    statement: picomatch ReDoS, versions up to 4.0.7, no patched release exists. Only npm's own bundled copy inside the image is affected, reached when npm matches file patterns. kit's own picomatch is a dev dependency and is not in the image. Re-check when picomatch publishes a fix or npm ships one.
-    expired_at: 2026-12-17
+#
+# Empty on purpose. The one waiver that lived here (CVE-2026-112366, picomatch inside npm's own
+# bundled tinyglobby) covered an advisory that GitHub withdrew on 2026-11-18. Put an entry back
+# only when a finding has no fix, and give it an end date.
+vulnerabilities: []

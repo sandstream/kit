@@ -115,18 +115,19 @@ Candidates, in order of gain over risk. None is done. Each needs Peter's decisio
       the other. Gain: 29 dev packages. Cost: a slower edit loop.
 - [ ] **`picomatch`, `fdir`, `tinyglobby` (3 packages, dev).** They exist only because
       `@typescript-eslint/typescript-estree` requires `tinyglobby`, which requires `fdir` and
-      `picomatch`. `picomatch` has no patched release (GHSA-fc5q-39xc-vjpf, waived until
-      2026-12-17). It cannot be replaced on its own. It goes only if `typescript-eslint` goes, or
-      if a release of `typescript-eslint` stops needing it.
+      `picomatch`. The advisory that made this urgent (GHSA-fc5q-39xc-vjpf) was withdrawn by GitHub
+      on 2026-11-18, and both waivers for it are removed. The three packages are still small
+      development weight. They cannot be replaced on their own: they go only if `typescript-eslint`
+      goes, or if a release of it stops needing them.
 - [ ] **ESLint with `typescript-eslint` (about 100 packages, 72 only through them).** The largest
       development cost and the source of the picomatch advisory. First list which rules kit relies
       on and whether `tsc` strict, `kit standards` or `kit self-audit` already cover them. Replace
       only what is covered. This is the decision with the most gain and the most risk.
 - [ ] **The Docker image carries its own copy of `picomatch`.** It is the copy bundled inside the
-      global npm (`/usr/local/lib/node_modules/npm/node_modules/tinyglobby/...`), waived in the
-      image scan until 2026-12-17. Plugin installs need npm, so it cannot simply be removed. The
-      Dockerfile already swaps one bundled package by hand (`undici`); that route is closed here,
-      because no fixed `picomatch` exists to swap in.
+      global npm (`/usr/local/lib/node_modules/npm/node_modules/tinyglobby/...`). Its waiver in the
+      image scan is removed together with the withdrawn advisory. Plugin installs need npm, so the
+      copy cannot simply be removed. If an advisory returns, the Dockerfile already swaps one
+      bundled package by hand (`undici`).
 - [ ] Keep: `fast-check` (2 packages, 2 test files), `prettier`, `typescript`, `@types/node`
       (kept at 22, the Node floor), `smol-toml`, `zod`. Each is one or two packages that do real
       work.

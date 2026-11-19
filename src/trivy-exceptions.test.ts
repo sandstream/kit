@@ -10,8 +10,9 @@ const text = readFileSync(join(root, FILE), "utf8");
 const workflow = readFileSync(join(root, ".github", "workflows", "docker-build.yml"), "utf8");
 
 // The image scan fails the Docker job, and with it every merge, on any HIGH or CRITICAL finding.
-// npm's own bundled picomatch has one with no patched version. A waiver is allowed only when it
-// is narrow: one id, one path, a statement, and an end date. Trivy stops honouring it on that date.
+// A waiver is allowed only when it is narrow: one id, one path, a statement, and an end date. Trivy
+// stops honouring it on that date. The list is empty when nothing needs waiving: the picomatch
+// advisory that needed one on 18 November 2026 was withdrawn by GitHub the same day.
 
 interface Entry {
   id: string;
@@ -40,7 +41,6 @@ describe("Trivy exceptions", () => {
 
   it("every entry names one CVE, the exact path, a statement and an end date", () => {
     const list = entries();
-    assert.ok(list.length >= 1, "the ignore file lists the picomatch finding");
     for (const e of list) {
       assert.match(e.id, /^CVE-\d{4}-\d{4,}$/, `${e.id}: a CVE id, never a wildcard`);
       assert.ok(e.paths.length >= 1, `${e.id}: scoped to a path, so another copy still fails`);
@@ -50,13 +50,9 @@ describe("Trivy exceptions", () => {
     }
   });
 
-  it("covers only npm's bundled picomatch, nothing else", () => {
-    const list = entries();
-    assert.deepEqual(
-      list.flatMap((e) => e.paths),
-      [
-        "usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json",
-      ],
-    );
+  it("waives nothing wider than one path under the image's global npm", () => {
+    for (const p of entries().flatMap((e) => e.paths)) {
+      assert.match(p, /^usr\/local\/lib\/node_modules\/npm\/node_modules\//, p);
+    }
   });
 });
