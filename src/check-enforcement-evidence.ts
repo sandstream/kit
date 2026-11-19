@@ -135,7 +135,7 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
       `install gate and env-write gate wired; ${held} of ${f.proof.total} negative controls held just now; ` +
       `no skipped hook in the last ${BYPASS_WINDOW_DAYS} days. ` +
       `${notRunText(f.proof)}` +
-      `Not proven: that another tool than Claude Code is gated, or that the settings file was not edited after the proof`,
+      `Not proven: that the wired commands run kit's gate (the controls ran this kit's own build, and the settings file is never executed), that another tool than Claude Code is gated, or that the settings file was not edited after the proof`,
   };
 }
 

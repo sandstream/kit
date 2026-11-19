@@ -110,8 +110,9 @@ A control that ran and did not hold is a failure. A control that could not run i
 skipped hook is a warning. The row never runs the commands a settings file names, because that file
 is repository content.
 
-It does not prove that another tool than Claude Code is gated, that the settings file was not edited
-after the check, or what the gates allowed and blocked in real sessions (allowed calls are not
+It does not prove that the wired commands run kit's gate (the controls run this kit's own build; a
+settings entry that points at any executable that exits 0 passes both rows), that another tool than
+Claude Code is gated, that the settings file was not edited after the check, or what the gates allowed and blocked in real sessions (allowed calls are not
 logged). On Windows the two pre-commit hook controls are not run, and the row names them.
 
 ## The formula
