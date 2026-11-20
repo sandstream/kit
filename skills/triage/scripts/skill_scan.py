@@ -89,7 +89,42 @@ def triage_local_skill(rep):
     if len(skills) > SKILL_PACK_LIMIT:
         rep.warn(f"only the first {SKILL_PACK_LIMIT} of {len(skills)} skills were triaged")
     rep.fact(f"triaged {min(len(skills), SKILL_PACK_LIMIT)} skill(s) in the pack at {target}")
+    _declare_outside_skills(rep, target, skills)
     return True
+
+
+# Files at a pack's root that describe the pack to people and are not installed into a project.
+_PACK_META = re.compile(r"^(readme|license|licence|changelog|contributing|version|notice|"
+                        r"code_of_conduct|security|authors)([.-].*)?$", re.IGNORECASE)
+
+
+def _outside_skills(root, skills):
+    """Files in the pack that no skill directory holds, minus root metadata and dot-entries at the root."""
+    skill_dirs = {os.path.dirname(s) for s in skills}
+    out = []
+    for current, dirs, files in os.walk(root):
+        if current == root:
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+            files = [f for f in files if not f.startswith(".") and not _PACK_META.match(f)]
+        else:
+            dirs[:] = sorted(d for d in dirs if d not in (".git", "node_modules"))
+        dirs[:] = [d for d in dirs if os.path.join(current, d) not in skill_dirs]
+        for name in sorted(files):
+            out.append(os.path.relpath(os.path.join(current, name), root).replace(os.sep, "/"))
+    return out
+
+
+def _declare_outside_skills(rep, root, skills):
+    """A pack can ship hooks, setup instructions and scripts beside its skills (kit-research
+    `humanmaxxing-vs-kit`: a hooks fragment and a getting-started file an agent is told to follow).
+    Pack triage reads the skill directories only, so the rest is declared not checked, never
+    passed silently."""
+    rest = _outside_skills(root, skills)
+    if not rest:
+        return
+    more = f" and {len(rest) - 10} more" if len(rest) > 10 else ""
+    rep.notchecked(f"{len(rest)} file(s) outside the skill directories",
+                   f"pack triage reads skill directories only: {', '.join(rest[:10])}{more}")
 
 
 def _skills_under(root):
