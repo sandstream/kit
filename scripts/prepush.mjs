@@ -8,7 +8,7 @@
 // --allow  a `kit review` check that fails for a reason outside the change (an expired login, a
 //          worktree without gates). Exact name only. Printed, so it stays visible.
 // --skip   one of: tools, build, format, lint, review, tests, coverage, test-growth, semgrep,
-//          pr-text.
+//          self-audit, pr-text.
 // --strict a branch that is behind origin/main, or a Semgrep that is not the CI version, fails
 //          instead of warning.
 import { existsSync, readFileSync } from "node:fs";
@@ -21,6 +21,7 @@ import {
   parseReviewJson,
   pinnedSemgrepVersion,
   semgrepPacks,
+  selfAuditErrors,
   semgrepVersionFrom,
   sessionUrlIn,
   testsForChanged,
@@ -161,6 +162,16 @@ function semgrep() {
   return { ok: true, warn: `  semgrep ${have}, ${packs.length} packs` };
 }
 
+// CI's "kit self-audit" job. It fails on rules `kit review` does not run, such as an export that no
+// other file names, and it stopped two pull requests that `kit review` had passed.
+function selfAudit() {
+  const r = run(process.execPath, ["dist/cli.js", "self-audit", "--format=github"]);
+  if (r.ok) return { ok: true };
+  const errors = selfAuditErrors(r.out);
+  const detail = errors.length > 0 ? errors.map((e) => `  ${e}`).join("\n") : tail(r.out, 12);
+  return { ok: false, detail };
+}
+
 function prText() {
   const r = run("gh", ["pr", "view", "--json", "title,body"]);
   if (!r.ok) return { ok: true, warn: "  no open PR for this branch, or gh is not available" };
@@ -188,6 +199,7 @@ const steps = [
   ["tests", "tests of the changed files", tests],
   ["coverage", "every new source file has a test (CI coverage gate)", coverage],
   ["test-growth", "net new test lines within the cap, or a stated reason", testGrowth],
+  ["self-audit", "kit self-audit (CI's self-audit job)", selfAudit],
   ["semgrep", "Semgrep at the CI version and packs", semgrep],
   ["pr-text", "PR text has no session URL", prText],
 ];
