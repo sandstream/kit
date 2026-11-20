@@ -354,6 +354,7 @@
     "triage npm",
     "triage pip",
     "triage pkg",
+    "triage prompt",
     "triage repo",
     "triage skill",
     "triage tools",

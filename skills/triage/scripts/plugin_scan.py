@@ -25,6 +25,22 @@ CONTEXT_EVENTS = ("SessionStart", "UserPromptSubmit")
 RUNNER = re.compile(r"\b(npx|bunx|uvx|pnpm\s+dlx|yarn\s+dlx|pipx\s+run)\s+((?:-{1,2}[\w-]+\s+)*)([^\s\"';|&)]+)")
 # curl/wget sending a local file's bytes in the request body.
 UPLOAD = re.compile(r"\b(curl|wget)\b[^\n]*(?:--data-binary\s+@|--data\s+@|-d\s+@|-F\s+\S+=@|--upload-file|-T\s|--post-file)")
+# A download handed straight to a shell or PowerShell: whatever the server returns at hook time
+# runs, unverified. `curl -o f` followed by a checksum check is not this, and is not matched.
+_SHELL = r"(?:sudo\s+(?:-\S+\s+)*)?(?:ba|z|da|k)?sh(?![\w.-])"
+PIPE_TO_SHELL = (
+    # curl ... | sh, wget -qO- ... | sudo bash  (stops at the first pipe, so `||` never matches)
+    re.compile(r"\b(?:curl|wget)\b[^\n|]*\|\s*" + _SHELL),
+    # bash <(curl ...), source <(curl ...), . <(wget ...)
+    re.compile(r"(?:\b(?:ba|z|da|k)?sh|\bsource|(?<![\w.])\.)\s+(?:-\S+\s+)*<\(\s*(?:curl|wget)\b"),
+    # sh -c "$(curl ...)", eval "$(wget ...)", bash -c `curl ...`
+    re.compile(r"(?:\b(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-c|\beval)\s+[\"']?(?:\$\(|`)\s*(?:curl|wget)\b"),
+    # iex (iwr ...), Invoke-Expression (Invoke-WebRequest ...), iex ((New-Object Net.WebClient).DownloadString(...))
+    re.compile(r"\b(?:iex|Invoke-Expression)\b[\s(&]*(?:iwr|irm|curl|wget|Invoke-WebRequest|Invoke-RestMethod|New-Object\s+(?:System\.)?Net\.WebClient)\b", re.I),
+    # iwr ... | iex, irm ... | Invoke-Expression
+    re.compile(r"\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b[^\n|]*\|\s*(?:iex|Invoke-Expression)\b", re.I),
+)
+URL_HOST = re.compile(r"https?://([^/\s\"'`)$:?#]+)")
 
 
 def _load_json(rep, path, label):
@@ -84,7 +100,15 @@ def _report_hooks(rep, plugin_dir, manifest):
                 cmds = group.get("hooks", []) if isinstance(group, dict) else []
                 registered += len(cmds) if isinstance(cmds, list) else 0
                 _judge_hook(rep, source, event, matcher)
+                _scan_hook_commands(rep, f"{source} {event} command", cmds)
     rep.fact(f"plugin registers {registered} hook command(s)")
+
+
+def _scan_hook_commands(rep, label, cmds):
+    """A hook's command text runs at hook time like a script, so it gets the same line scan."""
+    for cmd in cmds if isinstance(cmds, list) else []:
+        if isinstance(cmd, dict) and isinstance(cmd.get("command"), str):
+            _scan_script(rep, label, cmd["command"])
 
 
 def _judge_hook(rep, source, event, matcher):
@@ -107,6 +131,15 @@ def _scan_script(rep, rel, text):
                 rep.warn(f"{rel}:{n}: `{m.group(1)} {m.group(3)}` runs the newest published version on every call (unpinned)")
         if UPLOAD.search(code):
             rep.warn(f"{rel}:{n}: uploads a local file's contents over the network")
+        _pipe_to_shell(rep, f"{rel}:{n}", code)
+
+
+def _pipe_to_shell(rep, where, code):
+    m = next((m for m in (p.search(code) for p in PIPE_TO_SHELL) if m), None)
+    if m:
+        host = URL_HOST.search(code, m.start())
+        src = f"from {host.group(1)}" if host else "from a remote URL"
+        rep.warn(f"{where}: runs a script downloaded {src} without verifying it (download piped into a shell)")
 
 
 def _skill_frontmatter(rep, rel, text):
