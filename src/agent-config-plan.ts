@@ -44,7 +44,7 @@ const SHARED = ".claude/settings.json";
  * `sandbox.enabled`, `sandbox.filesystem.denyRead` (installStrictSettings). The gate file
  * (`settings.local.json` when settings.json is tracked) and the user file get hooks only.
  */
-export const OWNED_OUTSIDE_HOOKS = [
+const OWNED_OUTSIDE_HOOKS = [
   "permissions.allow",
   "permissions.deny",
   "sandbox.enabled",
@@ -166,7 +166,7 @@ function foreignHooks(doc: Json): Map<string, string[]> {
 }
 
 /** The two invariants for one file. */
-export function checkInvariants(
+function checkInvariants(
   before: string | null,
   after: string | null,
   owned: string[],
@@ -306,7 +306,7 @@ function planned(
 }
 
 /** Compute the plan. Writes only inside a temporary directory, which it removes. */
-export async function computeAgentConfigPlan(opts: PlanOptions): Promise<AgentConfigPlan> {
+async function computeAgentConfigPlan(opts: PlanOptions): Promise<AgentConfigPlan> {
   const scratch = mkdtempSync(join(tmpdir(), "kit-agent-config-plan-"));
   try {
     const files = opts.user ? await planUser(scratch, opts) : await planProject(scratch, opts);
@@ -373,7 +373,7 @@ function hunkHeader(slice: DiffOp[], oldFirst: number, newFirst: number): string
 }
 
 /** A unified-style line diff of one file, or [] when nothing changes. */
-export function unifiedDiff(path: string, before: string | null, after: string | null): string[] {
+function unifiedDiff(path: string, before: string | null, after: string | null): string[] {
   const ops = diffOps(linesOf(before), linesOf(after));
   const ranges = hunkRanges(ops, 3);
   if (ranges.length === 0) return [];
@@ -400,7 +400,7 @@ export function unifiedDiff(path: string, before: string | null, after: string |
 }
 
 /** The plan as printed lines: per file its diff and two invariants, then `note`, the hash last. */
-export function describePlan(plan: AgentConfigPlan, note?: string): string[] {
+function describePlan(plan: AgentConfigPlan, note?: string): string[] {
   const lines: string[] = [];
   for (const f of plan.files) {
     const diff = unifiedDiff(f.path, f.before, f.after);
@@ -416,7 +416,7 @@ export function describePlan(plan: AgentConfigPlan, note?: string): string[] {
 }
 
 /** What the flags ask agent-config to write, read the way cmdAgentConfigEntry reads them. */
-export function planOptionsFrom(argv: readonly string[]): PlanOptions {
+function planOptionsFrom(argv: readonly string[]): PlanOptions {
   return {
     cwd: process.cwd(),
     home: homedir(),
