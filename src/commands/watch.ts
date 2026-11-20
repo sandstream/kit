@@ -16,6 +16,8 @@ import { isReadOnlyMode } from "../read-only-mode.js";
 import {
   cronLine,
   gatherWatch,
+  kevLookupFor,
+  type KevSettings,
   launchdPlist,
   palTitlesFor,
   readWatchCache,
@@ -59,12 +61,21 @@ async function openPalItems(titles: string[]): Promise<string[]> {
   }
 }
 
+/** `.kit.toml` when it exists, so `[air_gap]` and `[scan] exploit_intel` reach the KEV lookup. */
+async function projectSettings(): Promise<KevSettings> {
+  const { resolveConfigPath } = await import("../cli-shared.js");
+  const path = resolveConfigPath();
+  if (!existsSync(path)) return {};
+  const { loadConfig } = await import("../config.js");
+  return loadConfig(path);
+}
+
 async function cmdWatchRun(): Promise<boolean> {
   const gh = async (args: string[]) => {
     const r = await execFileNoThrow("gh", args, { timeout: 30_000 });
     return { ok: r.ok, stdout: r.stdout };
   };
-  const cache = await gatherWatch(gh, Date.now);
+  const cache = await gatherWatch(gh, Date.now, kevLookupFor(await projectSettings()));
   const readOnly = isReadOnlyMode();
   if (!readOnly) writeWatchCache(process.cwd(), cache);
   let opened: string[] = [];
@@ -77,9 +88,11 @@ async function cmdWatchRun(): Promise<boolean> {
   }
   console.log(`${c.bold}kit watch${c.reset}  ${c.dim}${cache.repo || "no repository"}${c.reset}`);
   if (cache.unverified) console.log(`  ${c.yellow}unverified: ${cache.unverified}${c.reset}`);
+  if (cache.kevNote) console.log(`  ${c.yellow}! ${cache.kevNote}${c.reset}`);
   else if (cache.ranked.length === 0) console.log(`  ${c.dim}no open security PRs${c.reset}`);
   for (const pr of cache.ranked) {
-    console.log(`  ${c.bold}#${pr.number}${c.reset} ${pr.severity} ci:${pr.ci}  ${pr.title}`);
+    const kev = pr.kev ? `${c.red}${c.bold}KEV${c.reset} ` : "";
+    console.log(`  ${c.bold}#${pr.number}${c.reset} ${kev}${pr.severity} ci:${pr.ci}  ${pr.title}`);
   }
   if (opened.length > 0)
     console.log(`  ${c.green}✓${c.reset} opened ${opened.length} action item(s)`);

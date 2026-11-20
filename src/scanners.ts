@@ -356,6 +356,10 @@ export function dedupKey(f: SecurityCheckResult): string {
 export interface MergedFinding extends SecurityCheckResult {
   /** which scanners reported this finding */
   scanners: string[];
+  /** CISA KEV: the CVE is exploited in the wild (set by `kit scan`, see exploit-intel.ts). */
+  kev?: { cve: string; dateAdded: string; ransomware: boolean };
+  /** FIRST EPSS: the highest exploitation probability among the finding's CVEs. */
+  epss?: { cve: string; score: number; percentile: number };
 }
 
 /** Collapse findings from many scanners by dedupKey — max severity, union of scanners. */
@@ -372,6 +376,9 @@ export function mergeFindings(
         continue;
       }
       if (!existing.scanners.includes(id)) existing.scanners.push(id);
+      if (f.aliases?.length) {
+        existing.aliases = [...new Set([...(existing.aliases ?? []), ...f.aliases])];
+      }
       if ((RANK[f.severity ?? "low"] ?? 0) > (RANK[existing.severity ?? "low"] ?? 0)) {
         existing.severity = f.severity;
       }

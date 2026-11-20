@@ -132,6 +132,7 @@ export function parseSarif(json: string): SecurityCheckResult[] {
 // ---- OSV-scanner JSON (minimal shape) ----
 interface OsvVuln {
   id?: string;
+  aliases?: string[];
   summary?: string;
   database_specific?: { severity?: string };
 }
@@ -181,22 +182,35 @@ export function parseOsv(json: string): SecurityCheckResult[] {
   }
   const out: SecurityCheckResult[] = [];
   for (const r of log.results ?? []) {
-    for (const p of r.packages ?? []) {
-      const name = p.package?.name ?? "(package)";
-      const ver = p.package?.version ? `@${p.package.version}` : "";
-      for (const v of p.vulnerabilities ?? []) {
-        out.push({
-          category: "dependency",
-          name: `${name}${ver}: ${v.id ?? "vuln"}`,
-          status: "fail",
-          detail: v.summary ?? v.id ?? "known vulnerability",
-          severity: osvSeverity(v),
-          rule: OSV_RULE,
-        });
-      }
-    }
+    for (const p of r.packages ?? []) out.push(...osvPackageFindings(p));
   }
   return out;
+}
+
+function osvPackageFindings(p: OsvPackage): SecurityCheckResult[] {
+  const name = p.package?.name ?? "(package)";
+  const ver = p.package?.version ? `@${p.package.version}` : "";
+  return (p.vulnerabilities ?? []).map((v) => ({
+    category: "dependency",
+    name: `${name}${ver}: ${v.id ?? "vuln"}`,
+    status: "fail",
+    detail: v.summary ?? v.id ?? "known vulnerability",
+    severity: osvSeverity(v),
+    rule: OSV_RULE,
+    ...osvAliases(v),
+  }));
+}
+
+const ADVISORY_ALIAS = /^(CVE-\d{4}-\d{4,7}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})$/i;
+
+/**
+ * The CVE/GHSA ids OSV lists as the same vulnerability. An npm advisory is keyed by its GHSA id,
+ * and the CVE that CISA KEV and EPSS know it by is only in `aliases`. Anything else is dropped.
+ */
+function osvAliases(v: OsvVuln): { aliases?: string[] } {
+  if (!Array.isArray(v.aliases)) return {};
+  const ids = v.aliases.filter((a): a is string => typeof a === "string" && ADVISORY_ALIAS.test(a));
+  return ids.length > 0 ? { aliases: ids.slice(0, 20).map((a) => a.toUpperCase()) } : {};
 }
 
 export type IngestFormat = "sarif" | "osv" | "cloudflare-audit";

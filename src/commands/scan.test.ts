@@ -189,7 +189,7 @@ describe("kit scan: scanner-health gate", { skip }, () => {
     assert.equal(viaCfg.exitCode, 1, viaCfg.stdout);
   });
 
-  it("--json prints runs, findings, suppressed, ok, scannerGate and strict", async () => {
+  it("--json prints runs, findings, suppressed, ok, scannerGate, strict and exploitIntel", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\n');
     tool(f, "socket", "exit 1");
     const r = await scan(f, ["--json"], { SOCKET_SECURITY_API_TOKEN: "t" });
@@ -202,6 +202,7 @@ describe("kit scan: scanner-health gate", { skip }, () => {
       "ok",
       "scannerGate",
       "strict",
+      "exploitIntel",
     ]);
     assert.deepEqual(j.runs, [{ id: "socket", status: "ran", findings: 1 }]);
     assert.equal(j.findings.length, 1);
@@ -386,5 +387,123 @@ describe("kit scan: projects, images and severities", { skip }, () => {
     assert.equal(r.exitCode, 0, r.stdout + r.stderr);
     assert.match(plain(r.stdout), /\n {2}MEDIUM {3}[^\n]+ {2}\[grype\]\n/);
     assert.doesNotMatch(plain(r.stdout), /high\/critical/);
+  });
+});
+
+// osv-scanner keys an npm advisory by GHSA; the CVE that KEV knows is only in `aliases`.
+const osvMedium = JSON.stringify({
+  results: [
+    {
+      packages: [
+        {
+          package: { name: "log4js", version: "1.0.0" },
+          vulnerabilities: [
+            {
+              id: "GHSA-aaaa-bbbb-cccc",
+              aliases: ["CVE-2021-44228"],
+              summary: "remote code execution",
+              database_specific: { severity: "MODERATE" },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+function seedCache(kev: boolean): string {
+  const path = join(f.dir, ".intel.json");
+  const at = new Date().toISOString();
+  writeFileSync(
+    path,
+    JSON.stringify({
+      v: 1,
+      kev: {
+        fetchedAt: at,
+        catalogVersion: "test",
+        entries: kev
+          ? { "CVE-2021-44228": { dateAdded: "2021-12-10", ransomware: true } }
+          : { "CVE-2000-0001": { dateAdded: "2000-01-01", ransomware: false } },
+      },
+      epss: { "CVE-2021-44228": { score: 0.97, percentile: 0.99, fetchedAt: at } },
+    }),
+  );
+  return path;
+}
+
+describe("kit scan: CISA KEV and FIRST EPSS", { skip }, () => {
+  useFixture();
+
+  it("a medium finding whose CVE alias is in KEV is marked and fails the scan", async () => {
+    toml(f, '[scan]\ndelegates = ["osv-scanner"]\n');
+    tool(f, "osv-scanner", `echo '${osvMedium}'; exit 1`);
+    const r = await scan(f, [], {
+      KIT_EXPLOIT_INTEL: "1",
+      KIT_EXPLOIT_INTEL_CACHE: seedCache(true),
+    });
+    assert.equal(r.exitCode, 1, r.stdout + r.stderr);
+    const out = plain(r.stdout);
+    assert.match(
+      out,
+      /MEDIUM {3}KEV\+ransomware log4js@1\.0\.0: GHSA-aaaa-bbbb-cccc {2}EPSS 0\.97/,
+    );
+    assert.match(out, /1 high\/critical \(1 in CISA KEV: exploited in the wild\)/);
+  });
+
+  it("the same finding outside KEV keeps its EPSS mark and passes", async () => {
+    toml(f, '[scan]\ndelegates = ["osv-scanner"]\n');
+    tool(f, "osv-scanner", `echo '${osvMedium}'; exit 1`);
+    const r = await scan(f, ["--json"], {
+      KIT_EXPLOIT_INTEL: "1",
+      KIT_EXPLOIT_INTEL_CACHE: seedCache(false),
+    });
+    assert.equal(r.exitCode, 0, r.stdout + r.stderr);
+    const j = JSON.parse(r.stdout) as {
+      findings: { kev?: unknown; epss?: { score: number }; aliases?: string[] }[];
+      exploitIntel: { enabled: boolean; kevChecked: boolean; notes: string[] };
+    };
+    assert.equal(j.findings[0].kev, undefined);
+    assert.equal(j.findings[0].epss?.score, 0.97);
+    assert.deepEqual(j.findings[0].aliases, ["CVE-2021-44228"]);
+    assert.deepEqual(j.exploitIntel, {
+      enabled: true,
+      kevChecked: true,
+      epssChecked: true,
+      notes: [],
+    });
+  });
+});
+
+describe("kit scan: CISA KEV and FIRST EPSS when a feed is off or absent", { skip }, () => {
+  useFixture();
+
+  it("air gap without a cache warns that KEV was not checked, and --strict fails", async () => {
+    toml(f, '[scan]\ndelegates = ["osv-scanner"]\n');
+    tool(f, "osv-scanner", `echo '${osvMedium}'; exit 1`);
+    const env = {
+      KIT_EXPLOIT_INTEL: "1",
+      KIT_EXPLOIT_INTEL_CACHE: join(f.dir, "absent.json"),
+      KIT_AIRGAP: "1",
+    };
+    const lenient = await scan(f, [], env);
+    assert.equal(lenient.exitCode, 0, lenient.stdout + lenient.stderr);
+    assert.match(plain(lenient.stdout), /! CISA KEV not checked: air gap/);
+    const strict = await scan(f, ["--strict"], env);
+    assert.equal(strict.exitCode, 1, strict.stdout + strict.stderr);
+    assert.match(plain(strict.stdout), /✗ CISA KEV not checked: air gap/);
+  });
+
+  it("[scan] exploit_intel = false turns it off", async () => {
+    toml(f, '[scan]\ndelegates = ["osv-scanner"]\nexploit_intel = false\n');
+    tool(f, "osv-scanner", `echo '${osvMedium}'; exit 1`);
+    const r = await scan(f, ["--json"], {
+      KIT_EXPLOIT_INTEL: "1",
+      KIT_EXPLOIT_INTEL_CACHE: seedCache(true),
+    });
+    assert.equal(r.exitCode, 0, r.stdout + r.stderr);
+    assert.equal(
+      (JSON.parse(r.stdout) as { exploitIntel: { enabled: boolean } }).exploitIntel.enabled,
+      false,
+    );
   });
 });
