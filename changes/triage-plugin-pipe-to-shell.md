@@ -1,0 +1,3 @@
+### Fixed
+
+- **`kit triage skill` flags a Claude Code plugin that runs a downloaded script unverified.** A hook command in `hooks/hooks.json` (or the manifest) or a plugin script that pipes a download into a shell (`curl … | sh`, `wget -qO- … | bash`, `bash <(curl …)`, `sh -c "$(curl …)"`, `eval "$(curl …)"`) or into PowerShell (`iex (iwr …)`, `irm … | iex`, `Invoke-Expression (Invoke-WebRequest …)`) now gets a warning that names the URL's host. Before, such a plugin got only the generic warning about its hook event, and the hook command text itself was never scanned: it now gets the same line scan as a script, labelled `hooks/hooks.json <Event> command`. A download saved with `-o` and then checked with a checksum is not flagged.
