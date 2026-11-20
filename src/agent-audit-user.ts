@@ -193,6 +193,21 @@ export function userInstructionFiles(
   return files;
 }
 
+/** Every file kit reads in the user-level agent dirs, plus the top-level instruction files. */
+export function userSurfaceFiles(
+  home: string,
+  env: Record<string, unknown> = {},
+): { abs: string; shown: string }[] {
+  const out = userInstructionFiles(home, env);
+  for (const surface of userSurfaces(home, env)) {
+    const found: string[] = [];
+    filesUnder(surface.dir, SCAN_EXTS, MAX_DEPTH, found);
+    out.push(...found.map((abs) => ({ abs, shown: shownIn(surface.shown, surface.dir, abs) })));
+  }
+  const seen = new Set<string>();
+  return out.filter((f) => !seen.has(f.shown) && (seen.add(f.shown), true));
+}
+
 /**
  * A path inside an installed dependency tree. A skill can ship its own `node_modules`
  * (`~/.claude/skills/<name>/scripts`), and the secret rules read those files as secrets: a locale
