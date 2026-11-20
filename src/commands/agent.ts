@@ -22,6 +22,7 @@ import {
   loadUserRulesProfile,
 } from "../agent-config.js";
 import { describeStrictResult, installStrictSettings } from "../agent-config-strict.js";
+import { agentConfigPlanStep } from "../agent-config-plan.js";
 import { describeUserGates, installUserGates } from "../agent-config-user.js";
 import { ensureKitWrapper } from "../kit-wrapper.js";
 import { isReadOnlyMode } from "../read-only-mode.js";
@@ -104,6 +105,9 @@ async function cmdAgentConfigUser(): Promise<boolean> {
  * is frozen in the baseline (one more line there measured CCN 32 and 136 lines, a fresh finding).
  */
 export async function cmdAgentConfigEntry(): Promise<boolean> {
+  // `--plan` / `--apply <hash>`: show (or check) the settings diff before anything is written.
+  const step = await agentConfigPlanStep(process.argv);
+  if (step !== "continue") return step === "done";
   if (hasFlag(process.argv, "--user")) return cmdAgentConfigUser();
   const ok = await cmdAgentConfig();
   // Opt-in gates, after the defaults; here so cmdAgentConfig keeps its frozen size.
