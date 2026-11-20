@@ -32,6 +32,7 @@ const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> =
   model: (args) => cmdTriageModel(args),
   instructions: async (args) =>
     (await import("./triage-instructions.js")).cmdTriageInstructions(args),
+  prompt: async (args) => (await import("../triage-prompt.js")).cmdTriagePrompt(args),
   pkg: async (args) => (await import("./triage-pkg.js")).cmdTriagePkg(args),
   gem: async (args) => (await import("./triage-gem.js")).cmdTriageGem(args),
 };
@@ -60,6 +61,7 @@ const TRIAGE_TYPES = [
   "mcp",
   "model",
   "instructions",
+  "prompt",
   "pkg",
   "plugin",
   "vault-config",
@@ -88,6 +90,7 @@ const HELP_ROWS = [
   "  kit triage check-deps                Pre-commit gate: fail if staged deps lack triage entries",
   "  kit triage check-skills              Pre-commit gate: fail if staged skills lack a --deep triage entry",
   "  kit triage instructions [path]       Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks",
+  '  kit triage prompt "<text>"|-        Read a pasted install prompt (or stdin) for planted attacks, URLs and repos; fetches nothing',
   "  kit triage pkg <file.pkg>            Check a macOS installer: checksum, publisher Team ID, notarization (macOS)",
 ];
 
