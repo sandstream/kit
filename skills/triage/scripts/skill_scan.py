@@ -4,6 +4,7 @@ Split out of triage.py, which kit freezes at its current size. kit installs and 
 this file exactly as it does triage.py (src/triage.ts), so it carries the same provenance.
 """
 
+import json
 import os
 import re
 
@@ -117,14 +118,80 @@ def _outside_skills(root, skills):
 def _declare_outside_skills(rep, root, skills):
     """A pack can ship hooks, setup instructions and scripts beside its skills (kit-research
     `humanmaxxing-vs-kit`: a hooks fragment and a getting-started file an agent is told to follow).
-    Pack triage reads the skill directories only, so the rest is declared not checked, never
-    passed silently."""
-    rest = _outside_skills(root, skills)
+    Hook fragments and scripts are judged as a plugin's are; the rest is declared not checked,
+    never passed silently."""
+    rest = _read_hooks_and_scripts(rep, root, _outside_skills(root, skills))
     if not rest:
         return
     more = f" and {len(rest) - 10} more" if len(rest) > 10 else ""
     rep.notchecked(f"{len(rest)} file(s) outside the skill directories",
-                   f"pack triage reads skill directories only: {', '.join(rest[:10])}{more}")
+                   f"pack triage reads skill directories, hook fragments and scripts only: {', '.join(rest[:10])}{more}")
+
+
+_HOOK_SCRIPTS = (".sh", ".py", ".js")
+
+
+def _read_hooks_and_scripts(rep, root, rest):
+    """Judge the pack's hook fragments and scripts outside its skill directories by the rules
+    plugin_scan.py applies to a plugin's hooks and scripts; return the files still unread.
+
+    A fragment is a `*.json` in Claude Code settings shape (`{"hooks": {"<Event>": [{"matcher",
+    "hooks": [{"command"}]}]}}`) or a map of entries carrying `event` and `handler.command`
+    (kit-research `humanmaxxing-vs-kit`). A JSON file in neither shape stays declared unread."""
+    plugin = _plugin_scan()
+    left, entries, scripts = [], 0, 0
+    for rel in rest:
+        is_json = rel.endswith(".json")
+        text = _read_text(os.path.join(root, *rel.split("/"))) if is_json or rel.endswith(_HOOK_SCRIPTS) else None
+        hooks = _hook_entries(text) if is_json and text is not None else []
+        if text is None or (is_json and not hooks):
+            left.append(rel)
+            continue
+        _secrets_in(rep, rel, text)
+        if not is_json:
+            plugin._scan_script(rep, rel, text)
+            scripts += 1
+            continue
+        entries += len(hooks)
+        for event, matcher, command in hooks:
+            plugin._judge_hook(rep, rel, event, matcher)
+            plugin._scan_script(rep, f"{rel} {event} command", command)
+    if entries or scripts:
+        rep.fact(f"read {entries} hook entr{'y' if entries == 1 else 'ies'} and {scripts} script(s) outside the skill directories")
+    return left
+
+
+def _read_text(full):
+    try:
+        if os.path.islink(full) or os.path.getsize(full) > FILE_LIMIT:
+            return None
+        with open(full, "r", encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _hook_entries(text):
+    """(event, matcher, command) for each hook command in a settings-shaped or fragment JSON."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    out = []
+    events = data.get("hooks")
+    for event, groups in (events.items() if isinstance(events, dict) else ()):
+        for group in groups if isinstance(groups, list) else ():
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                continue
+            matcher = str(group.get("matcher", "*"))
+            out += [(str(event), matcher, str(h.get("command", ""))) for h in group["hooks"] if isinstance(h, dict)]
+    for entry in data.values():
+        handler = entry.get("handler") if isinstance(entry, dict) else None
+        if isinstance(handler, dict) and isinstance(entry.get("event"), str) and "command" in handler:
+            out.append((entry["event"], str(entry.get("matcher", "*")), str(handler["command"])))
+    return out
 
 
 def _skills_under(root):
