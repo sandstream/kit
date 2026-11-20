@@ -91,17 +91,8 @@ function notRunText(proof: GateProof): string {
   return `Not run here: ${proof.notRun.map((n) => plain(n)).join("; ")}. `;
 }
 
-/** The verdict for one set of facts. Pure. */
-export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
-  const l = f.liveness;
-  if (!l.everInstalled || !l.installGate || !l.envGate || l.problems.length > 0) {
-    return {
-      ...base,
-      status: "skip",
-      detail:
-        "the gates are not wired here, so there is nothing to prove: see enforcement gate liveness",
-    };
-  }
+/** A wired gate that is not kit fails the row, whatever the controls showed. */
+function notKitVerdict(f: EvidenceFacts): SecurityCheckResult | null {
   const notKit = f.identity?.notKit ?? [];
   if (notKit.length > 0) {
     const first = notKit[0];
@@ -114,6 +105,38 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
       suggestion: "Run `kit agent-config` to rewire the gates to this kit.",
     };
   }
+  return null;
+}
+
+/** Gates that run another kit version: the controls proved this kit only. */
+function otherVersionVerdict(f: EvidenceFacts, total: number): SecurityCheckResult | null {
+  const others = f.identity?.otherVersions ?? [];
+  if (others.length > 0) {
+    return {
+      ...base,
+      status: "warn",
+      severity: "medium",
+      hasFindings: true,
+      detail: `the wired gates run kit ${others.map((v) => plain(v, 32)).join(", ")}, not the kit that ran the controls; the controls held (${total} of ${total}) for this kit only`,
+      suggestion: "Run `kit agent-config` so the gates and the CLI are the same kit.",
+    };
+  }
+  return null;
+}
+
+/** The verdict for one set of facts. Pure. */
+export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
+  const l = f.liveness;
+  if (!l.everInstalled || !l.installGate || !l.envGate || l.problems.length > 0) {
+    return {
+      ...base,
+      status: "skip",
+      detail:
+        "the gates are not wired here, so there is nothing to prove: see enforcement gate liveness",
+    };
+  }
+  const notKitResult = notKitVerdict(f);
+  if (notKitResult) return notKitResult;
   if (f.proof && f.proof.failed.length > 0) {
     const names = f.proof.failed.map((n) => plain(n)).join("; ");
     return {
@@ -127,17 +150,8 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
     };
   }
   if (!f.proof || f.proof.inconclusive.length > 0) return unverified(f);
-  const others = f.identity?.otherVersions ?? [];
-  if (others.length > 0) {
-    return {
-      ...base,
-      status: "warn",
-      severity: "medium",
-      hasFindings: true,
-      detail: `the wired gates run kit ${others.map((v) => plain(v, 32)).join(", ")}, not the kit that ran the controls; the controls held (${f.proof.total} of ${f.proof.total}) for this kit only`,
-      suggestion: "Run `kit agent-config` so the gates and the CLI are the same kit.",
-    };
-  }
+  const versionResult = otherVersionVerdict(f, f.proof.total);
+  if (versionResult) return versionResult;
   const skipped = recentBypass(f.bypass.entries, f.now);
   if (skipped.length > 0) {
     const last = skipped[skipped.length - 1];

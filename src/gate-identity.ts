@@ -11,7 +11,7 @@
  * The entrypoint counts as kit when the nearest `package.json` above it is named `sandstream-kit`.
  * Nothing the settings file names is executed: the file is repository content.
  */
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -39,16 +39,24 @@ function realOrSelf(path: string): string {
   }
 }
 
-/** The node + cli.js a kit-managed wrapper runs, or null when `path` is not one. */
-function wrapperEntry(path: string): string | null {
-  let body: string;
+/** A small file's text, read through one descriptor (size and content from the same file), or null. */
+function readSmall(path: string): string | null {
+  let fd: number | undefined;
   try {
-    if (statSync(path).size > WRAPPER_READ_LIMIT) return null;
-    body = readFileSync(path, "utf-8");
+    fd = openSync(path, "r");
+    if (fstatSync(fd).size > WRAPPER_READ_LIMIT) return null;
+    return readFileSync(fd, "utf-8");
   } catch {
     return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
-  if (!body.includes(WRAPPER_MARKER)) return null;
+}
+
+/** The node + cli.js a kit-managed wrapper runs, or null when `path` is not one. */
+function wrapperEntry(path: string): string | null {
+  const body = readSmall(path);
+  if (body === null || !body.includes(WRAPPER_MARKER)) return null;
   const posix = body.match(/exec "[^"]+" "([^"]+)" "\$@"/);
   if (posix) return posix[1];
   const cmd = body.match(/^"[^"]+" "([^"]+)" %\*\s*$/m);
@@ -58,14 +66,8 @@ function wrapperEntry(path: string): string | null {
 /** The cli.js an npm `.cmd` shim runs (`"%dp0%\…\cli.js"`), resolved against the shim's folder. */
 function npmCmdShimEntry(path: string): string | null {
   if (!/\.cmd$/i.test(path)) return null;
-  let body: string;
-  try {
-    if (statSync(path).size > WRAPPER_READ_LIMIT) return null;
-    body = readFileSync(path, "utf-8");
-  } catch {
-    return null;
-  }
-  const m = body.match(/"%~?dp0%?\\?([^"]*?cli\.js)"/i);
+  const body = readSmall(path);
+  const m = body?.match(/"%~?dp0%?\\?([^"]*?cli\.js)"/i);
   return m ? resolve(dirname(path), m[1].replace(/\\/g, "/")) : null;
 }
 
@@ -117,7 +119,7 @@ export function identifyGate(command: string): GateIdentity {
 }
 
 /** The gate-bash and gate-env commands Claude Code would run here: project, local and user settings. */
-export function wiredGateCommands(root: string, home: string = homedir()): string[] {
+function wiredGateCommands(root: string, home: string = homedir()): string[] {
   const files = [
     join(root, ".claude", "settings.json"),
     join(root, ".claude", "settings.local.json"),
