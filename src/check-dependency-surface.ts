@@ -20,11 +20,12 @@ import {
   type SurfaceFinding,
   type SurfaceReport,
 } from "./dependency-surface.js";
+import { graphFromPnpmLock, pnpmLockfileVersion } from "./dependency-surface-pnpm.js";
 import { graphFromYarnLock } from "./dependency-surface-yarn.js";
 import { scanSurfaceUsage } from "./dependency-surface-imports.js";
 
 const NAME = "dependency surface";
-const OTHER_LOCKFILES = ["pnpm-lock.yaml", "bun.lock", "bun.lockb"];
+const OTHER_LOCKFILES = ["bun.lock", "bun.lockb"];
 const BLIND_SPOTS =
   "Reads imports, scripts and configs: dynamic imports, tools started from elsewhere and packages a framework loads by convention are not seen, so these are suggestions";
 
@@ -155,10 +156,24 @@ async function loadGraph(
       return skip("yarn.lock is neither the classic nor the berry format, so it was not read");
     return { graph, source: "yarn.lock" };
   }
+  const pnpmPath = join(dir, "pnpm-lock.yaml");
+  if (await exists(pnpmPath)) {
+    const text = await readFile(pnpmPath, "utf8").catch(() => "");
+    const graph = graphFromPnpmLock(text, manifest);
+    if (!graph) {
+      const format = pnpmLockfileVersion(text);
+      return skip(
+        format === null
+          ? "pnpm-lock.yaml is not a pnpm lockfile, so it was not read"
+          : `pnpm-lock.yaml is format ${format}; this analysis reads format 9 (pnpm 9 and newer), so it was not read`,
+      );
+    }
+    return { graph, source: "pnpm-lock.yaml" };
+  }
   for (const other of OTHER_LOCKFILES) {
     if (await exists(join(dir, other))) {
       return skip(
-        `this analysis reads package-lock.json and yarn.lock; found ${other}, which is not read yet`,
+        `this analysis reads package-lock.json, yarn.lock and pnpm-lock.yaml; found ${other}, which is not read yet`,
       );
     }
   }

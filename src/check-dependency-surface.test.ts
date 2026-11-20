@@ -77,8 +77,8 @@ describe("checkDependencySurface", () => {
     }
   });
 
-  it("skips honestly for a pnpm or bun project, naming the lockfile it did not read", async () => {
-    for (const file of ["pnpm-lock.yaml", "bun.lock"]) {
+  it("skips honestly for a bun project, naming the lockfile it did not read", async () => {
+    for (const file of ["bun.lock", "bun.lockb"]) {
       const dir = project({ "package.json": { dependencies: { used: "1.0.0" } }, [file]: "" });
       try {
         const rows = await checkDependencySurface(dir);
@@ -207,6 +207,98 @@ shared@^1.0.0:
       const unused = rows.find((r) => r.name === `${NAME}: unused`);
       assert.match(unused?.detail ?? "", /idle/);
       for (const r of rows) assert.equal(r.status, "pass", `${r.name} must not move the verdict`);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+const PNPM = `lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    dependencies:
+      idle:
+        specifier: ^1.0.0
+        version: 1.0.0
+      used:
+        specifier: ^1.0.0
+        version: 1.0.0
+
+packages:
+
+  idle@1.0.0:
+    resolution: {integrity: sha512-a}
+
+  shared@1.0.0:
+    resolution: {integrity: sha512-b}
+    engines: {node: '>=18'}
+
+  used@1.0.0:
+    resolution: {integrity: sha512-c}
+
+snapshots:
+
+  idle@1.0.0: {}
+
+  shared@1.0.0: {}
+
+  used@1.0.0:
+    dependencies:
+      shared: 1.0.0
+`;
+
+describe("checkDependencySurface with pnpm-lock.yaml", () => {
+  it("measures a pnpm project and says what pnpm-lock.yaml cannot tell it", async () => {
+    const dir = project({
+      "package.json": { dependencies: { used: "^1.0.0", idle: "^1.0.0" } },
+      "pnpm-lock.yaml": PNPM,
+      "src/a.js": 'import u from "used";\n',
+    });
+    try {
+      const rows = await checkDependencySurface(dir);
+      const summary = rows.find((r) => r.name === NAME);
+      assert.ok(summary);
+      assert.equal(summary.status, "pass");
+      assert.match(summary.detail, /2 direct \(2 prod, 0 dev\)/);
+      assert.match(summary.detail, /3 packages in pnpm-lock\.yaml/);
+      assert.match(summary.detail, /bin names/);
+      assert.doesNotMatch(summary.detail, /engines and install scripts/);
+      const unused = rows.find((r) => r.name === `${NAME}: unused`);
+      assert.match(unused?.detail ?? "", /idle/);
+      for (const r of rows) assert.equal(r.status, "pass", `${r.name} must not move the verdict`);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("skips, naming pnpm-lock.yaml, when the file is not a pnpm lockfile", async () => {
+    const dir = project({
+      "package.json": { dependencies: { used: "^1.0.0" } },
+      "pnpm-lock.yaml": "something else entirely\n",
+    });
+    try {
+      const rows = await checkDependencySurface(dir);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].status, "skip");
+      assert.match(rows[0].detail, /pnpm-lock\.yaml/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("skips, naming the format, for a lockfile of another format than 9", async () => {
+    const dir = project({
+      "package.json": { dependencies: { used: "^1.0.0" } },
+      "pnpm-lock.yaml": PNPM.replace("'9.0'", "'6.0'"),
+    });
+    try {
+      const rows = await checkDependencySurface(dir);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].status, "skip");
+      assert.match(rows[0].detail, /pnpm-lock\.yaml/);
+      assert.match(rows[0].detail, /6\.0/);
     } finally {
       rmTemp(dir);
     }

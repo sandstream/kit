@@ -202,6 +202,32 @@ export function graphFromNpmLock(lock: NpmLock, manifest: ProjectManifest): DepG
   return { nodes, direct, cannotSee: [] };
 }
 
+/** Mark as development only every node that no runtime dependency of the project reaches. */
+export function markDevOnly(nodes: Map<string, GraphNode>, runtimeRoots: string[]): void {
+  const reached = new Set<string>();
+  const stack = [...runtimeRoots];
+  while (stack.length > 0) {
+    const id = stack.pop() as string;
+    if (reached.has(id)) continue;
+    reached.add(id);
+    for (const dep of nodes.get(id)?.deps ?? []) stack.push(dep);
+  }
+  for (const node of nodes.values()) node.dev = !reached.has(node.id);
+}
+
+/** Drop every node that none of the given roots reaches. */
+export function keepReachable(nodes: Map<string, GraphNode>, roots: string[]): void {
+  const reached = new Set<string>();
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const id = stack.pop() as string;
+    if (reached.has(id)) continue;
+    reached.add(id);
+    for (const dep of nodes.get(id)?.deps ?? []) stack.push(dep);
+  }
+  for (const id of [...nodes.keys()]) if (!reached.has(id)) nodes.delete(id);
+}
+
 /** The package names reachable from one node, not counting the node itself. */
 function closureOf(graph: DepGraph, start: string): Set<string> {
   const seen = new Set<string>();
