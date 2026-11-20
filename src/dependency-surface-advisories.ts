@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DepGraph } from "./dependency-surface.js";
 
-export const OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch";
+const OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch";
 
 const BATCH = 1000;
 const TTL_MS = 24 * 3_600_000;
