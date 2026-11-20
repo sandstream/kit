@@ -23,6 +23,18 @@ import {
 import { graphFromPnpmLock, pnpmLockfileVersion } from "./dependency-surface-pnpm.js";
 import { graphFromYarnLock } from "./dependency-surface-yarn.js";
 import { scanSurfaceUsage } from "./dependency-surface-imports.js";
+import {
+  advisoriesPerDirect,
+  type AdvisoryResult,
+  type PackageRef,
+} from "./dependency-surface-advisories.js";
+
+/** Looks up known advisories for packages. Absent means the check does not ask. */
+export type AdvisoryLookup = (packages: PackageRef[]) => Promise<AdvisoryResult>;
+
+export interface SurfaceOptions {
+  advisories?: AdvisoryLookup;
+}
 
 const NAME = "dependency surface";
 const OTHER_LOCKFILES = ["bun.lock", "bun.lockb"];
@@ -131,6 +143,78 @@ function findingRows(findings: SurfaceFinding[]): SecurityCheckResult[] {
   }));
 }
 
+/**
+ * The real lookup, only when asked for: `[scan] advisories = true` or `KIT_ADVISORIES=1`
+ * (`KIT_ADVISORIES=0` always wins). It sends the names and versions of every package in the
+ * lockfile to api.osv.dev, private packages included, and a lockfile does not always say which
+ * registry a package came from. So it is never on by default. A project in an air gap (config or
+ * `KIT_AIRGAP`) reads only the cache; a config that cannot be read counts as an air gap.
+ */
+export async function advisoryOptionsFor(root: string): Promise<SurfaceOptions> {
+  if (process.env.KIT_ADVISORIES === "0") return {};
+  let offline = true;
+  let asked = process.env.KIT_ADVISORIES === "1";
+  try {
+    const [{ loadConfig }, { resolveAirGap }] = await Promise.all([
+      import("./config.js"),
+      import("./airgap/config.js"),
+    ]);
+    const config = await loadConfig(join(root, ".kit.toml"));
+    asked ||= config.scan?.advisories === true;
+    offline = resolveAirGap(config.air_gap).enabled;
+  } catch {
+    offline = true;
+  }
+  if (!asked) return {};
+  const { defaultAdvisoryDeps, loadAdvisories } =
+    await import("./dependency-surface-advisories.js");
+  return { advisories: (packages) => loadAdvisories(packages, defaultAdvisoryDeps(offline)) };
+}
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * One row for the advisories OSV holds for the lockfile's packages, counted per direct dependency
+ * so the heavy source of them is visible. Advisory only: it never moves the verdict. A lookup that
+ * did not finish is a skip row, so a missing count is never read as a clean one.
+ */
+async function advisoryRow(
+  graph: DepGraph,
+  lookup: AdvisoryLookup,
+): Promise<SecurityCheckResult | null> {
+  let result: AdvisoryResult;
+  try {
+    const packages = [...graph.nodes.values()].map((n) => ({ name: n.name, version: n.version }));
+    result = await lookup(packages);
+  } catch (e) {
+    const why = (e instanceof Error ? e.message : String(e)).replace(/[\x00-\x1f\x7f]/g, " ");
+    result = { found: new Map(), checked: false, note: `lookup failed: ${why.slice(0, 160)}` };
+  }
+  const rows = advisoriesPerDirect(graph, result.found);
+  const total = new Set(rows.flatMap((r) => r.ids)).size;
+  if (!result.checked) {
+    const partial =
+      total > 0 ? ` ${plural(total, "advisory is", "advisories are")} known from the cache.` : "";
+    return {
+      category: "dependency",
+      name: `${NAME}: advisories`,
+      status: "skip",
+      detail: `Advisories not checked: ${result.note ?? "the lookup did not finish"}.${partial}`,
+    };
+  }
+  if (total === 0) return null;
+  const listed = rows.map((r) => `${r.name}${r.dev ? " (dev)" : ""} (${r.ids.length})`);
+  return {
+    category: "dependency",
+    name: `${NAME}: advisories`,
+    status: "pass",
+    severity: "low",
+    detail: `${plural(total, "known advisory", "known advisories")} in ${plural(rows.length, "direct dependency", "direct dependencies")}; most through ${listedNames(listed, ", ")}`,
+    suggestion:
+      "Run `kit check --category security` for severity and fixes. Removing or replacing the dependency that brings the most clears the most.",
+  };
+}
+
 /** The lockfile to read and the graph it gives, or the row that says why it could not be read. */
 async function loadGraph(
   dir: string,
@@ -222,7 +306,10 @@ async function workspaceRoots(root: string): Promise<string[]> {
 
 const posix = (p: string): string => p.split("\\").join("/");
 
-export async function checkDependencySurface(root: string): Promise<SecurityCheckResult[]> {
+export async function checkDependencySurface(
+  root: string,
+  options: SurfaceOptions = {},
+): Promise<SecurityCheckResult[]> {
   const manifestPath = join(root, "package.json");
   if (!(await exists(manifestPath))) return [];
   const manifest = await readJson<ProjectManifest>(manifestPath);
@@ -255,6 +342,9 @@ export async function checkDependencySurface(root: string): Promise<SecurityChec
           manifest.workspaces !== undefined || (await exists(join(root, "lerna.json"))),
       }),
       ...findingRows(report.findings),
+      ...(options.advisories ? [await advisoryRow(loaded.graph, options.advisories)] : []).filter(
+        (r): r is SecurityCheckResult => r !== null,
+      ),
     ];
   }
   return failure ? [failure] : [];
