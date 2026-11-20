@@ -5,6 +5,10 @@ import { hasExecAfterDownload, hasSecretOutbound } from "./instruction-scan-patt
 import { sanitizeDisplayText as sanitizeInstructionDisplay } from "./display-text.js";
 export { sanitizeDisplayText as sanitizeInstructionDisplay } from "./display-text.js";
 
+/** The honesty line every instruction scan prints: what a finding, and its absence, mean. */
+export const INSTRUCTION_SCAN_FLOOR =
+  "A floor, not a guard: the first rules caught 3 of 20 attack lines written by a separate model that had not seen them; rules added since were written against 8 of those lines, so no blind figure exists for them. A finding is worth reading; no finding does not mean the files are safe.";
+
 export type InstructionRule =
   | "secret-to-outbound"
   | "exec-after-download"
