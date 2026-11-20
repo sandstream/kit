@@ -16,7 +16,7 @@ export function commandIncludesSubcommand(command: string, sub: string): boolean
   }
 }
 
-function parseHookCommand(command: string): string[] {
+export function parseHookCommand(command: string): string[] {
   // POSIX shell escaping treats backslash as an escape. In cmd.exe it is a
   // literal path separator, including outside quotes.
   return shellSplit(process.platform === "win32" ? command.replace(/\\/g, "\\\\") : command);
@@ -39,7 +39,7 @@ function isExecutable(path: string): boolean {
 
 /** The version of the kit package a CLI entrypoint belongs to, or null when none can be read.
  *  Walks up from the entrypoint to the nearest package.json named for kit; never guesses. */
-function kitVersionAt(cliPath: string): string | null {
+export function kitVersionAt(cliPath: string): string | null {
   let dir: string;
   try {
     dir = dirname(realpathSync(cliPath));
