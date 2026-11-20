@@ -127,16 +127,24 @@ export async function cmdSupplyChain(): Promise<boolean> {
 
 export async function cmdAgentAudit(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
+  const drift = await import("../user-surface-drift.js");
+  const { homedir } = await import("node:os");
+  if (hasFlag(process.argv, "--accept-user-surfaces")) {
+    const n = drift.acceptUserSurfaces(homedir(), process.env);
+    console.log(`kit agent-audit: accepted ${n} user-level agent file(s) as the baseline`);
+    return true;
+  }
+  const { isReadOnlyMode } = await import("../read-only-mode.js");
   const { runAgentAudit } = await import("../agent-audit.js");
   const { runAgentTrifecta } = await import("../agent-trifecta.js");
   const { runAgentPreload } = await import("../agent-preload.js");
   const { runAgentEndpoint } = await import("../agent-endpoint.js");
   const { runUserAgentAudit } = await import("../agent-audit-user.js");
   const { runAgentSkillPosture } = await import("../agent-skill-posture.js");
-  const { homedir } = await import("node:os");
   const results = [
     ...runAgentAudit(process.cwd()),
     ...runUserAgentAudit(process.cwd(), homedir(), process.env),
+    ...drift.userSurfaceDriftRows(homedir(), process.env, !isReadOnlyMode()),
     ...runAgentTrifecta(process.cwd(), homedir()),
     ...runAgentPreload(process.cwd(), homedir(), process.env),
     ...runAgentEndpoint(process.cwd(), homedir(), process.env),
