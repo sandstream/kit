@@ -179,14 +179,25 @@ def _hook_entries(text):
         return []
     if not isinstance(data, dict):
         return []
+    return _settings_hooks(data.get("hooks")) + _fragment_hooks(data)
+
+
+def _settings_hooks(events):
+    """Claude Code settings shape: {"<Event>": [{"matcher", "hooks": [{"command"}]}]}."""
     out = []
-    events = data.get("hooks")
     for event, groups in (events.items() if isinstance(events, dict) else ()):
         for group in groups if isinstance(groups, list) else ():
-            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            hooks = group.get("hooks") if isinstance(group, dict) else None
+            if not isinstance(hooks, list):
                 continue
             matcher = str(group.get("matcher", "*"))
-            out += [(str(event), matcher, str(h.get("command", ""))) for h in group["hooks"] if isinstance(h, dict)]
+            out += [(str(event), matcher, str(h.get("command", ""))) for h in hooks if isinstance(h, dict)]
+    return out
+
+
+def _fragment_hooks(data):
+    """Fragment shape: {"<name>": {"event", "matcher", "handler": {"command"}}}."""
+    out = []
     for entry in data.values():
         handler = entry.get("handler") if isinstance(entry, dict) else None
         if isinstance(handler, dict) and isinstance(entry.get("event"), str) and "command" in handler:
