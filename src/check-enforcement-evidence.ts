@@ -22,6 +22,7 @@
 import { resolve } from "node:path";
 
 import type { GateLiveness } from "./agent-config.js";
+import type { GateIdentityFacts } from "./gate-identity.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 const EVIDENCE_CHECK = "enforcement evidence";
@@ -53,6 +54,8 @@ export interface EvidenceFacts {
   now: number;
   /** Why the controls did not run. */
   refreshNote?: string;
+  /** What the wired gate commands resolve to (files read, never run). Absent: not checked. */
+  identity?: GateIdentityFacts;
 }
 
 const base = { category: "governance", name: EVIDENCE_CHECK } as const;
@@ -99,6 +102,18 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
         "the gates are not wired here, so there is nothing to prove: see enforcement gate liveness",
     };
   }
+  const notKit = f.identity?.notKit ?? [];
+  if (notKit.length > 0) {
+    const first = notKit[0];
+    return {
+      ...base,
+      status: "fail",
+      severity: "high",
+      hasFindings: true,
+      detail: `${notKit.length} wired gate command(s) do not run kit: ${plain(first.target, 160)} (${plain(first.why, 120)}). The negative controls prove kit's gate code, not this command`,
+      suggestion: "Run `kit agent-config` to rewire the gates to this kit.",
+    };
+  }
   if (f.proof && f.proof.failed.length > 0) {
     const names = f.proof.failed.map((n) => plain(n)).join("; ");
     return {
@@ -112,6 +127,17 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
     };
   }
   if (!f.proof || f.proof.inconclusive.length > 0) return unverified(f);
+  const others = f.identity?.otherVersions ?? [];
+  if (others.length > 0) {
+    return {
+      ...base,
+      status: "warn",
+      severity: "medium",
+      hasFindings: true,
+      detail: `the wired gates run kit ${others.map((v) => plain(v, 32)).join(", ")}, not the kit that ran the controls; the controls held (${f.proof.total} of ${f.proof.total}) for this kit only`,
+      suggestion: "Run `kit agent-config` so the gates and the CLI are the same kit.",
+    };
+  }
   const skipped = recentBypass(f.bypass.entries, f.now);
   if (skipped.length > 0) {
     const last = skipped[skipped.length - 1];
@@ -132,10 +158,13 @@ export function judgeEvidence(f: EvidenceFacts): SecurityCheckResult {
     ...base,
     status: "pass",
     detail:
-      `install gate and env-write gate wired; ${held} of ${f.proof.total} negative controls held just now; ` +
+      `install gate and env-write gate wired${f.identity ? " to this kit (resolved from files, not run)" : ""}; ${held} of ${f.proof.total} negative controls held just now; ` +
       `no skipped hook in the last ${BYPASS_WINDOW_DAYS} days. ` +
       `${notRunText(f.proof)}` +
-      `Not proven: that the wired commands run kit's gate (the controls ran this kit's own build, and the settings file is never executed), that another tool than Claude Code is gated, or that the settings file was not edited after the proof`,
+      (f.identity
+        ? "Not proven: that the kit files the gates resolve to are unmodified, "
+        : "Not proven: that the wired commands run kit's gate (the controls ran this kit's own build, and the settings file is never executed), ") +
+      "that another tool than Claude Code is gated, or that the settings file was not edited after the proof",
   };
 }
 
@@ -184,6 +213,8 @@ export interface EvidenceDeps {
   liveness: (root: string) => EvidenceFacts["liveness"];
   /** Run the negative controls. */
   prove: (root: string) => GateProof;
+  /** What the wired gate commands resolve to. Reads files, runs nothing. */
+  identity?: (root: string) => GateIdentityFacts;
   /** False where running processes is not allowed (read-only mode). */
   canRun: () => boolean;
   skipped: (root: string) => Promise<{ entries: BypassEntry[] }>;
@@ -193,10 +224,13 @@ async function defaultDeps(): Promise<EvidenceDeps> {
   const { gateLiveness } = await import("./agent-config.js");
   const { proveFloor } = await import("./usage-prove.js");
   const { isReadOnlyMode } = await import("./read-only-mode.js");
+  const { gateIdentityFacts } = await import("./gate-identity.js");
+  const { getKitVersionSync } = await import("./update-check.js");
   return {
     now: () => Date.now(),
     liveness: (root) => gateLiveness(root),
     prove: (root) => classifyControls(proveFloor(root).controls),
+    identity: (root) => gateIdentityFacts(root, getKitVersionSync()),
     canRun: () => !isReadOnlyMode(),
     skipped: readSkippedCommits,
   };
@@ -238,5 +272,11 @@ export async function checkEnforcementEvidence(
     }
   }
   const bypass = wired ? await d.skipped(root).catch(() => ({ entries: [] })) : { entries: [] };
-  return judgeEvidence({ liveness, proof, bypass, now: d.now(), refreshNote });
+  let identity: GateIdentityFacts | undefined;
+  try {
+    identity = wired && d.identity ? d.identity(root) : undefined;
+  } catch {
+    identity = undefined; // not checked: the row keeps saying the wired command is unproven
+  }
+  return judgeEvidence({ liveness, proof, bypass, now: d.now(), refreshNote, identity });
 }
