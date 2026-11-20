@@ -56,6 +56,9 @@ export async function cmdGateBash(): Promise<boolean> {
   const { trailCommandRefusal } = await import("../trail-guard.js");
   const { homedir } = await import("node:os");
   if (await refuseTrail("gate-bash", trailCommandRefusal(command, homedir()), payload)) return true;
+  const { gateSettingsCommandRefusal } = await import("../gate-self-edit.js");
+  const selfEdit = gateSettingsCommandRefusal(command, process.cwd(), homedir());
+  if (await refuseTrail("gate-bash", selfEdit, payload)) return true;
   const verdict = await decideBashGate(command, undefined, process.cwd());
   if (verdict.block) {
     await auditGateDeny("gate-bash", verdict.reason, sessionIdOf(payload));
@@ -148,6 +151,9 @@ export async function cmdGateEnv(): Promise<boolean> {
   const { homedir } = await import("node:os");
   const trail = trailWriteRefusal(write.filePath, process.cwd(), homedir());
   if (await refuseTrail("gate-env", trail, payload)) return true;
+  const { gateSettingsWriteRefusal } = await import("../gate-self-edit.js");
+  const selfEdit = gateSettingsWriteRefusal(payload, process.cwd(), homedir());
+  if (await refuseTrail("gate-env", selfEdit, payload)) return true;
   const verdict = decideEnvWriteGate(write.filePath, write.text);
   if (verdict.block) {
     await auditGateDeny("gate-env", verdict.reason ?? "secret write", sessionIdOf(payload));
