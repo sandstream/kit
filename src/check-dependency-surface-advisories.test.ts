@@ -141,6 +141,36 @@ describe("advisoryOptionsFor", () => {
     }
   };
 
+  it("gives no lookup unless asked for: package names must not leave by default", async () => {
+    const d = project({ "package.json": {}, ".kit.toml": '[project]\nname = "t"\n' });
+    try {
+      await withEnv({ KIT_ADVISORIES: "" }, async () => {
+        delete process.env.KIT_ADVISORIES;
+        assert.deepEqual(await advisoryOptionsFor(d), {});
+      });
+    } finally {
+      rmTemp(d);
+    }
+  });
+
+  it("gives a lookup when [scan] advisories = true, and KIT_ADVISORIES=0 still wins", async () => {
+    const d = project({
+      "package.json": {},
+      ".kit.toml": '[project]\nname = "t"\n\n[scan]\nadvisories = true\n',
+    });
+    try {
+      await withEnv({ KIT_ADVISORIES: "" }, async () => {
+        delete process.env.KIT_ADVISORIES;
+        assert.ok((await advisoryOptionsFor(d)).advisories);
+      });
+      await withEnv({ KIT_ADVISORIES: "0" }, async () => {
+        assert.deepEqual(await advisoryOptionsFor(d), {});
+      });
+    } finally {
+      rmTemp(d);
+    }
+  });
+
   it("gives no lookup when KIT_ADVISORIES=0", async () => {
     const d = project({ "package.json": {} });
     try {

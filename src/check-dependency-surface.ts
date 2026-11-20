@@ -144,23 +144,30 @@ function findingRows(findings: SurfaceFinding[]): SecurityCheckResult[] {
 }
 
 /**
- * The real lookup, unless `KIT_ADVISORIES=0`. A project in an air gap (config or `KIT_AIRGAP`) reads
- * only the cache; a config that cannot be read counts as an air gap, so nothing leaves by mistake.
+ * The real lookup, only when asked for: `[scan] advisories = true` or `KIT_ADVISORIES=1`
+ * (`KIT_ADVISORIES=0` always wins). It sends the names and versions of every package in the
+ * lockfile to api.osv.dev, private packages included, and a lockfile does not always say which
+ * registry a package came from. So it is never on by default. A project in an air gap (config or
+ * `KIT_AIRGAP`) reads only the cache; a config that cannot be read counts as an air gap.
  */
 export async function advisoryOptionsFor(root: string): Promise<SurfaceOptions> {
   if (process.env.KIT_ADVISORIES === "0") return {};
-  const { defaultAdvisoryDeps, loadAdvisories } =
-    await import("./dependency-surface-advisories.js");
   let offline = true;
+  let asked = process.env.KIT_ADVISORIES === "1";
   try {
     const [{ loadConfig }, { resolveAirGap }] = await Promise.all([
       import("./config.js"),
       import("./airgap/config.js"),
     ]);
-    offline = resolveAirGap((await loadConfig(join(root, ".kit.toml"))).air_gap).enabled;
+    const config = await loadConfig(join(root, ".kit.toml"));
+    asked ||= config.scan?.advisories === true;
+    offline = resolveAirGap(config.air_gap).enabled;
   } catch {
     offline = true;
   }
+  if (!asked) return {};
+  const { defaultAdvisoryDeps, loadAdvisories } =
+    await import("./dependency-surface-advisories.js");
   return { advisories: (packages) => loadAdvisories(packages, defaultAdvisoryDeps(offline)) };
 }
 
