@@ -3411,6 +3411,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "prompt": {
+          "kind": "command",
+          "summary": "Read a pasted install prompt (argument or stdin) for planted attacks, the URLs and hosts it names and repos it clones; fetches nothing",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "repo": {
           "kind": "command",
           "summary": "GitHub repo evaluation",
