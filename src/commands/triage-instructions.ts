@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import { scanInstructions, type InstructionScan } from "../instruction-scan.js";
-import { sanitizeInstructionDisplay } from "../instruction-scan-text.js";
+import { INSTRUCTION_SCAN_FLOOR, sanitizeInstructionDisplay } from "../instruction-scan-text.js";
 
 const NOT_READ =
   "README files are not read: install lines written for people (`curl … | sh`) would be false positives.";
@@ -31,9 +31,7 @@ function render(scan: InstructionScan): void {
       ? `${c.red}${scan.findings.length} finding(s)${c.reset}`
       : `${c.green}no finding${c.reset}`;
   console.log(`\n  ${read} instruction file(s) read: ${verdict}.`);
-  console.log(
-    `  ${c.dim}A floor, not a guard: the first rules caught 3 of 20 attack lines written by a separate model that had not seen them; rules added since were written against 8 of those lines, so no blind figure exists for them. A finding is worth reading; no finding does not mean the files are safe. ${NOT_READ}${c.reset}`,
-  );
+  console.log(`  ${c.dim}${INSTRUCTION_SCAN_FLOOR} ${NOT_READ}${c.reset}`);
 }
 
 function displayScan(scan: InstructionScan): InstructionScan {
