@@ -1,0 +1,3 @@
+### Added
+
+- **The `dependency surface` check counts known advisories per direct dependency.** `kit check` now asks OSV (`api.osv.dev`) which advisories exist for each package and version in the lockfile, then names the direct dependencies that bring the most, so the heavy source of them is visible. It reads all three lockfile formats. It sends package names and versions only, caches the answers for 24 hours in `~/.kit/osv-advisories.json`, and never moves the verdict. In an air gap (`[air_gap]` or `KIT_AIRGAP`) it makes no request and reads only the cache. A lookup that cannot finish gives a skipped row that says so, so a missing count is never read as a clean one. Set `KIT_ADVISORIES=0` to turn it off.

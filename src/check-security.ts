@@ -1,4 +1,4 @@
-import { checkDependencySurface } from "./check-dependency-surface.js";
+import { advisoryOptionsFor, checkDependencySurface } from "./check-dependency-surface.js";
 import { auditDecision } from "./audit-exceptions.js";
 import { skipsBasicScan } from "./basic-scan-skip.js";
 import { execFile } from "node:child_process";
@@ -2625,7 +2625,8 @@ async function runPrimarySecurityChecks(
         ];
   const lockfileResults = level === "repo" ? [] : await checkLockfilesCommitted(root);
   const codeResults = level === "repo" ? [] : await checkCodeGuardrails(root);
-  const surfaceResults = level === "repo" ? [] : await checkDependencySurface(root);
+  const surfaceResults =
+    level === "repo" ? [] : await checkDependencySurface(root, await advisoryOptionsFor(root));
   return [
     ...(await Promise.all([...project, ...repo])),
     ...lockfileResults,
