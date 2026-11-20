@@ -25,6 +25,7 @@ interface Lib {
   semgrepPacks(workflow: string): string[];
   semgrepVersionFrom(output: string): string | undefined;
   untestedFiles(output: string): string[];
+  selfAuditErrors(output: string): string[];
 }
 
 async function lib(): Promise<Lib> {
@@ -222,5 +223,27 @@ describe("untestedFiles", () => {
   it("returns nothing when the row passes", async () => {
     const { untestedFiles } = await lib();
     assert.deepEqual(untestedFiles("  ! unit-test coverage  75 pre-existing untested file(s)"), []);
+  });
+});
+
+describe("selfAuditErrors", () => {
+  it("returns the failing rules from `kit self-audit --format=github`, without the prefix", async () => {
+    const { selfAuditErrors } = await lib();
+    const out = [
+      "::warning::self-audit/unwired-code: 118 exported functions with no production call site",
+      "::error::self-audit/unreferenced-export/unreferenced exports: marksFor is exported and no other file names it [src/exploit-intel.ts:349]",
+      "kit self-audit: 20 passed, 1 failed, 0 warnings, 227 advisories",
+      "::error::self-audit/R1-fail-open-ci: a step swallows its failure",
+    ].join("\n");
+    assert.deepEqual(selfAuditErrors(out), [
+      "self-audit/unreferenced-export/unreferenced exports: marksFor is exported and no other file names it [src/exploit-intel.ts:349]",
+      "self-audit/R1-fail-open-ci: a step swallows its failure",
+    ]);
+  });
+
+  it("returns nothing for a clean run", async () => {
+    const { selfAuditErrors } = await lib();
+    assert.deepEqual(selfAuditErrors("19 rules, 0 fail, 0 warn, 228 advisory\n"), []);
+    assert.deepEqual(selfAuditErrors(""), []);
   });
 });

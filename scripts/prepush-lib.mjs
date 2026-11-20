@@ -105,3 +105,11 @@ export function untestedFiles(output) {
   }
   return out;
 }
+
+/** The failing rules in the output of `kit self-audit --format=github`, one line each. */
+export function selfAuditErrors(output) {
+  return output
+    .split("\n")
+    .filter((line) => line.startsWith("::error::"))
+    .map((line) => line.slice("::error::".length).trim());
+}

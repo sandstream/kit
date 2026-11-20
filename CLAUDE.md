@@ -57,7 +57,7 @@ node scripts/prepush.mjs
 It checks, in one pass: that the installed tools match `package-lock.json` (a stale `prettier` gave a
 false green format check), that the branch is current with `origin/main` (CI tests the merge), build,
 format, lint, `kit review --enforce` over **all** stages, the tests of the changed files, that every
-new source file has a test (CI's coverage gate, which `kit review` does not run), Semgrep at the
+new source file has a test (CI's coverage gate, which `kit review` does not run), `kit self-audit` (CI's self-audit job, which also fails on rules `kit review` does not run, such as an export no other file names), Semgrep at the
 version and with the rule packs `.github/workflows/security.yml` names, and that the PR text holds no
 session URL. A Semgrep of another version does not run: the line shows `!` and `--strict` fails it. It lists every problem, then exits non-zero if there is one.
 
