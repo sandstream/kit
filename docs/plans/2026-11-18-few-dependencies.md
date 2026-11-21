@@ -107,12 +107,13 @@ only through it.
 
 Candidates, in order of gain over risk. None is done. Each needs Peter's decision.
 
-- [ ] **`tsx` (29 packages, all only through it).** It exists for one script, `npm run dev`
-      (`tsx src/cli.ts`). That script is named in `CONTRIBUTING.md`, `docker-compose.yml`,
-      `docs/ADAPTER_GUIDE.md` and `docs/MIGRATION_GUIDE.md`. Replace it with a build and `node
-      dist/cli.js`, and change those four files. Node's own type stripping does not replace it
-      directly: kit's imports end in `.js` while the files are `.ts`, and tsx is what maps one to
-      the other. Gain: 29 dev packages. Cost: a slower edit loop.
+- [x] **`tsx` (29 packages, all only through it). Kept, decided 2026-11-20.** An earlier version
+      of this plan said tsx exists for one script, `npm run dev`. That was wrong. 59 files under
+      `src` and `scripts` name tsx, and 47 of them load it with `import.meta.resolve("tsx")` to run
+      a `.ts` file in a child process. Removing tsx means rewriting those tests, not four docs.
+      Node's own type stripping does not replace it: kit's imports end in `.js` while the files
+      are `.ts`, and tsx is what maps one to the other. Gain would be 29 dev packages. Cost is a
+      large test rewrite. It stays.
 - [ ] **`picomatch`, `fdir`, `tinyglobby` (3 packages, dev).** They exist only because
       `@typescript-eslint/typescript-estree` requires `tinyglobby`, which requires `fdir` and
       `picomatch`. The advisory that made this urgent (GHSA-fc5q-39xc-vjpf) was withdrawn by GitHub
