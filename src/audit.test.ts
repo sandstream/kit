@@ -663,15 +663,8 @@ describe("logAuditEvent return value (fail-closed signal)", () => {
     }
   });
 
-  it("returns false when the local append fails (unwritable path)", async () => {
-    const bad = join(tmpdir(), `kit-audit-nope-${process.pid}`, "deep", ".kit-audit.jsonl");
-    const ok = await logAuditEvent(cfg(bad), {
-      operation: "x",
-      environment: "dev",
-      success: true,
-    });
-    assert.equal(ok, false);
-  });
+  // "returns false when the local append fails" lives in audit-loss.test.ts. A failed append
+  // now also fails the process that made it, so that case runs in a child process.
 
   it("returns true when audit is disabled (nothing to gate)", async () => {
     const c = cfg("/whatever");

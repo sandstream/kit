@@ -39,10 +39,11 @@ test("a legacy seal under a directory alias advances and verifies through both p
 
 test("hard-linked logs refuse an append without changing either name", async (t) => {
   const fixture = auditFixture(t);
-  await runAuditWorkers([
-    startAuditWorker(
-      fixture,
-      `
+  await runAuditWorkers(
+    [
+      startAuditWorker(
+        fixture,
+        `
     const { link } = await import("node:fs/promises");
     const original = join(project, ".kit-audit.jsonl"), alias = join(project, "linked.jsonl");
     assert.equal(await audit.appendAuditEventDirect(event("first"), { cwd: project }), true);
@@ -53,8 +54,10 @@ test("hard-linked logs refuse an append without changing either name", async (t)
     assert.equal(await readFile(original, "utf8"), before);
     assert.equal(await readFile(alias, "utf8"), before);
   `,
-    ),
-  ]);
+      ),
+    ],
+    2,
+  );
   assert.equal(
     readFileSync(join(fixture.project, ".kit-audit.jsonl"), "utf8"),
     readFileSync(join(fixture.project, "linked.jsonl"), "utf8"),

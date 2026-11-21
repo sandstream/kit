@@ -55,10 +55,11 @@ test("concurrent audit calls preserve every admitted event in a verifiable chain
 
 test("a partial audit record refuses admission and preserves the damaged evidence", async (t) => {
   const fixture = auditFixture(t);
-  await runAuditWorkers([
-    startAuditWorker(
-      fixture,
-      `
+  await runAuditWorkers(
+    [
+      startAuditWorker(
+        fixture,
+        `
     const logPath = join(project, ".kit-audit.jsonl");
     assert.equal(await audit.appendAuditEventDirect(event("first"), { cwd: project }), true);
     const original = await readFile(logPath, "utf8");
@@ -70,8 +71,10 @@ test("a partial audit record refuses admission and preserves the damaged evidenc
     assert.equal(await audit.appendAuditEventDirect(event("recovered"), { cwd: project }), true);
     assert.deepEqual(audit.verifyAuditChain(await readFile(logPath, "utf8")), { ok: true, entries: 2 });
   `,
-    ),
-  ]);
+      ),
+    ],
+    1,
+  );
 });
 
 test("a valid final record without a newline remains a valid chain after append", async (t) => {

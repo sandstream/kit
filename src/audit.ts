@@ -6,6 +6,7 @@ import type { GovernanceConfig } from "./config.js";
 import { identityId, verifySignature } from "./identity.js";
 import { resolveKeyStore, assertHardwareIdentity, hardwareRequired } from "./keystore/index.js";
 import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
+import { recordAuditLoss } from "./audit-loss.js";
 
 // Redact secrets from an audit event BEFORE it is hashed and written. The sink previously
 // stored `error` and `metadata` verbatim, so a credential echoed in an error message or
@@ -419,6 +420,7 @@ export async function appendAuditEventDirect(
     return true;
   } catch (error) {
     console.error(`[kit] audit-log append failed: ${error}`);
+    recordAuditLoss();
     return false;
   }
 }
@@ -630,6 +632,7 @@ export async function logAuditEvent(
     wroteLocal = true;
   } catch (error) {
     console.error(`Failed to write audit log: ${error}`);
+    recordAuditLoss();
   }
 
   // Send to Remote API only when audit.remote is explicitly enabled in

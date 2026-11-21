@@ -17,6 +17,36 @@ import {
 } from "./elevation.js";
 import { readFileSync, existsSync } from "node:fs";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+
+const ELEVATION = pathToFileURL(join(process.cwd(), "src", "elevation.ts")).href;
+const TSX = import.meta.resolve("tsx");
+
+/**
+ * Run `requireElevation` in a child process and return its result. A check that cannot write
+ * its audit record also fails the process that ran it (src/audit-loss.ts), and that process
+ * must not be the test file.
+ */
+function requireElevationInChild(scope: string, dir: string) {
+  const script = `
+    const { requireElevation } = await import(${JSON.stringify(ELEVATION)});
+    const result = await requireElevation(${JSON.stringify(scope)}, ${JSON.stringify(dir)});
+    process.stdout.write(JSON.stringify(result));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ["--import", TSX, "--input-type=module", "-e", script],
+    {
+      encoding: "utf8",
+      timeout: 120_000,
+    },
+  );
+  assert.ifError(child.error);
+  assert.equal(child.status, 1, child.stderr);
+  assert.match(child.stderr, /1 audit event was not recorded/);
+  return JSON.parse(child.stdout) as { ok: boolean; reason: string };
+}
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-elev-"));
@@ -125,7 +155,7 @@ describe("requireElevation", () => {
     try {
       process.env.KIT_ELEVATED = "1";
       writeFileSync(path, damaged);
-      const result = await requireElevation("rotate", dir);
+      const result = requireElevationInChild("rotate", dir);
       assert.equal(result.ok, false);
       assert.match(result.reason, /audit-log unavailable/);
       assert.equal(readFileSync(path, "utf8"), damaged);
