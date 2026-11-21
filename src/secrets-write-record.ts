@@ -55,9 +55,9 @@ export function secretWriteEvent(
 }
 
 /**
- * Append the event to the project's hash-chained audit log. Best-effort like every other direct
- * append: a failed append is reported on stderr by `appendAuditEventDirect` and never stops the
- * write it describes, which has already happened.
+ * Append the event to the project's hash-chained audit log. A failed append never stops the
+ * write it describes, which has already happened. It is not silent either: the cause goes to
+ * stderr and the process exits non-zero (`src/audit-loss.ts`).
  */
 export async function recordSecretWrite(
   op: SecretWriteOp,

@@ -151,13 +151,17 @@ function fixture(t: TestContext) {
       results?: { ok: boolean }[];
     };
   };
-  const run = (action: string, scope = "purge-history") => {
+  // `lostEvents` is how many audit appends the run makes fail on purpose. A lost event is
+  // never silent: the process says how many and exits non-zero (src/audit-loss.ts).
+  const run = (action: string, scope = "purge-history", lostEvents = 0) => {
     const child = spawnSync(process.execPath, args(action, scope), {
       env,
       encoding: "utf8",
       timeout: 15_000,
     });
-    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.status, lostEvents === 0 ? 0 : 1, child.stderr);
+    const reported = /(\d+) audit events? (?:was|were) not recorded/.exec(child.stderr);
+    assert.equal(Number(reported?.[1] ?? 0), lostEvents, child.stderr);
     return parse(child.stdout);
   };
   const race = async (scopes: string[], action = "race", afterReady?: () => void) => {
@@ -286,7 +290,7 @@ test("a failed audit refuses effects and leaves the reserved approval consumed",
   const saved = readFileSync(marker);
   const audit = join(project, ".kit-audit.jsonl");
   mkdirSync(audit);
-  assert.equal(run("consume").ok, false);
+  assert.equal(run("consume", undefined, 1).ok, false);
   assert.equal(readFileSync(effect, "utf8"), "");
   rmSync(audit, { recursive: true });
   writeFileSync(marker, saved);

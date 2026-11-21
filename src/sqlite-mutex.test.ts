@@ -180,7 +180,7 @@ test(
     await holder.finish();
     assert.equal(readFileSync(logPath(fixture), "utf8"), before);
     waiter.child.send("retry");
-    await waiter.finish();
+    await waiter.finish(1);
     assertLog(logPath(fixture), ["seed", "after-timeout"]);
   },
 );
@@ -237,7 +237,7 @@ test(
     await writer.wait("recovered");
     assertLog(path, ["seed", "other-process-recovery", "same-process-recovery"]);
     writer.child.send("finish");
-    await writer.finish();
+    await writer.finish(1);
   },
 );
 

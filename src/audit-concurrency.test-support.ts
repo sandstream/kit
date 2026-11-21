@@ -12,7 +12,8 @@ interface Worker {
   child: ChildProcess;
   done: Promise<void>;
   wait: (message: string) => Promise<void>;
-  finish: () => Promise<void>;
+  /** `lostEvents` is how many appends the worker makes fail on purpose. */
+  finish: (lostEvents?: number) => Promise<void>;
   messages: string[];
 }
 
@@ -108,19 +109,22 @@ export function startAuditWorker(context: ReturnType<typeof auditFixture>, body:
         await delay(10);
       }
     },
-    finish: async () => {
+    finish: async (lostEvents = 0) => {
       await done;
-      assert.equal(child.exitCode, 0, output);
+      // A lost audit event is never silent: the process says how many and exits non-zero.
+      assert.equal(child.exitCode, lostEvents === 0 ? 0 : 1, output);
+      const reported = /(\d+) audit events? (?:was|were) not recorded/.exec(output);
+      assert.equal(Number(reported?.[1] ?? 0), lostEvents, output);
     },
   };
   context.workers.push(worker);
   return worker;
 }
 
-export async function runAuditWorkers(workers: Worker[]): Promise<void> {
+export async function runAuditWorkers(workers: Worker[], lostEvents = 0): Promise<void> {
   await Promise.all(workers.map((worker) => worker.wait("ready")));
   for (const worker of workers) worker.child.send("start");
-  await Promise.all(workers.map((worker) => worker.finish()));
+  await Promise.all(workers.map((worker) => worker.finish(lostEvents)));
 }
 
 export function auditCli(context: ReturnType<typeof auditFixture>, args: string[]) {

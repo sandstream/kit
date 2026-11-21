@@ -41,6 +41,11 @@ sealed prefix and the `count` of entries it covers.
   writers queue behind one lock, so on a slow disk the last one can need longer.
   `KIT_AUDIT_LOCK_WAIT_MS` raises the wait (at most 120000). A value under 5000 is ignored, so the
   variable cannot make appends fail sooner.
+- An event that could not be appended is never silent. The append reports the cause on stderr,
+  and when the process ends kit prints the number of lost events and exits with code 1 where
+  the code would have been 0. A refusal code from a gate (2) is kept. The operation itself is
+  not stopped by this: a caller that must not go on without the log checks the result of the
+  append and refuses, as the exec broker and the policy gate do.
 
 Detection properties:
 

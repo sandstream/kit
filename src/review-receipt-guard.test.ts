@@ -44,11 +44,22 @@ it("does not claim a completed audit when a synchronous caller exits immediately
   }
 });
 
-async function waitForAudit(root: string, expected: string[]): Promise<void> {
+/**
+ * Wait until every expected operation is in the log, and `refusals` records in total. The
+ * refusals are audited without awaiting, so a wait on the names alone can return while one
+ * append is still in flight. The teardown then removed the directory under it and that event
+ * was lost, which nothing reported before src/audit-loss.ts.
+ */
+async function waitForAudit(
+  root: string,
+  expected: string[],
+  refusals = expected.length,
+): Promise<void> {
   const path = join(root, ".kit-audit.jsonl");
   for (let attempt = 0; attempt < 500; attempt++) {
     const text = existsSync(path) ? readFileSync(path, "utf8") : "";
-    if (expected.every((name) => text.includes(name))) return;
+    const records = text.split("\n").filter((line) => line.trim().length > 0).length;
+    if (records >= refusals && expected.every((name) => text.includes(name))) return;
     await new Promise((done) => setTimeout(done, 20));
   }
   throw new Error("read-only refusals did not reach the audit log");
@@ -96,13 +107,18 @@ it("refuses direct file operations and audits each refusal", async () => {
       () => persistHistory(root, JSON.parse("{}"), Buffer.alloc(32)),
       /read-only mode active/,
     );
-    await waitForAudit(root, [
-      "review-transaction",
-      "review-history",
-      "review-receipt-publish",
-      "review-recovery-pending",
-      "review-interruption-assessment",
-    ]);
+    // Six refusals above. "review-history" is refused twice, by the append and by the persist.
+    await waitForAudit(
+      root,
+      [
+        "review-transaction",
+        "review-history",
+        "review-receipt-publish",
+        "review-recovery-pending",
+        "review-interruption-assessment",
+      ],
+      6,
+    );
     // The last append can still hold its transaction open: SQLite keeps a journal beside the
     // coordination file until it commits. Wait for that transient file before the inventory.
     const journal = join(root, ".kit-audit.jsonl.lock.sqlite-journal");

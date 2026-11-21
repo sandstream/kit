@@ -1,13 +1,6 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  symlinkSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brokerExec, runBrokered, type BrokerContext } from "./broker.js";
@@ -143,22 +136,8 @@ describe("brokerExec per-gate denial", () => {
   });
 });
 
-describe("brokerExec fail-closed audit", () => {
-  it("refuses to run when the pre-exec 'authorized' audit append fails", async () => {
-    // Force appendAuditEventDirect to return false by making the audit path a
-    // DIRECTORY, so appendFile fails with EISDIR even as root (permission-
-    // independent).
-    mkdirSync(join(sandbox, ".kit-audit.jsonl"));
-    let ran = false;
-    const out = await brokerExec(CTX({ declaredEffects: true }), POLICY, async () => {
-      ran = true;
-      return 1;
-    });
-    assert.equal(out.ok, false);
-    assert.match(out.reason ?? "", /audit-log unavailable.*fail-closed/);
-    assert.equal(ran, false);
-  });
-});
+// "brokerExec fail-closed audit" lives in broker-audit-loss.test.ts: a failed append also
+// fails the process that made it, so that case runs in a child process.
 
 describe("brokerExec happy path", () => {
   it("runs with exactly the REQUESTED (least-privilege) env subset and returns ok", async () => {
