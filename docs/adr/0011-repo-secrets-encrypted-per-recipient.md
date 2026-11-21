@@ -14,17 +14,29 @@ list of recipients can decrypt them. The feature is opt in and off by default.
 - **Scope is files, not branches.** GitHub grants read access to a whole repository, never to a
   branch or a path. kit does not claim to add private branches. It gives the same effect for
   chosen files, which are visible to everyone and readable by the recipients.
-- **One random file key per file, wrapped per recipient.** The format follows the age
-  specification: an ephemeral X25519 key per recipient stanza, HKDF-SHA-256, an authenticated
-  header, and AES-256-GCM chunks with a counter nonce. It uses `node:crypto` only. No new
-  dependency, no own primitive (ADR-0002).
+- **Two kinds, two switches.** The owner chose both on 2026-11-21, and they carry different risk:
+  - **Private files**: a plan, a contract, customer material. A leak exposes one document.
+  - **Secrets**: API keys and passwords, shared in the team without an external vault service.
+    A leak can expose production.
+
+  Each kind has its own opt in. Turning on private files does not turn on secrets.
+
+- **One random file key per file, wrapped per recipient.** The format is the age format, not a
+  variant of it: an ephemeral X25519 key per recipient stanza, HKDF-SHA-256, a header MAC, and
+  ChaCha20-Poly1305 payload chunks with a counter nonce. It uses `node:crypto` only, which has
+  all of these. No new dependency, no own primitive (ADR-0002).
+- **The standard `age` tool must be able to decrypt.** A file that only kit can open would lock
+  the team to kit. A test decrypts kit's output with `age` and kit decrypts `age`'s output. If
+  that cannot be made to hold, this ADR must name each deviation and why, before it is accepted.
 - **The recipient list is a signed manifest.** Anyone with write access could otherwise add their
   own key. An admin key signs the manifest. Each machine pins the admin key outside the repo
   and checks the signature before it wraps a key for anyone.
 - **The format is versioned and fails closed.** An unknown version or stanza is an error, never
   a downgrade.
-- **Opt in.** The README promise changes from "secrets never live in the repo" to "no secret
-  lives in the repo in plaintext". Without the opt in, nothing changes.
+- **The README promise depends on the secrets switch.** With it off, which is the default,
+  "secrets never live in the repo" stays true as written, also when private files are on. With it
+  on, the promise for that repo is "no secret lives in the repo in plaintext", and `kit check`
+  says which of the two holds.
 
 ## No lockout
 
@@ -51,8 +63,9 @@ Losing the keys must never lose the data. The design needs all of these before i
 
 - **GitHub cannot limit reads.** Rulesets, push rulesets and CODEOWNERS limit writes and
   review only. No per-path or per-branch read access was found in the primary documentation.
-- **age is the model.** Its design is specified, small, and maps to `node:crypto`. kit already
-  has X25519, HKDF and AES-256-GCM in `src/memory/backup.ts`, for one recipient.
+- **age is the format.** Its design is specified, small, and maps to `node:crypto`. kit already
+  has X25519 and HKDF in `src/memory/backup.ts`, for one recipient and with AES-256-GCM. That
+  code is a starting point, not the format: the payload cipher and the header differ.
 - **git-crypt is the warning.** It is all or nothing per repo, has no user removal, and leaks
   file names and equal files through a deterministic IV.
 
@@ -78,7 +91,9 @@ Losing the keys must never lose the data. The design needs all of these before i
   - removal is refused if any file would lose all but one reader;
   - an unsigned or wrongly signed manifest is never used to wrap a key;
   - an unknown format version fails closed;
-  - a tracked plaintext secret is still flagged.
+  - a tracked plaintext secret is still flagged;
+  - the `age` tool decrypts kit's output, and kit decrypts the `age` tool's output;
+  - the private files switch does not turn on the secrets switch.
 
 ## Sources
 
