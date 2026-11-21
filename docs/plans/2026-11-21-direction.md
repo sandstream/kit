@@ -42,9 +42,15 @@ proof by themselves. This gives one question for every row and every new idea:
 In this order. A row marked **owner** needs Peter's decision before work starts.
 
 1. **The evidence store holds.** A log that cannot be verified breaks the principle directly.
-   - Concurrent audit appends give duplicate previous hashes and fail verification (PAL `e49b`).
-   - Windows: the audit lock deadline expires under 8 writers and an event is lost (PAL `c6c5`).
+   - An audit event can be lost with only a line on stderr. When the write lock times out,
+     `appendAuditEventDirect` returns false. Some callers check the result, others ignore it.
+     This is the open defect, on every platform.
+   - Windows reaches the timeout first (PAL `c6c5`): under 8 writers the 5 second wait expires,
+     because each anchored append starts PowerShell about three times while it holds the lock.
      Shipped as a known limit in 7.3.0. **owner**: a design decision is needed.
+   - Closed, listed here because the action list still shows it: duplicate previous hashes
+     under concurrent appends (PAL `e49b`). The read of the previous hash is inside the lock,
+     and the four tests in `src/audit-write-lock.test.ts` pass.
    - `TN6`, evidence store integrity: a broken log is kept byte for byte and reported.
    - The audit log and its anchor are never changed without Peter's decision.
 2. **`TN0`**: malformed, partial, stale, unsupported, missing and complete-empty evidence are
