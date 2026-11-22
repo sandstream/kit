@@ -199,6 +199,8 @@ describe("cmdBroker enforce (guided, signed flip)", () => {
     const out = JSON.parse(stdout.join("\n"));
     assert.equal(out.enforced, false);
     assert.equal(out.verdict, "untested");
+    assert.equal(out.untestedReason, "missing-log");
+    assert.match(out.reason, /log is missing/i);
     assert.notEqual((await loadProfile(projDir))?.scope?.enforce_runtime, true);
   });
 

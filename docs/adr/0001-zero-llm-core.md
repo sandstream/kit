@@ -60,10 +60,9 @@ first. `groq-sdk` and `@google/genai` are absent from it and present in both the
    *A deny-list enumerates what you know; an allow-list denies what you don't.* The three layers
    above are deny-lists and will always have this hole; the broker does not.
 
-   **The caveat that keeps this honest:** the broker is graduated, not on. `enforce-readiness`
-   reports `ready | would-block | untested`, and no observe data means `untested` — never a green
-   "ready". So this layer covers the case *when a repo has earned enforce*, and on a machine that
-   has never run observe the coverage is architectural rather than active.
+   The broker mediates these calls when enforcement is active. `enforce-readiness` reports
+   `ready`, `would-block`, `untested`, or `unverifiable`. No observe evidence yields `untested`.
+   A failed integrity check yields `unverifiable`. Both verdicts fail `enforce-readiness --gate`.
 2. **Local inference runtimes.** `node-llama-cpp`, `onnxruntime-node`, `@huggingface/transformers`
    and similar are not banned anywhere. Whether they *should* be is a real question this ADR does
    not currently answer: "zero-LLM" bundles four distinct prohibitions — a network call to a

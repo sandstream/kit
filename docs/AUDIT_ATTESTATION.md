@@ -40,6 +40,10 @@ The broker records observe events in the project's `.kit-audit.jsonl`.
 `kit broker enforce-readiness`, `kit broker enforce`, and `kit doctor` use the same log.
 Before they use observe events, they check the chain and the complete local HMAC seal.
 A broken chain, missing seal, truncated log, or unsealed tail produces `unverifiable`.
+When there is no seal and no observe evidence, the broker reports `untested`.
+The `--json` output gives the cause in `untestedReason`.
+Its values are `missing-log`, `empty-log`, and `no-observations`.
+The last value means the log has entries but no observe events.
 `kit broker enforce-readiness --gate` then exits with code 1. `kit broker enforce`
 requires `--force` to proceed. These checks do not create or update an anchor.
 The result applies to the local snapshot and the operations it contains.

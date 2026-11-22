@@ -342,7 +342,8 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
       };
     }
     // Evidence-based nudge (E3): read the recorded observe window and point to the exact next step.
-    const { readObserveReadiness } = await import("./exec-broker/observe-evidence.js");
+    const { describeUntestedObserveEvidence, readObserveReadiness } =
+      await import("./exec-broker/observe-evidence.js");
     const r = await readObserveReadiness(cwd);
     let detail: string;
     if (r.verdict === "unverifiable") {
@@ -352,8 +353,7 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
     } else if (r.verdict === "would-block") {
       detail = `runtime in OBSERVE — ${r.wouldBlockOps} of ${r.opsObserved} observed op(s) would be denied under enforce; run 'kit broker enforce-readiness' to see them, then declare in [scope] + re-sign`;
     } else {
-      detail =
-        "runtime in OBSERVE — gates run but never deny, and no would-be denials are recorded yet. Exercise the workflow, then 'kit broker enforce-readiness' before graduating";
+      detail = `Runtime is in OBSERVE. ${describeUntestedObserveEvidence(r.untestedReason)}. Exercise the workflow, then run 'kit broker enforce-readiness'.`;
     }
     return { name, status: "warn", detail, category };
   }

@@ -22,6 +22,8 @@ export type EnforceVerdict =
   | "untested" // no observe data — cannot claim ready
   | "unverifiable"; // the local audit snapshot could not be verified
 
+export type UntestedObserveReason = "missing-log" | "empty-log" | "no-observations";
+
 export interface EnforceReadiness {
   opsObserved: number;
   /** Observed ops with ≥1 would-be denial (these break on flip unless the scope is widened). */
@@ -31,6 +33,8 @@ export interface EnforceReadiness {
   verdict: EnforceVerdict;
   /** Why the audit snapshot could not be verified. Set only with `unverifiable`. */
   evidenceBreak?: string;
+  /** Why the local log provided no observe evidence. Set only with `untested`. */
+  untestedReason?: UntestedObserveReason;
 }
 
 /**

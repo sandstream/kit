@@ -7,8 +7,7 @@
  * based way to answer "is it safe to flip to enforce?"
  *
  *   - `enforce-readiness` — read the observe evidence and turn the flip from a leap into a diff:
- *       `ready` (nothing observed would break), `would-block` (+ exactly what breaks), or the
- *       honest `untested` (no observe data — coverage is only what was observed, never a green).
+ *       `ready`, `would-block`, `untested` (no observe data), or `unverifiable` (failed log check).
  *   - `enforce` — the guided flip: run the readiness pre-flight, REFUSE without `--force` unless
  *       the verdict is `ready` (fail-closed — never silently enable a posture that will break the
  *       workflow). Record the request when auditing is enabled. Sign and verify the updated
@@ -24,7 +23,11 @@ import { hasFlag } from "../utils/flags.js";
 import type { EnforceReadiness } from "../exec-broker/enforce-readiness.js";
 import type { KitProfile } from "../profile/schema.js";
 import type { ProfileSignResult } from "../profile/sign.js";
-import { BROKER_AUDIT_FILE, readObserveReadiness } from "../exec-broker/observe-evidence.js";
+import {
+  BROKER_AUDIT_FILE,
+  describeUntestedObserveEvidence,
+  readObserveReadiness,
+} from "../exec-broker/observe-evidence.js";
 import {
   reconcileBrokerEnforceAudit,
   startBrokerEnforceAudit,
@@ -64,8 +67,7 @@ export function enforceGateDecision(
   }
   return {
     proceed: false,
-    reason:
-      "no observe evidence yet (untested) — run under observe to gather a clean window first, or pass --force",
+    reason: `${describeUntestedObserveEvidence(readiness.untestedReason)}. Run the workflow in observe mode first, or pass --force.`,
   };
 }
 
@@ -74,7 +76,7 @@ function renderReadiness(r: EnforceReadiness): void {
   switch (r.verdict) {
     case "untested":
       console.log(
-        `  ${c.yellow}! untested${c.reset} ${c.dim}No observe data in ${BROKER_AUDIT_FILE}. Run the workflow in observe mode first.${c.reset}`,
+        `  ${c.yellow}! untested${c.reset} ${c.dim}${describeUntestedObserveEvidence(r.untestedReason)}. Run the workflow in observe mode first.${c.reset}`,
       );
       return;
     case "unverifiable":
@@ -149,6 +151,31 @@ function refuseEnforcement(jsonMode: boolean, reason: string, signed?: false): f
   return false;
 }
 
+function refuseReadiness(jsonMode: boolean, readiness: EnforceReadiness, reason: string): false {
+  if (jsonMode) {
+    console.log(
+      JSON.stringify(
+        {
+          enforced: false,
+          verdict: readiness.verdict,
+          untestedReason: readiness.untestedReason,
+          reason,
+        },
+        null,
+        2,
+      ),
+    );
+  } else {
+    console.error(
+      `${c.red}✗ Refusing to enable enforcement.${c.reset} ${c.dim}${reason}${c.reset}`,
+    );
+    for (const { reason, count } of readiness.reasons) {
+      console.error(`    ${c.yellow}⚠${c.reset} ${c.bold}${count}×${c.reset}  ${reason}`);
+    }
+  }
+  return false;
+}
+
 function reportEnabled(
   jsonMode: boolean,
   signature: { fingerprint?: string; kid?: string },
@@ -217,25 +244,7 @@ async function brokerEnforce(jsonMode: boolean, force: boolean): Promise<boolean
 
   const readiness = await readObserveReadiness(cwd);
   const decision = enforceGateDecision(readiness, force);
-  if (!decision.proceed) {
-    if (jsonMode) {
-      console.log(
-        JSON.stringify(
-          { enforced: false, verdict: readiness.verdict, reason: decision.reason },
-          null,
-          2,
-        ),
-      );
-    } else {
-      console.error(
-        `${c.red}✗ refusing to flip to enforce${c.reset} ${c.dim}— ${decision.reason}${c.reset}`,
-      );
-      for (const { reason, count } of readiness.reasons) {
-        console.error(`    ${c.yellow}⚠${c.reset} ${c.bold}${count}×${c.reset}  ${reason}`);
-      }
-    }
-    return false;
-  }
+  if (!decision.proceed) return refuseReadiness(jsonMode, readiness, decision.reason);
 
   const expectedBytes = canonicalProfileBytes(profile);
   const transitionId = randomUUID();

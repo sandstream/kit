@@ -128,6 +128,33 @@ describe("kit broker enforce-readiness verifies both evidence layers", () => {
   });
 });
 
+for (const { content, reason, detail } of [
+  { content: undefined, reason: "missing-log", detail: /log is missing/i },
+  { content: "", reason: "empty-log", detail: /log is empty/i },
+  { content: " \n\t\r\n", reason: "empty-log", detail: /log is empty/i },
+  {
+    content: chainedAuditLog([{ ...observeEvent([]), metadata: {} }]),
+    reason: "no-observations",
+    detail: /log has no observe events/i,
+  },
+]) {
+  it(`enforce-readiness reports untested (${reason}, ${content?.length ?? 0} bytes)`, (t) => {
+    const fixture = auditFixture(t);
+    if (content !== undefined) writeFileSync(join(fixture.project, ".kit-audit.jsonl"), content);
+
+    const json = runReadiness(fixture);
+    assert.equal(json.status, 1, json.stdout + json.stderr);
+    const report = JSON.parse(json.stdout);
+    assert.equal(report.verdict, "untested");
+    assert.equal(report.untestedReason, reason);
+    assert.equal(report.opsObserved, 0);
+
+    const text = runBroker(fixture, "enforce-readiness", "--gate");
+    assert.equal(text.status, 1, text.stdout + text.stderr);
+    assert.match(text.stdout, detail);
+  });
+}
+
 describe("kit broker enforce-readiness refuses incomplete evidence", () => {
   it("refuses an unsealed log, an unsealed tail and a missing anchored log", async (t) => {
     const fixture = auditFixture(t, true);
@@ -145,6 +172,8 @@ describe("kit broker enforce-readiness refuses incomplete evidence", () => {
     writeFileSync(logPath, sealed);
     check(/not anchored/i);
     await writeSealedAuditLog(logPath, sealed, join(fixture.home, "anchors"));
+    writeFileSync(logPath, "");
+    check(/truncated/i);
     writeFileSync(logPath, chainedAuditLog([event, event]));
     check(/unsealed/i);
     unlinkSync(logPath);
