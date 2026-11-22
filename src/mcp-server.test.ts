@@ -14,6 +14,31 @@ import { loadOrCreateIdentity } from "./identity.js";
 import { signProfile } from "./profile/sign.js";
 import { PROFILE_FILE } from "./profile/schema.js";
 
+// kit_check measures two things that belong to the machine, not to the project under test:
+// bumblebee's `baseline` profile scans the whole machine, and the memory-injection check reads
+// the developer's own memory store. On a machine that has both, one kit_check call took 5 to
+// 20 s and this file, with its 13 calls, passed the runner's 180 s limit (measured: 321 s; 100 s
+// with these two off). The tests here assert the MCP response, so both are switched off for the
+// file. `check-security` tests cover the two checks themselves.
+const MACHINE_ENV = ["KIT_BUMBLEBEE", "KIT_MEMORY_DB"] as const;
+const savedMachineEnv = new Map<string, string | undefined>();
+let machineEnvDir: string;
+
+before(async () => {
+  machineEnvDir = await mkdtemp(join(tmpdir(), "kit-mcp-machine-"));
+  for (const key of MACHINE_ENV) savedMachineEnv.set(key, process.env[key]);
+  process.env.KIT_BUMBLEBEE = "0";
+  process.env.KIT_MEMORY_DB = join(machineEnvDir, "absent", "memory.db");
+});
+
+after(async () => {
+  for (const [key, value] of savedMachineEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  await rm(machineEnvDir, { recursive: true, force: true });
+});
+
 // Standard .gitignore so security check passes in temp dirs
 const GITIGNORE = ".env\n.env.local\n.env.*.local\n";
 
@@ -219,6 +244,22 @@ describe("kit_check response is summarized, and the reference resolves", () => {
       const data = parseResult(result) as Record<string, unknown>;
       assert.ok("tools" in data && "security" in data);
       assert.ok(!("summarized" in data), "the full document must not claim to be a summary");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("does not scan the developer's machine: no bumblebee run, no real memory store", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: dir, detail: true },
+      });
+      const data = parseResult(result) as { security: Array<{ name: string; detail?: string }> };
+      const row = (name: string) => data.security.find((check) => check.name === name);
+      assert.equal(row("bumblebee (supply-chain)")?.detail, "disabled via KIT_BUMBLEBEE");
+      assert.equal(row("memory injection")?.detail, "no memory store to scan");
     } finally {
       await cleanup();
     }
