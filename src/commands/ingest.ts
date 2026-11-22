@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ingestStrict, type IngestFormat } from "../adapters/ingest.js";
+import { withImportFacts, type AdvisoryPackage } from "../advisory-import-fact.js";
+import type { SecurityCheckResult } from "../check-security.js";
 import { sanitizeDisplayText } from "../display-text.js";
 import { c } from "../utils/colors.js";
 import { GLOBAL_FLAGS, hasFlag } from "../utils/flags.js";
@@ -33,6 +35,22 @@ const FORMATS: readonly string[] = ["sarif", "osv", "cloudflare-audit"];
 const isIngestFormat = (value: string | undefined): value is IngestFormat =>
   value !== undefined && FORMATS.includes(value);
 
+/** A finding with every report-supplied text it shows made safe to print. */
+function displayFinding<T extends { name: string; detail: string; package?: AdvisoryPackage }>(
+  finding: T,
+): T {
+  const shown = {
+    ...finding,
+    name: sanitizeDisplayText(finding.name),
+    detail: sanitizeDisplayText(finding.detail),
+  };
+  const pkg = finding.package;
+  if (!pkg) return shown;
+  const name = sanitizeDisplayText(pkg.name);
+  const ecosystem = pkg.ecosystem === undefined ? undefined : sanitizeDisplayText(pkg.ecosystem);
+  return { ...shown, package: ecosystem === undefined ? { name } : { name, ecosystem } };
+}
+
 /** Read a scanner report without storage, scanner execution, or network access. */
 export async function cmdIngest(): Promise<boolean> {
   const { jsonMode, positional } = ingestArguments(process.argv.slice(3));
@@ -54,11 +72,10 @@ export async function cmdIngest(): Promise<boolean> {
   const outcome = ingestStrict(format, json);
   if (!outcome.ok) return fail(outcome.reason);
   // Report identities stay raw in the parsers. Only the CLI display is sanitized.
-  const findings = outcome.findings.map((finding) => ({
-    ...finding,
-    name: sanitizeDisplayText(finding.name),
-    detail: sanitizeDisplayText(finding.detail),
-  }));
+  const named = outcome.findings.map(displayFinding);
+  // One added fact beside a dependency finding: does this project's source import the package?
+  // It is read from the current directory once, and changes no severity, status or order.
+  const findings = await withImportFacts(process.cwd(), named);
   console.error("External scanner report. Findings do not verify the current account state.");
   for (const note of outcome.notes ?? []) console.error(note);
 
@@ -73,19 +90,20 @@ export async function cmdIngest(): Promise<boolean> {
   const sorted = [...findings].sort(
     (a, b) => (order[a.severity ?? "low"] ?? 9) - (order[b.severity ?? "low"] ?? 9),
   );
-  for (const finding of sorted) {
-    const severity = finding.severity ?? "low";
-    const color =
-      severity === "critical" || severity === "high"
-        ? c.red
-        : severity === "medium"
-          ? c.yellow
-          : c.dim;
-    const citation = finding.rule ? ` ${c.dim}[${finding.rule.id}]${c.reset}` : "";
-    console.log(
-      `  ${color}${severity.toUpperCase().padEnd(8)}${c.reset} ${finding.name}${citation}`,
-    );
-    console.log(`    ${c.dim}${finding.detail}${c.reset}`);
-  }
+  for (const finding of sorted) printFinding(finding);
   return true;
+}
+
+function printFinding(finding: SecurityCheckResult & { importFact?: { text: string } }): void {
+  const severity = finding.severity ?? "low";
+  const color =
+    severity === "critical" || severity === "high"
+      ? c.red
+      : severity === "medium"
+        ? c.yellow
+        : c.dim;
+  const citation = finding.rule ? ` ${c.dim}[${finding.rule.id}]${c.reset}` : "";
+  console.log(`  ${color}${severity.toUpperCase().padEnd(8)}${c.reset} ${finding.name}${citation}`);
+  console.log(`    ${c.dim}${finding.detail}${c.reset}`);
+  if (finding.importFact) console.log(`    ${c.dim}${finding.importFact.text}${c.reset}`);
 }
