@@ -110,7 +110,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "audit secrets":
     "Forensics: who/what touched each key + when (reads audit log); --target <platform> lists the keys kit pushed there",
   "audit verify":
-    "Verify the audit chain and HMAC seal. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
+    "Verify the audit chain and HMAC seal. --all --strict requires at least one verified log. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
   "audit anchor":
     "Seal the audit log with the machine-local HMAC key. --external requires KIT_EXTERNAL_ANCHOR_CMD and KIT_EXTERNAL_ANCHOR_VERIFY_CMD before publication.",
   "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",

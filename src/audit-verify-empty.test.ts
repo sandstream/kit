@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { chainedAuditLog } from "./audit-chain.test-support.js";
 import { auditCli, auditFixture } from "./audit-concurrency.test-support.js";
 import { nothingVerified } from "./audit-verify-empty.js";
 
@@ -64,6 +65,19 @@ test("a missing log and an empty log give different messages", (t) => {
   assert.equal(json.reason, "audit log unavailable; nothing verified");
 });
 
+test("verify --all --strict fails when the anchor index has no logs", (t) => {
+  const fixture = auditFixture(t);
+  const text = auditCli(fixture, ["verify", "--all", "--strict"]);
+  const json = auditCli(fixture, ["verify", "--all", "--strict", "--json"]);
+  assert.equal(text.status, 1, text.stdout + text.stderr);
+  assert.match(text.stderr, /nothing to verify/i);
+  assert.equal(json.status, 1, json.stdout + json.stderr);
+  const report = JSON.parse(json.stdout);
+  assert.equal(report.ok, false);
+  assert.equal(report.reason, "no-anchors");
+  assert.deepEqual(report.results, []);
+});
+
 test("verify --all fails on a seal with no log entries", (t) => {
   const fixture = auditFixture(t);
   const logPath = join(fixture.project, ".kit-audit.jsonl");
@@ -82,6 +96,38 @@ test("verify --all fails on a seal with no log entries", (t) => {
   assert.equal(report.results[0].entries, 0);
   assert.equal(readFileSync(logPath, "utf8"), "\n");
   assert.deepEqual(readFileSync(indexPath), index);
+});
+
+test("verify --all reports when every anchored log is missing", (t) => {
+  const fixture = auditFixture(t);
+  const logPath = join(fixture.project, ".kit-audit.jsonl");
+  const content = chainedAuditLog([{ operation: "seed", environment: "dev", success: true }]);
+  writeFileSync(logPath, content);
+  const anchor = auditCli(fixture, ["anchor"]);
+  assert.equal(anchor.status, 0, anchor.stdout + anchor.stderr);
+  const indexPath = join(fixture.home, "anchors", "audit-anchor.json");
+  const index = readFileSync(indexPath);
+  const strictArgs = ["verify", "--all", "--strict", "--json"];
+
+  const sealed = auditCli(fixture, strictArgs);
+  assert.equal(sealed.status, 0, sealed.stdout + sealed.stderr);
+  assert.equal(JSON.parse(sealed.stdout).counts.verified, 1);
+
+  const moved = join(fixture.root, "moved-log");
+  renameSync(logPath, moved);
+  const strict = auditCli(fixture, strictArgs);
+  assert.equal(strict.status, 1, strict.stdout + strict.stderr);
+  const report = JSON.parse(strict.stdout);
+  assert.equal(report.ok, false);
+  assert.equal(report.reason, "all-logs-missing");
+  assert.equal(report.results[0].outcome, "missing");
+
+  const diagnostic = auditCli(fixture, ["verify", "--all"]);
+  assert.equal(diagnostic.status, 0, diagnostic.stdout + diagnostic.stderr);
+  assert.match(diagnostic.stderr, /nothing to verify/i);
+  assert.doesNotMatch(diagnostic.stdout, /✓ .*0 verified/);
+  assert.deepEqual(readFileSync(indexPath), index);
+  assert.equal(readFileSync(moved, "utf8"), content);
 });
 
 test("an unreadable log fails instead of reporting a fresh install", (t) => {

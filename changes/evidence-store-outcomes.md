@@ -8,6 +8,7 @@
   way as a missing log. The JSON report carries `reason: "audit log is empty; nothing verified"`
   and `chain: null`.
 - `kit audit verify --all` fails when a sealed log has zero entries.
+- `kit audit verify --all --strict` fails when there are no indexed logs or all logs are missing.
 - `kit audit verify` fails when the audit log exists but cannot be read.
 - `kit broker enforce-readiness`, `kit broker enforce`, and `kit doctor` check the audit chain
   and the complete local HMAC seal before they use observe records. Broken, truncated, or

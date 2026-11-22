@@ -25,6 +25,9 @@ Both fail under `--strict`, `require_anchor`, `--require-external`, and on a mac
 anchored logs. On a fresh install both are a warning.
 An unreadable log fails verification.
 `kit audit verify --all` reports a seal with zero entries as `empty-log` and fails verification.
+For `--all`, an empty index reports `no-anchors`. If all indexed logs are missing, the report
+uses `all-logs-missing`. Both outcomes warn by default and fail when verification is required.
+With `--all --strict`, at least one log must verify. `--require-external` also fails on any missing log.
 
 The broker records observe events in the project's `.kit-audit.jsonl`.
 `kit broker enforce-readiness`, `kit broker enforce`, and `kit doctor` use the same log.

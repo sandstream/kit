@@ -242,7 +242,7 @@
         },
         "verify": {
           "kind": "command",
-          "summary": "Verify the audit chain and HMAC seal. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
+          "summary": "Verify the audit chain and HMAC seal. --all --strict requires at least one verified log. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
