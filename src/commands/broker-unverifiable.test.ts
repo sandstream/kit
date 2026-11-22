@@ -103,7 +103,7 @@ describe("cmdBroker enforce on a log that does not verify", () => {
     const out = JSON.parse(logs.join("\n"));
     assert.equal(out.enforced, false);
     assert.equal(out.verdict, "unverifiable");
-    assert.match(out.reason, /audit chain is broken/);
+    assert.match(out.reason, /Cannot verify.*entry 1: broken link/);
     assert.notEqual((await loadProfile(dir))?.scope?.enforce_runtime, true);
   });
 

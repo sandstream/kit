@@ -458,7 +458,7 @@
         },
         "enforce-readiness": {
           "kind": "command",
-          "summary": "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested | unverifiable (the audit chain is broken) (--gate fails CI on any not-ready verdict)",
+          "summary": "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested | unverifiable (audit evidence cannot be verified) (--gate fails CI on any not-ready verdict)",
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
           "x-kit-flags-inherited": true,
@@ -467,7 +467,7 @@
         }
       },
       "kind": "group",
-      "summary": "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reports ready | would-block (+ what breaks) | untested | unverifiable (broken audit chain); enforce does the guided, signed flip (refuses unless ready, --force overrides) (--json, --gate, --force)",
+      "summary": "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reports ready | would-block (+ what breaks) | untested | unverifiable (audit evidence cannot be verified); enforce does the guided, signed flip (refuses unless ready, --force overrides) (--json, --gate, --force)",
       "x-kit-accepted-flags": [
         "--env",
         "--force",

@@ -2,6 +2,7 @@
 import { readSecretAuditEvents, groupBySecret, summarize, exposureAt } from "../audit-secrets.js";
 import { readAuditLog, type ChainVerifyResult, type SignatureVerifyResult } from "../audit.js";
 import type { AnchorVerifyResult, AnchorVerdict } from "../audit-anchor.js";
+import { canonicalAuditLogPath } from "../audit-log-path.js";
 import { resolve } from "node:path";
 import { printAuditTable } from "../output.js";
 import { loadConfig } from "../config.js";
@@ -351,9 +352,15 @@ async function cmdAuditVerify(): Promise<boolean> {
   const fail = { failClosed: strictFlag || requireAnchor || requireExternal, jsonMode };
   let content: string;
   try {
-    content = await readFile(logPath, "utf-8");
-  } catch {
-    return reportNothingVerified(report, "missing", fail);
+    content = await readFile(canonicalAuditLogPath(logPath), "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return reportNothingVerified(report, "missing", fail);
+    }
+    report.reason = "audit log could not be read; nothing verified";
+    if (jsonMode) return printAuditVerifyReport(report);
+    console.error(`${c.red}✗ Cannot read the audit log at ${logPath}.${c.reset}`);
+    return false;
   }
   // An empty log is its own outcome. "Chain intact, 0 entries" would report a log that
   // was emptied in the same words as a log that verifies.

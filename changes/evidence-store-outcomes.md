@@ -7,11 +7,9 @@
   `require_anchor`, `--require-external` and on a machine that has anchored logs, in the same
   way as a missing log. The JSON report carries `reason: "audit log is empty; nothing verified"`
   and `chain: null`.
-- **`kit broker enforce-readiness` no longer gives a verdict from a log with a broken chain.**
-  The command, `kit broker enforce` and the `exec-broker runtime` row of `kit doctor` counted
-  the observe events without verifying the hash chain, and skipped lines that did not parse.
-  Removing one would-be denial from the log turned `would-block` into `ready`, and
-  `kit broker enforce` then made the flip. A broken chain now gives the new verdict
-  `unverifiable` with the entry and the reason, `--gate` fails on it, and `kit broker enforce`
-  refuses it without `--force`. Limit: the hash chain does not show a log that lost its last
-  lines; `kit audit verify` finds that with the anchor.
+- `kit audit verify --all` fails when a sealed log has zero entries.
+- `kit audit verify` fails when the audit log exists but cannot be read.
+- `kit broker enforce-readiness`, `kit broker enforce`, and `kit doctor` check the audit chain
+  and the complete local HMAC seal before they use observe records. Broken, truncated, or
+  unsealed evidence gives `unverifiable`. `--gate` fails and `kit broker enforce` requires
+  `--force` for that verdict. These checks leave the log and anchor unchanged.

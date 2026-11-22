@@ -20,11 +20,10 @@
  * into a non-zero exit for CI; `enforce --force` overrides the readiness refusal.
  */
 import { resolve } from "node:path";
-import { readFileSync } from "node:fs";
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import type { EnforceReadiness } from "../exec-broker/enforce-readiness.js";
-import { assessObserveEvidence } from "../exec-broker/observe-evidence.js";
+import { BROKER_AUDIT_FILE, readObserveReadiness } from "../exec-broker/observe-evidence.js";
 
 /**
  * Pure pre-flight decision for the guided flip: only a `ready` verdict flips unforced. A
@@ -54,7 +53,7 @@ export function enforceGateDecision(
   if (readiness.verdict === "unverifiable") {
     return {
       proceed: false,
-      reason: `the audit chain is broken (${readiness.evidenceBreak}), so the observe events are not evidence. Run 'kit audit verify' and recover the log, or pass --force`,
+      reason: `Cannot verify ${BROKER_AUDIT_FILE}: ${readiness.evidenceBreak}. Inspect the broker log with 'kit audit verify', or pass --force.`,
     };
   }
   return {
@@ -64,29 +63,17 @@ export function enforceGateDecision(
   };
 }
 
-const AUDIT_FILE = ".kit-audit.jsonl";
-
-/** Read the raw audit log; a missing/unreadable file is "" → parsed as zero observe records. */
-// The chain of that content is verified by assessObserveEvidence before any verdict.
-function readAuditJsonl(cwd: string): string {
-  try {
-    return readFileSync(resolve(cwd, AUDIT_FILE), "utf-8");
-  } catch {
-    return "";
-  }
-}
-
 function renderReadiness(r: EnforceReadiness): void {
   console.log(`${c.bold}kit broker enforce-readiness${c.reset}`);
   switch (r.verdict) {
     case "untested":
       console.log(
-        `  ${c.yellow}! untested${c.reset} ${c.dim}— no observe data in ${AUDIT_FILE}. Run under observe first; a clean window is what makes enforce safe. Not a green "ready".${c.reset}`,
+        `  ${c.yellow}! untested${c.reset} ${c.dim}No observe data in ${BROKER_AUDIT_FILE}. Run the workflow in observe mode first.${c.reset}`,
       );
       return;
     case "unverifiable":
       console.log(
-        `  ${c.red}✗ unverifiable${c.reset} ${c.dim}: the audit chain in ${AUDIT_FILE} is broken at ${r.evidenceBreak}. The observe events are not evidence. Run 'kit audit verify'. Not a green "ready".${c.reset}`,
+        `  ${c.red}✗ unverifiable${c.reset} ${c.dim}Cannot verify ${BROKER_AUDIT_FILE}: ${r.evidenceBreak}. Inspect the broker log with 'kit audit verify'.${c.reset}`,
       );
       return;
     case "ready":
@@ -112,7 +99,7 @@ function renderReadiness(r: EnforceReadiness): void {
 }
 
 async function brokerEnforceReadiness(jsonMode: boolean, gate: boolean): Promise<boolean> {
-  const readiness = assessObserveEvidence(readAuditJsonl(process.cwd()));
+  const readiness = await readObserveReadiness(process.cwd());
   if (jsonMode) {
     console.log(JSON.stringify({ gate, coverage: "observed-ops-only", ...readiness }, null, 2));
     return gate ? readiness.verdict === "ready" : true;
@@ -160,7 +147,7 @@ async function brokerEnforce(jsonMode: boolean, force: boolean): Promise<boolean
     return false;
   }
 
-  const readiness = assessObserveEvidence(readAuditJsonl(cwd));
+  const readiness = await readObserveReadiness(cwd);
   const decision = enforceGateDecision(readiness, force);
   if (!decision.proceed) {
     if (jsonMode) {

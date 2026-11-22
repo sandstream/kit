@@ -55,6 +55,7 @@ export type AnchoredLogOutcome = "verified" | "stalled" | "missing" | "failed";
  */
 export type AnchoredLogDetail =
   | "verified"
+  | "empty-log"
   | "log-gone"
   | "unsealed-tail"
   | "anchor-key-changed"
@@ -128,6 +129,14 @@ function classifyIntactSeal(
   a: AnchorVerifyResult,
   requireExternal?: boolean,
 ): AnchoredLogStatus {
+  if (a.entries === 0) {
+    return {
+      ...common,
+      outcome: "failed",
+      detail: "empty-log",
+      message: "The audit log is empty. No entries were verified.",
+    };
+  }
   const tail = a.newSinceAnchor ?? 0;
   const verdict = decideAnchorVerdict({
     result: a,

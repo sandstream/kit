@@ -16,7 +16,9 @@
  *       changes files (`rm`, `mv`, `truncate`, `sed`, `Remove-Item`, …) or redirects output into
  *       it;
  *     - `kit audit anchor` and `kit panic`, which re-seal or rotate on the agent's behalf;
- *     - `kit mcp callback`, which carries an OAuth authorization code a model should not see.
+ *     - `kit mcp callback`, which carries an OAuth authorization code a model should not see;
+ *     - `kit agent-audit --accept-user-surfaces`, which accepts changed user-level skills as read
+ *       (an acceptance the audited party can give itself is not one).
  *
  * Reading the log (`cat`, `kit audit verify`) and running the `~/.kit/bin/kit` wrapper stay
  * allowed. A person runs the refused commands themselves (with `!` in Claude Code). Out of
@@ -110,6 +112,12 @@ export function trailCommandRefusal(command: string, home: string): string | nul
   }
   if (/(^|[\s/\\"'])kit(?:\.cmd)?["']?\s+mcp\s+callback\b/i.test(command)) {
     return "`kit mcp callback` carries an OAuth authorization code; a person runs it in their own terminal, so the code never passes through the agent";
+  }
+  if (
+    /--accept-user-surfaces\b/.test(command) &&
+    /(^|[\s/\\"'])kit(?:\.cmd)?["']?\s/i.test(command)
+  ) {
+    return "`kit agent-audit --accept-user-surfaces` accepts changed user-level agent files as read; a person does that, not the agent whose files changed";
   }
   for (const segment of command.split(/&&|\|\||[;|\n]/)) {
     if (ANCHOR_FILES.test(segment)) {

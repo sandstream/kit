@@ -31,10 +31,9 @@
  * A timestamp alone does not detect rollback. An attacker who controls the
  * launcher can replace the delegated verifier. See ExternalTimestampAnchor.
  *
- * The append path stays KEYLESS so a project-sandboxed agent (which cannot read
- * `~/.kit`) can still append audit entries; anchoring is layered on top and is
- * best-effort / fail-soft on the write path. A log that was never anchored
- * verifies as "legacy (unanchored)" - a warning, not a hard failure.
+ * A project-sandboxed agent that cannot access the index can append to the keyless chain.
+ * When the index has a seal for this log, verify its prefix before appending.
+ * Auto-advance after a successful write remains best-effort.
  */
 import { readFile } from "node:fs/promises";
 import {
@@ -618,22 +617,12 @@ export async function tryAdvanceAnchorOnAppend(
   if (process.env.KIT_AUDIT_ANCHOR === "0") return;
   try {
     const { withAuditWriteLock } = await import("./audit-write-lock.js");
-    await withAuditWriteLock(logPath, (canonical) => advanceAnchor(canonical, dir, opts));
+    await withAuditWriteLock(logPath, (canonical) =>
+      advanceAuditAnchorUnderLock(canonical, dir, opts),
+    );
   } catch {
     // A failed anchor does not invalidate an otherwise successful local append.
   }
-}
-
-/** Hold the log lock across the append and its optional seal. */
-export async function appendWithAuditAnchor(
-  logPath: string,
-  append: (canonical: string) => Promise<string>,
-): Promise<void> {
-  const { withAuditWriteLock } = await import("./audit-write-lock.js");
-  await withAuditWriteLock(logPath, async (canonical) => {
-    const hash = await append(canonical);
-    await advanceAnchor(canonical, undefined, { expectedTailHashes: [hash] });
-  });
 }
 
 function matchesAppendedTail(seals: LineSeal[] | null, expected?: string[]): boolean {
@@ -655,7 +644,8 @@ async function canExtendAnchor(
   return verified.status === "anchored-ok" && (verified.newSinceAnchor ?? 0) <= maxNewEntries;
 }
 
-async function advanceAnchor(
+/** Advance only after the caller locks the audit log. */
+export async function advanceAuditAnchorUnderLock(
   logPath: string,
   dir?: string,
   opts: { expectedNewEntries?: number; expectedTailHashes?: string[] } = {},

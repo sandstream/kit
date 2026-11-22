@@ -8,16 +8,19 @@ import { loadOrCreateIdentity } from "./identity.js";
 import { PROFILE_FILE } from "./profile/schema.js";
 import { signProfile } from "./profile/sign.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
-import { chainedAuditLog, observeEvent } from "./audit-chain.test-support.js";
+import { chainedAuditLog, observeEvent, writeSealedAuditLog } from "./audit-chain.test-support.js";
 
 describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () => {
   let idDir: string;
   let proj: string;
   let savedId: string | undefined;
+  let savedAnchor: string | undefined;
 
   beforeEach(() => {
     idDir = mkdtempSync(join(tmpdir(), "kit-id-"));
     proj = mkdtempSync(join(tmpdir(), "kit-nudge-"));
+    savedAnchor = process.env.KIT_AUDIT_ANCHOR_DIR;
+    process.env.KIT_AUDIT_ANCHOR_DIR = join(idDir, "anchors");
     savedId = process.env.KIT_IDENTITY_DIR;
     process.env.KIT_IDENTITY_DIR = idDir;
     loadOrCreateIdentity();
@@ -26,6 +29,8 @@ describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () =>
   afterEach(() => {
     if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = savedId;
+    if (savedAnchor === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
+    else process.env.KIT_AUDIT_ANCHOR_DIR = savedAnchor;
     rmTemp(idDir);
     rmTemp(proj);
   });
@@ -45,10 +50,10 @@ describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () =>
 
   it("a clean observe window nudges to 'kit broker enforce'", async () => {
     await signedObserveProfile();
-    writeFileSync(
+    await writeSealedAuditLog(
       join(proj, ".kit-audit.jsonl"),
       chainedAuditLog([observe([]), observe([])]),
-      "utf-8",
+      join(idDir, "anchors"),
     );
     const row = await rtRow();
     assert.ok(row);
@@ -59,10 +64,10 @@ describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () =>
 
   it("a would-block observe window points to enforce-readiness, not the flip", async () => {
     await signedObserveProfile();
-    writeFileSync(
+    await writeSealedAuditLog(
       join(proj, ".kit-audit.jsonl"),
       chainedAuditLog([observe(["egress evil.test not in scope"])]),
-      "utf-8",
+      join(idDir, "anchors"),
     );
     const row = await rtRow();
     assert.ok(row);
@@ -80,7 +85,7 @@ describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () =>
     const row = await rtRow();
     assert.ok(row);
     assert.equal(row.status, "warn");
-    assert.match(row.detail, /audit chain is broken/);
+    assert.match(row.detail, /Cannot verify the OBSERVE audit log/);
     assert.match(row.detail, /kit audit verify/);
     assert.doesNotMatch(row.detail, /Safe to graduate/);
   });

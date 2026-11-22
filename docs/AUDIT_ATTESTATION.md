@@ -23,11 +23,17 @@ An empty log is not an intact chain. When the log is missing, or exists and hold
 `kit audit verify` reports that nothing was verified, with a different message for each case.
 Both fail under `--strict`, `require_anchor`, `--require-external`, and on a machine that has
 anchored logs. On a fresh install both are a warning.
+An unreadable log fails verification.
+`kit audit verify --all` reports a seal with zero entries as `empty-log` and fails verification.
 
-Commands that read the log as evidence verify the chain first. `kit broker enforce-readiness`,
-`kit broker enforce` and the `exec-broker runtime` row of `kit doctor` report `unverifiable`
-when the chain is broken, and name the entry. They do not give a verdict from the events that
-are left. Limit: the hash chain does not show a log that lost its last lines. The anchor does.
+The broker records observe events in the project's `.kit-audit.jsonl`.
+`kit broker enforce-readiness`, `kit broker enforce`, and `kit doctor` use the same log.
+Before they use observe events, they check the chain and the complete local HMAC seal.
+A broken chain, missing seal, truncated log, or unsealed tail produces `unverifiable`.
+`kit broker enforce-readiness --gate` then exits with code 1. `kit broker enforce`
+requires `--force` to proceed. These checks do not create or update an anchor.
+The result applies to the local snapshot and the operations it contains.
+It does not establish external freshness or cover operations that were never recorded.
 
 ## 2. External HMAC anchor (`kit audit anchor` / `kit audit verify`)
 
@@ -42,11 +48,12 @@ sealed prefix and the `count` of entries it covers.
 - `kit audit verify` re-checks the keyless chain, then (when an anchor exists and
   the key is readable) recomputes the tip over the first `count` line hashes and
   compares it to the stored tip, and checks that at least `count` entries remain.
-- The append path stays KEYLESS. A project-sandboxed agent that cannot read
-  `~/.kit` still appends audit entries. An unavailable anchor does not make a successful local append fail.
-  Set `KIT_AUDIT_ANCHOR=0` to disable
-  append-time anchoring; set `KIT_AUDIT_ANCHOR_DIR` to relocate the key + record
-  (used by the test suite for isolation).
+- Before it appends, Kit checks the chain and any seal recorded for the log.
+  If the seal fails verification or the sealed log is missing, Kit refuses the append.
+  It preserves the log and the anchor index for inspection.
+  A sandbox that denies access to the index can still use the keyless chain.
+  Set `KIT_AUDIT_ANCHOR=0` to disable automatic seal updates. Kit still checks existing seals.
+  Set `KIT_AUDIT_ANCHOR_DIR` to choose the directory for the key and index.
 - A writer waits up to 5 seconds for the audit lock, then the append fails and says so. Several
   writers queue behind one lock, so on a slow disk the last one can need longer.
   `KIT_AUDIT_LOCK_WAIT_MS` raises the wait (at most 120000). A value under 5000 is ignored, so the
@@ -113,9 +120,8 @@ strict mode, fails. Re-run `kit audit anchor` to seal them.
 A key rotation (the current key no longer matches the one that sealed the
 record) is reported as `anchor-key-changed`, NOT a content tamper. Old anchors
 are invalid by design after a key change; re-anchor to re-establish the seal.
-The append-time auto-advance will NOT silently re-seal a prefix that no longer
-verifies under the current key, so a real tamper/rotation alarm cannot be erased
-by the next audited write.
+An append requires the key that verifies the existing seal. Inspect the log and resolve the
+anchor failure before appending. Auto-advance after an append covers only Kit's new entries.
 
 ### Threat boundary (read before claiming anything)
 

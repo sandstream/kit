@@ -32,9 +32,8 @@ export function nothingVerified(
     return {
       ok: false,
       reason,
-      message: `${what} — refusing to report verified under strict / require_anchor / a machine that has anchored logs. An erased trail is a tamper signal, not a pass.`,
+      message: `${what}. Refusing to report verified when verification is required or this machine has anchored logs. Inspect the audit trail.`,
     };
   }
-  const state = missing ? "yet — nothing to verify (fresh install)" : "(nothing verified)";
-  return { ok: true, reason, message: `${what} ${state}` };
+  return { ok: true, reason, message: `${what} (nothing verified)` };
 }
