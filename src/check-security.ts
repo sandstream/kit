@@ -18,8 +18,7 @@ import {
 import { checkEnvIgnoreProtection } from "./check-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
-import { classifyGuardDog } from "./guarddog.js";
-import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
+import { classifyGuardDog, guardDogScope, GUARDDOG_CHECK } from "./guarddog.js";
 import {
   buildSemgrepArgs,
   semgrepConfig,
@@ -40,12 +39,10 @@ import {
   ensureBumblebee,
   runScan,
   maxSeverity,
-  newestCatalogMtime,
   isCatalogStale,
   BUMBLEBEE_VERSION,
   type BumblebeeFinding,
   type EnsureFailureKind,
-  type ScannerInstall,
   type ScanOutcome,
 } from "./bumblebee.js";
 import { describeTrivyFsResult } from "./check-trivy-text.js";
@@ -62,6 +59,7 @@ import { checkTranscriptSecrets } from "./check-transcripts.js";
 import { checkLicenses } from "./check-licenses.js";
 import { checkBrowserScripts } from "./check-browser-scripts.js";
 import { npmLockfileCover } from "./check-pinned-lockfile.js";
+import { readRegularFileBytesIfPresent } from "./upstream-safe-read.js";
 
 const exec = promisify(execFile);
 
@@ -1787,56 +1785,60 @@ async function checkSocket(): Promise<SecurityCheckResult> {
   };
 }
 
-/**
- * GuardDog (DataDog, OSS) — LOCAL behavioral-malware heuristics, the local-first
- * replacement for Socket (#105). OPT-IN (KIT_GUARDDOG=1): GuardDog needs semgrep
- * and `verify` fetches/scans each dependency, so it's too heavy for the default
- * check. Classification (incl. fail-closed on incomplete scans) is in guarddog.ts.
- */
-async function checkGuardDog(root: string): Promise<SecurityCheckResult> {
-  const base = { category: "supply-chain", name: "guarddog (malware)" } as const;
+/** GuardDog verification fetches dependency artifacts from the public registry. */
+export async function checkGuardDog(root: string): Promise<SecurityCheckResult> {
+  const base = GUARDDOG_CHECK;
   const envEnabled = ["1", "true", "yes", "on"].includes(
     (process.env.KIT_GUARDDOG ?? "").trim().toLowerCase(),
   );
-  // Persistent project opt-in via `.kit.toml [scan] guarddog = true` (best-effort
-  // config read) — so the choice lives in config, not just an ephemeral env var.
+  // A project can opt in through .kit.toml or the environment.
   let cfgEnabled = false;
   try {
     const { loadConfig } = await import("./config.js");
     const cfg = await loadConfig(resolve(root, ".kit.toml"));
     cfgEnabled = cfg.scan?.guarddog === true;
   } catch {
-    // no/invalid config → env var is the only switch
+    // The environment controls opt-in if the config cannot be read.
   }
   if (!envEnabled && !cfgEnabled) {
     return {
       ...base,
       status: "skip",
       detail:
-        "opt-in — set `guarddog = true` under [scan] in .kit.toml (or KIT_GUARDDOG=1) to run local malware heuristics (needs semgrep)",
+        "opt-in. Set `guarddog = true` under [scan] in .kit.toml or set KIT_GUARDDOG=1 to run local malware heuristics",
     };
   }
 
-  // Direct deps first (#205): guarddog costs ~25s/package (tarball + per-package
-  // semgrep) — a 12k-package lockfile can NEVER finish inside the check budget,
-  // so verifying it always produced an honest-but-useless UNVERIFIED. Direct
-  // deps are guarddog's depth; the full tree gets breadth from bumblebee + osv.
-  const candidates: { ecosystem: string; file: string }[] = [
+  const candidates = [
     { ecosystem: "npm", file: "package.json" },
     { ecosystem: "pypi", file: "requirements.txt" },
-  ];
-  let target: { ecosystem: string; file: string } | undefined;
-  for (const c of candidates) {
+  ] as const;
+  let target: ((typeof candidates)[number] & { manifest: Buffer }) | undefined;
+  for (const candidate of candidates) {
     try {
-      await access(resolve(root, c.file));
-      target = c;
+      const manifest = readRegularFileBytesIfPresent(resolve(root, candidate.file));
+      if (!manifest) continue;
+      target = { ...candidate, manifest };
       break;
     } catch {
-      // not present — try the next
+      return scannerEvidence({ ...base, status: "warn", detail: "" }, 0, {
+        status: "unavailable",
+        reason: `kit could not read the GuardDog target ${candidate.file}`,
+        didNotStart: true,
+      });
     }
   }
   if (!target) {
     return { ...base, status: "skip", detail: "no package.json / requirements.txt to scan" };
+  }
+  const { manifest, ecosystem, file } = target;
+  const scope = guardDogScope(ecosystem, manifest);
+  if (scope.gap === "malformed") {
+    return scannerEvidence({ ...base, status: "warn", detail: "" }, 0, {
+      status: "malformed",
+      reason: `GuardDog target ${file} is malformed`,
+      didNotStart: true,
+    });
   }
 
   const bin = await resolveToolBin("guarddog");
@@ -1844,48 +1846,31 @@ async function checkGuardDog(root: string): Promise<SecurityCheckResult> {
     return {
       ...base,
       status: "warn",
-      detail: "guarddog not installed — malware heuristics unavailable",
+      detail: "guarddog not installed. Malware heuristics are unavailable",
       severity: "medium",
       suggestion: "mise use pipx:guarddog",
-      // guarddog is opted in (env/config) AND a manifest is present, but the tool
-      // is absent → the opted-in malware scan did NOT run (mirrors semgrep below).
       didNotRun: true,
+      evidenceStatus: "unavailable",
     };
   }
 
-  // Verdict cache (#205): an unchanged direct-deps set with a completed clean
-  // scan doesn't re-pay the ~25s/package cost. Only CLEAN verdicts are cached;
-  // fails and incomplete scans always re-run. npm only (the hash reads
-  // package.json deps).
-  let depsHash: string | null = null;
-  if (target.ecosystem === "npm") {
-    try {
-      depsHash = depsHashFor(readFileSync(resolve(root, target.file), "utf8"));
-    } catch {
-      depsHash = null;
-    }
-    const cached = depsHash ? loadGuardDogCache() : null;
-    if (cached && depsHash && cached.depsHash === depsHash) {
-      return {
-        ...base,
-        status: "pass",
-        detail: `no malware indicators — cached clean verdict from ${cached.scannedAt.slice(0, 10)} (${cached.packages} direct dep(s), unchanged since)`,
-      };
-    }
-  }
-
+  // A verify report gives registry versions but no artifact or ruleset identity.
+  // A fresh scan is required even if a previous verdict covered these selectors.
   const timeoutMs = Number(process.env.KIT_GUARDDOG_TIMEOUT_MS ?? "") || 300_000;
-  const result = await execFileNoThrow(
-    bin,
-    [target.ecosystem, "verify", target.file, "--output-format=json"],
-    { timeout: timeoutMs, cwd: root },
-  );
-  const verdict = classifyGuardDog(result.stdout || result.stderr);
-  if (verdict.status === "pass" && depsHash) {
-    const packages = Number(verdict.detail.match(/\((\d+) package/)?.[1] ?? 0);
-    saveGuardDogCache({ depsHash, scannedAt: new Date().toISOString(), packages });
+  const result = await execFileNoThrow(bin, [ecosystem, "verify", file, "--output-format=json"], {
+    timeout: timeoutMs,
+    cwd: root,
+    // Older GuardDog includes devDependencies by default. Newer versions use this setting.
+    env: { ...process.env, GUARDDOG_NPM_INCLUDE_DEV_DEPENDENCIES: "true" },
+  });
+  let manifestChanged = true;
+  try {
+    const currentManifest = readRegularFileBytesIfPresent(resolve(root, file));
+    manifestChanged = !currentManifest || !manifest.equals(currentManifest);
+  } catch {
+    // An unreadable target cannot confirm the original scan scope.
   }
-  return verdict;
+  return classifyGuardDog(result, scope, manifestChanged);
 }
 
 /**
@@ -2340,6 +2325,7 @@ function bumblebeeInstallFailure(
       category: "supply-chain",
       name: BUMBLEBEE_NAME,
       status: "fail",
+      evidenceStatus: "malformed",
       detail: `scanner ${reason}`,
       severity: "high",
       suggestion:
@@ -2350,23 +2336,12 @@ function bumblebeeInstallFailure(
     category: "supply-chain",
     name: BUMBLEBEE_NAME,
     status: context.unscanned,
+    evidenceStatus: kind === "unsupported" ? "unsupported" : "unavailable",
+    ...(context.required || kind === "config" ? { didNotRun: true } : {}),
     detail: `scanner unavailable: ${reason}${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
     severity: context.required ? "high" : "low",
     suggestion:
       "Provide a binary with KIT_BUMBLEBEE_BIN, or allow downloads (unset KIT_NO_DOWNLOAD). Manual install: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest",
-  };
-}
-
-function bumblebeeScanFailure(
-  context: BumblebeeCheckContext,
-  error: string | undefined,
-): SecurityCheckResult {
-  return {
-    category: "supply-chain",
-    name: BUMBLEBEE_NAME,
-    status: context.unscanned,
-    detail: `scan failed: ${error ?? "no output"}${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
-    severity: context.required ? "high" : "medium",
   };
 }
 
@@ -2390,20 +2365,6 @@ async function bumblebeeFindingsVerdict(
   };
 }
 
-function bumblebeeIncompleteVerdict(
-  outcome: ScanOutcome,
-  context: BumblebeeCheckContext,
-): SecurityCheckResult | null {
-  if (outcome.summarySeen && outcome.status === "complete" && !outcome.timedOut) return null;
-  return {
-    category: "supply-chain",
-    name: BUMBLEBEE_NAME,
-    status: context.unscanned,
-    detail: `scan incomplete (status=${outcome.status}${outcome.timedOut ? ", timed out" : ""})${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
-    severity: context.required ? "high" : "low",
-  };
-}
-
 export function bumblebeeStaleCatalogVerdict(
   outcome: ScanOutcome,
   ageDays: number,
@@ -2417,6 +2378,7 @@ export function bumblebeeStaleCatalogVerdict(
     category: "supply-chain",
     name: BUMBLEBEE_NAME,
     status: staleCatalogStatus(ageDays),
+    evidenceStatus: "stale",
     detail: staleCatalogDetail(outcome.packagesScanned, ageDays, update, profile),
     suggestion,
     ...(update && {
@@ -2430,13 +2392,11 @@ export function bumblebeeStaleCatalogVerdict(
 }
 
 async function bumblebeeCatalogAdvisory(
-  install: ScannerInstall,
   outcome: ScanOutcome,
   profile: string,
 ): Promise<SecurityCheckResult | null> {
-  const newest = await newestCatalogMtime(install.catalogDir);
-  if (newest === null) return null;
-  const { stale, ageDays } = isCatalogStale(newest, Date.now());
+  if (outcome.catalogMtime === undefined) return null;
+  const { stale, ageDays } = isCatalogStale(outcome.catalogMtime, Date.now());
   if (!stale) return null;
   // Cached-only lookup keeps the security verdict independent of network availability.
   const { readCachedBumblebeeUpdateSync } = await import("./bumblebee-update.js");
@@ -2447,6 +2407,8 @@ async function bumblebeeCatalogAdvisory(
 async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
   const context = bumblebeeContext();
   if (envFlagDisabled(process.env.KIT_BUMBLEBEE)) {
+    if (context.required)
+      return bumblebeeInstallFailure(context, "required scanner is disabled", "config");
     return {
       category: "supply-chain",
       name: BUMBLEBEE_NAME,
@@ -2464,22 +2426,21 @@ async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const { outcome, error } = await runScan({ install: ensured.install, profile, roots });
-  if (!outcome || error) return bumblebeeScanFailure(context, error);
-
+  const outcome = await runScan({ install: ensured.install, profile, roots, cwd: root });
   const findings = await bumblebeeFindingsVerdict(outcome, profile, root);
-  if (findings) return findings;
-  const incomplete = bumblebeeIncompleteVerdict(outcome, context);
-  if (incomplete) return incomplete;
-  const advisory = await bumblebeeCatalogAdvisory(ensured.install, outcome, profile);
-  return (
-    advisory ?? {
+  const row =
+    findings ??
+    ({
       category: "supply-chain",
       name: BUMBLEBEE_NAME,
-      status: "pass",
+      status: outcome.gap ? context.unscanned : "pass",
       detail: scannedHead(outcome.packagesScanned, profile),
-    }
-  );
+    } satisfies SecurityCheckResult);
+  if (!findings && !outcome.gap) {
+    const advisory = await bumblebeeCatalogAdvisory(outcome, profile);
+    if (advisory) return advisory;
+  }
+  return scannerEvidence(row, outcome.findings.length, outcome.gap);
 }
 
 /** Short, human-readable summary of the catalogs matched by findings. */

@@ -27,11 +27,18 @@ function why(update: Update): string {
  * package roots and agent configs, never the repository: run in a project with no manifest at all,
  * it still reported "no known exposures (86 packages)", which reads as a verdict on the project.
  */
-export function scannedHead(packagesScanned: number, profile: string): string {
+function scannedScope(packagesScanned: number, profile: string): string {
   if (profile === "baseline") {
-    return `no known exposures in ${packagesScanned} packages on this machine (baseline profile: global and user package roots and agent configs, not this repository's dependencies; KIT_BUMBLEBEE_PROFILE=project with KIT_BUMBLEBEE_ROOTS=. scans the repository)`;
+    return `${packagesScanned} packages on this machine (baseline profile: global and user package roots and agent configs, not this repository's dependencies; KIT_BUMBLEBEE_PROFILE=project with KIT_BUMBLEBEE_ROOTS=. scans the repository)`;
   }
-  return `no known exposures (${packagesScanned} packages, profile=${profile})`;
+  return `${packagesScanned} packages, profile=${profile}`;
+}
+
+export function scannedHead(packagesScanned: number, profile: string): string {
+  const scope = scannedScope(packagesScanned, profile);
+  return profile === "baseline"
+    ? `no known exposures in ${scope}`
+    : `no known exposures (${scope})`;
 }
 
 export function staleCatalogDetail(
@@ -40,7 +47,7 @@ export function staleCatalogDetail(
   update: Update,
   profile = "baseline",
 ): string {
-  const head = scannedHead(packagesScanned, profile);
+  const head = `Compared ${scannedScope(packagesScanned, profile)} with the pinned catalogs`;
   if (ageDays <= STALE_AFTER_DAYS) {
     return `${head}; note: threat-intel catalogs are ${ageDays} days old (advisory, not gated); ${why(update)}`;
   }

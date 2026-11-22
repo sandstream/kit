@@ -31,6 +31,11 @@ import { readFile, writeFile, mkdir, readdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { exec } from "./utils/exec.js";
+import {
+  checkBumblebee,
+  checkBumblebeeCatalogStale,
+  prepareBumblebee,
+} from "./security-prescan-bumblebee.js";
 
 const PRESCAN_DIR = join(homedir(), ".kit", "prescans");
 
@@ -476,106 +481,6 @@ async function checkWorkflowDrift(repo: string): Promise<PrescanFinding[]> {
   ];
 }
 
-// ── Deep check: bumblebee supply-chain exposure ────────────────────────────
-
-/**
- * One-time staleness check for the bundled exposure catalog. Stale catalogs
- * mean the scanner is detecting old compromises only — new credential-stealing
- * supply-chain attacks won't surface. Surfaced as a single warning across the
- * whole prescan, not per-repo (the catalog is shared).
- */
-async function checkBumblebeeCatalogStale(
-  install: { binPath: string; catalogDir: string },
-  root: string,
-): Promise<PrescanFinding[]> {
-  try {
-    const { newestCatalogMtime, isCatalogStale, CATALOG_STALE_AFTER_DAYS } =
-      await import("./bumblebee.js");
-    const mtime = await newestCatalogMtime(install.catalogDir);
-    if (mtime === null) {
-      return [
-        finding(
-          root,
-          "bumblebee-catalog-missing",
-          "medium",
-          `bumblebee threat_intel catalog directory empty: ${install.catalogDir}`,
-          `clear ~/.kit/tools/bumblebee and run any deep scan to re-download`,
-        ),
-      ];
-    }
-    const { stale, ageDays } = isCatalogStale(mtime, Date.now());
-    if (stale) {
-      return [
-        finding(
-          root,
-          "bumblebee-catalog-stale",
-          "medium",
-          `bumblebee threat_intel catalog is ${ageDays} days old (threshold: ${CATALOG_STALE_AFTER_DAYS}d) — new supply-chain compromises may not be detected`,
-          `clear ~/.kit/tools/bumblebee to force a fresh download next deep scan`,
-        ),
-      ];
-    }
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Per-repo bumblebee scan. Returns one finding per detected exposure.
- * `install` is hoisted to the caller so the binary is fetched ONCE per
- * prescan run, not 27× — bumblebee install can do an HTTP download.
- */
-async function checkBumblebee(
-  repo: string,
-  install: { binPath: string; catalogDir: string },
-): Promise<PrescanFinding[]> {
-  try {
-    const { runScan } = await import("./bumblebee.js");
-    const { outcome, error } = await runScan({
-      install: install as unknown as Parameters<typeof runScan>[0]["install"],
-      profile: "project",
-      roots: [repo],
-      maxDuration: "60s",
-      timeoutMs: 90_000,
-    });
-    if (error || !outcome) {
-      // Don't fail OPEN silently: a scan that errored/timed out is NOT the same
-      // as "no compromised packages found". Surface it so "we couldn't scan" is
-      // visible in the verdict rather than indistinguishable from a clean run.
-      return [
-        finding(
-          repo,
-          "supply-chain",
-          "info",
-          "bumblebee known-compromise scan did not complete (timeout or error) — supply-chain results may be incomplete",
-          "re-run `kit check`; if it persists, clear the bumblebee cache or scan manually",
-        ),
-      ];
-    }
-    if (!outcome.findings.length) return [];
-    return outcome.findings.map((f) =>
-      finding(
-        repo,
-        "supply-chain",
-        (f.severity?.toLowerCase() as Severity) ?? "medium",
-        `${f.ecosystem}/${f.packageName}@${f.version} matches catalog ${f.catalogName} (${f.catalogId}) in ${f.sourceFile}`,
-        "investigate package; remove if not directly required; pin to last-known-good version",
-      ),
-    );
-  } catch {
-    return [
-      finding(
-        repo,
-        "supply-chain",
-        "info",
-        "bumblebee known-compromise scan errored — supply-chain results may be incomplete",
-        "re-run `kit check`; verify the bumblebee binary and catalog are intact",
-      ),
-    ];
-  }
-}
-
 // ── Deep check: audit-log gap ──────────────────────────────────────────────
 
 async function checkAuditGap(repo: string): Promise<PrescanFinding[]> {
@@ -671,27 +576,18 @@ export async function runPrescan(opts: PrescanOptions): Promise<PrescanReport> {
     excludes.length === 0 ? allRepos : allRepos.filter((r) => !excludes.some((p) => r.includes(p)));
   const findings: PrescanFinding[] = [];
 
-  // Hoist bumblebee install once for the whole run (deep mode only).
-  // Failure to ensure → ctx.bumblebeeInstall stays null and per-check
-  // run() callbacks defensively return [].
-  let bumblebeeInstall: { binPath: string; catalogDir: string } | null = null;
-  if (opts.deep) {
-    try {
-      const { ensureBumblebee } = await import("./bumblebee.js");
-      const { install } = await ensureBumblebee({ allowDownload: true });
-      if (install) bumblebeeInstall = install as { binPath: string; catalogDir: string };
-    } catch {
-      // Best-effort — leave install null.
-    }
-  }
-
-  const ctx: PrescanCheckContext = { bumblebeeInstall };
   const checks = selectChecks(
     [...BUILTIN_CHECKS, ...(opts.extraChecks ?? [])],
     Boolean(opts.deep),
     opts.onlyChecks,
     opts.skipChecks,
   );
+  const usesBumblebee = checks.some(
+    ({ name }) => name === "bumblebee" || name === "bumblebee-catalog-stale",
+  );
+  const ctx: PrescanCheckContext = {
+    bumblebeeInstall: usesBumblebee ? await prepareBumblebee(opts.root, findings) : null,
+  };
   const globalChecks = checks.filter((c) => c.scope === "global");
   const perRepoChecks = checks.filter((c) => c.scope === "per-repo");
 

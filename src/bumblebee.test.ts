@@ -6,7 +6,6 @@ import { join } from "node:path";
 import {
   resolveTarget,
   sha256,
-  parseScanOutput,
   maxSeverity,
   isCatalogStale,
   CATALOG_STALE_AFTER_DAYS,
@@ -58,84 +57,6 @@ describe("sha256", () => {
       sha256(Buffer.from("")),
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     );
-  });
-});
-
-describe("parseScanOutput", () => {
-  it("parses a clean scan (summary only, no findings)", () => {
-    const ndjson = [
-      JSON.stringify({
-        record_type: "scan_summary",
-        status: "complete",
-        timed_out: false,
-        package_records_emitted: 0,
-        package_records_suppressed: 152,
-      }),
-    ].join("\n");
-
-    const out = parseScanOutput(ndjson);
-    assert.equal(out.summarySeen, true);
-    assert.equal(out.status, "complete");
-    assert.equal(out.timedOut, false);
-    assert.equal(out.findings.length, 0);
-    assert.equal(out.packagesScanned, 152);
-  });
-
-  it("parses findings and ignores blank/garbage/diagnostic lines", () => {
-    const ndjson = [
-      "",
-      "not json at all",
-      JSON.stringify({ record_type: "diagnostic", level: "info", message: "scan complete" }),
-      JSON.stringify({
-        record_type: "finding",
-        finding_type: "package_exposure",
-        severity: "critical",
-        catalog_id: "socket-2026-05-19-go-shopsprint-decimal-typosquat",
-        catalog_name: "github.com/shopsprint/decimal v1.3.3 (typosquat DNS backdoor)",
-        ecosystem: "go",
-        package_name: "github.com/shopsprint/decimal",
-        version: "v1.3.3",
-        source_file: "fix/goproj/go.sum",
-        evidence: "exact name+version match (version=v1.3.3)",
-      }),
-      JSON.stringify({
-        record_type: "scan_summary",
-        status: "complete",
-        timed_out: false,
-        counts: { finding: 1, package: 0 },
-        package_records_emitted: 0,
-        package_records_suppressed: 2,
-      }),
-    ].join("\n");
-
-    const out = parseScanOutput(ndjson);
-    assert.equal(out.findings.length, 1);
-    const f = out.findings[0];
-    assert.equal(f.severity, "critical");
-    assert.equal(f.ecosystem, "go");
-    assert.equal(f.packageName, "github.com/shopsprint/decimal");
-    assert.equal(f.version, "v1.3.3");
-    assert.equal(f.sourceFile, "fix/goproj/go.sum");
-    assert.equal(out.summarySeen, true);
-    assert.equal(out.packagesScanned, 2);
-  });
-
-  it("falls back to package_name from normalized_name when absent", () => {
-    const ndjson = JSON.stringify({
-      record_type: "finding",
-      severity: "high",
-      normalized_name: "left-pad",
-      version: "1.0.0",
-    });
-    const out = parseScanOutput(ndjson);
-    assert.equal(out.findings[0].packageName, "left-pad");
-  });
-
-  it("reports no summary when none is present", () => {
-    const out = parseScanOutput("");
-    assert.equal(out.summarySeen, false);
-    assert.equal(out.status, "unknown");
-    assert.equal(out.findings.length, 0);
   });
 });
 

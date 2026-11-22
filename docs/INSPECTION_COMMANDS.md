@@ -165,6 +165,24 @@ Its configuration check compares the report with discovered Dockerfile, Compose,
 Terraform targets match by directory. If a scanner omits a Compose file, its coverage remains unverified.
 The filesystem check covers files and does not inspect a built image.
 
+## GuardDog security check evidence
+
+Enable GuardDog with `KIT_GUARDDOG=1` or `guarddog = true` under `[scan]`.
+Kit checks `package.json` first and uses `requirements.txt` when the npm manifest is absent.
+The npm check covers `dependencies` and `devDependencies`.
+GuardDog selects and scans registry versions for these declarations. It fetches their artifacts from npm or PyPI.
+Kit checks that the report covers each package and each exact version it can identify.
+For a single range, Kit uses GuardDog's registry version selection.
+Private artifacts, lockfile resolutions and transitive dependencies are outside this check's coverage.
+Unsupported declarations, such as local npm dependencies or pip requirement includes, leave coverage unverified.
+
+GuardDog writes an array of dependency results to stdout.
+A successful empty array verifies an empty manifest within the selected scope.
+A missing target or report, malformed output, package omissions and scanner errors leave coverage unverified.
+Kit retains reported malware indicators and the strict security gate fails when coverage is unverified.
+The check runs GuardDog each time. The report has no artifact digest or ruleset identity for reuse.
+Kit ignores legacy GuardDog verdict files.
+
 ## Exploit intelligence in scan results
 
 The JSON result shows separate coverage for CISA KEV and FIRST EPSS.
