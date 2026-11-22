@@ -10,7 +10,10 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  # Everything the old single job ran except the tests: format, lint, build, the standards gate,
+  # the test-coverage gate, the ADR gate and the skill gate.
+  checks:
+    name: checks (format, lint, build, gates)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -40,9 +43,6 @@ jobs:
 
       - name: Standards gate
         run: node dist/cli.js standards --enforce
-
-      - name: Test
-        run: npm test
 
       # kit's own test-coverage gate, enforced. `.kit-baseline.json` is committed, so
       # the 91 pre-existing untested files are frozen and only a NET-NEW untested
@@ -85,6 +85,61 @@ jobs:
       # `ci-adr-gate.test.ts` pins this step's existence — deleting it fails the suite.
       - name: Skill gate (module discipline for every shipped SKILL.md)
         run: node dist/cli.js review --stages skill
+
+  # The whole suite, split into four shards that run in parallel. scripts/test-shard.mjs gives every
+  # compiled test file to exactly one shard, as the Windows workflow has done since #675, so every
+  # test still runs on every pull request and every push to main. One job took about 14 minutes,
+  # nearly all of it tests; a shard runs about a quarter of them.
+  linux-shard:
+    name: linux shard ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Provision pinned standards tools
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test (shard ${{ matrix.shard }}/4)
+        env:
+          KIT_TEST_SHARD: ${{ matrix.shard }}/4
+        run: npm test
+
+  # The single result. Its name is the one branch rules and the review gate read
+  # (scripts/agent-review-gate.mjs MAIN_CHECKS), so it stays. It passes only when the checks job
+  # and every shard passed; a failed, cancelled or skipped one fails it.
+  build-and-test:
+    name: build-and-test
+    needs: [checks, linux-shard]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The checks job and every Linux shard must have passed
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          SHARDS: ${{ needs.linux-shard.result }}
+        run: |
+          echo "checks: $CHECKS, linux-shard: $SHARDS"
+          test "$CHECKS" = "success"
+          test "$SHARDS" = "success"
 
   # Over 400 net new lines in src/**/*.test.ts and *.test-support.ts fails, unless a commit on the
   # branch carries a `Test-Growth: <reason>` trailer (scripts/test-growth.mjs, also a step of
