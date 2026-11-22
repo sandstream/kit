@@ -118,7 +118,10 @@ function sarifFinding(
 
 export function parseSarif(json: string): SecurityCheckResult[] {
   const log = readSarifLog(json);
-  if (!log) return [];
+  return log ? sarifFindings(log) : [];
+}
+
+function sarifFindings(log: SarifLog): SecurityCheckResult[] {
   const out: SecurityCheckResult[] = [];
   for (const run of log.runs ?? []) {
     const tool = run.tool?.driver?.name ?? "sarif";
@@ -304,13 +307,13 @@ const stoppedRun = (run: unknown): boolean =>
  * run with no results is refused, and findings from a log with a stopped run carry a note that
  * they are partial (kit-research `openai-daybreak-red-team-vs-kit`). Only SARIF 2.1.0 is read.
  */
-function sarifOutcome(parsed: unknown, json: string): IngestOutcome {
+export function ingestSarifReport(parsed: unknown): IngestOutcome {
   if (!isRecord(parsed) || !Array.isArray(parsed.runs))
     return { ok: false, reason: "not a SARIF log (no `runs` array)" };
   if (parsed.version !== undefined && parsed.version !== "2.1.0")
     return { ok: false, reason: "unsupported SARIF version (kit reads SARIF 2.1.0)" };
   if (!parsed.runs.every(sarifRun)) return { ok: false, reason: "invalid SARIF report structure" };
-  const findings = parseSarif(json);
+  const findings = sarifFindings(parsed as SarifLog);
   const stopped = parsed.runs.filter(stoppedRun).length;
   if (stopped === 0) return { ok: true, findings };
   if (findings.length === 0)
@@ -329,7 +332,7 @@ export function ingestStrict(format: IngestFormat, json: string): IngestOutcome 
   } catch {
     return { ok: false, reason: "output is not valid JSON" };
   }
-  if (format === "sarif") return sarifOutcome(parsed, json);
+  if (format === "sarif") return ingestSarifReport(parsed);
   if (format === "osv") {
     if (!isRecord(parsed) || !Array.isArray(parsed.results)) {
       return { ok: false, reason: "not an OSV report (no `results` array)" };

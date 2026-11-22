@@ -10,19 +10,21 @@ import { triageVaultConfig } from "../vault-triage.js";
 import { triageModelArtifact } from "../model-artifact-triage.js";
 import { existsSync, statSync } from "node:fs";
 import { redactSecrets } from "../utils/redactSecrets.js";
+import { sanitizeDisplayText } from "../display-text.js";
 import {
   appendTriagePass,
   TRIAGE_LOG_FILE,
   TRIAGE_MAX_AGE_DAYS,
+  type SkillScanEvidence,
   type TriageLogEntry,
 } from "../triage-receipt.js";
-import { readSkillDir, resolveSkillTarget, skillDigest } from "../skill-triage-binding.js";
+import {
+  readSkillDir,
+  resolveSkillTarget,
+  skillDigest,
+  withLocalSkillSnapshot,
+} from "../skill-triage-binding.js";
 import { cmdTriageCheckSkills } from "../skill-triage-gate.js";
-export {
-  latestDeepSkillTriage,
-  missingDeepSkillTriage,
-  parseStagedSkillNames,
-} from "../skill-triage-gate.js";
 
 /** `kit triage <name> …` subcommands that are not a package type. */
 const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> = {
@@ -81,7 +83,7 @@ const HELP_ROWS = [
   "  kit triage model <path>              Evaluate an untrusted AI artifact (model weights / dataset) before loading",
   "  kit triage model <path> --scan-bytes + byte-level malware scan via a local ClamAV delegate (clean/malicious/gap; never a silent pass)",
   "  kit triage skill <path|name>         Evaluate Claude Code / agent skill",
-  "  kit triage skill <path|name> --deep  + SkillSpector (NVIDIA) static Stage 1 (no LLM, no egress) when installed",
+  "  kit triage skill <path|name> --deep  Require a complete SkillSpector static scan",
   "  kit triage mcp <server> --tools <f>  Evaluate MCP tool metadata (poisoning) + pin against drift",
   "  kit triage plugin [name]             Triage kitPlugins (npm supply-chain + manifest-poisoning scan); all declared if no name",
   "  kit triage vault-config              Triage the secret-backend selection (.kit.toml secrets.store + per-key source); never reads secret values",
@@ -145,43 +147,59 @@ async function evaluate(
   deep: boolean,
 ): Promise<boolean> {
   console.log(`${c.bold}Running triage on ${type}: ${redactSecrets(target)}${c.reset}\n`);
+  if (deep && type === "skill") return evaluateDeepSkill(target, sandbox);
   const result = await runTriage(type, target);
   console.log(result.output);
 
-  // Sandbox is currently only meaningful for npm packages: it extends the
-  // registry-metadata check with offline tarball inspection.
-  let sandboxClean = true;
-  if (sandbox && type === "npm") {
-    sandboxClean = await npmSandbox(target);
-  } else if (sandbox) {
-    console.log(
-      `\n${c.dim}(--sandbox currently only applies to npm; ignored for ${type})${c.reset}`,
-    );
-  }
-
-  // --deep on a skill: delegate to SkillSpector's STATIC Stage 1 (no LLM, no egress). Fail-closed.
-  let deepClean = true;
-  let deepRan = false;
-  if (deep && type === "skill") {
-    ({ clean: deepClean, ran: deepRan } = await deepSkillScan(target));
-  } else if (deep) {
+  const sandboxClean = await requestedSandbox(type, target, sandbox);
+  if (deep)
     console.log(
       `\n${c.dim}(--deep currently only applies to skill; ignored for ${type})${c.reset}`,
     );
-  }
-
-  const overall = result.passed && sandboxClean && deepClean;
-  if (!overall) {
+  if (!result.passed || !sandboxClean) {
     console.log(`\n${c.yellow}⚠️  Review warnings above before proceeding.${c.reset}`);
+    return false;
   }
+  await recordTriageRun(type, target, sandbox && type === "npm", false, {
+    contentDigest: type === "skill" ? localSkillDigest(target) : undefined,
+  });
+  return true;
+}
 
-  // Record the triage outcome so the pre-commit triage-check can verify
-  // that every newly added dep was evaluated. Failed runs aren't logged:
-  // a failed triage means the user explicitly chose not to install, so it
-  // shouldn't unblock the commit.
-  if (overall) await recordWhatRan(type, target, sandbox, deepRan);
+async function evaluateDeepSkill(target: string, sandbox: boolean): Promise<boolean> {
+  try {
+    await requestedSandbox("skill", target, sandbox);
+    const checked = await withLocalSkillSnapshot(target, async (scanTarget, snapshot) => {
+      const base = await runTriage("skill", scanTarget);
+      console.log(base.output.replace(/^TRIAGE PASSED\r?$/gm, "Base skill triage passed."));
+      const scan = await deepSkillScan(scanTarget, snapshot?.fileCount);
+      if (!base.passed || !scan.clean || !scan.evidence) return undefined;
+      return { contentDigest: snapshot?.digest, skillScan: scan.evidence };
+    });
+    if (!checked) return false;
+    if (!checked.contentDigest) {
+      console.log("Deep scan passed. The commit gate requires a scan of local skill files.");
+      return true;
+    }
+    const recorded = await recordTriageRun("skill", target, false, true, checked);
+    if (recorded) console.log("Deep skill triage passed.");
+    return recorded;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Deep triage could not finish. ${sanitizeDisplayText(message)}`);
+    return false;
+  }
+}
 
-  return overall;
+async function requestedSandbox(
+  type: TriageType,
+  target: string,
+  enabled: boolean,
+): Promise<boolean> {
+  if (!enabled) return true;
+  if (type === "npm") return npmSandbox(target);
+  console.log(`\n${c.dim}(--sandbox currently only applies to npm; ignored for ${type})${c.reset}`);
+  return true;
 }
 
 export async function cmdTriage(): Promise<boolean> {
@@ -226,65 +244,57 @@ function skillTargetFor(type: string, target: string | undefined): string | unde
   return type === "skill" && target ? resolveSkillTarget(target, process.cwd()) : target;
 }
 
-/**
- * Log a PASS with what ran, not what was asked for: `--sandbox` runs for npm only, and `--deep`
- * counts only when SkillSpector ran (`deepRan`). A skill entry carries the digest of the files it
- * read, so the check-skills gate can tell it from a triage of other content under the same name.
- */
-async function recordWhatRan(
-  type: string,
-  target: string,
-  sandbox: boolean,
-  deepRan: boolean,
-): Promise<void> {
-  let files = null;
+function localSkillDigest(target: string): string | undefined {
   try {
-    files = type === "skill" ? readSkillDir(target) : null;
+    const files = readSkillDir(target);
+    return files ? skillDigest(files) : undefined;
   } catch {
-    /* unreadable or oversized skill: no digest, so the check-skills gate cannot count it */
+    return undefined;
   }
-  await recordTriageRun(type, target, sandbox && type === "npm", deepRan, {
-    contentDigest: files ? skillDigest(files) : undefined,
-  });
 }
 
-/**
- * `kit triage skill … --deep` helper: run SkillSpector's static Stage 1 (no LLM, no egress) and fold
- * its normalized findings into the verdict. `clean` is false only on a real high/critical finding or
- * a scan error. An ABSENT delegate is surfaced honestly with `ran: false`: the base triage verdict
- * still governs, and the triage log records no deep scan, so the check-skills gate stays closed.
- */
-async function deepSkillScan(target: string): Promise<{ clean: boolean; ran: boolean }> {
+/** Report observed findings and require complete coverage before giving a deep verdict. */
+async function deepSkillScan(
+  target: string,
+  localFileCount = 1,
+): Promise<{ clean: boolean; evidence?: SkillScanEvidence }> {
   const { runSkillspectorStage1, SKILLSPECTOR_SOURCE } =
     await import("../skillspector-delegate.js");
-  console.log(
-    `\n${c.bold}Deep scan (${SKILLSPECTOR_SOURCE}, static — no LLM, no egress):${c.reset}`,
-  );
+  console.log(`\n${c.bold}Deep scan (${SKILLSPECTOR_SOURCE}, static analysis):${c.reset}`);
   const deepRes = await runSkillspectorStage1(target);
-  if (deepRes.status === "unavailable") {
-    console.log(`  ${c.yellow}! ${deepRes.detail}${c.reset}`);
-    console.log(
-      `  ${c.yellow}  not recorded as a deep triage: the check-skills gate still needs one${c.reset}`,
-    );
-    return { clean: true, ran: false };
-  }
-  if (deepRes.status === "error") {
-    console.log(`  ${c.red}✗ deep scan errored: ${deepRes.detail}${c.reset}`);
-    return { clean: false, ran: false };
-  }
-  if (deepRes.findings.length === 0) {
-    console.log(`  ${c.green}✓ no findings from the deep static scan${c.reset}`);
-    return { clean: true, ran: true };
-  }
   for (const f of deepRes.findings) {
     const sev = f.severity ?? "info";
     const tag =
       sev === "critical" || sev === "high"
         ? `${c.red}[${sev.toUpperCase()}]${c.reset}`
         : `${c.yellow}[${sev}]${c.reset}`;
-    console.log(`  ${tag} ${f.detail}`);
+    console.log(`  ${tag} ${sanitizeDisplayText(f.detail)}`);
   }
-  return { clean: !(deepRes.worst === "critical" || deepRes.worst === "high"), ran: true };
+  if (deepRes.status !== "ok") {
+    console.log(
+      `  ${c.red}✗ Deep scan ${deepRes.status}. ${sanitizeDisplayText(deepRes.detail)}${c.reset}`,
+    );
+    return { clean: false };
+  }
+  if (deepRes.evidence.runs.some((run) => run.fullyInspectedFiles < localFileCount)) {
+    console.log(
+      "Deep scan partial. SkillSpector reported fewer inspected files than the local snapshot contains.",
+    );
+    return { clean: false };
+  }
+  for (const run of deepRes.evidence.runs) {
+    const version = sanitizeDisplayText(run.scannerVersion);
+    console.log(
+      `  SkillSpector ${version} reports ${run.coveragePercent}% coverage, ${run.fullyInspectedFiles} fully inspected files and ${run.scopeExclusionCount} exclusions.`,
+    );
+  }
+  if (deepRes.findings.length === 0) {
+    console.log(`  ${c.green}✓ No findings within the declared coverage.${c.reset}`);
+  }
+  return {
+    clean: !(deepRes.worst === "critical" || deepRes.worst === "high"),
+    evidence: deepRes.evidence,
+  };
 }
 
 /**
@@ -516,15 +526,16 @@ export async function recordTriageRun(
   target: string,
   sandbox: boolean,
   deep = false,
-  opts: { cwd?: string; contentDigest?: string } = {},
-): Promise<void> {
-  const { cwd, contentDigest } = opts;
+  opts: { cwd?: string; contentDigest?: string; skillScan?: SkillScanEvidence } = {},
+): Promise<boolean> {
   try {
-    await appendTriagePass({ type, target, sandbox, deep, cwd, contentDigest });
+    await appendTriagePass({ type, target, sandbox, deep, ...opts });
+    return true;
   } catch (err) {
     console.error(
       `${c.dim}(triage-log append failed: ${err instanceof Error ? err.message : err})${c.reset}`,
     );
+    return false;
   }
 }
 

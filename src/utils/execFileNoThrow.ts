@@ -12,6 +12,8 @@ export interface ExecResult {
   truncated?: boolean;
   /** True when the timeout killed the process (stdout is then only what it had printed). */
   timedOut?: boolean;
+  /** The child did not return a numeric exit status. */
+  noNumericExitStatus?: true;
 }
 
 /** 64 MiB, the limit most callers already set. A report grows with what a scanner finds. */
@@ -21,7 +23,7 @@ const MAXBUFFER_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
 
 function failureResult(error: unknown): ExecResult {
   if (!error || typeof error !== "object") {
-    return { stdout: "", stderr: String(error), exitCode: 1, ok: false };
+    return { stdout: "", stderr: String(error), exitCode: 1, ok: false, noNumericExitStatus: true };
   }
   const e = error as {
     stdout?: string;
@@ -36,6 +38,7 @@ function failureResult(error: unknown): ExecResult {
     exitCode: typeof e.code === "number" ? e.code : 1,
     ok: false,
   };
+  if (typeof e.code !== "number") result.noNumericExitStatus = true;
   if (e.code === MAXBUFFER_CODE) result.truncated = true;
   else if (e.killed === true && e.signal === "SIGTERM") result.timedOut = true;
   return result;
