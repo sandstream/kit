@@ -141,14 +141,13 @@ export async function cmdMcpCallback(args: string[]): Promise<boolean> {
     console.error("kit mcp callback: refused in read-only mode (it makes a request)");
     return false;
   }
-  const { flagValue } = await import("./utils/flags.js");
-  const forAt = args.indexOf("--for");
-  const authorizationUrl = forAt === -1 ? undefined : (flagValue(args, "--for") ?? undefined);
-  if (forAt !== -1 && !authorizationUrl) {
+  const { flagValue, hasFlag } = await import("./utils/flags.js");
+  const authorizationUrl = flagValue(args, "--for") ?? undefined;
+  if (hasFlag(args, "--for") && !authorizationUrl) {
     console.error("kit mcp callback: --for needs the sign-in page's address");
     return false;
   }
-  const rest = args.filter((a, i) => i !== forAt && i !== forAt + 1);
+  const rest = args.filter((a) => a !== "--for" && a !== authorizationUrl);
   const pasted = await readAddress(rest.find((a) => a === "-" || !a.startsWith("-")));
   if (!pasted) {
     console.error("Usage: kit mcp callback [--for <authorization URL>] [<address> | -]");
