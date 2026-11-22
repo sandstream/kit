@@ -17,7 +17,7 @@ describe("abortedRun", () => {
     const run = abortedRun({ id: "osv-scanner", timeoutMs: 600_000 }, { timedOut: true });
     assert.equal(run?.status, "timed-out");
     assert.match(run?.reason ?? "", /timed out after 600 s/);
-    assert.match(run?.reason ?? "", /not a scanner crash/);
+    assert.match(run?.reason ?? "", /scan coverage is unverified/i);
   });
 
   it("uses the default limit when the scanner sets none", () => {

@@ -124,17 +124,21 @@ Run `kit ingest sarif report.sarif`, `kit ingest osv report.json`, or
 Add `--json` for structured output.
 Use `--` before a report filename that starts with a hyphen.
 
-The command reads one local report and prints normalized findings.
+Kit ingest reads one local report and prints normalized findings.
 It does not store findings, launch a scanner, or contact a cloud service.
-It also suppresses the normal post-command registry notices, including in interactive use.
-The scanner adapters use the same strict parser when they feed the security verdict.
+It suppresses post-command registry notices, including in interactive use.
 
-A successful import produces exit 0, including when the report contains findings with status `fail`.
-That exit code confirms a valid import. It does not certify the account or resolve a finding.
-Valid empty reports produce a count of zero.
-A SARIF run that reports `executionSuccessful: false` is not an empty report: with no results it
-is refused, and with results the findings are printed with a note that they are partial. Only
-SARIF 2.1.0 is read.
+Exit 0 confirms a valid import, including reports with findings.
+A completed SARIF scan without findings has a run with an empty results array.
+Missing results, a stopped run, or a reported execution error indicate a coverage gap.
+A partial report with readable findings prints them and adds `"coverage": "partial"` to JSON output.
+A partial report without findings exits 1. Kit reads SARIF 2.1.0.
+
+`kit scan` reports incomplete delegates separately from their findings.
+`kit scan --strict` rejects incomplete coverage.
+A required delegate must complete its scan before the scanner gate can pass.
+A baseline update also needs a completed scan and an approved scanner gate.
+The SARIF export records each delegate's status and keeps coverage gaps visible on import.
 
 `cloudflare-audit` reads the `findings.json` that Cloudflare's security-audit skill writes and
 validates. kit checks only the fields it reads: the verdict, a unique fingerprint, the title, a source

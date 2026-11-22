@@ -98,7 +98,7 @@ describe("runScanners (injected deps)", () => {
   it("skips not-installed + no-token, runs the rest, merges", async () => {
     const deps: ScanDeps = {
       resolve: async (bin) => (bin === "grype" ? null : `/usr/bin/${bin}`), // grype absent
-      run: async () => ({ ok: false, stdout: SARIF }), // non-zero exit + SARIF (findings present)
+      run: async () => ({ ok: true, stdout: SARIF }),
       hasEnv: () => false, // no SNYK_TOKEN
       detect: () => true,
     };
@@ -128,7 +128,10 @@ describe("runScanners (injected deps)", () => {
     const only: ScannerDef[] = [{ id: "trivy", bin: "trivy", args: [], format: "sarif" }];
     const deps: ScanDeps = {
       resolve: async (bin) => `/usr/bin/${bin}`,
-      run: async () => ({ ok: true, stdout: JSON.stringify({ runs: [] }) }),
+      run: async () => ({
+        ok: true,
+        stdout: JSON.stringify({ runs: [{ tool: { driver: { name: "trivy" } }, results: [] }] }),
+      }),
       hasEnv: () => true,
       detect: () => true,
     };
@@ -136,7 +139,9 @@ describe("runScanners (injected deps)", () => {
     assert.equal(runs[0].status, "ran");
     assert.equal(runs[0].findings, 0);
   });
+});
 
+describe("runScanners with an exit-code delegate", () => {
   it("exitGate scanner: clean exit → ran/0, no finding (stdout ignored)", async () => {
     const only: ScannerDef[] = [
       { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },

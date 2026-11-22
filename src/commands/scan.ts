@@ -55,6 +55,13 @@ export async function cmdScan(): Promise<boolean> {
   const { merged, runs } = await executeScanners(cwd, airgap, toolingTokens);
 
   if (hasFlag(process.argv, "--update-baseline")) {
+    const { scanHealthGate } = await import("../scanners.js");
+    const gate = scanHealthGate(runs, scanPolicy(config));
+    printGate(gate);
+    if (!gate.ok || !hasCompletedScan(runs)) {
+      console.error("Scan coverage cannot support a baseline update.");
+      return false;
+    }
     await updateScanBaseline(cwd, merged);
     return true;
   }
@@ -112,7 +119,11 @@ async function applyAirGap(selected: ScannerDef[], config: kitConfig): Promise<A
   const ag = resolveAirGap(config.air_gap, process.env);
   const airgap = airGapScanners(selected, ag.enabled);
   if (!ag.enabled) return airgap;
-  console.log(
+  const info =
+    hasFlag(process.argv, "--json") || hasFlag(process.argv, "--sarif")
+      ? console.error
+      : console.log;
+  info(
     `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
   );
   await warnRegistrySemgrep();
@@ -232,6 +243,7 @@ async function executeScanners(
           exitCode: r.exitCode,
           truncated: r.truncated,
           timedOut: r.timedOut,
+          noNumericExitStatus: r.noNumericExitStatus,
         };
       },
       hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
@@ -256,6 +268,13 @@ async function updateScanBaseline(cwd: string, merged: MergedFinding[]): Promise
   );
 }
 
+function scanPolicy(config: kitConfig) {
+  return {
+    strict: hasFlag(process.argv, "--strict") || envTruthy(process.env.KIT_CI_STRICT),
+    requiredScanners: config.governance?.scan?.required_scanners ?? [],
+  };
+}
+
 async function judgeScan(
   cwd: string,
   config: kitConfig,
@@ -276,9 +295,11 @@ async function judgeScan(
   // run (crashed/absent/no-token) must be able to force a non-zero exit so a green
   // verdict never hides a broken scanner. Backward-compatible — a non-running
   // scanner stays a loud WARN unless strict or a required scanner missed.
-  const strict = hasFlag(process.argv, "--strict") || envTruthy(process.env.KIT_CI_STRICT);
-  const requiredScanners = config.governance?.scan?.required_scanners ?? [];
-  const gate = scanHealthGate(runs, { strict, requiredScanners });
+  const policy = scanPolicy(config);
+  const { strict } = policy;
+  const gate = scanHealthGate(runs, policy);
+  if (strict && gate.ok && !hasCompletedScan(runs))
+    gate.failures.push("No scanner completed. Scan coverage is unverified [strict].");
   // A feed that did not answer is a scanner that did not run: a warning, and a failure in strict.
   for (const note of intel.notes) {
     if (strict && !(intel.kevChecked && intel.epssChecked)) gate.failures.push(note);
@@ -320,16 +341,36 @@ async function withExploitIntel(
 }
 
 async function printVerdict(v: ScanVerdict): Promise<void> {
+  const completed = hasCompletedScan(v.runs);
+  const coverage =
+    completed && v.gate.failures.length === 0 && v.gate.warnings.length === 0
+      ? undefined
+      : "partial";
   if (hasFlag(process.argv, "--sarif")) {
     const { toSarif } = await import("../sbom.js");
-    console.log(JSON.stringify(toSarif(v.findings), null, 2));
+    const scanners = v.runs.map(({ id, status, findings, reportGap }) => ({
+      id,
+      status,
+      findings,
+      reportGap,
+    }));
+    console.log(JSON.stringify(toSarif(v.findings, coverage === undefined, scanners), null, 2));
     return;
   }
   if (hasFlag(process.argv, "--json")) {
     const { runs, findings, suppressed, ok, gate, strict, intel } = v;
     console.log(
       JSON.stringify(
-        { runs, findings, suppressed, ok, scannerGate: gate, strict, exploitIntel: intel },
+        {
+          runs,
+          findings,
+          suppressed,
+          ok,
+          scannerGate: gate,
+          strict,
+          exploitIntel: intel,
+          coverage,
+        },
         null,
         2,
       ),
@@ -342,7 +383,7 @@ async function printVerdict(v: ScanVerdict): Promise<void> {
   );
   printRuns(v.runs);
   console.log("");
-  printFindings(v.findings, v.suppressed);
+  printFindings(v.findings, v.suppressed, completed);
   const kev = v.findings.filter((f) => f.kev).length;
   if (v.bad > 0) {
     console.log(
@@ -370,8 +411,16 @@ function printRuns(runs: ScannerRun[]): void {
   }
 }
 
-function printFindings(findings: MergedFinding[], suppressed: number): void {
+function hasCompletedScan(runs: ScannerRun[]): boolean {
+  return runs.some((run) => run.status === "ran");
+}
+
+function printFindings(findings: MergedFinding[], suppressed: number, completed: boolean): void {
   if (findings.length === 0) {
+    if (!completed) {
+      console.log("  No scanner completed. Scan coverage is unverified.");
+      return;
+    }
     console.log(
       `  ${c.green}no findings${suppressed > 0 ? " (after baseline)" : " from the scanners that ran"}${c.reset}`,
     );

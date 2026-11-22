@@ -174,7 +174,14 @@ export function readSkillspectorReport(stdout: string): SkillspectorReport {
   const findings = ingested.ok ? normalizeFindings(ingested.findings) : [];
   const result = assessRun(runs[0]);
   if (!result.ok) return { status: result.status, detail: result.detail, findings };
-  if (!ingested.ok) return { status: "malformed", detail: ingested.reason, findings };
+  if (!ingested.ok)
+    return { status: ingested.reportGap ?? "malformed", detail: ingested.reason, findings };
+  if (ingested.coverage === "partial")
+    return {
+      status: "partial",
+      detail: ingested.notes?.join(" ") ?? "SARIF is partial.",
+      findings,
+    };
   return {
     status: "ok",
     findings,

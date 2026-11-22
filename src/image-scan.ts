@@ -210,6 +210,7 @@ export function imageScanners(
         bin: "osv-scanner",
         args: ["scan", "image", "--format", "json", ref],
         format: "osv",
+        findingsExit: 1,
         cloudOnly: true,
         timeoutMs: IMAGE_TIMEOUT_MS,
       });

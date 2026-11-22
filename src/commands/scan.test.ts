@@ -8,73 +8,17 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  existsSync,
-  chmodSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { generateKeyPairSync, sign as cryptoSign, createHash } from "node:crypto";
-import { runCli, type CliResult } from "../cli-run.test-support.js";
 import { rmTemp } from "../temp-cleanup.test-support.js";
+import { EMPTY_SARIF, makeFixture, scan, toml, tool, type Fixture } from "./scan.test-support.js";
 
 // Fake tools are POSIX shell scripts, and Windows cannot run them from execFile.
 const skip = process.platform === "win32" ? "fake tools are /bin/sh scripts (POSIX only)" : false;
 
 const ANSI = /\x1b\[[0-9;]*m/g;
 const plain = (s: string) => s.replace(ANSI, "");
-
-const EMPTY_SARIF = JSON.stringify({
-  version: "2.1.0",
-  runs: [{ tool: { driver: { name: "grype", rules: [] } }, results: [] }],
-});
-
-interface Fixture {
-  dir: string;
-  bin: string;
-}
-
-function makeFixture(): Fixture {
-  const dir = mkdtempSync(join(tmpdir(), "kit-scan-char-"));
-  const bin = join(dir, ".fakebin");
-  mkdirSync(bin);
-  writeFileSync(join(dir, "package.json"), '{"name":"t","dependencies":{}}');
-  // `which <tool>` prints the fake's path when a fake exists, else exits 1 (not installed).
-  tool(
-    { dir, bin },
-    "which",
-    `[ -x "${bin}/$1" ] && [ "$1" != which ] && { echo "${bin}/$1"; exit 0; }\nexit 1`,
-  );
-  return { dir, bin };
-}
-
-function tool(f: Fixture, name: string, body: string): void {
-  const p = join(f.bin, name);
-  writeFileSync(p, `#!/bin/sh\n${body}\n`);
-  chmodSync(p, 0o755);
-}
-
-function toml(f: Fixture, text: string): void {
-  writeFileSync(join(f.dir, ".kit.toml"), text);
-}
-
-function scan(f: Fixture, args: string[], env: Record<string, string> = {}): Promise<CliResult> {
-  return runCli(["scan", ...args], f.dir, {
-    PATH: f.bin,
-    SOCKET_SECURITY_API_TOKEN: "",
-    SNYK_TOKEN: "",
-    KIT_SEMGREP_CONFIG: "",
-    KIT_AIRGAP: "",
-    KIT_CI_STRICT: "",
-    KIT_THREAT_DATA_DIR: "",
-    KIT_THREAT_DATA_PUBKEY: "",
-    ...env,
-  });
-}
 
 /** A signed threat-data bundle with one artifact that sets env KIT_TD_PROBE. */
 function makeBundle(f: Fixture): { dir: string; pubPath: string } {

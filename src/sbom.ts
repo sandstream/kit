@@ -8,6 +8,7 @@
  *
  * Pure (data → document); fixture-tested. Reuses supply-chain's lockfile parser.
  */
+import type { DeclaredScannerCoverage } from "./adapters/ingest.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import type { LockPkg } from "./supply-chain.js";
 
@@ -78,7 +79,11 @@ function sarifLevel(sev: SecurityCheckResult["severity"]): "error" | "warning" |
 }
 
 /** kit findings → SARIF 2.1.0 (one run, kit as the tool, rules carry the citation). */
-export function toSarif(findings: SecurityCheckResult[]): unknown {
+export function toSarif(
+  findings: SecurityCheckResult[],
+  executionSuccessful?: boolean,
+  scannerCoverage?: readonly DeclaredScannerCoverage[],
+): unknown {
   const rules = [...new Map(findings.map((f) => [f.name, f])).values()].map((f) => ({
     id: f.name,
     name: f.name,
@@ -101,6 +106,8 @@ export function toSarif(findings: SecurityCheckResult[]): unknown {
         tool: {
           driver: { name: "kit", informationUri: "https://github.com/sandstream/kit", rules },
         },
+        ...(scannerCoverage?.length ? { properties: { scannerCoverage } } : {}),
+        ...(executionSuccessful === undefined ? {} : { invocations: [{ executionSuccessful }] }),
         results: findings.map((f) => ({
           ruleId: f.name,
           level: sarifLevel(f.severity),

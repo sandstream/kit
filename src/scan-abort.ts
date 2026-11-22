@@ -22,18 +22,18 @@ export function abortedRun(
   if (res.truncated) {
     return run(
       "error",
-      "output exceeded kit's buffer limit and was cut off, so the report was not read (a kit limit, not a scanner error)",
+      "output exceeded Kit's buffer limit and was cut off. Scan coverage is unverified.",
     );
   }
   if (!res.timedOut) return undefined;
   const seconds = (scanner.timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS) / 1000;
   return run(
     "timed-out",
-    `timed out after ${seconds} s and was stopped, so it found nothing to report (a kit time limit, not a scanner crash)`,
+    `timed out after ${seconds} s at Kit's time limit. Scan coverage is unverified.`,
   );
 }
 
 /** A run to show as failed (red). Not-installed and no-token are gaps, not failures. */
 export function isFailedRun(status: ScannerStatus): boolean {
-  return status === "error" || status === "timed-out";
+  return status === "error" || status === "partial" || status === "timed-out";
 }

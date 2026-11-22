@@ -17,6 +17,30 @@ function report(content: unknown, name = "report.json") {
   return name;
 }
 
+const EMPTY_SARIF = { runs: [{ tool: { driver: { name: "public-scanner" } }, results: [] }] };
+
+it("imports findings from an incomplete SARIF report and labels the coverage", () => {
+  const result = fixture.run([
+    "ingest",
+    "sarif",
+    report({
+      runs: [
+        {
+          tool: { driver: { name: "fixture" } },
+          invocations: [{ executionSuccessful: false }],
+          results: [{ ruleId: "sample", message: { text: "Example finding" } }],
+        },
+      ],
+    }),
+    "--json",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.equal(value.coverage, "partial");
+  assert.equal(value.count, 1);
+  assert.match(result.stderr, /stopped run/);
+});
+
 for (const format of ["sarif", "osv"] as const) {
   it(`${format}: rejects malformed JSON instead of reporting zero findings`, () => {
     writeFileSync(join(fixture.cwd, "report.json"), "invalid public-fixture-secret");
@@ -48,14 +72,14 @@ for (const format of ["sarif", "osv"] as const) {
   });
 
   it(`${format}: rejects extra positional data`, () => {
-    const data = format === "sarif" ? { runs: [] } : { results: [] };
+    const data = format === "sarif" ? EMPTY_SARIF : { results: [] };
     const result = fixture.run(["ingest", format, report(data), "ignored.json", "--json"]);
     assert.notEqual(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /usage:/i);
   });
 
   it(`${format}: handles a separate global environment value before the format`, () => {
-    const data = format === "sarif" ? { runs: [] } : { results: [] };
+    const data = format === "sarif" ? EMPTY_SARIF : { results: [] };
     const result = fixture.run(["ingest", "--env", "staging", format, report(data), "--json"]);
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), { count: 0, findings: [] });
@@ -224,7 +248,7 @@ syncBuiltinESMExports();
   });
 
   for (const data of format === "sarif"
-    ? [{ runs: [] }, { runs: [{ tool: { driver: { name: "public-scanner" } }, results: [] }] }]
+    ? [EMPTY_SARIF]
     : [
         { results: [] },
         { results: [{ packages: [{ package: { name: "public-package" }, vulnerabilities: [] }] }] },
@@ -345,7 +369,7 @@ for (const args of [
   ["sarif", "report.json", "-x"],
 ]) {
   it(`refuses invalid arguments ${JSON.stringify(args)} without writes`, () => {
-    report({ runs: [] });
+    report(EMPTY_SARIF);
     const before = fixture.snapshot();
     const result = fixture.run(["ingest", ...args, "--json"]);
     assert.notEqual(result.status, 0, result.stderr);
@@ -362,7 +386,7 @@ for (const args of [
   ["ingest", "--env=staging", "sarif", "report.json"],
 ]) {
   it(`accepts global environment placement ${JSON.stringify(args)}`, () => {
-    report({ runs: [] });
+    report(EMPTY_SARIF);
     const result = fixture.run([...args, "--json"]);
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), { count: 0, findings: [] });
@@ -386,7 +410,7 @@ for (const [flag, status] of [
 }
 
 it("reads a dash-prefixed filename after the option separator", () => {
-  const file = report({ runs: [] }, "-report.json");
+  const file = report(EMPTY_SARIF, "-report.json");
   const result = fixture.run(["ingest", "sarif", "--json", "--", file]);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), { count: 0, findings: [] });

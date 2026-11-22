@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ingestStrict, type IngestFormat } from "../adapters/ingest.js";
+import {
+  ingestStrict,
+  type IngestFormat,
+  type DeclaredScannerCoverage,
+} from "../adapters/ingest.js";
 import { sanitizeDisplayText } from "../display-text.js";
 import { c } from "../utils/colors.js";
 import { GLOBAL_FLAGS, hasFlag } from "../utils/flags.js";
@@ -36,8 +40,12 @@ const isIngestFormat = (value: string | undefined): value is IngestFormat =>
 /** Read a scanner report without storage, scanner execution, or network access. */
 export async function cmdIngest(): Promise<boolean> {
   const { jsonMode, positional } = ingestArguments(process.argv.slice(3));
-  const fail = (error: string): false => {
-    if (jsonMode) console.log(JSON.stringify({ ok: false, error }));
+  const fail = (
+    error: string,
+    reportGap?: string,
+    scannerCoverage?: DeclaredScannerCoverage[],
+  ): false => {
+    if (jsonMode) console.log(JSON.stringify({ ok: false, error, reportGap, scannerCoverage }));
     console.error(`${c.red}${error}${c.reset}`);
     return false;
   };
@@ -52,7 +60,12 @@ export async function cmdIngest(): Promise<boolean> {
     return fail("could not read report file; check its path and read permissions");
   }
   const outcome = ingestStrict(format, json);
-  if (!outcome.ok) return fail(outcome.reason);
+  const scannerCoverage = outcome.scannerCoverage?.map((scanner) => ({
+    ...scanner,
+    id: sanitizeDisplayText(scanner.id),
+    status: sanitizeDisplayText(scanner.status),
+  }));
+  if (!outcome.ok) return fail(outcome.reason, outcome.reportGap, scannerCoverage);
   // Report identities stay raw in the parsers. Only the CLI display is sanitized.
   const findings = outcome.findings.map((finding) => ({
     ...finding,
@@ -63,7 +76,19 @@ export async function cmdIngest(): Promise<boolean> {
   for (const note of outcome.notes ?? []) console.error(note);
 
   if (jsonMode) {
-    console.log(JSON.stringify({ count: findings.length, findings }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          count: findings.length,
+          findings,
+          coverage: outcome.coverage,
+          reportGap: outcome.reportGap,
+          scannerCoverage,
+        },
+        null,
+        2,
+      ),
+    );
     return true;
   }
   console.log(

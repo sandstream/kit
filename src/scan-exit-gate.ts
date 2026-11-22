@@ -39,6 +39,7 @@ export function exitGateFinding(
       status: "fail",
       detail: `${id} ci could not run: the API refused the token (HTTP ${refused}). Check ${scanner.needsToken ?? "the API token"}. This is not a policy result`,
       severity: "high",
+      didNotRun: true,
     };
   }
   return {

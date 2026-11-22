@@ -241,10 +241,11 @@ describe("nothing to scan does not satisfy a required scanner", () => {
     assert.equal(scanHealthGate([run], { strict: true }).ok, true);
   });
 
-  it("an ordinary not-applicable stays a legitimate skip for a required scanner", () => {
+  it("a required scanner needs applicable input to produce evidence", () => {
     const g = scanHealthGate([{ ...run, noTarget: undefined }], {
       requiredScanners: ["osv-scanner"],
     });
-    assert.equal(g.ok, true);
+    assert.equal(g.ok, false);
+    assert.match(g.failures[0], /nothing to scan/);
   });
 });
