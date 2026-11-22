@@ -153,6 +153,11 @@ async function evaluate(
   console.log(`${c.bold}Running triage on ${type}: ${redactSecrets(target)}${c.reset}\n`);
   const result = await runTriage(type, target);
   console.log(result.output);
+  if (type === "skill") {
+    const { skillInstructionLines } = await import("../triage-skill-instructions.js");
+    const lines = skillInstructionLines(target);
+    if (lines) console.log(`${lines.join("\n")}\n`);
+  }
 
   // Sandbox is currently only meaningful for npm packages: it extends the
   // registry-metadata check with offline tarball inspection.
