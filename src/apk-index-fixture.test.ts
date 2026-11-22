@@ -14,7 +14,11 @@ it("builds an APKINDEX fixture that an independent tar reader accepts", () => {
     const archive = join(root, "index.tar.gz");
     const text = "P:libexpat\nV:2.10.0-r0\no:expat\n";
     writeFileSync(archive, gzipSync(tarOf({ DESCRIPTION: "test index", APKINDEX: text })));
-    const observed = execFileSync("tar", ["-xOzf", archive, "APKINDEX"], { encoding: "utf8" });
+    // A relative name from the archive's folder: GNU tar reads `C:\...` as host `C` on Windows.
+    const observed = execFileSync("tar", ["-xOzf", "index.tar.gz", "APKINDEX"], {
+      cwd: root,
+      encoding: "utf8",
+    });
     assert.equal(observed, text);
   } finally {
     rmTemp(root);
