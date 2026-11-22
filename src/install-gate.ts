@@ -13,10 +13,10 @@
  * the existing `gateInstall` and returns a block/allow verdict. Pure + injectable
  * (no I/O here); the CLI wires it to stdin/exit-codes.
  *
- * Scope: npm (npm/pnpm/yarn/bun + npx), PyPI (pip/pip3/pipx/uv) and RubyGems (`gem install`,
- * `bundle add`: install-gate-gem.ts). Other ecosystems (cargo/go/brew) pass through when the
- * command is explicit. Unknown wrapper options and command strings are refused before ecosystem
- * detection. Within scope it is FAIL-CLOSED: an
+ * Scope: npm (npm/pnpm/yarn/bun + npx), PyPI (pip/pip3/pipx/uv), RubyGems (`gem install`,
+ * `bundle add`), crates.io (`cargo install|binstall`), Go modules (`go install|run pkg@version`)
+ * and Homebrew (`brew install`): install-gate-{gem,cargo,go,brew}.ts. Unknown wrapper options and
+ * command strings are refused before ecosystem detection. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
 import { mayChangeDirectory } from "./install-gate-cwd.js";
@@ -47,10 +47,15 @@ import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { windowsShellBodies } from "./install-gate-shells.js";
 import { installNotes, withNotes } from "./install-gate-notes.js";
 import { gemInstall } from "./install-gate-gem.js";
+import { cargoInstall } from "./install-gate-cargo.js";
+import { goInstall } from "./install-gate-go.js";
+import { brewInstall } from "./install-gate-brew.js";
 import { githubRepoRef, notePipedPayloads } from "./install-gate-pipe-interp.js";
 import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
 
 export { ownerRepoArg, explainUnverifiable };
+
+const REGISTRY_INSTALLS = [cargoInstall, goInstall, brewInstall];
 
 export interface InstallProbe {
   /** A covered install or an unresolved command carrier requires a gate decision. */
@@ -1168,6 +1173,8 @@ function scanSegment(segment: string, probe: InstallProbe): void {
 
   if (indirectInstall(tokens, probe) || claudePluginInstall(tokens, probe)) return;
   if (gemInstall(tokens, probe)) return;
+  const lead = raw.slice(0, start); // env assignments can move a registry: the parsers read them
+  if (REGISTRY_INSTALLS.some((record) => record(tokens, probe, lead))) return;
   const runner = npmRunnerInvocation(tokens);
   if (runner) {
     applyNpmRunner(runner, raw.slice(0, raw.length - tokens.length), probe);

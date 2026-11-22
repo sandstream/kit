@@ -140,9 +140,9 @@ describe("parseInstallCommand — detection", () => {
 
   it("out-of-scope ecosystems pass through (not flagged)", () => {
     assert.equal(parseInstallCommand("cargo add serde").isInstall, false);
-    assert.equal(parseInstallCommand("go install x@latest").isInstall, false);
+    assert.equal(parseInstallCommand("go build ./...").isInstall, false);
     assert.equal(parseInstallCommand("gem list").isInstall, false);
-    assert.equal(parseInstallCommand("brew install jq").isInstall, false);
+    assert.equal(parseInstallCommand("brew list").isInstall, false);
   });
 
   it("non-install commands are ignored", () => {

@@ -35,6 +35,8 @@ const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> =
   prompt: async (args) => (await import("../triage-prompt.js")).cmdTriagePrompt(args),
   pkg: async (args) => (await import("./triage-pkg.js")).cmdTriagePkg(args),
   gem: async (args) => (await import("./triage-gem.js")).cmdTriageGem(args),
+  cargo: async (args) => (await import("./triage-release.js")).cmdTriageCargo(args),
+  go: async (args) => (await import("./triage-release.js")).cmdTriageGo(args),
 };
 
 function triageSubcommand(
@@ -47,6 +49,8 @@ function triageSubcommand(
 const PIP_AND_GEM_HELP = [
   "  kit triage pip <package>             Evaluate PyPI package",
   "  kit triage gem <name>[@version]      Evaluate a RubyGems release (cooling, OSV malicious, history); install-time code not read",
+  "  kit triage cargo <crate>[@version]   Evaluate a crates.io release (cooling, yanked, OSV, owners); build-time code not read",
+  "  kit triage go <package>[@version]    Evaluate a Go module release on the module proxy (cooling, OSV); module source not read",
 ].join("\n");
 
 /** Every type `kit triage` accepts, for the unknown-type message (several dispatch before it). */
@@ -54,6 +58,8 @@ const TRIAGE_TYPES = [
   "npm",
   "pip",
   "gem",
+  "cargo",
+  "go",
   "brew",
   "docker",
   "repo",
@@ -76,7 +82,7 @@ const HELP_ROWS = [
   "  kit triage npm <package>             Evaluate npm package (registry metadata)",
   "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
   PIP_AND_GEM_HELP,
-  "  kit triage brew <formula>            Evaluate Homebrew formula (resolves upstream repo, then repo-scores)",
+  "  kit triage brew <formula>            Evaluate Homebrew formula or cask (resolves upstream repo, then repo-scores)",
   "  kit triage repo <github-url>         Evaluate GitHub repository",
   "  kit triage model <path>              Evaluate an untrusted AI artifact (model weights / dataset) before loading",
   "  kit triage model <path> --scan-bytes + byte-level malware scan via a local ClamAV delegate (clean/malicious/gap; never a silent pass)",

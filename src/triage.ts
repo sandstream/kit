@@ -155,7 +155,7 @@ async function installedScriptMatchesBundled(targetDir: string): Promise<boolean
 }
 
 export type TriageType =
-  "docker" | "npm" | "pip" | "gem" | "repo" | "skill" | "brew" | "all" | "tools";
+  "docker" | "npm" | "pip" | "gem" | "cargo" | "go" | "repo" | "skill" | "brew" | "all" | "tools";
 
 export { triageNpmSandbox, type SandboxResult };
 
@@ -254,12 +254,31 @@ function asRepoUrl(u?: string): string | undefined {
   return m[1].replace(/\.git$/i, "").replace(/\/$/, "");
 }
 
+/** The same fields for a cask (`casks[0]`), which `brew info` lists apart from formulae. */
+function parseCaskInfo(json: unknown): BrewInfo {
+  const casks = (json as { casks?: unknown[] })?.casks;
+  const cask = (Array.isArray(casks) ? casks[0] : undefined) as
+    { token?: unknown; version?: unknown; homepage?: unknown; url?: unknown } | undefined;
+  const flags = cask as { deprecated?: unknown; disabled?: unknown } | undefined;
+  if (!cask || typeof cask !== "object") return { deprecated: false, disabled: false };
+  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+  return {
+    name: text(cask.token),
+    version: text(cask.version),
+    homepage: text(cask.homepage),
+    repoUrl: asRepoUrl(text(cask.homepage)) ?? asRepoUrl(text(cask.url)),
+    deprecated: Boolean(flags?.deprecated),
+    disabled: Boolean(flags?.disabled),
+  };
+}
+
 /**
  * Pure parse of `brew info --json=v2 <formula>` into the fields triage needs.
  * Resolves the upstream repo from the homepage first, then the source URLs.
  */
 export function parseBrewInfo(json: unknown): BrewInfo {
   const formulae = (json as { formulae?: unknown[] })?.formulae;
+  if (!Array.isArray(formulae) || formulae.length === 0) return parseCaskInfo(json);
   const f = (Array.isArray(formulae) ? formulae[0] : undefined) as
     | {
         name?: string;
@@ -360,7 +379,18 @@ async function runGemTriage(target: string, cwd: string): Promise<TriageResult> 
 /** Types triaged in TypeScript instead of triage.py. */
 const NATIVE_TRIAGE: Partial<
   Record<TriageType, (target: string, cwd: string) => Promise<TriageResult>>
-> = { brew: triageBrew, gem: runGemTriage };
+> = {
+  brew: triageBrew,
+  gem: runGemTriage,
+  cargo: async (target, cwd) => {
+    const { triageCargo } = await import("./triage-cargo.js");
+    return { target, type: "cargo", ...(await triageCargo(cwd, target)) };
+  },
+  go: async (target, cwd) => {
+    const { triageGo } = await import("./triage-go.js");
+    return { target, type: "go", ...(await triageGo(cwd, target)) };
+  },
+};
 
 export async function runTriage(
   type: TriageType,
