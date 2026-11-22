@@ -3,9 +3,13 @@ import { it } from "node:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkApkFloors } from "./check-apk-floors.js";
 import { gateStatus } from "./check-security.js";
-import { alpineFixtureFetcher, apkIndexFixture, secdbFixture } from "./apk-index.test-support.js";
+import {
+  alpineFixtureFetcher,
+  apkIndexFixture,
+  checkApkFloorsFixture,
+  secdbFixture,
+} from "./apk-index.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const ORIGIN = "P:codec-lib\nV:2-r0\no:codec\n\n";
@@ -27,7 +31,7 @@ async function inspect(
       join(root, "Dockerfile"),
       `FROM alpine:3.24\nRUN apk add ${options.floors ?? "'codec-lib>=1-r0'"}\n`,
     );
-    const result = await checkApkFloors(
+    const result = await checkApkFloorsFixture(
       root,
       alpineFixtureFetcher(async (url) => {
         seen.push(url);

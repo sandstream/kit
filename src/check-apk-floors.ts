@@ -26,6 +26,7 @@ import {
 } from "./check-apk-sources.js";
 import { sanitizeDisplayText } from "./display-text.js";
 import { readRegularFileBytesIfPresent } from "./upstream-safe-read.js";
+import type { ApkIndexKeys } from "./alpine-index-signature.js";
 export { defaultApkFetcher, type ApkFetcher } from "./check-apk-fetch.js";
 
 export const APK_FLOORS_NAME = "alpine apk floors";
@@ -107,6 +108,7 @@ async function compareBranches(
   byBranch: ReadonlyMap<string, ApkFloor[]>,
   lookup: AlpineSourceEvidence | undefined,
   fetcher: ApkFetcher,
+  keys?: ApkIndexKeys,
 ): Promise<FloorComparison> {
   const judged: FloorComparison = {
     findings: [],
@@ -120,7 +122,7 @@ async function compareBranches(
   };
   for (const [branch, list] of [...byBranch].sort()) {
     try {
-      const sources = await readAlpineBranch(branch, fetcher);
+      const sources = await readAlpineBranch(branch, fetcher, keys);
       judged.evidenceSources.push(...sources.sources);
       const one = judgeFloors(list, branch, sources.secfixes, sources.origins);
       const findings = sources.originsComplete ? judged.findings : judged.preliminary;
@@ -229,6 +231,7 @@ export async function checkApkFloors(
   root: string,
   fetcher: ApkFetcher = defaultApkFetcher,
   env: NodeJS.ProcessEnv = process.env,
+  keys?: ApkIndexKeys,
 ): Promise<SecurityCheckResult> {
   const inventory = readFloors(root);
   const { floors, unread, gaps } = inventory;
@@ -249,6 +252,6 @@ export async function checkApkFloors(
     });
   }
   const { byBranch, assumed, lookup } = await groupByBranch(floors, fetcher);
-  const judged = await compareBranches(byBranch, lookup, fetcher);
+  const judged = await compareBranches(byBranch, lookup, fetcher, keys);
   return verdict(inventory, judged, assumed);
 }

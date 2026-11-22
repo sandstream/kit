@@ -12,8 +12,10 @@ The archive reader permits at most 64 MiB after decompression, across all gzip m
 It permits at most 4,096 tar entries and 64 KiB per local PAX metadata entry.
 
 Kit validates header checksums, complete numeric fields, member bodies, zero padding, and final zero blocks.
-It accepts GNU and POSIX ustar headers. It accepts regular signature entries before an optional DESCRIPTION and exactly one APKINDEX.
-Signature fragments need no tar end blocks. The complete archive must end with at least two complete zero blocks.
+It accepts GNU and POSIX ustar headers. The leading gzip member must contain one regular signature entry.
+The signature fragment has a 16 KiB inflated size limit and needs no tar end blocks.
+The signed archive must contain DESCRIPTION and exactly one APKINDEX.
+It must end with at least two complete zero blocks.
 Kit validates the entire archive before it returns APKINDEX text. It rejects invalid UTF-8 text.
 Kit also requires complete compressed-input consumption. It rejects residual bytes after the final gzip member, including zero padding.
 This restriction prevents a zero byte from hiding another member or corrupt content from the gzip reader.
@@ -23,18 +25,23 @@ Kit rejects other PAX keys, links, special files, unknown logical members, and u
 Two end blocks, zero member padding, and these extension restrictions define Kit's supported producer profile.
 They are stricter than some tar readers. An unsupported archive leaves the check unverified.
 
-Header checksums detect malformed structure. They provide no signature verification.
+Kit verifies Alpine's detached RSA or RSA256 signature over the exact compressed payload.
+It uses the public keys for x86_64 from the pinned Alpine `alpine-keys` package definition.
+The runtime must support the signature method in the archive.
 Kit requests the exact Alpine HTTPS URL for the branch, repository, and architecture.
-The APKINDEX DESCRIPTION must also name the requested stable branch.
+The signed DESCRIPTION must also name the requested stable branch.
 Kit checks each APKINDEX record for the requested architecture or `noarch`.
-The repository comes from the publisher's HTTPS path.
+Alpine's signed index format contains no repository name.
+The repository binding depends on the publisher's HTTPS path.
 
 Kit requests cache revalidation for each GET.
 The secdb and APKINDEX responses must supply a valid HTTP Last-Modified date.
 Kit rejects dates more than 30 days old or more than five minutes in the future.
-These are Kit's limits for publisher-reported modification times.
+Kit also applies these limits to the signed APKINDEX entry's modification time.
+It honors a local PAX modification time for that entry when present.
+The signature member can have a separate timestamp. Kit does not use it to assess age.
 The publisher and the local clock remain trust dependencies.
-The date does not prove that a newer index is unavailable or that Alpine still supports the repository.
+The dates give evidence of age. They do not prove that this is the latest index or that Alpine still supports the repository.
 The stable branch directory listing has no Last-Modified requirement.
 
 ## Complete data and comparison
@@ -71,6 +78,7 @@ A complete comparison with zero findings has status `complete-empty`.
 The `evidenceSources` array identifies each requested source by URL and includes its separate outcome.
 Source rows give the branch, repository, and architecture when these fields apply.
 The `lastModified` field is the HTTP modification time in ISO 8601 format.
+Authenticated APKINDEX rows can also carry `signedAt` and `signingKey`.
 The source statuses separate empty results from missing, malformed, stale, unsupported, and unavailable input.
 
 ## Dockerfile discovery
@@ -85,6 +93,7 @@ Kit reads regular Dockerfiles up to 8 MiB. A file that changes size during the r
 ## Evidence
 
 `alpine-index-archive.test.ts` exercises accepted formats, corruption, truncation, duplicate members, unsupported metadata, and resource limits.
+`alpine-index-signature.test.ts` checks detached signatures, untrusted keys, and changes after signing.
 `apk-index-fixture.test.ts` checks the synthetic tar writer with the operating system's tar reader.
 `alpine-secdb.test.ts` and `alpine-index-origins.test.ts` cover whole-feed and whole-record validation.
 `check-apk-floors-integrity.test.ts` and `check-apk-floors-coverage.test.ts` exercise the public check with real archive and JSON bytes.

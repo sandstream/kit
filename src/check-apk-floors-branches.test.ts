@@ -3,11 +3,11 @@ import { it } from "node:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkApkFloors } from "./check-apk-floors.js";
 import { gateStatus } from "./check-security.js";
 import {
   alpineFixtureFetcher,
   apkIndexFixture,
+  checkApkFloorsFixture,
   secdbFixture,
   secdbIndexFixture,
 } from "./apk-index.test-support.js";
@@ -33,7 +33,7 @@ async function inspect(
       join(root, "Dockerfile"),
       stages.map((image) => `FROM ${image}\nRUN apk add 'binary>=1-r0'\n`).join("\n"),
     );
-    const result = await checkApkFloors(
+    const result = await checkApkFloorsFixture(
       root,
       alpineFixtureFetcher(async (url) => {
         seen.push(url);

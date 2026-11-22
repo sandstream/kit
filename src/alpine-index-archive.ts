@@ -1,22 +1,25 @@
 import { isUtf8 } from "node:buffer";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, inflateRawSync } from "node:zlib";
 
 const BLOCK = 512;
 const MAX_COMPRESSED = 16 * 1024 * 1024;
 const MAX_INFLATED = 64 * 1024 * 1024;
 const MAX_ENTRIES = 4096;
 const MAX_PAX = 64 * 1024;
+const MAX_SIGNATURE_BYTES = 16 * 1024;
+const GZIP_HEADER_BYTES = 10;
+const GZIP_TRAILER_BYTES = 8;
 
 export class ApkIndexFormatError extends Error {
   constructor(
     reason: string,
-    readonly status: "malformed" | "unsupported",
+    readonly status: "malformed" | "missing" | "unsupported",
   ) {
     super(`APKINDEX.tar.gz: ${reason}`);
   }
 }
 
-function refuse(reason: string, status: "malformed" | "unsupported" = "malformed"): never {
+function refuse(reason: string, status: ApkIndexFormatError["status"] = "malformed"): never {
   throw new ApkIndexFormatError(reason, status);
 }
 
@@ -49,6 +52,7 @@ interface Entry {
   name: string;
   type: number;
   size: number;
+  mtime: number;
 }
 
 function readHeader(header: Buffer): Entry {
@@ -65,7 +69,6 @@ function readHeader(header: Buffer): Entry {
     [100, 8],
     [108, 8],
     [116, 8],
-    [136, 12],
   ])
     octal(header, start, length);
   octal(header, 329, 8, true);
@@ -78,13 +81,15 @@ function readHeader(header: Buffer): Entry {
     name: prefix ? `${prefix}/${name}` : name,
     type: header[156],
     size: octal(header, 124, 12),
+    mtime: octal(header, 136, 12),
   };
 }
 
 /** Only timestamp metadata is supported. Path, size, and other semantic overrides are refused. */
-function validatePax(body: Buffer): void {
+function readPaxMtime(body: Buffer): number | undefined {
   if (body.length === 0 || body.length > MAX_PAX) refuse("unsupported PAX metadata size");
   const keys = new Set<string>();
+  let mtime: number | undefined;
   for (let offset = 0; offset < body.length;) {
     const space = body.indexOf(32, offset);
     if (space < 0) refuse("invalid PAX record length");
@@ -101,8 +106,10 @@ function validatePax(body: Buffer): void {
     if (!match || match[0].length !== record.length || keys.has(match[1]))
       refuse("unsupported or repeated PAX metadata");
     keys.add(match[1]);
+    if (match[1] === "mtime") mtime = Number(match[2]);
     offset = end;
   }
+  return mtime;
 }
 
 function entryBody(tar: Buffer, offset: number, size: number): { body: Buffer; next: number } {
@@ -116,8 +123,10 @@ function entryBody(tar: Buffer, offset: number, size: number): { body: Buffer; n
 
 interface ArchiveState {
   index?: Buffer;
+  mtime?: number;
   description?: Buffer;
   pendingPax: boolean;
+  paxMtime?: number;
 }
 
 function acceptRegular(state: ArchiveState, entry: Entry, body: Buffer): void {
@@ -134,6 +143,7 @@ function acceptRegular(state: ArchiveState, entry: Entry, body: Buffer): void {
   }
   if (entry.name === "APKINDEX" && state.index === undefined) {
     state.index = body;
+    state.mtime = state.paxMtime ?? entry.mtime;
     return;
   }
   refuse(
@@ -148,12 +158,11 @@ function finish(tar: Buffer, offset: number, state: ArchiveState) {
     refuse("incomplete terminator or data after terminator");
   if (state.index === undefined) refuse("no APKINDEX member");
   if (!isUtf8(state.index)) refuse("invalid UTF-8 in APKINDEX");
-  return { text: state.index.toString("utf8"), description: state.description };
+  return { text: state.index.toString("utf8"), description: state.description, mtime: state.mtime };
 }
 
-function inflateComplete(gz: Buffer, limit: number): Buffer {
+function gzipInfo(result: unknown): { body: Buffer; consumed: number } {
   // Node's declarations omit the documented object result for info:true.
-  const result: unknown = gunzipSync(gz, { maxOutputLength: limit, info: true });
   if (
     typeof result !== "object" ||
     result === null ||
@@ -167,10 +176,64 @@ function inflateComplete(gz: Buffer, limit: number): Buffer {
     typeof engine !== "object" ||
     engine === null ||
     !("bytesWritten" in engine) ||
-    engine.bytesWritten !== gz.length
+    typeof engine.bytesWritten !== "number"
   )
-    refuse("unconsumed gzip input");
-  return result.buffer;
+    refuse("gzip input accounting unavailable");
+  return { body: result.buffer, consumed: engine.bytesWritten };
+}
+
+function inflateComplete(gz: Buffer, limit: number): Buffer {
+  const inflated = gzipInfo(gunzipSync(gz, { maxOutputLength: limit, info: true }));
+  if (inflated.consumed !== gz.length) refuse("unconsumed gzip input");
+  return inflated.body;
+}
+
+function endOfSignatureMember(gz: Buffer): number {
+  if (gz.length > MAX_COMPRESSED) refuse("compressed input exceeds 16 MiB");
+  if (
+    gz.length < GZIP_HEADER_BYTES + GZIP_TRAILER_BYTES ||
+    !gz.subarray(0, 3).equals(Buffer.from([31, 139, 8]))
+  )
+    refuse("invalid signature gzip header");
+  if (gz[3] !== 0) refuse("unsupported signature gzip flags", "unsupported");
+  const signature = gzipInfo(
+    inflateRawSync(gz.subarray(GZIP_HEADER_BYTES), {
+      maxOutputLength: MAX_SIGNATURE_BYTES,
+      info: true,
+    }),
+  );
+  const end = GZIP_HEADER_BYTES + signature.consumed + GZIP_TRAILER_BYTES;
+  if (end > gz.length) refuse("incomplete signature gzip member");
+  if (end === gz.length) refuse("missing separate signature and payload gzip members", "missing");
+  return end;
+}
+
+function signatureEntry(tar: Buffer, offset: number) {
+  if (tar.length - offset < BLOCK) refuse("incomplete signature tar header");
+  const entry = readHeader(tar.subarray(offset, offset + BLOCK));
+  return { entry, ...entryBody(tar, offset, entry.size) };
+}
+
+/** Separate the publisher signature from the precise compressed bytes it covers. */
+export function readApkIndexEnvelope(gz: Buffer) {
+  const end = endOfSignatureMember(gz);
+  const tar = inflateComplete(gz.subarray(0, end), MAX_SIGNATURE_BYTES);
+  let signature = signatureEntry(tar, 0);
+  if (signature.entry.type === 120) {
+    readPaxMtime(signature.body);
+    signature = signatureEntry(tar, signature.next);
+  }
+  if (!signature.entry.name.startsWith(".SIGN.")) refuse("missing detached signature", "missing");
+  if (signature.entry.type !== 0 && signature.entry.type !== 48)
+    refuse("unsupported signature entry type", "unsupported");
+  if (!signature.body.length || signature.next !== tar.length)
+    refuse("expected one nonempty signature in the leading gzip member");
+  return {
+    signature: signature.body,
+    name: signature.entry.name,
+    payload: gz.subarray(end),
+    maxPayloadInflatedBytes: MAX_INFLATED - tar.length,
+  };
 }
 
 /**
@@ -199,9 +262,12 @@ export function readApkIndexArchive(gz: Buffer, maxInflatedBytes = MAX_INFLATED)
     const { body, next } = entryBody(tar, offset, entry.size);
     if (entry.type === 120) {
       if (state.pendingPax || state.index !== undefined) refuse("unexpected PAX metadata");
-      validatePax(body);
+      state.paxMtime = readPaxMtime(body);
       state.pendingPax = true;
-    } else acceptRegular(state, entry, body);
+    } else {
+      acceptRegular(state, entry, body);
+      state.paxMtime = undefined;
+    }
     offset = next;
   }
   return refuse("missing tar terminator");

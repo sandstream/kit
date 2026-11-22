@@ -6,9 +6,11 @@ import { it, type TestContext } from "node:test";
 import {
   alpineFixtureFetcher,
   apkIndexFixture,
+  checkApkFloorsFixture,
+  FIXTURE_KEY_NAME,
   secdbIndexFixture,
 } from "./apk-index.test-support.js";
-import { checkApkFloors, type ApkFetcher } from "./check-apk-floors.js";
+import { type ApkFetcher } from "./check-apk-floors.js";
 import { securityCheckToJson } from "./check-run.js";
 import { gateStatus } from "./check-security.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
@@ -46,7 +48,7 @@ function sources(overrides: Partial<Record<string, Buffer | null>> = {}): ApkFet
 }
 
 it("reports the exact scope and complete coverage through the check JSON mapping", async (t) => {
-  const row = securityCheckToJson(await checkApkFloors(repo(t), sources(), {}));
+  const row = securityCheckToJson(await checkApkFloorsFixture(repo(t), sources(), {}));
   assert.equal(row.status, "pass");
   assert.equal(row.evidenceStatus, "complete-empty");
   assert.equal(row.evidenceSources?.length, 4);
@@ -61,9 +63,32 @@ it("reports the exact scope and complete coverage through the check JSON mapping
     architecture: "x86_64",
     status: "complete",
     lastModified: mainIndex?.lastModified,
+    signedAt: mainIndex?.signedAt,
+    signingKey: FIXTURE_KEY_NAME,
   });
   assert.match(mainIndex.lastModified ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(mainIndex.signedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(row.evidenceSources?.at(-1)?.status, "complete-empty");
+});
+
+it("rejects an older signed APKINDEX even with a current HTTP timestamp", async (t) => {
+  const record = "P:example-lib\nV:2-r0\no:example-source\n";
+  const age = 31 * 24 * 60 * 60;
+  const time = Math.floor(Date.now() / 1000) - age;
+  const row = await checkApkFloorsFixture(
+    repo(t),
+    sources({ "main/x86_64/APKINDEX.tar.gz": apkIndexFixture(branch, record, "x86_64", time) }),
+    {},
+  );
+  assert.equal(gateStatus(row), "fail");
+  assert.equal(row.evidenceStatus, "partial");
+  const stale = row.evidenceSources?.[1];
+  assert.equal(stale?.status, "stale");
+  assert.equal(stale.signingKey, FIXTURE_KEY_NAME);
+  assert.equal(stale.signedAt, new Date(time * 1000).toISOString());
+  assert.ok(stale.lastModified);
+  assert.match(row.detail, /Signed APKINDEX timestamp is more than 30 days old/);
+  assert.equal(row.evidenceSources?.[3]?.status, "complete-empty");
 });
 
 it("refuses complete archives with foreign scope or unsupported descriptions", async (t) => {
@@ -83,7 +108,7 @@ it("refuses complete archives with foreign scope or unsupported descriptions", a
     },
   ];
   for (const { archive, status, reason } of fixtures) {
-    const observed = await checkApkFloors(
+    const observed = await checkApkFloorsFixture(
       root,
       sources({ "main/x86_64/APKINDEX.tar.gz": archive }),
       {},
@@ -114,7 +139,7 @@ it("distinguishes missing, malformed and stale timestamps from success", async (
     },
   ];
   for (const { lastModified, status, message } of cases) {
-    const observed = await checkApkFloors(
+    const observed = await checkApkFloorsFixture(
       root,
       async (url) => {
         const source = await defaultSources(url);
@@ -136,7 +161,7 @@ it("rejects a secdb result for another branch or repository", async (t) => {
     { ...main, distroversion: "v3.23" },
     { ...main, reponame: "community" },
   ]) {
-    const result = await checkApkFloors(
+    const result = await checkApkFloorsFixture(
       root,
       sources({ "main.json": Buffer.from(JSON.stringify(foreign)) }),
       {},
@@ -153,7 +178,7 @@ it("retains a validated main finding when its peer source is unavailable", async
     "main.json": Buffer.from(JSON.stringify({ ...main, packages: fixes })),
     "community.json": null,
   });
-  const row = await checkApkFloors(root, fetcher, {});
+  const row = await checkApkFloorsFixture(root, fetcher, {});
   assert.equal(row.didNotRun, true);
   assert.equal(row.hasFindings, true);
   assert.equal(row.scanIncomplete, true);
@@ -166,7 +191,11 @@ it("retains a validated main finding when its peer source is unavailable", async
 it("refuses an ambiguous duplicate field in a secdb response", async (t) => {
   const root = repo(t);
   const duplicate = JSON.stringify({ ...main, packages: fixes }).replace(/}$/, ',"packages":[]}');
-  const result = await checkApkFloors(root, sources({ "main.json": Buffer.from(duplicate) }), {});
+  const result = await checkApkFloorsFixture(
+    root,
+    sources({ "main.json": Buffer.from(duplicate) }),
+    {},
+  );
   assert.equal(result.didNotRun, true, result.detail);
   assert.match(result.detail, /duplicate object keys/i);
 });
@@ -175,7 +204,7 @@ it("refuses a stable branch index that contains invalid UTF-8", async (t) => {
   const root = repo(t, "2-r0", "node:22-alpine");
   const route = "https://secdb.alpinelinux.org/";
   const body = Buffer.concat([secdbIndexFixture("v3.24"), Buffer.from([0xff])]);
-  const result = await checkApkFloors(root, sources({ [route]: body }), {});
+  const result = await checkApkFloorsFixture(root, sources({ [route]: body }), {});
   assert.equal(result.didNotRun, true, result.detail);
   assert.match(result.detail, /invalid UTF-8/);
 });
@@ -198,7 +227,7 @@ it(
     );
     chmodSync(directory, 0);
     try {
-      const result = await checkApkFloors(root, sources(), {});
+      const result = await checkApkFloorsFixture(root, sources(), {});
       assert.equal(result.didNotRun, true, result.detail);
       assert.match(result.detail, /worker/);
     } finally {
@@ -215,12 +244,16 @@ it("reports a directory beyond the search depth as unverified", async (t) => {
     join(directory, "Dockerfile"),
     "FROM alpine:3.24\nRUN apk add 'example-lib>=1-r0'\n",
   );
-  const result = await checkApkFloors(root, sources(), {});
+  const result = await checkApkFloorsFixture(root, sources(), {});
   assert.equal(result.didNotRun, true, result.detail);
   assert.match(result.detail, /depth limit/);
-  const offline = await checkApkFloors(root, async () => assert.fail("unexpected network lookup"), {
-    KIT_AIRGAP: "1",
-  });
+  const offline = await checkApkFloorsFixture(
+    root,
+    async () => assert.fail("unexpected network lookup"),
+    {
+      KIT_AIRGAP: "1",
+    },
+  );
   assert.equal(offline.didNotRun, true);
   assert.equal(gateStatus(offline), "fail");
   assert.match(offline.detail, /air-gap.*depth limit/);
@@ -235,7 +268,7 @@ it("records the Dockerfile limit and retains the floors already found", async (t
     );
   }
   const currentMain = Buffer.from(JSON.stringify({ ...main, packages: fixes }));
-  const result = await checkApkFloors(root, sources({ "main.json": currentMain }), {});
+  const result = await checkApkFloorsFixture(root, sources({ "main.json": currentMain }), {});
   assert.equal(result.didNotRun, true);
   assert.equal(result.hasFindings, true);
   assert.match(result.detail, /Dockerfile limit/);
@@ -246,7 +279,7 @@ it("rejects package names that lose their identity during an APKINDEX join", asy
   const root = repo(t);
   const inconsistent = [{ pkg: { name: "example-source ", secfixes: { "3-r0": [advisory] } } }];
   const response = Buffer.from(JSON.stringify({ ...main, packages: inconsistent }));
-  const row = await checkApkFloors(root, sources({ "main.json": response }), {});
+  const row = await checkApkFloorsFixture(root, sources({ "main.json": response }), {});
   assert.equal(row.didNotRun, true);
   assert.match(row.detail, /invalid package name/);
 });
@@ -254,7 +287,7 @@ it("rejects package names that lose their identity during an APKINDEX join", asy
 it("labels a finding preliminary when a missing index can change the package origin", async (t) => {
   const root = repo(t, "1-r0");
   const localMain = Buffer.from(JSON.stringify({ ...main, packages: fixes }));
-  const partial = await checkApkFloors(
+  const partial = await checkApkFloorsFixture(
     root,
     sources({
       "main.json": localMain,
@@ -269,7 +302,7 @@ it("labels a finding preliminary when a missing index can change the package ori
   assert.match(partial.detail, new RegExp(advisory));
 
   const otherOrigin = apkIndexFixture(branch, "P:example-lib\nV:2-r0\no:other-source\n");
-  const compared = await checkApkFloors(
+  const compared = await checkApkFloorsFixture(
     root,
     sources({
       "main.json": localMain,
@@ -288,7 +321,7 @@ it("keeps an incomplete stable index unverified without fetching a candidate bra
   const fragment = Buffer.from('<a href="v3.24/">v3.24/</a>');
   const mock = sources({ [route]: fragment });
   const called: string[] = [];
-  const row = await checkApkFloors(
+  const row = await checkApkFloorsFixture(
     root,
     (url) => {
       called.push(url);

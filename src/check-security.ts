@@ -52,6 +52,7 @@ import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
 import { OSV_EXITS, readOsvReport } from "./osv-report.js";
 import { readTrivyReport } from "./trivy-report.js";
+import { readSemgrepReport } from "./semgrep-report.js";
 import {
   scannerEvidence,
   scannerGap,
@@ -2267,40 +2268,6 @@ function semgrepAirGapRefusal(config: string): SecurityCheckResult {
   };
 }
 
-function semgrepVerdict(raw: string, config: string): SecurityCheckResult {
-  try {
-    const parsed = JSON.parse(raw) as { results?: Array<{ extra?: { severity?: string } }> };
-    const findings: Array<{ extra?: { severity?: string } }> = parsed.results ?? [];
-    const high = findings.filter(
-      (f) => f.extra?.severity === "ERROR" || f.extra?.severity === "WARNING",
-    );
-
-    if (high.length === 0) {
-      return {
-        category: "supply-chain",
-        name: SEMGREP_NAME,
-        status: "pass",
-        detail: "no security issues found",
-      };
-    }
-    return {
-      category: "supply-chain",
-      name: SEMGREP_NAME,
-      status: high.some((f) => f.extra?.severity === "ERROR") ? "fail" : "warn",
-      detail: `${high.length} security finding(s) -run: semgrep scan --config ${config}`,
-      severity: high.some((f) => f.extra?.severity === "ERROR") ? "high" : "medium",
-    };
-  } catch {
-    return {
-      category: "supply-chain",
-      name: SEMGREP_NAME,
-      status: "warn",
-      detail: "semgrep scan failed",
-      severity: "low",
-    };
-  }
-}
-
 async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
   // SAST is opt-in. Once requested, a missing scanner is an unscanned warning,
   // while air-gap mode refuses registry rules before spawning the process.
@@ -2316,7 +2283,25 @@ async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
     timeout: 120_000,
     cwd: root,
   });
-  return semgrepVerdict(result.stdout || result.stderr, config);
+  const report = readSemgrepReport(result.stdout);
+  const { count, blocking, scanned } = report;
+  const row: SecurityCheckResult =
+    count > 0
+      ? {
+          category: "supply-chain",
+          name: SEMGREP_NAME,
+          status: blocking ? "fail" : "warn",
+          detail: `${count} security finding(s). Run semgrep scan --config ${config}`,
+          severity: blocking ? "high" : "medium",
+        }
+      : {
+          category: "supply-chain",
+          name: SEMGREP_NAME,
+          status: "pass",
+          detail: `Semgrep reported ${scanned} scanned file(s) and no findings at warning severity or higher`,
+        };
+  // This command omits --error, so only exit zero can establish coverage.
+  return scannerEvidence(row, count, scannerGap(report, result));
 }
 
 /**

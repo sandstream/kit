@@ -6,7 +6,8 @@ import {
   type ApkFetcher,
 } from "./check-apk-fetch.js";
 import { mergeApkIndexOrigins, parseApkIndexOrigins } from "./alpine-index-origins.js";
-import { ApkIndexFormatError, readApkIndexArchive } from "./alpine-index-archive.js";
+import { ApkIndexFormatError } from "./alpine-index-archive.js";
+import { verifyApkIndex, type ApkIndexKeys } from "./alpine-index-signature.js";
 import { mergeSecdb, readSecdbSource, type AlpineRepository } from "./alpine-secdb.js";
 import { newestStableBranch } from "./dockerfile-apk-floors.js";
 import { sanitizeDisplayText } from "./display-text.js";
@@ -32,7 +33,7 @@ type SourceScope =
 
 type SourceSuccess = "complete" | "complete-empty";
 type SourceGap = ScannerReportGap | "stale";
-type SourcePublication = { lastModified?: string };
+type SourcePublication = { lastModified?: string; signedAt?: string; signingKey?: string };
 type SourceGood = SourceScope & SourcePublication & { status: SourceSuccess };
 type SourceBad = SourceScope & SourcePublication & { status: SourceGap; reason: string };
 export type AlpineSourceEvidence = SourceGood | SourceBad;
@@ -81,21 +82,18 @@ function readPublicationTime(lastModified: string | null): number {
   return time;
 }
 
-function requireCurrentPublication(time: number): void {
+function requireCurrentPublication(time: number, label: string): void {
   const age = Date.now() - time;
   if (age < -MAX_CLOCK_SKEW_MS)
-    throw new AlpineSourceError(
-      "HTTP Last-Modified is more than five minutes in the future",
-      "malformed",
-    );
+    throw new AlpineSourceError(`${label} is more than five minutes in the future`, "malformed");
   if (age > MAX_SOURCE_AGE_MS)
-    throw new AlpineSourceError("HTTP Last-Modified is more than 30 days old", "stale");
+    throw new AlpineSourceError(`${label} is more than 30 days old`, "stale");
 }
 
 async function readSource<T extends { size: number } | string>(
   fetcher: ApkFetcher,
   scope: SourceScope,
-  parse: (body: Buffer) => T,
+  parse: (body: Buffer, publication: SourcePublication) => T,
 ): Promise<ReadSource<T>> {
   let response: AlpineSourceResponse;
   try {
@@ -106,12 +104,12 @@ async function readSource<T extends { size: number } | string>(
   if (!response.body.length) return sourceRefusal(scope, "empty response body", "missing");
   const publication: SourcePublication = {};
   try {
-    const data = parse(response.body);
     if (scope.kind !== "branch-list") {
       const time = readPublicationTime(response.lastModified);
       publication.lastModified = new Date(time).toISOString();
-      requireCurrentPublication(time);
+      requireCurrentPublication(time, "HTTP Last-Modified");
     }
+    const data = parse(response.body, publication);
     const count = typeof data === "string" ? data.length : data.size;
     return {
       data,
@@ -122,8 +120,7 @@ async function readSource<T extends { size: number } | string>(
   }
 }
 
-function readIndexOrigins(body: Buffer, branch: string): Map<string, string> {
-  const { text, description } = readApkIndexArchive(body);
+function requireBranch(description: Buffer | undefined, branch: string): void {
   if (!description?.length) throw new AlpineSourceError("APKINDEX has no DESCRIPTION", "missing");
   if (description.length > 256 || !isUtf8(description))
     throw new AlpineSourceError("invalid APKINDEX DESCRIPTION", "malformed");
@@ -133,10 +130,31 @@ function readIndexOrigins(body: Buffer, branch: string): Map<string, string> {
   if (!version) throw new AlpineSourceError("unsupported APKINDEX DESCRIPTION", "unsupported");
   if (version[1] !== branch)
     throw new AlpineSourceError("APKINDEX DESCRIPTION names a different branch", "malformed");
+}
+
+function readIndexOrigins(
+  body: Buffer,
+  branch: string,
+  publication: SourcePublication,
+  keys?: ApkIndexKeys,
+): Map<string, string> {
+  const { text, description, mtime, signingKey } = verifyApkIndex(body, keys);
+  publication.signingKey = signingKey;
+  const signedAt = new Date((mtime ?? 0) * 1000);
+  if (!Number.isFinite(signedAt.getTime()) || signedAt.getTime() <= 0)
+    throw new AlpineSourceError("invalid signed APKINDEX timestamp", "malformed");
+  publication.signedAt = signedAt.toISOString();
+  requireCurrentPublication(signedAt.getTime(), "Signed APKINDEX timestamp");
+  requireBranch(description, branch);
   return parseApkIndexOrigins(text, ARCHITECTURE);
 }
 
-async function readRepository(branch: string, repository: AlpineRepository, fetcher: ApkFetcher) {
+async function readRepository(
+  branch: string,
+  repository: AlpineRepository,
+  fetcher: ApkFetcher,
+  keys?: ApkIndexKeys,
+) {
   const root = `${branch}/${repository}`;
   const [secdb, index] = await Promise.all([
     readSource(
@@ -158,7 +176,7 @@ async function readRepository(branch: string, repository: AlpineRepository, fetc
         repository,
         architecture: ARCHITECTURE,
       },
-      (body) => readIndexOrigins(body, branch),
+      (body, publication) => readIndexOrigins(body, branch, publication, keys),
     ),
   ]);
   return { secdb, index };
@@ -169,9 +187,9 @@ function sourceData<T>(source: ReadSource<T>): T[] {
 }
 
 /** Assess each source separately so valid evidence stays visible during a partial outage. */
-export async function readAlpineBranch(branch: string, fetcher: ApkFetcher) {
+export async function readAlpineBranch(branch: string, fetcher: ApkFetcher, keys?: ApkIndexKeys) {
   const repositories = await Promise.all(
-    REPOSITORIES.map((repo) => readRepository(branch, repo, fetcher)),
+    REPOSITORIES.map((repo) => readRepository(branch, repo, fetcher, keys)),
   );
   const sources = repositories.flatMap(({ secdb, index }) => [secdb.evidence, index.evidence]);
   return {
