@@ -221,6 +221,7 @@
     "map",
     "mcp",
     "mcp auth",
+    "mcp callback",
     "mcp clear",
     "mcp list",
     "mcp set-token",

@@ -358,7 +358,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   install: ["--no-triage"],
   login: ["--json", "--plan", "--retry-count", "--service"],
   map: ["--budget", "--co-change", "--depth", "--json", "--name-only", "--no-merges"],
-  mcp: ["--from-env", "--paste"],
+  mcp: ["--for", "--from-env", "--paste"],
   memory: [
     "--all",
     "--area",

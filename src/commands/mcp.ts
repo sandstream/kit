@@ -136,6 +136,10 @@ export async function cmdMcp(): Promise<boolean> {
     return true;
   }
   if (sub === "web") return runWebWizard();
+  if (sub === "callback") {
+    const { cmdMcpCallback } = await import("../mcp-callback.js");
+    return cmdMcpCallback(process.argv.slice(process.argv.indexOf("callback") + 1));
+  }
 
   const config = await loadConfig(resolveConfigPath()).catch(() => null);
   const mcpConfig = config?.mcp;
@@ -147,6 +151,6 @@ export async function cmdMcp(): Promise<boolean> {
   if (sub === "set-token") return setTokenMcp(name, mcpConfig, orchestrator);
   if (sub === "clear") return clearMcp(name, orchestrator.clearMcpToken);
   return usage(
-    "Usage: kit mcp [web | list | status | auth <name> | set-token <name> | clear <name>]",
+    "Usage: kit mcp [web | list | status | auth <name> | set-token <name> | clear <name> | callback]",
   );
 }
