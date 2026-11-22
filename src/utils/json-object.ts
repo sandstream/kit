@@ -3,10 +3,10 @@ type JsonIssue = {
   message: string;
 };
 
-export type NpmJsonResult = { value: Record<string, unknown> } | { issues: JsonIssue[] };
+export type JsonObjectResult = { value: Record<string, unknown> } | { issues: JsonIssue[] };
 
 /** Parse JSON data with unambiguous object keys and bounded nesting. */
-export function parseNpmObject(bytes: Uint8Array, maxBytes: number): NpmJsonResult {
+export function parseJsonObject(bytes: Uint8Array, maxBytes: number): JsonObjectResult {
   if (bytes.byteLength > maxBytes) {
     return {
       issues: [
@@ -25,12 +25,12 @@ export function parseNpmObject(bytes: Uint8Array, maxBytes: number): NpmJsonResu
   }
   let value: unknown;
   try {
+    const issues = objectKeyIssues(content);
+    if (issues.length > 0) return { issues };
     value = JSON.parse(content);
   } catch {
     return { issues: [{ code: "invalid-json", message: "Expected a JSON document." }] };
   }
-  const issues = objectKeyIssues(content);
-  if (issues.length > 0) return { issues };
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return { issues: [{ code: "invalid-schema", message: "Expected a JSON object." }] };
   }

@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
+import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import {
   LOCAL_COVER,
   scannedHead,
@@ -27,7 +27,7 @@ import {
   isLocalSemgrepConfig,
   PROVIDER_GLOB,
 } from "./scanners.js";
-import { findIac } from "./check-iac-detect.js";
+import { findIacFiles } from "./check-iac-detect.js";
 import { checkApkFloors } from "./check-apk-floors.js";
 import { checkMavenSbomCoverage } from "./maven-sbom.js";
 import type { SecurityLevel } from "./check-projects.js";
@@ -49,6 +49,13 @@ import {
 } from "./bumblebee.js";
 import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
+import { OSV_EXITS, readOsvReport } from "./osv-report.js";
+import { readTrivyReport } from "./trivy-report.js";
+import {
+  scannerEvidence,
+  scannerGap,
+  type ScannerEvidenceStatus,
+} from "./check-scanner-evidence.js";
 import { checkTranscriptSecrets } from "./check-transcripts.js";
 import { checkLicenses } from "./check-licenses.js";
 import { checkBrowserScripts } from "./check-browser-scripts.js";
@@ -126,6 +133,7 @@ export interface SecurityCheckResult extends Partial<{ hasFindings: true; scanIn
    * didNotRun — it is an honest skip.
    */
   didNotRun?: boolean;
+  evidenceStatus?: ScannerEvidenceStatus;
   /**
    * An out-of-verdict advisory riding on this result. Some signals must NOT move
    * pass/fail — catalog age is a function of the wall clock, an upstream release is a
@@ -1916,53 +1924,13 @@ async function checkTrivy(root: string): Promise<SecurityCheckResult> {
     { timeout: 120_000, cwd: root },
   );
 
-  if (!result.ok && !result.stdout) {
-    return {
-      category: "supply-chain",
-      name: "trivy container scan",
-      status: "warn",
-      detail: failedDetail("trivy scan failed", result),
-      severity: "medium",
-      didNotRun: true,
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout);
-    const vulns: unknown[] = (parsed.Results ?? []).flatMap(
-      (r: { Vulnerabilities?: unknown[] }) => r.Vulnerabilities ?? [],
-    );
-
-    return {
-      category: "supply-chain",
-      name: "trivy container scan",
-      ...describeTrivyFsResult(vulns.length),
-    };
-  } catch {
-    return {
-      category: "supply-chain",
-      name: "trivy container scan",
-      status: "warn",
-      detail: failedDetail("trivy scan failed", result),
-      severity: "medium",
-      didNotRun: true,
-    };
-  }
-}
-
-/** Count HIGH/CRITICAL misconfigurations in a `trivy config --format json`
- *  payload. PURE so it can be unit-tested without running trivy. */
-export function parseTrivyMisconfigCount(stdout: string): number {
-  try {
-    const parsed = JSON.parse(stdout) as {
-      Results?: { Misconfigurations?: { Severity?: string }[] }[];
-    };
-    return (parsed.Results ?? [])
-      .flatMap((r) => r.Misconfigurations ?? [])
-      .filter((m) => m.Severity === "HIGH" || m.Severity === "CRITICAL").length;
-  } catch {
-    return -1; // unparseable
-  }
+  const report = readTrivyReport(result.stdout, "vulnerability");
+  const row: SecurityCheckResult = {
+    category: "supply-chain",
+    name: "trivy container scan",
+    ...describeTrivyFsResult(report.count),
+  };
+  return scannerEvidence(row, report.count, scannerGap(report, result));
 }
 
 /**
@@ -1975,7 +1943,7 @@ export function parseTrivyMisconfigCount(stdout: string): number {
 async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
   const name = "trivy config (IaC)";
   const cwd = root;
-  const iac = await findIac(cwd);
+  const iac = await findIacFiles(cwd);
   const hasIaC = iac.length > 0;
   if (!hasIaC) {
     return {
@@ -2016,31 +1984,24 @@ async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
     ],
     { timeout: 120_000, cwd: root },
   );
-  const count = parseTrivyMisconfigCount(result.stdout);
-  if (count < 0) {
-    return {
-      category: "supply-chain",
-      name,
-      status: "warn",
-      detail: failedDetail("trivy config scan failed", result),
-      severity: "medium",
-    };
-  }
-  if (count === 0) {
-    return {
-      category: "supply-chain",
-      name,
-      status: "pass",
-      detail: `no high/critical IaC misconfigurations in ${iac.length} location(s)`,
-    };
-  }
-  return {
-    category: "supply-chain",
-    name,
-    status: "warn",
-    detail: `${count} high/critical IaC misconfiguration(s) -run: trivy config .`,
-    severity: "high",
-  };
+  const report = readTrivyReport(result.stdout, "configuration", iac);
+  const { count } = report;
+  const row: SecurityCheckResult =
+    count > 0
+      ? {
+          category: "supply-chain",
+          name,
+          status: "warn",
+          detail: `${count} high/critical IaC misconfiguration(s) -run: trivy config .`,
+          severity: "high",
+        }
+      : {
+          category: "supply-chain",
+          name,
+          status: "pass",
+          detail: "no high/critical IaC misconfigurations in Trivy reported targets",
+        };
+  return scannerEvidence(row, count, scannerGap(report, result));
 }
 
 export type JvmKind = "maven" | "gradle";
@@ -2094,20 +2055,6 @@ export async function findJvmProject(
     frontier = next;
   }
   return null;
-}
-
-/** Count vulnerabilities in a `trivy fs --format json` payload. PURE so it can
- *  be unit-tested without running trivy. -1 = unparseable. The caller passes
- *  `--severity HIGH,CRITICAL`, so every counted vuln is already high/critical. */
-export function parseTrivyVulnCount(stdout: string): number {
-  try {
-    const parsed = JSON.parse(stdout) as {
-      Results?: { Vulnerabilities?: unknown[] }[];
-    };
-    return (parsed.Results ?? []).flatMap((r) => r.Vulnerabilities ?? []).length;
-  } catch {
-    return -1;
-  }
 }
 
 /**
@@ -2202,57 +2149,24 @@ async function checkMavenAudit(root: string): Promise<SecurityCheckResult> {
     ],
     { timeout: 180_000, cwd: root },
   );
-  if (!result.ok && !result.stdout) {
-    return {
-      category: "dependency",
-      name,
-      status: "warn",
-      detail: failedDetail("trivy JVM scan failed", result),
-      severity: "medium",
-    };
-  }
-  const count = parseTrivyVulnCount(result.stdout);
-  if (count < 0) {
-    return {
-      category: "dependency",
-      name,
-      status: "warn",
-      detail: failedDetail("trivy JVM scan failed", result),
-      severity: "medium",
-    };
-  }
-  if (count === 0) {
-    return {
-      category: "dependency",
-      name,
-      status: "pass",
-      detail: "no high/critical JVM dependency CVEs",
-    };
-  }
-  return {
-    category: "dependency",
-    name,
-    status: "fail",
-    detail: `${count} high/critical JVM dependency CVE(s) -run: trivy fs --offline-scan ${mavenDir}`,
-    severity: "high",
-  };
-}
-
-const OSV_NO_RESULT = "osv-scanner gave no parseable result despite manifests; deps are UNSCANNED";
-
-/** Count vulnerabilities in an `osv-scanner --format json` payload. PURE so it
- *  can be unit-tested without running osv-scanner. -1 = unparseable. */
-export function parseOsvVulnCount(stdout: string): number {
-  try {
-    const parsed = JSON.parse(stdout) as {
-      results?: { packages?: { vulnerabilities?: unknown[] }[] }[];
-    };
-    return (parsed.results ?? [])
-      .flatMap((r) => r.packages ?? [])
-      .flatMap((p) => p.vulnerabilities ?? []).length;
-  } catch {
-    return -1;
-  }
+  const report = readTrivyReport(result.stdout, kind);
+  const { count } = report;
+  const row: SecurityCheckResult =
+    count > 0
+      ? {
+          category: "dependency",
+          name,
+          status: "fail",
+          detail: `${count} high/critical JVM dependency CVE(s) -run: trivy fs --offline-scan ${mavenDir}`,
+          severity: "high",
+        }
+      : {
+          category: "dependency",
+          name,
+          status: "pass",
+          detail: "no high/critical JVM dependency CVEs",
+        };
+  return scannerEvidence(row, count, scannerGap(report, result));
 }
 
 /**
@@ -2291,30 +2205,26 @@ async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
     timeout: 120_000,
     cwd: root,
   });
-  const count = parseOsvVulnCount(result.stdout);
-  if (count < 0) {
-    // No parseable JSON. With an osv ecosystem present the run FAILED (crash, timeout, a report
-    // cut off at kit's buffer) and must not read as clean → WARN; otherwise no lockfiles → skip.
-    return (await osvEcosystemPresent())
-      ? {
-          category: "supply-chain",
-          name,
-          status: "warn",
-          detail: failedDetail(OSV_NO_RESULT, result),
-          severity: "medium",
-          didNotRun: true,
-        }
-      : { category: "supply-chain", name, status: "skip", detail: "no lockfiles to scan" };
-  }
-  if (count === 0) {
+  const report = readOsvReport(result.stdout);
+  const gap = scannerGap(report, result, OSV_EXITS);
+  if (gap && report.count === 0 && !(await osvEcosystemPresent()))
     return {
       category: "supply-chain",
       name,
-      status: "pass",
-      detail: "no known dependency vulnerabilities",
+      status: "skip",
+      detail: "no applicable manifests for OSV",
+      evidenceStatus: gap.status,
     };
-  }
-  return osvFinding(name, result.stdout);
+  const row: SecurityCheckResult =
+    report.count > 0
+      ? osvFinding(name, report)
+      : {
+          category: "supply-chain",
+          name,
+          status: "pass",
+          detail: "no known dependency vulnerabilities",
+        };
+  return scannerEvidence(row, report.count, gap);
 }
 
 export { checkLicenses };

@@ -7,7 +7,7 @@
  * or carry a control character. Pulling an image is network, so these runs are cloud-only and are
  * dropped in air-gap mode.
  */
-import { readdirSync } from "node:fs";
+import { opendirSync, type Dir, type Dirent } from "node:fs";
 import { isScannerEnabled } from "./scanners.js";
 import type { ScannerDef } from "./scanners.js";
 import { readRegularFileIfPresent } from "./upstream-safe-read.js";
@@ -120,34 +120,75 @@ function isDockerfileName(name: string): boolean {
   );
 }
 
-/** Dockerfile paths under `root`, relative and sorted. Symlinks and vendored folders are skipped. */
-export function findDockerfiles(root: string): string[] {
-  const found: string[] = [];
+export interface DockerfileInventoryGap {
+  path: string;
+  reason: string;
+}
+
+type DockerfileInventory = { files: string[]; gaps: DockerfileInventoryGap[] };
+
+function walkableDirectory(name: string): boolean {
+  return !name.startsWith(".") && !SKIPPED_DIRS.has(name);
+}
+
+/** Find relative Dockerfile paths and record where the bounded walk could not finish. */
+export function discoverDockerfiles(root: string): DockerfileInventory {
+  const inventory: DockerfileInventory = { files: [], gaps: [] };
   let seen = 0;
-  const walk = (rel: string, depth: number): void => {
-    let entries;
-    try {
-      entries = readdirSync(join(root, rel), { withFileTypes: true });
-    } catch {
+  let stopped = false;
+  function halt(path: string, reason: string): void {
+    inventory.gaps.push({ path, reason });
+    stopped = true;
+  }
+  function visit(entry: Dirent, parent: string, depth: number): void {
+    const name = stripControl(entry.name);
+    if (name !== entry.name) {
+      inventory.gaps.push({
+        path: parent || ".",
+        reason: "entry has a control character in its name",
+      });
       return;
     }
-    for (const entry of entries) {
-      if (++seen > MAX_ENTRIES || found.length >= MAX_DOCKERFILES) return;
-      if (stripControl(entry.name) !== entry.name) continue; // a name with control characters is never printed
-      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isFile() && isDockerfileName(entry.name)) found.push(childRel);
-      else if (
-        entry.isDirectory() &&
-        depth < MAX_DEPTH &&
-        !entry.name.startsWith(".") &&
-        !SKIPPED_DIRS.has(entry.name)
-      ) {
-        walk(childRel, depth + 1);
+    const path = parent ? `${parent}/${name}` : name;
+    if (entry.isFile() && isDockerfileName(name)) {
+      if (inventory.files.length >= MAX_DOCKERFILES) return halt(path, "Dockerfile limit reached");
+      inventory.files.push(path);
+    } else if (entry.isDirectory() && walkableDirectory(name)) {
+      if (depth >= MAX_DEPTH) inventory.gaps.push({ path, reason: "depth limit reached" });
+      else walk(path, depth + 1);
+    }
+  }
+  function walk(rel: string, depth: number): void {
+    let directory: Dir | undefined;
+    const path = rel || ".";
+    try {
+      directory = opendirSync(join(root, rel));
+      while (!stopped) {
+        const entry = directory.readSync();
+        if (!entry) break;
+        if (++seen > MAX_ENTRIES) halt(path, "entry limit reached");
+        else visit(entry, rel, depth);
+      }
+    } catch {
+      inventory.gaps.push({ path, reason: "directory could not be read" });
+    } finally {
+      try {
+        directory?.closeSync();
+      } catch {
+        inventory.gaps.push({ path, reason: "directory could not be closed" });
       }
     }
-  };
+  }
+
   walk("", 0);
-  return found.sort();
+  inventory.files.sort();
+  inventory.gaps.sort((a, b) => a.path.localeCompare(b.path));
+  return inventory;
+}
+
+/** Dockerfile paths under root, relative and sorted. */
+export function findDockerfiles(root: string): string[] {
+  return discoverDockerfiles(root).files;
 }
 
 /** `[scan].images` as read from a config that is not schema-checked: a list of strings, else nothing. */

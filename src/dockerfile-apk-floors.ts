@@ -6,9 +6,7 @@
  * pure: it parses the Dockerfile, secdb JSON and APKINDEX text it is handed, and compares
  * versions. The fetching lives in check-apk-floors.ts.
  */
-import { gunzipSync } from "node:zlib";
 import { joinContinuations } from "./image-scan.js";
-import { stripControl } from "./upstream-sources.js";
 import { compareApkVersions } from "./utils/apk-version.js";
 
 /** Which Alpine branch a stage runs on: a named one, the newest stable, or not Alpine at all. */
@@ -107,89 +105,47 @@ export function parseApkFloors(text: string): ApkFloor[] {
   return floors;
 }
 
-/** secdb `<branch>/<repo>.json` → origin package name → fixed version → CVE ids. */
-export function parseSecdb(json: unknown): Map<string, Map<string, string[]>> {
-  const out = new Map<string, Map<string, string[]>>();
-  const packages = (json as { packages?: unknown })?.packages;
-  if (!Array.isArray(packages)) throw new Error("secdb: no packages list");
-  for (const entry of packages) {
-    const pkg = (entry as { pkg?: { name?: unknown; secfixes?: unknown } })?.pkg;
-    if (typeof pkg?.name !== "string" || typeof pkg.secfixes !== "object" || !pkg.secfixes)
-      continue;
-    const fixes = out.get(pkg.name) ?? new Map<string, string[]>();
-    for (const [version, ids] of Object.entries(pkg.secfixes as Record<string, unknown>)) {
-      if (!Array.isArray(ids)) continue;
-      const cves = ids
-        .filter((id): id is string => typeof id === "string")
-        .map((id) => stripControl(id));
-      fixes.set(version, [...(fixes.get(version) ?? []), ...cves]);
-    }
-    out.set(pkg.name, fixes);
-  }
-  return out;
-}
+export { parseSecdb } from "./alpine-secdb.js";
+export { apkIndexText } from "./alpine-index-archive.js";
 
-/** The `APKINDEX` member of a gzipped APKINDEX.tar.gz (a signature and an index, each its own gzip and tar stream). */
-export function apkIndexText(gz: Buffer): string {
-  const tar = gunzipSync(gz);
-  for (let offset = 0; offset + 512 <= tar.length;) {
-    const header = tar.subarray(offset, offset + 512);
-    const name = header.subarray(0, 100).toString("latin1").replace(/\0.*$/s, "");
-    if (!name) {
-      offset += 512; // end-of-archive padding: the index is a second tar stream after the signature
-      continue;
-    }
-    const size = parseInt(
-      header.subarray(124, 136).toString("latin1").replace(/\0.*$/s, "").trim(),
-      8,
-    );
-    if (!Number.isFinite(size)) break;
-    const start = offset + 512;
-    if (name === "APKINDEX") return tar.subarray(start, start + size).toString("utf8");
-    offset = start + Math.ceil(size / 512) * 512;
-  }
-  throw new Error("APKINDEX.tar.gz holds no APKINDEX");
-}
-
-/** APKINDEX text → package name → origin (source) package, which is what secdb lists. */
-export function parseApkIndexOrigins(text: string): Map<string, string> {
-  const origins = new Map<string, string>();
-  for (const record of text.split(/\n\n+/)) {
-    const name = /^P:(.+)$/m.exec(record)?.[1];
-    const origin = /^o:(.+)$/m.exec(record)?.[1];
-    if (name && origin) origins.set(name.trim(), origin.trim());
-  }
-  return origins;
-}
+export { parseApkIndexOrigins } from "./alpine-index-origins.js";
 
 /**
  * The floors that admit a version Alpine fixed CVEs in: for each, the CVEs fixed above the floor
- * and the highest such fixed version. `unparsed` lists floors whose version could not be compared.
+ * and the highest such fixed version. `unparsed` lists floors with unsupported versions. `unresolved` lists packages without an origin.
  */
 export function judgeFloors(
   floors: ApkFloor[],
   branch: string,
   secfixes: ReadonlyMap<string, ReadonlyMap<string, string[]>>,
   origins: ReadonlyMap<string, string>,
-): { findings: FloorFinding[]; unparsed: string[] } {
+): { findings: FloorFinding[]; unparsed: string[]; unresolved: string[] } {
   const findings: FloorFinding[] = [];
   const unparsed: string[] = [];
+  const unresolved: string[] = [];
   for (const floor of floors) {
-    const fixes = secfixes.get(origins.get(floor.name) ?? floor.name);
+    const origin = origins.get(floor.name);
+    if (!origin) {
+      unresolved.push(floor.name);
+      continue;
+    }
+    if (compareApkVersions(floor.version, floor.version) !== 0) {
+      unparsed.push(`${floor.name}${floor.op}${floor.version}`);
+      continue;
+    }
+    const fixes = secfixes.get(origin);
     if (!fixes) continue;
     let fixedIn = "";
     const cves: string[] = [];
     for (const [version, ids] of fixes) {
       if (version === "0") continue; // listed as not fixed (or not affected) on this branch
       const cmp = compareApkVersions(floor.version, version);
-      if (cmp === null) {
+      if (cmp === null || !Number.isFinite(cmp)) {
         unparsed.push(`${floor.name}${floor.op}${floor.version}`);
-        fixedIn = "";
-        cves.length = 0;
-        break;
+        continue;
       }
       if (cmp >= 0) continue;
-      cves.push(...ids);
+      for (const id of ids) cves.push(id);
       if (!fixedIn || (compareApkVersions(version, fixedIn) ?? 0) > 0) fixedIn = version;
     }
     if (fixedIn)
@@ -201,15 +157,19 @@ export function judgeFloors(
         branch,
       });
   }
-  return { findings, unparsed: [...new Set(unparsed)] };
+  return { findings, unparsed: [...new Set(unparsed)], unresolved: [...new Set(unresolved)] };
 }
 
-/** The newest stable branch (`v3.N`) in secdb's index page. */
+/** Read the newest stable link in Alpine secdb's complete root directory listing. */
 export function newestStableBranch(indexHtml: string): string | null {
-  const branches = [...indexHtml.matchAll(/\bv(\d+)\.(\d+)\//g)].map((m) => [
-    Number(m[1]),
-    Number(m[2]),
-  ]);
+  const listing =
+    /^\s*<html>\s*<head>\s*<title>Index of \/<\/title>\s*<\/head>\s*<body>\s*<h1>Index of \/<\/h1>\s*<hr>\s*<pre>([\s\S]*?)<\/pre>\s*<hr>\s*<\/body>\s*<\/html>\s*$/.exec(
+      indexHtml,
+    );
+  if (!listing) throw new Error("secdb index is not a complete directory listing");
+  const branches = [...listing[1].matchAll(/<a href="v(\d+)\.(\d+)\/">v\1\.\2\/<\/a>/g)]
+    .map((match) => [Number(match[1]), Number(match[2])])
+    .filter((parts) => parts.every(Number.isSafeInteger));
   branches.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const top = branches.at(-1);
   return top ? `v${top[0]}.${top[1]}` : null;

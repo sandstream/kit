@@ -154,6 +154,17 @@ The output states that an external report does not verify the current account st
 Displayed findings mask recognized credentials and remove terminal controls.
 The parser retains original identities for other consumers.
 
+## OSV and Trivy security check evidence
+
+Kit checks the process exit status and the report before it verifies coverage.
+The JSON security rows use `evidenceStatus` to distinguish complete, complete-empty, missing, malformed, partial, unsupported, and unavailable evidence.
+Kit keeps readable findings when the scanner returns incomplete evidence.
+The strict security gate fails a check whose coverage remains unverified.
+Trivy requires a reported target for the scan type.
+Its configuration check compares the report with discovered Dockerfile, Compose, and Terraform targets.
+Terraform targets match by directory. If a scanner omits a Compose file, its coverage remains unverified.
+The filesystem check covers files and does not inspect a built image.
+
 ## Exploit intelligence in scan results
 
 The JSON result shows separate coverage for CISA KEV and FIRST EPSS.

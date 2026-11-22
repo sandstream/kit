@@ -4,9 +4,6 @@ import {
   basicSecretScanFiles,
   checkSecurity,
   gateStatus,
-  parseTrivyMisconfigCount,
-  parseOsvVulnCount,
-  parseTrivyVulnCount,
   classifyTrufflehogFindings,
   isExampleCredential,
   parseSecretsIgnore,
@@ -700,60 +697,6 @@ describe("license check tool boundary", () => {
       else process.env.PATH = prevPath;
       rmTemp(root);
     }
-  });
-});
-
-describe("parseTrivyMisconfigCount", () => {
-  it("counts only HIGH/CRITICAL misconfigurations", () => {
-    const json = JSON.stringify({
-      Results: [
-        {
-          Misconfigurations: [{ Severity: "HIGH" }, { Severity: "LOW" }, { Severity: "CRITICAL" }],
-        },
-        { Misconfigurations: [{ Severity: "MEDIUM" }] },
-      ],
-    });
-    assert.strictEqual(parseTrivyMisconfigCount(json), 2);
-  });
-
-  it("returns 0 for a clean scan and -1 for unparseable output", () => {
-    assert.strictEqual(parseTrivyMisconfigCount(JSON.stringify({ Results: [] })), 0);
-    assert.strictEqual(parseTrivyMisconfigCount("not json"), -1);
-  });
-});
-
-describe("parseTrivyVulnCount", () => {
-  it("sums vulnerabilities across trivy fs results", () => {
-    const json = JSON.stringify({
-      Results: [
-        { Target: "pom.xml", Vulnerabilities: [{ Severity: "HIGH" }, { Severity: "CRITICAL" }] },
-        { Target: "pom.xml", Vulnerabilities: [{ Severity: "HIGH" }] },
-        { Target: "novulns", Vulnerabilities: [] },
-      ],
-    });
-    assert.strictEqual(parseTrivyVulnCount(json), 3);
-  });
-
-  it("returns 0 for a clean scan and -1 for unparseable output", () => {
-    assert.strictEqual(parseTrivyVulnCount(JSON.stringify({ Results: [] })), 0);
-    assert.strictEqual(parseTrivyVulnCount("not json"), -1);
-  });
-});
-
-describe("parseOsvVulnCount", () => {
-  it("sums vulnerabilities across results/packages", () => {
-    const json = JSON.stringify({
-      results: [
-        { packages: [{ vulnerabilities: [{}, {}] }, { vulnerabilities: [{}] }] },
-        { packages: [{ vulnerabilities: [] }] },
-      ],
-    });
-    assert.strictEqual(parseOsvVulnCount(json), 3);
-  });
-
-  it("returns 0 for a clean scan and -1 for unparseable output", () => {
-    assert.strictEqual(parseOsvVulnCount(JSON.stringify({ results: [] })), 0);
-    assert.strictEqual(parseOsvVulnCount(""), -1);
   });
 });
 

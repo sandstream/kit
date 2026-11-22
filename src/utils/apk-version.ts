@@ -30,18 +30,23 @@ const VERSION = /^(\d+(?:\.\d+)*)([a-z]?)((?:_[a-z]+\d*)*)(?:-r(\d+))?$/;
 export function parseApkVersion(text: string): ApkVersion | null {
   const m = VERSION.exec(text.trim());
   if (!m) return null;
+  const numbers = m[1].split(".").map(Number);
+  const revision = Number(m[4] ?? 0);
+  if (!numbers.every(Number.isSafeInteger) || !Number.isSafeInteger(revision)) return null;
   const suffixes: [number, number][] = [];
   for (const part of (m[3] ?? "").split("_").filter(Boolean)) {
     const s = /^([a-z]+)(\d*)$/.exec(part);
     const rank = s ? SUFFIX_RANK[s[1]] : undefined;
     if (!s || rank === undefined) return null;
-    suffixes.push([rank, Number(s[2] || 0)]);
+    const counter = Number(s[2] || 0);
+    if (!Number.isSafeInteger(counter)) return null;
+    suffixes.push([rank, counter]);
   }
   return {
-    numbers: m[1].split(".").map(Number),
+    numbers,
     letter: m[2] ?? "",
     suffixes,
-    revision: Number(m[4] ?? 0),
+    revision,
   };
 }
 
