@@ -6,107 +6,46 @@ import { mkdtemp, writeFile, rm, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMcpServer, KIT_MCP_TOOLS } from "./mcp-server.js";
+import { KIT_MCP_TOOLS } from "./mcp-server.js";
 import { mcpExposedToolNames } from "./cli.js";
 import { loadOrCreateIdentity } from "./identity.js";
 import { signProfile } from "./profile/sign.js";
 import { PROFILE_FILE } from "./profile/schema.js";
+import {
+  FIXTURE_CONFIG_SECRET,
+  FIXTURE_EMPTY,
+  FIXTURE_MISSING_ENV_SECRET,
+  GITIGNORE,
+  createTestClient,
+  isolateFromMachine,
+  parseResult,
+} from "./mcp-server.test-support.js";
 
-// kit_check measures two things that belong to the machine, not to the project under test:
-// bumblebee's `baseline` profile scans the whole machine, and the memory-injection check reads
-// the developer's own memory store. On a machine that has both, one kit_check call took 5 to
-// 20 s and this file, with its 13 calls, passed the runner's 180 s limit (measured: 321 s; 100 s
-// with these two off). The tests here assert the MCP response, so both are switched off for the
-// file. `check-security` tests cover the two checks themselves.
-const MACHINE_ENV = ["KIT_BUMBLEBEE", "KIT_MEMORY_DB"] as const;
-const savedMachineEnv = new Map<string, string | undefined>();
-let machineEnvDir: string;
+isolateFromMachine();
 
-before(async () => {
-  machineEnvDir = await mkdtemp(join(tmpdir(), "kit-mcp-machine-"));
-  for (const key of MACHINE_ENV) savedMachineEnv.set(key, process.env[key]);
-  process.env.KIT_BUMBLEBEE = "0";
-  process.env.KIT_MEMORY_DB = join(machineEnvDir, "absent", "memory.db");
+describe("the MCP tests do not scan the developer's machine", () => {
+  it("kit_check runs no bumblebee scan and reads no real memory store", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-mcp-isolated-"));
+    const savedCwd = process.cwd();
+    await writeFile(join(dir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+    process.chdir(dir);
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: dir, detail: true },
+      });
+      const data = parseResult(result) as { security: Array<{ name: string; detail?: string }> };
+      const detail = (name: string) => data.security.find((row) => row.name === name)?.detail;
+      assert.equal(detail("bumblebee (supply-chain)"), "disabled via KIT_BUMBLEBEE");
+      assert.equal(detail("memory injection"), "no memory store to scan");
+    } finally {
+      await cleanup();
+      process.chdir(savedCwd);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
-
-after(async () => {
-  for (const [key, value] of savedMachineEnv) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-  await rm(machineEnvDir, { recursive: true, force: true });
-});
-
-// Standard .gitignore so security check passes in temp dirs
-const GITIGNORE = ".env\n.env.local\n.env.*.local\n";
-
-const FIXTURE_EMPTY = `# empty kit config\n`;
-
-const FIXTURE_CONFIG_SECRET = `
-[secrets.keys]
-APP_KEY = { source = "config", value = "hello" }
-`;
-
-const FIXTURE_MISSING_ENV_SECRET = `
-[secrets.keys]
-MISSING_VAR = { source = "env" }
-`;
-
-/**
- * Per-request timeout for every call made through `createTestClient`.
- *
- * The SDK's default is 60s of wall clock (`DEFAULT_REQUEST_TIMEOUT_MSEC`), and
- * several tests below run a full `kit check` through the MCP protocol. Keep the
- * default-cwd regression tests pointed at cheap fixtures; using the real kit repo
- * here makes the suite load-sensitive rather than more correct. Past the line the failure reads
- * `MCP error -32001: Request timed out` — machine load, not a defect, and it
- * names a test that passes on a re-run, which is the most expensive kind of red.
- *
- * Deliberately below the runner's own `--test-timeout=180000` so a genuine hang is
- * still bounded, and bounded by node with the request-level error surfacing first.
- */
-const REQUEST_TIMEOUT_MS = 150_000;
-
-/**
- * Create a connected Client + McpServer pair using in-memory transport.
- * Returns the client (already connected) and a cleanup function.
- */
-async function createTestClient(): Promise<{ client: Client; cleanup: () => Promise<void> }> {
-  const server = createMcpServer();
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-
-  const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
-
-  // Applied here rather than at ~40 call sites: the SDK takes the timeout per
-  // request, so a default set in the harness is what keeps the next real-repo call
-  // from reintroducing the flake. An explicit `options.timeout` still wins.
-  const callTool = client.callTool.bind(client);
-  client.callTool = ((params, resultSchema?, options?) =>
-    callTool(params, resultSchema, {
-      timeout: REQUEST_TIMEOUT_MS,
-      ...options,
-    })) as typeof client.callTool;
-
-  await server.connect(serverTransport);
-  await client.connect(clientTransport);
-
-  return {
-    client,
-    cleanup: async () => {
-      await client.close();
-    },
-  };
-}
-
-/** Parse JSON content from an MCP tool result */
-function parseResult(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
-  const content = result.content as Array<{ type: string; text: string }>;
-  assert.ok(content.length > 0, "Expected content in result");
-  assert.equal(content[0].type, "text");
-  return JSON.parse(content[0].text);
-}
 
 // ─── Tool registration ────────────────────────────────────────────────────────
 
@@ -244,22 +183,6 @@ describe("kit_check response is summarized, and the reference resolves", () => {
       const data = parseResult(result) as Record<string, unknown>;
       assert.ok("tools" in data && "security" in data);
       assert.ok(!("summarized" in data), "the full document must not claim to be a summary");
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("does not scan the developer's machine: no bumblebee run, no real memory store", async () => {
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({
-        name: "kit_check",
-        arguments: { cwd: dir, detail: true },
-      });
-      const data = parseResult(result) as { security: Array<{ name: string; detail?: string }> };
-      const row = (name: string) => data.security.find((check) => check.name === name);
-      assert.equal(row("bumblebee (supply-chain)")?.detail, "disabled via KIT_BUMBLEBEE");
-      assert.equal(row("memory injection")?.detail, "no memory store to scan");
     } finally {
       await cleanup();
     }
