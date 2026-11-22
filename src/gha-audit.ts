@@ -24,6 +24,7 @@ import { auditSkippableGates } from "./gha-skip-gate.js";
 import { auditIdToken } from "./gha-id-token.js";
 import { auditInstallScripts } from "./gha-install-scripts.js";
 import { auditModelSpend } from "./gha-model-spend.js";
+import { auditSecretsDump } from "./gha-secrets-dump.js";
 import { PRT_DEFAULT_BLOCK_DATE, pwnRequest, workflowTriggers } from "./gha-pwn.js";
 
 const UNPINNED_RULE = {
@@ -75,6 +76,7 @@ export function auditWorkflow(content: string, file: string): SecurityCheckResul
   out.push(...auditIdToken(content, file));
   out.push(...auditInstallScripts(content, file));
   out.push(...auditModelSpend(content, file));
+  out.push(...auditSecretsDump(content, file));
   return out;
 }
 
