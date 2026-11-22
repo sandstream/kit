@@ -49,6 +49,7 @@ export type EvidenceState = "verified" | "failing" | "unrun";
  */
 export const CHECK_ID_ALIASES: Record<string, string> = {
   "supply-chain": "bumblebee (supply-chain)",
+  "scan-transcripts": "agent transcripts",
 };
 
 /** Fold a control's backing-check statuses into one evidence state. */

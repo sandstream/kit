@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import {
   LOCAL_COVER,
@@ -55,13 +56,22 @@ import { checkPipAudit } from "./check-pip-audit.js";
 import {
   scannerEvidence,
   scannerGap,
+  scannerObject,
+  scannerRecord,
   type ScannerEvidenceStatus,
+  type ScannerGap,
 } from "./check-scanner-evidence.js";
 import { checkTranscriptSecrets } from "./check-transcripts.js";
 import { checkLicenses } from "./check-licenses.js";
 import { checkBrowserScripts } from "./check-browser-scripts.js";
 import { npmLockfileCover } from "./check-pinned-lockfile.js";
 import { readRegularFileBytesIfPresent } from "./upstream-safe-read.js";
+import {
+  gitHistoryScope,
+  readBasicSecretGrep,
+  trufflehogHistoryGap,
+  type BasicSecretMatch,
+} from "./history-secret-evidence.js";
 
 const exec = promisify(execFile);
 
@@ -1389,49 +1399,71 @@ export function classifyTrufflehogFindings(
   stdout: string,
   readFile: (path: string) => string | null = () => null,
   ignores: SecretsIgnoreEntry[] = [],
-): {
-  verified: number;
-  unverified: number;
-  publicByDesign: number;
-  example: number;
-  ignored: number;
-} {
-  let verified = 0;
-  let unverified = 0;
-  let publicByDesign = 0;
-  let example = 0;
-  let ignored = 0;
-  for (const line of stdout.trim().split("\n")) {
-    if (!line.includes('"DetectorName"')) continue;
-    try {
-      const j = JSON.parse(line) as {
-        DetectorName?: string;
-        Verified?: boolean;
-        Raw?: string;
-        SourceMetadata?: { Data?: { Git?: { file?: string; commit?: string } } };
-      };
-      const finding: TrufflehogFinding = {
-        verified: j.Verified === true,
-        raw: j.Raw ?? "",
-        file: j.SourceMetadata?.Data?.Git?.file,
-        detector: j.DetectorName,
-        commit: j.SourceMetadata?.Data?.Git?.commit,
-      };
-      if (finding.verified) verified++;
-      else if (isPublicByDesign(finding, readFile)) publicByDesign++;
-      else if (isExampleCredential(finding)) example++;
-      else if (isIgnoredFinding(finding, ignores)) ignored++;
-      else unverified++;
-    } catch {
-      unverified++;
-    }
-  }
-  return { verified, unverified, publicByDesign, example, ignored };
+) {
+  return classifyTrufflehogReport(stdout, readFile, ignores).counts;
 }
 
-/**
- * Scan for secrets in code using trufflehog or basic pattern matching
- */
+function classifyTrufflehogReport(
+  stdout: string,
+  readFile: (path: string) => string | null,
+  ignores: SecretsIgnoreEntry[],
+) {
+  const counts = { verified: 0, unverified: 0, publicByDesign: 0, example: 0, ignored: 0 };
+  let malformed = false;
+  const lines = stdout === "" ? [] : stdout.replace(/\r?\n$/, "").split(/\r?\n/);
+  for (const line of lines) {
+    const record = scannerObject(line);
+    if (!record || typeof record.DetectorName !== "string" || !record.DetectorName.trim()) {
+      malformed = true;
+      if (line.includes('"DetectorName"')) counts.unverified++;
+      continue;
+    }
+    const { finding, valid } = readTrufflehogFinding(record, record.DetectorName);
+    if (!valid) malformed = true;
+    const classification = classifyTrufflehogFinding(finding, readFile, ignores);
+    counts[classification]++;
+  }
+  return { counts, malformed };
+}
+
+function readTrufflehogFinding(record: Record<string, unknown>, detector: string) {
+  const metadata = scannerRecord(record.SourceMetadata) ? record.SourceMetadata : undefined;
+  const data = scannerRecord(metadata?.Data) ? metadata.Data : undefined;
+  const git = scannerRecord(data?.Git) ? data.Git : undefined;
+  const file = typeof git?.file === "string" ? git.file : undefined;
+  const commit = typeof git?.commit === "string" ? git.commit : undefined;
+  const finding: TrufflehogFinding = {
+    verified: record.Verified === true,
+    raw: typeof record.Raw === "string" ? record.Raw : "",
+    detector,
+    file,
+    commit,
+  };
+  const valid =
+    typeof record.Verified === "boolean" &&
+    typeof record.Raw === "string" &&
+    git !== undefined &&
+    file === git.file &&
+    commit === git.commit;
+  return { finding, valid };
+}
+
+function classifyTrufflehogFinding(
+  finding: TrufflehogFinding,
+  readFile: (path: string) => string | null,
+  ignores: SecretsIgnoreEntry[],
+): "verified" | "unverified" | "publicByDesign" | "example" | "ignored" {
+  if (finding.verified) return "verified";
+  try {
+    if (isPublicByDesign(finding, readFile)) return "publicByDesign";
+    if (isExampleCredential(finding)) return "example";
+    if (isIgnoredFinding(finding, ignores)) return "ignored";
+  } catch {
+    // A finding with unreadable context still needs review.
+  }
+  return "unverified";
+}
+
 /**
  * Filter git-grep hits from the DEGRADED secrets path (no trufflehog) down to the files
  * worth a warn. It's an UNVERIFIED grep, so it drops the three dominant false-positive
@@ -1451,15 +1483,20 @@ export function classifyTrufflehogFindings(
  * Input: `git grep -n` output lines (`file:line:content`). Pure and deterministic.
  */
 export function basicSecretScanFiles(lines: string[]): string[] {
+  const matches = lines.flatMap((line) => {
+    const match = line.match(/^([^:]+):\d+:(.*)$/);
+    return match ? [{ file: match[1], content: match[2] }] : [];
+  });
+  return basicSecretFiles(matches);
+}
+
+function basicSecretFiles(matches: BasicSecretMatch[]): string[] {
   const VALUE_RE =
     /(?:api[_-]?key|secret[_-]?key|password|token|credential)["']?\s*[:=]\s*["']([^"']{20,})/i;
   const TEMPLATE_VALUE =
     /^\s*(\$\{\{[^}]*\}\}|\$\{[A-Za-z_][A-Za-z0-9_:.-]*\}|\{\{[^}]*\}\}|\$\([^)]*\))\s*$/;
   const files = new Set<string>();
-  for (const line of lines) {
-    const m = line.match(/^([^:]+):\d+:(.*)$/);
-    if (!m) continue;
-    const [, file, content] = m;
+  for (const { file, content } of matches) {
     if (skipsBasicScan(file, content)) continue;
     const value = content.match(VALUE_RE)?.[1] ?? "";
     if (/^[A-Z][A-Z0-9_]+$/.test(value)) continue; // env-var name, not a secret
@@ -1477,157 +1514,164 @@ export function basicSecretScanFiles(lines: string[]): string[] {
   return [...files];
 }
 
+const HISTORY_SECRET_SCAN = { category: "secrets", name: "secrets scan" } as const;
+const NO_HISTORY_SECRET_SCOPE = {
+  ...HISTORY_SECRET_SCAN,
+  status: "skip",
+  evidenceStatus: "missing",
+  detail: "no committed content in local Git history",
+} as const;
+
+async function checkBasicSecretScan(
+  root: string,
+  hasHistory: boolean,
+  scopeLimit?: ScannerGap,
+): Promise<SecurityCheckResult> {
+  const process = await execFileNoThrow(
+    "git",
+    [
+      "grep",
+      "--no-color",
+      "--no-column",
+      "--no-textconv",
+      "--no-recurse-submodules",
+      "--full-name",
+      "-H",
+      "-I",
+      "-n",
+      "-z",
+      "-iE",
+      "-e",
+      "(api[_-]?key|secret[_-]?key|password|token|credential)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^\"']{20,}",
+      "--",
+    ],
+    { timeout: 10_000, cwd: root },
+  );
+  const { matches, gap } = readBasicSecretGrep(process);
+  const files = basicSecretFiles(matches);
+  if (!gap && !scopeLimit && !hasHistory && files.length === 0) return NO_HISTORY_SECRET_SCOPE;
+
+  const limitation =
+    "the Git grep fallback covers tracked working-tree text only. Install TruffleHog to scan Git history";
+  const detail = files.length
+    ? `${files.length} file(s) with unverified secret-shaped strings in the working tree`
+    : matches.length
+      ? "all Git grep matches were excluded by the basic scan filters"
+      : "Git grep found no matches";
+  return scannerEvidence(
+    {
+      ...HISTORY_SECRET_SCAN,
+      status: "warn",
+      severity: "medium",
+      detail,
+      ...(files.length ? { files } : {}),
+    },
+    files.length,
+    mergeHistoryLimits(
+      gap
+        ? { ...gap, reason: `${gap.reason}. TruffleHog is unavailable for Git history` }
+        : hasHistory
+          ? { status: "partial", reason: files.length ? limitation : `${detail}. ${limitation}` }
+          : undefined,
+      scopeLimit,
+    ),
+  );
+}
+
+function mergeHistoryLimits(gap?: ScannerGap, scopeLimit?: ScannerGap): ScannerGap | undefined {
+  return gap && scopeLimit
+    ? { ...gap, reason: `${gap.reason}. ${scopeLimit.reason}` }
+    : (gap ?? scopeLimit);
+}
+
+function historyScopeWarning(gap: ScannerGap): SecurityCheckResult {
+  return scannerEvidence({ ...HISTORY_SECRET_SCAN, status: "warn", detail: "" }, 0, gap);
+}
+
 export async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
-  try {
-    // Check if we're in a git repo
-    await exec("git", ["rev-parse", "--git-dir"], { timeout: 5_000, cwd: root });
-  } catch {
+  const scope = await gitHistoryScope(root);
+  if (scope.kind === "outside") {
     return {
-      category: "secrets",
-      name: "secrets scan",
+      ...HISTORY_SECRET_SCAN,
       status: "skip",
+      evidenceStatus: "missing",
       detail: "not a git repository",
     };
   }
+  if (scope.kind === "unknown") return historyScopeWarning(scope.gap);
 
-  // Deep scan with trufflehog — resolve mise-first so a mise-installed one is
-  // used (kit provisions it as a default), not just a bare-PATH one. Throwing
-  // when it's absent falls through to the basic pattern-matching below.
-  try {
-    const trufflehogBin = await resolveToolBin("trufflehog");
-    if (!trufflehogBin) throw new Error("trufflehog not installed");
+  const trufflehogBin = await resolveToolBin("trufflehog");
+  if (!trufflehogBin) return checkBasicSecretScan(root, scope.hasContent, scope.limit);
+  if (!scope.hasContent)
+    return scope.limit ? historyScopeWarning(scope.limit) : NO_HISTORY_SECRET_SCOPE;
 
+  const scan = await execFileNoThrow(
+    trufflehogBin,
+    [
+      "git",
+      pathToFileURL(root).href,
+      "--json",
+      "--no-update",
+      "--log-level=2",
+      "--no-ignore-tag",
+      "--fail",
+      "--fail-on-scan-errors",
+    ],
+    { timeout: 90_000, cwd: root },
+  );
+
+  const readWorktreeFile = (path: string): string | null => {
     try {
-      // Scan GIT (committed content) — not the raw filesystem. `filesystem .`
-      // walks node_modules (times out) and flags gitignored local files like
-      // `.env.production.local` that were never committed (false positives).
-      // Git mode is fast and only sees what's actually in the repo's history.
-      const { stdout } = await exec(
-        trufflehogBin,
-        ["git", `file://${root}`, "--json", "--no-update"],
-        { timeout: 90_000, cwd: root },
-      );
-
-      // Split verified-live from unverified (#noise-reduction). Only a VERIFIED
-      // secret — one trufflehog confirmed still works — is a critical fail (rotate
-      // now). Unverified secret-shaped strings (overwhelmingly test fixtures /
-      // example connection strings) are a warn to review, not a release-blocking
-      // critical. Avoids failing a clean repo on its own test data.
-      // Public-by-design client keys (#250: Firebase web config, Sentry DSN,
-      // PostHog) are split out with truthful advice — rotating them fixes nothing.
-      const readWorktreeFile = (p: string): string | null => {
-        try {
-          return readFileSync(resolve(root, p), "utf8");
-        } catch {
-          return null;
-        }
-      };
-      // Accepted historical findings, if the repo keeps a .kit-secretsignore. Absent
-      // file ⇒ no acceptances, which is the correct default for a repo that has never
-      // reviewed one.
-      let ignores: SecretsIgnoreEntry[] = [];
-      try {
-        ignores = parseSecretsIgnore(readFileSync(resolve(root, ".kit-secretsignore"), "utf8"));
-      } catch {
-        // no ignore file (or unreadable) — treat every finding on its own merits
-      }
-      const { verified, unverified, publicByDesign, example, ignored } = classifyTrufflehogFindings(
-        stdout,
-        readWorktreeFile,
-        ignores,
-      );
-      const pbdNote =
-        publicByDesign > 0
-          ? `; ${publicByDesign} public-by-design client key(s) (Firebase web config / DSN) — verify API-key restrictions + security rules, rotation not applicable`
-          : "";
-      // Example credentials are counted, not hidden: a reader can still see how many
-      // there are, but they don't hold the line at warn forever (see isExampleCredential).
-      const exampleNote =
-        example > 0
-          ? `; ${example} example credential(s) (unreachable host / placeholder secret — fixtures & docs), no rotation needed`
-          : "";
-      const ignoredNote =
-        ignored > 0 ? `; ${ignored} accepted historical finding(s) via .kit-secretsignore` : "";
-
-      if (verified > 0) {
-        return {
-          category: "secrets",
-          name: "secrets scan",
-          status: "fail",
-          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.${pbdNote}${exampleNote}${ignoredNote}`,
-          severity: "critical",
-        };
-      }
-      if (unverified > 0) {
-        return {
-          category: "secrets",
-          name: "secrets scan",
-          status: "warn",
-          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.${pbdNote}${exampleNote}${ignoredNote}`,
-          severity: "medium",
-        };
-      }
-
-      return {
-        category: "secrets",
-        name: "secrets scan",
-        status: "pass",
-        // Name the detector, not just the outcome: this path's coverage is trufflehog's set over
-        // full history, which is a different (much larger) bound than kit's own pattern list used
-        // by scan-staged and scan-build. A reader cannot size "no committed secrets" without it.
-        detail: `no committed secrets (trufflehog detector set, full history)${pbdNote}${exampleNote}${ignoredNote}`,
-      };
+      return readFileSync(resolve(root, path), "utf8");
     } catch {
-      return {
-        category: "secrets",
-        name: "secrets scan",
-        status: "warn",
-        detail: "trufflehog scan failed",
-        severity: "medium",
-      };
+      return null;
     }
-  } catch {
-    // Trufflehog not installed, use basic pattern matching
-    try {
-      const { stdout } = await exec(
-        "git",
-        [
-          "grep",
-          "-n",
-          "-iE",
-          "(api[_-]?key|secret[_-]?key|password|token|credential)[\"']?\\s*[:=]\\s*[\"'][^\"']{20,}",
-        ],
-        { timeout: 10_000, cwd: root },
-      );
+  };
+  const ignores = parseSecretsIgnore(readWorktreeFile(".kit-secretsignore") ?? "");
+  const { counts, malformed } = classifyTrufflehogReport(scan.stdout, readWorktreeFile, ignores);
+  const { verified, unverified, publicByDesign, example, ignored } = counts;
+  const gap = mergeHistoryLimits(
+    trufflehogHistoryGap(scan, {
+      verified,
+      unverified: unverified + publicByDesign + example + ignored,
+      malformed,
+    }),
+    scope.limit,
+  );
+  return describeTrufflehogResult(counts, gap);
+}
 
-      if (stdout.trim()) {
-        const files = basicSecretScanFiles(stdout.trim().split("\n"));
-
-        if (files.length > 0) {
-          return {
-            category: "secrets",
-            name: "secrets scan",
-            status: "warn",
-            detail: `${files.length} file(s) with unverified secret-shaped strings (basic scan, trufflehog absent — HEAD/working-tree only, does NOT scan git history) — review for real credentials`,
-            severity: "medium",
-            files,
-            suggestion:
-              "Install trufflehog for verified detection (it confirms live secrets, skipping test/example data):\n  • kit install (provisions the declared aqua:trufflesecurity/trufflehog)\n  • macOS/Linux: brew install trufflehog\n  • Go: go install github.com/trufflesecurity/trufflehog/v3@latest",
-          };
-        }
-      }
-    } catch {
-      // No matches or git grep failed
-    }
-
-    return {
-      category: "secrets",
-      name: "secrets scan",
-      status: "pass",
-      detail:
-        "basic scan: no secret-shaped strings outside tests/fixtures — HEAD/working-tree only, NOT git history; install trufflehog for full-history + verified detection",
-    };
+function describeTrufflehogResult(
+  counts: ReturnType<typeof classifyTrufflehogFindings>,
+  gap?: ScannerGap,
+): SecurityCheckResult {
+  const { verified, unverified, publicByDesign, example, ignored } = counts;
+  const total = verified + unverified + publicByDesign + example + ignored;
+  const notes = [
+    publicByDesign > 0
+      ? `${publicByDesign} public-by-design client key(s) (Firebase web config / DSN). Check API-key restrictions and security rules.`
+      : "",
+    example > 0 ? `${example} example credential(s) in fixtures or documentation.` : "",
+    ignored > 0 ? `${ignored} accepted historical finding(s) via .kit-secretsignore.` : "",
+  ].filter(Boolean);
+  const row: SecurityCheckResult = { ...HISTORY_SECRET_SCAN, status: "pass", detail: "" };
+  if (verified > 0) {
+    row.status = "fail";
+    row.severity = "critical";
+    row.detail = `${verified} VERIFIED-LIVE secret(s) in history reachable from local Git refs. Rotate them now`;
+  } else if (unverified > 0) {
+    row.status = "warn";
+    row.severity = "medium";
+    row.detail = `${unverified} unverified secret-shaped string(s) in history reachable from local Git refs (0 verified-live). Review the findings`;
+  } else if (gap) {
+    row.severity = "medium";
+    row.detail = "TruffleHog reported findings before coverage could be confirmed";
+  } else {
+    row.detail =
+      "no actionable committed secrets (TruffleHog detectors, history reachable from local Git refs)";
   }
+  const result = scannerEvidence(row, total, gap);
+  return notes.length ? { ...result, detail: `${result.detail}. ${notes.join(" ")}` } : result;
 }
 
 /**

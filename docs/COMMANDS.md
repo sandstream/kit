@@ -310,8 +310,8 @@ Kit ignores a match only when the comment includes a reason.
 
 ### Secret findings: what is classified, and what you accept
 
-`kit check --category security` runs trufflehog over git history and splits the results
-so the verdict can reach green without hiding anything:
+`kit check --category security` uses TruffleHog on history reachable from local refs. Kit checks the exit status, summary, and finding counts.
+Shallow clones and Git grep fallback give partial coverage. Git grep checks tracked working-tree text only.
 
 | Bucket                          | Meaning                                                                                                                                                                                               | Your action                                               |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
