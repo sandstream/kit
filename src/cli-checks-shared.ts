@@ -75,6 +75,7 @@ export interface JsonCheck {
   scanIncomplete?: boolean;
   /** Evidence state of a scanner-backed row, when the check reports one. */
   evidenceStatus?: import("./check-scanner-evidence.js").ScannerEvidenceStatus;
+  evidenceSources?: import("./check-apk-sources.js").AlpineSourceEvidence[];
 }
 
 /** The full `--json` document for check / ci. */

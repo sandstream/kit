@@ -3,14 +3,17 @@ import { it } from "node:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
 import { checkApkFloors } from "./check-apk-floors.js";
 import { gateStatus } from "./check-security.js";
-import { secdbFixture, secdbIndexFixture, tarOf } from "./apk-index.test-support.js";
+import {
+  alpineFixtureFetcher,
+  apkIndexFixture,
+  secdbFixture,
+  secdbIndexFixture,
+} from "./apk-index.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
-const INDEX = gzipSync(tarOf({ APKINDEX: "P:binary\nV:2-r0\no:source\n" }));
-const EMPTY_INDEX = gzipSync(tarOf({ APKINDEX: "" }));
+const ORIGIN = "P:binary\nV:2-r0\no:source\n";
 const OLDER = "CVE-2026-12345";
 const NEWER = "CVE-2026-54321";
 
@@ -32,7 +35,7 @@ async function inspect(
     );
     const result = await checkApkFloors(
       root,
-      async (url) => {
+      alpineFixtureFetcher(async (url) => {
         seen.push(url);
         if (url === "https://secdb.alpinelinux.org/") {
           if (options.latestUnavailable) throw new Error("index unavailable");
@@ -53,10 +56,10 @@ async function inspect(
               pkg: { name: "source", secfixes: { "2-r0": [branch === "v3.23" ? OLDER : NEWER] } },
             },
           ]);
-        if (url.endsWith("/main/x86_64/APKINDEX.tar.gz")) return INDEX;
-        if (url.endsWith("/community/x86_64/APKINDEX.tar.gz")) return EMPTY_INDEX;
+        if (url.endsWith("/main/x86_64/APKINDEX.tar.gz")) return apkIndexFixture(branch, ORIGIN);
+        if (url.endsWith("/community/x86_64/APKINDEX.tar.gz")) return apkIndexFixture(branch, "");
         throw new Error(`Unexpected URL: ${url}`);
-      },
+      }),
       {},
     );
     return { result, seen };

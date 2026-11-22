@@ -18,9 +18,11 @@ import { discoverDockerfiles, type DockerfileInventoryGap } from "./image-scan.j
 import { isAirGap } from "./scanners.js";
 import { defaultApkFetcher, type ApkFetcher } from "./check-apk-fetch.js";
 import {
+  aggregateAlpineStatus,
   alpineSourceFailure,
   readAlpineBranch,
   readNewestStableBranch,
+  type AlpineSourceEvidence,
 } from "./check-apk-sources.js";
 import { sanitizeDisplayText } from "./display-text.js";
 import { readRegularFileBytesIfPresent } from "./upstream-safe-read.js";
@@ -37,6 +39,7 @@ interface FloorInventory {
 
 type FloorComparison = ReturnType<typeof judgeFloors> & {
   failures: string[];
+  evidenceSources: AlpineSourceEvidence[];
   checked: string[];
   partialSources: string[];
   preliminary: FloorFinding[];
@@ -81,14 +84,10 @@ function describe(findings: FloorFinding[]): string {
 }
 
 /** Floors grouped by the branch they are judged on; `assumed` is the newest stable branch, when used. */
-async function groupByBranch(
-  floors: ApkFloor[],
-  fetcher: ApkFetcher,
-): Promise<{ byBranch: Map<string, ApkFloor[]>; assumed: string | null; failures: string[] }> {
+async function groupByBranch(floors: ApkFloor[], fetcher: ApkFetcher) {
   let assumed: string | null = null;
   const byBranch = new Map<string, ApkFloor[]>();
   const latest: ApkFloor[] = [];
-  const failures: string[] = [];
   for (const floor of floors) {
     if (floor.branch.kind === "branch") {
       const list = byBranch.get(floor.branch.branch) ?? [];
@@ -96,27 +95,25 @@ async function groupByBranch(
       byBranch.set(floor.branch.branch, list);
     } else latest.push(floor);
   }
-  if (latest.length > 0) {
-    try {
-      assumed = await readNewestStableBranch(fetcher);
-      byBranch.set(assumed, [...(byBranch.get(assumed) ?? []), ...latest]);
-    } catch (error) {
-      failures.push(alpineSourceFailure(error, "latest Alpine branch"));
-    }
+  const lookup = latest.length ? await readNewestStableBranch(fetcher) : undefined;
+  if (lookup && "data" in lookup) {
+    assumed = lookup.data;
+    byBranch.set(assumed, [...(byBranch.get(assumed) ?? []), ...latest]);
   }
-  return { byBranch, assumed, failures };
+  return { byBranch, assumed, lookup: lookup?.evidence };
 }
 
 async function compareBranches(
   byBranch: ReadonlyMap<string, ApkFloor[]>,
-  failures: string[],
+  lookup: AlpineSourceEvidence | undefined,
   fetcher: ApkFetcher,
 ): Promise<FloorComparison> {
   const judged: FloorComparison = {
     findings: [],
     unparsed: [],
     unresolved: [],
-    failures: [...failures],
+    failures: lookup && "reason" in lookup ? [lookup.reason] : [],
+    evidenceSources: lookup ? [lookup] : [],
     checked: [],
     partialSources: [],
     preliminary: [],
@@ -124,6 +121,7 @@ async function compareBranches(
   for (const [branch, list] of [...byBranch].sort()) {
     try {
       const sources = await readAlpineBranch(branch, fetcher);
+      judged.evidenceSources.push(...sources.sources);
       const one = judgeFloors(list, branch, sources.secfixes, sources.origins);
       const findings = sources.originsComplete ? judged.findings : judged.preliminary;
       for (const finding of one.findings) findings.push(finding);
@@ -199,8 +197,13 @@ function verdict(
     gaps.length > 0;
   const tail = coverageNote(judged, assumed, inventory, incomplete);
   const locations = [...files, ...unread].map(sanitizeDisplayText).join(", ") || "the project";
+  const evidence = {
+    evidenceStatus: aggregateAlpineStatus(judged.evidenceSources, incomplete, findings.length > 0),
+    evidenceSources: judged.evidenceSources,
+  };
   if (findings.length === 0)
     return result({
+      ...evidence,
       status: incomplete ? "warn" : "pass",
       ...(incomplete
         ? { severity: "medium" as const, didNotRun: true, scanIncomplete: true as const }
@@ -210,6 +213,7 @@ function verdict(
         : `${floors.length} apk floor(s) in ${locations} are at or above every Alpine secdb fix.${tail}`,
     });
   return result({
+    ...evidence,
     status: "warn",
     severity: "high",
     ...(incomplete
@@ -233,16 +237,18 @@ export async function checkApkFloors(
   if (isAirGap(env)) {
     const notes = inventoryNotes(inventory);
     const detail = `air-gap mode: ${floors.length} apk floor(s) not compared with Alpine secdb (unverified)`;
-    if (notes.length === 0) return result({ status: "skip", detail });
+    if (notes.length === 0)
+      return result({ status: "skip", detail, evidenceStatus: "unavailable" });
     return result({
       status: "warn",
       severity: "medium",
       didNotRun: true,
       scanIncomplete: true,
+      evidenceStatus: "partial",
       detail: [detail, ...notes].join(". "),
     });
   }
-  const { byBranch, assumed, failures } = await groupByBranch(floors, fetcher);
-  const judged = await compareBranches(byBranch, failures, fetcher);
+  const { byBranch, assumed, lookup } = await groupByBranch(floors, fetcher);
+  const judged = await compareBranches(byBranch, lookup, fetcher);
   return verdict(inventory, judged, assumed);
 }

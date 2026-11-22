@@ -3,9 +3,13 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
-import { gzipSync } from "node:zlib";
-import { secdbIndexFixture, tarOf } from "./apk-index.test-support.js";
+import {
+  alpineFixtureFetcher,
+  apkIndexFixture,
+  secdbIndexFixture,
+} from "./apk-index.test-support.js";
 import { checkApkFloors, type ApkFetcher } from "./check-apk-floors.js";
+import { securityCheckToJson } from "./check-run.js";
 import { gateStatus } from "./check-security.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -14,8 +18,8 @@ const advisory = "CVE-2026-12345";
 const main = { distroversion: branch, reponame: "main", packages: [] };
 const community = { distroversion: branch, reponame: "community", packages: [] };
 const fixes = [{ pkg: { name: "example-source", secfixes: { "2-r0": [advisory] } } }];
-const index = gzipSync(tarOf({ APKINDEX: "P:example-lib\nV:2-r0\no:example-source\n" }));
-const emptyIndex = gzipSync(tarOf({ APKINDEX: "" }));
+const index = apkIndexFixture(branch, "P:example-lib\nV:2-r0\no:example-source\n");
+const emptyIndex = apkIndexFixture(branch, "");
 
 function repo(t: TestContext, version = "2-r0", base = "alpine:3.24"): string {
   const root = mkdtempSync(join(tmpdir(), "kit-alpine-sources-"));
@@ -32,14 +36,99 @@ function sources(overrides: Partial<Record<string, Buffer | null>> = {}): ApkFet
     "main/x86_64/APKINDEX.tar.gz": index,
     "community/x86_64/APKINDEX.tar.gz": emptyIndex,
   };
-  return async (url) => {
+  return alpineFixtureFetcher(async (url) => {
     const source = Object.keys(stock).find((name) => url.endsWith(name));
     if (!source) throw new Error("Unexpected source in fixture");
     const data = source in overrides ? overrides[source] : stock[source];
     if (!data) throw new Error("Source unavailable");
     return data;
-  };
+  });
 }
+
+it("reports the exact scope and complete coverage through the check JSON mapping", async (t) => {
+  const row = securityCheckToJson(await checkApkFloors(repo(t), sources(), {}));
+  assert.equal(row.status, "pass");
+  assert.equal(row.evidenceStatus, "complete-empty");
+  assert.equal(row.evidenceSources?.length, 4);
+  const mainIndex = row.evidenceSources?.find(
+    (source) => source.kind === "apkindex" && source.repository === "main",
+  );
+  assert.deepEqual(mainIndex, {
+    kind: "apkindex",
+    url: "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/APKINDEX.tar.gz",
+    branch,
+    repository: "main",
+    architecture: "x86_64",
+    status: "complete",
+    lastModified: mainIndex?.lastModified,
+  });
+  assert.match(mainIndex.lastModified ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(row.evidenceSources?.at(-1)?.status, "complete-empty");
+});
+
+it("refuses complete archives with foreign scope or unsupported descriptions", async (t) => {
+  const root = repo(t);
+  const record = "P:example-lib\nV:2-r0\no:example-source\n";
+  const fixtures = [
+    { archive: apkIndexFixture("v3.23", record), status: "malformed", reason: /different branch/ },
+    {
+      archive: apkIndexFixture(branch, record, "aarch64"),
+      status: "malformed",
+      reason: /requires A:x86_64/,
+    },
+    {
+      archive: apkIndexFixture("edge", record),
+      status: "unsupported",
+      reason: /unsupported APKINDEX DESCRIPTION/,
+    },
+  ];
+  for (const { archive, status, reason } of fixtures) {
+    const observed = await checkApkFloors(
+      root,
+      sources({ "main/x86_64/APKINDEX.tar.gz": archive }),
+      {},
+    );
+    assert.equal(gateStatus(observed), "fail");
+    assert.equal(observed.evidenceStatus, "partial");
+    assert.equal(observed.evidenceSources?.[1]?.status, status);
+    assert.match(observed.detail, reason);
+  }
+});
+
+it("distinguishes missing, malformed and stale timestamps from success", async (t) => {
+  const root = repo(t);
+  const defaultSources = sources();
+  const day = 24 * 60 * 60 * 1000;
+  const cases = [
+    { lastModified: null, status: "missing", message: /missing HTTP Last-Modified/ },
+    { lastModified: "no date", status: "malformed", message: /invalid HTTP Last-Modified/ },
+    {
+      lastModified: new Date(Date.now() + day).toUTCString(),
+      status: "malformed",
+      message: /in the future/,
+    },
+    {
+      lastModified: new Date(Date.now() - 31 * day).toUTCString(),
+      status: "stale",
+      message: /more than 30 days old/,
+    },
+  ];
+  for (const { lastModified, status, message } of cases) {
+    const observed = await checkApkFloors(
+      root,
+      async (url) => {
+        const source = await defaultSources(url);
+        return url.endsWith("/main/x86_64/APKINDEX.tar.gz") ? { ...source, lastModified } : source;
+      },
+      {},
+    );
+    assert.equal(gateStatus(observed), "fail");
+    assert.equal(observed.evidenceStatus, "partial");
+    assert.equal(observed.evidenceSources?.[1]?.status, status);
+    assert.match(observed.detail, message);
+    assert.equal(observed.evidenceSources?.[0]?.status, "complete-empty");
+  }
+});
 
 it("rejects a secdb result for another branch or repository", async (t) => {
   const root = repo(t);
@@ -179,7 +268,7 @@ it("labels a finding preliminary when a missing index can change the package ori
   assert.match(partial.detail, /preliminary findings with incomplete origin data/);
   assert.match(partial.detail, new RegExp(advisory));
 
-  const otherOrigin = gzipSync(tarOf({ APKINDEX: "P:example-lib\nV:2-r0\no:other-source\n" }));
+  const otherOrigin = apkIndexFixture(branch, "P:example-lib\nV:2-r0\no:other-source\n");
   const compared = await checkApkFloors(
     root,
     sources({

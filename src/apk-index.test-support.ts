@@ -1,3 +1,6 @@
+import { gzipSync } from "node:zlib";
+import type { AlpineSourceResponse, ApkFetcher } from "./check-apk-fetch.js";
+
 /** Build a complete ustar fixture with regular files, checksums, padding, and termination. */
 export function tarOf(files: Record<string, string>): Buffer {
   const parts: Buffer[] = [];
@@ -19,6 +22,24 @@ export function tarOf(files: Record<string, string>): Buffer {
     parts.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512));
   }
   return Buffer.concat([...parts, Buffer.alloc(1024)]);
+}
+
+export function apkIndexFixture(branch: string, text: string, architecture = "x86_64"): Buffer {
+  const index = text.replace(/^P:[^\n]*\n/gm, (name) => name + `A:${architecture}\n`);
+  return gzipSync(tarOf({ DESCRIPTION: `${branch}.0-1-g1234567\n`, APKINDEX: index }));
+}
+
+export function alpineFixtureFetcher(fetchBody: (url: string) => Promise<Buffer>): ApkFetcher {
+  return async (url) => ({
+    body: await fetchBody(url),
+    lastModified: new Date().toUTCString(),
+  });
+}
+
+export function alpineHttpFixture({ body, lastModified }: AlpineSourceResponse): Response {
+  return new Response(new Uint8Array(body), {
+    headers: lastModified === null ? undefined : { "last-modified": lastModified },
+  });
 }
 
 /** Alpine secdb fixture with the published source identity fields. */

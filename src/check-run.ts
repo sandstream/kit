@@ -297,6 +297,7 @@ export function securityCheckToJson(s: SecurityCheckResult): JsonCheck {
     ...(s.hasFindings ? { hasFindings: true } : {}),
     ...(s.scanIncomplete ? { scanIncomplete: true } : {}),
     ...(s.evidenceStatus ? { evidenceStatus: s.evidenceStatus } : {}),
+    ...(s.evidenceSources ? { evidenceSources: s.evidenceSources } : {}),
   };
 }
 

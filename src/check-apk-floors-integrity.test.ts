@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { checkApkFloors } from "./check-apk-floors.js";
 import { gateStatus } from "./check-security.js";
-import { secdbFixture, secdbIndexFixture, tarOf } from "./apk-index.test-support.js";
+import {
+  alpineFixtureFetcher,
+  apkIndexFixture,
+  secdbFixture,
+  secdbIndexFixture,
+} from "./apk-index.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const VALID_MAIN = {
@@ -14,7 +19,7 @@ const VALID_MAIN = {
   reponame: "main",
   packages: [{ pkg: { name: "expat", secfixes: { "2.10.0-r0": ["CVE-2026-117610"] } } }],
 };
-const INDEX = gzipSync(tarOf({ APKINDEX: "P:libexpat\nV:2.10.0-r0\no:expat\n" }));
+const INDEX = apkIndexFixture("v3.24", "P:libexpat\nV:2.10.0-r0\no:expat\n");
 
 async function inspectSources(main: unknown, index = INDEX, floor = "2.8.5-r0") {
   const root = mkdtempSync(join(tmpdir(), "kit-apk-integrity-"));
@@ -25,14 +30,14 @@ async function inspectSources(main: unknown, index = INDEX, floor = "2.8.5-r0") 
     );
     return await checkApkFloors(
       root,
-      async (url) => {
+      alpineFixtureFetcher(async (url) => {
         if (url === "https://secdb.alpinelinux.org/") return secdbIndexFixture("v3.24");
         if (url.endsWith("/main.json"))
           return Buffer.isBuffer(main) ? main : Buffer.from(JSON.stringify(main));
         if (url.endsWith("/community.json")) return secdbFixture("v3.24", "community");
         if (url.endsWith("/APKINDEX.tar.gz")) return index;
         throw new Error("Unexpected source URL");
-      },
+      }),
       {},
     );
   } finally {
@@ -65,7 +70,7 @@ it("keeps a malformed fix record unverified instead of dropping the vulnerabilit
 });
 
 it("keeps a truncated tar body unverified despite complete gzip framing", async () => {
-  const truncated = gzipSync(gunzipSync(INDEX).subarray(0, 522));
+  const truncated = gzipSync(gunzipSync(INDEX).subarray(0, 1024 + 522));
   const result = await inspectSources(VALID_MAIN, truncated);
   assert.equal(result.status, "warn");
   assert.equal(result.didNotRun, true);

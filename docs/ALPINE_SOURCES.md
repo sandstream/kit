@@ -23,8 +23,19 @@ Kit rejects other PAX keys, links, special files, unknown logical members, and u
 Two end blocks, zero member padding, and these extension restrictions define Kit's supported producer profile.
 They are stricter than some tar readers. An unsupported archive leaves the check unverified.
 
-Header checksums detect malformed structure. Kit does not authenticate the signature bytes or establish repository freshness.
-HTTPS and the configured Alpine sources remain trust dependencies.
+Header checksums detect malformed structure. They provide no signature verification.
+Kit requests the exact Alpine HTTPS URL for the branch, repository, and architecture.
+The APKINDEX DESCRIPTION must also name the requested stable branch.
+Kit checks each APKINDEX record for the requested architecture or `noarch`.
+The repository comes from the publisher's HTTPS path.
+
+Kit requests cache revalidation for each GET.
+The secdb and APKINDEX responses must supply a valid HTTP Last-Modified date.
+Kit rejects dates more than 30 days old or more than five minutes in the future.
+These are Kit's limits for publisher-reported modification times.
+The publisher and the local clock remain trust dependencies.
+The date does not prove that a newer index is unavailable or that Alpine still supports the repository.
+The stable branch directory listing has no Last-Modified requirement.
 
 ## Complete data and comparison
 
@@ -54,6 +65,13 @@ Kit selects stable branch links from the publisher's complete root directory lis
 An invalid listing leaves the unresolved branch unverified.
 The result sanitizes advisory text for display.
 An incomplete comparison produces a warning, which the strict security gate rejects.
+
+On check JSON rows, `evidenceStatus` describes the comparison.
+A complete comparison with zero findings has status `complete-empty`.
+The `evidenceSources` array identifies each requested source by URL and includes its separate outcome.
+Source rows give the branch, repository, and architecture when these fields apply.
+The `lastModified` field is the HTTP modification time in ISO 8601 format.
+The source statuses separate empty results from missing, malformed, stale, unsupported, and unavailable input.
 
 ## Dockerfile discovery
 

@@ -7,8 +7,17 @@ const MAX_INFLATED = 64 * 1024 * 1024;
 const MAX_ENTRIES = 4096;
 const MAX_PAX = 64 * 1024;
 
-function refuse(reason: string): never {
-  throw new Error(`APKINDEX.tar.gz: ${reason}`);
+export class ApkIndexFormatError extends Error {
+  constructor(
+    reason: string,
+    readonly status: "malformed" | "unsupported",
+  ) {
+    super(`APKINDEX.tar.gz: ${reason}`);
+  }
+}
+
+function refuse(reason: string, status: "malformed" | "unsupported" = "malformed"): never {
+  throw new ApkIndexFormatError(reason, status);
 }
 
 function isZero(bytes: Buffer): boolean {
@@ -50,7 +59,8 @@ function readHeader(header: Buffer): Entry {
   );
   if (checksum !== actual) refuse("header checksum mismatch");
   const magic = header.subarray(257, 265).toString("latin1");
-  if (magic !== "ustar\0" + "00" && magic !== "ustar  \0") refuse("unsupported tar header");
+  if (magic !== "ustar\0" + "00" && magic !== "ustar  \0")
+    refuse("unsupported tar header", "unsupported");
   for (const [start, length] of [
     [100, 8],
     [108, 8],
@@ -60,7 +70,7 @@ function readHeader(header: Buffer): Entry {
     octal(header, start, length);
   octal(header, 329, 8, true);
   octal(header, 337, 8, true);
-  if (textField(header, 157, 100)) refuse("links are unsupported");
+  if (textField(header, 157, 100)) refuse("links are unsupported", "unsupported");
   const name = textField(header, 0, 100);
   const prefix = textField(header, 345, 155);
   if (!name) refuse("empty member name");
@@ -106,12 +116,12 @@ function entryBody(tar: Buffer, offset: number, size: number): { body: Buffer; n
 
 interface ArchiveState {
   index?: Buffer;
-  description: boolean;
+  description?: Buffer;
   pendingPax: boolean;
 }
 
 function acceptRegular(state: ArchiveState, entry: Entry, body: Buffer): void {
-  if (entry.type !== 0 && entry.type !== 48) refuse("unsupported member type");
+  if (entry.type !== 0 && entry.type !== 48) refuse("unsupported member type", "unsupported");
   state.pendingPax = false;
   if (/^\.SIGN\.(RSA|RSA256|RSA512|DSA)\.[a-zA-Z0-9._+@-]+$/.test(entry.name)) {
     if (state.description || state.index !== undefined) refuse("signature after index content");
@@ -119,23 +129,26 @@ function acceptRegular(state: ArchiveState, entry: Entry, body: Buffer): void {
     return;
   }
   if (entry.name === "DESCRIPTION" && !state.description && state.index === undefined) {
-    state.description = true;
+    state.description = body;
     return;
   }
   if (entry.name === "APKINDEX" && state.index === undefined) {
     state.index = body;
     return;
   }
-  refuse(`unsupported or duplicate member: ${entry.name}`);
+  refuse(
+    `unsupported or duplicate member: ${entry.name}`,
+    entry.name === "APKINDEX" || entry.name === "DESCRIPTION" ? "malformed" : "unsupported",
+  );
 }
 
-function finish(tar: Buffer, offset: number, state: ArchiveState): string {
+function finish(tar: Buffer, offset: number, state: ArchiveState) {
   if (state.pendingPax) refuse("PAX metadata has no following member");
   if (tar.length - offset < 2 * BLOCK || !isZero(tar.subarray(offset)))
     refuse("incomplete terminator or data after terminator");
   if (state.index === undefined) refuse("no APKINDEX member");
   if (!isUtf8(state.index)) refuse("invalid UTF-8 in APKINDEX");
-  return state.index.toString("utf8");
+  return { text: state.index.toString("utf8"), description: state.description };
 }
 
 function inflateComplete(gz: Buffer, limit: number): Buffer {
@@ -166,7 +179,7 @@ function inflateComplete(gz: Buffer, limit: number): Buffer {
  * Leading signature fragments need no tar terminator. Signature bytes are not authenticated here.
  * The optional trusted caller limit can only reduce the 64 MiB cumulative decompression limit.
  */
-export function apkIndexText(gz: Buffer, maxInflatedBytes = MAX_INFLATED): string {
+export function readApkIndexArchive(gz: Buffer, maxInflatedBytes = MAX_INFLATED) {
   if (
     !Number.isSafeInteger(maxInflatedBytes) ||
     maxInflatedBytes <= 0 ||
@@ -176,7 +189,7 @@ export function apkIndexText(gz: Buffer, maxInflatedBytes = MAX_INFLATED): strin
   if (gz.length > MAX_COMPRESSED) refuse("compressed input exceeds 16 MiB");
   const tar = inflateComplete(gz, maxInflatedBytes);
   if (tar.length % BLOCK !== 0) refuse("partial tar block");
-  const state: ArchiveState = { description: false, pendingPax: false };
+  const state: ArchiveState = { pendingPax: false };
   let entries = 0;
   for (let offset = 0; offset < tar.length;) {
     const header = tar.subarray(offset, offset + BLOCK);
@@ -192,4 +205,8 @@ export function apkIndexText(gz: Buffer, maxInflatedBytes = MAX_INFLATED): strin
     offset = next;
   }
   return refuse("missing tar terminator");
+}
+
+export function apkIndexText(gz: Buffer, maxInflatedBytes = MAX_INFLATED): string {
+  return readApkIndexArchive(gz, maxInflatedBytes).text;
 }

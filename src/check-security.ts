@@ -29,6 +29,7 @@ import {
 } from "./scanners.js";
 import { findIacFiles } from "./check-iac-detect.js";
 import { checkApkFloors } from "./check-apk-floors.js";
+import type { AlpineSourceEvidence } from "./check-apk-sources.js";
 import { checkMavenSbomCoverage } from "./maven-sbom.js";
 import type { SecurityLevel } from "./check-projects.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
@@ -134,6 +135,7 @@ export interface SecurityCheckResult extends Partial<{ hasFindings: true; scanIn
    */
   didNotRun?: boolean;
   evidenceStatus?: ScannerEvidenceStatus;
+  evidenceSources?: AlpineSourceEvidence[];
   /**
    * An out-of-verdict advisory riding on this result. Some signals must NOT move
    * pass/fail — catalog age is a function of the wall clock, an upstream release is a

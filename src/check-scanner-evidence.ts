@@ -2,7 +2,7 @@ import type { SecurityCheckResult } from "./check-security.js";
 import { failedDetail, type ExecResult } from "./utils/execFileNoThrow.js";
 
 export type ScannerReportGap = "missing" | "malformed" | "partial" | "unsupported" | "unavailable";
-export type ScannerEvidenceStatus = ScannerReportGap | "complete" | "complete-empty";
+export type ScannerEvidenceStatus = ScannerReportGap | "stale" | "complete" | "complete-empty";
 
 export interface ScannerReport {
   count: number;

@@ -7,27 +7,32 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
 import { APK_FLOORS_NAME, checkApkFloors, type ApkFetcher } from "./check-apk-floors.js";
-import { secdbFixture, secdbIndexFixture, tarOf } from "./apk-index.test-support.js";
+import {
+  alpineFixtureFetcher,
+  alpineHttpFixture,
+  apkIndexFixture,
+  secdbFixture,
+  secdbIndexFixture,
+} from "./apk-index.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const SECDB_MAIN = secdbFixture("v3.24", "main", [
   { pkg: { name: "expat", secfixes: { "2.10.0-r0": ["CVE-2026-117610"] } } },
 ]);
-const INDEX = gzipSync(tarOf({ APKINDEX: "P:libexpat\nV:2.10.0-r0\no:expat\n" }));
+const INDEX = apkIndexFixture("v3.24", "P:libexpat\nV:2.10.0-r0\no:expat\n");
 
 function fakeFetcher(seen: string[]): ApkFetcher {
-  return async (url) => {
+  return alpineFixtureFetcher(async (url) => {
     seen.push(url);
     if (url === "https://secdb.alpinelinux.org/") return secdbIndexFixture("v3.24");
     if (url.endsWith("/v3.24/main.json")) return SECDB_MAIN;
     if (url.endsWith("/v3.24/community.json")) return secdbFixture("v3.24", "community");
     if (url.endsWith("/v3.24/main/x86_64/APKINDEX.tar.gz")) return INDEX;
     if (url.endsWith("/v3.24/community/x86_64/APKINDEX.tar.gz"))
-      return gzipSync(tarOf({ APKINDEX: "" }));
+      return apkIndexFixture("v3.24", "");
     throw new Error(`unexpected ${url}`);
-  };
+  });
 }
 
 function repoWith(floor: string): string {
@@ -150,12 +155,14 @@ describe("check apk floors with the default transport", () => {
     t.mock.method(globalThis, "fetch", async (url: string) => {
       calls++;
       if (url.endsWith("/main.json")) return new Response('{"packages":[]}', { status: 206 });
-      return new Response(new Uint8Array(await fakeFetcher([])(url)));
+      return alpineHttpFixture(await fakeFetcher([])(url));
     });
     const result = await checkApkFloors(dir, undefined, {});
     assert.equal(result.status, "warn");
     assert.equal(result.didNotRun, true);
     assert.match(result.detail, /HTTP 206/);
+    assert.equal(result.evidenceStatus, "partial");
+    assert.equal(result.evidenceSources?.[1]?.status, "partial");
     assert.equal(calls, 5);
   });
 
@@ -169,7 +176,7 @@ describe("check apk floors with the default transport", () => {
         throw new TypeError("fetch failed", {
           cause: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
         });
-      return new Response(new Uint8Array(await fakeFetcher(seen)(url)));
+      return alpineHttpFixture(await fakeFetcher(seen)(url));
     });
     const observed = await checkApkFloors(dir, undefined, {});
     assert.equal(observed.status, "pass");
@@ -201,10 +208,8 @@ describe("check apk floors with the default transport", () => {
     let calls = 0;
     t.mock.method(globalThis, "fetch", async (url: string) => {
       calls++;
-      const bytes = url.endsWith("/main.json")
-        ? Buffer.from("{invalid")
-        : await fakeFetcher([])(url);
-      return new Response(new Uint8Array(bytes));
+      if (url.endsWith("/main.json")) return new Response("{invalid");
+      return alpineHttpFixture(await fakeFetcher([])(url));
     });
     const observed = await checkApkFloors(dir, undefined, {});
     assert.equal(observed.status, "warn");

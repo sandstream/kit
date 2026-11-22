@@ -1,16 +1,49 @@
 import { isUtf8 } from "node:buffer";
-import { ALPINE_SOURCE_MAX_BYTES, type ApkFetcher } from "./check-apk-fetch.js";
+import {
+  ALPINE_SOURCE_MAX_BYTES,
+  AlpineSourceError,
+  type AlpineSourceResponse,
+  type ApkFetcher,
+} from "./check-apk-fetch.js";
 import { mergeApkIndexOrigins, parseApkIndexOrigins } from "./alpine-index-origins.js";
-import { apkIndexText } from "./alpine-index-archive.js";
+import { ApkIndexFormatError, readApkIndexArchive } from "./alpine-index-archive.js";
 import { mergeSecdb, readSecdbSource, type AlpineRepository } from "./alpine-secdb.js";
 import { newestStableBranch } from "./dockerfile-apk-floors.js";
 import { sanitizeDisplayText } from "./display-text.js";
+import type { ScannerEvidenceStatus, ScannerReportGap } from "./check-scanner-evidence.js";
 
 const SECDB = "https://secdb.alpinelinux.org";
 const CDN = "https://dl-cdn.alpinelinux.org/alpine";
 const REPOSITORIES = ["main", "community"] as const;
+const ARCHITECTURE = "x86_64";
+const MAX_SOURCE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-type ReadSource<T> = { data: T; label: string } | { failure: string };
+type SourceScope =
+  | { kind: "branch-list"; url: string }
+  | { kind: "secdb"; url: string; branch: string; repository: AlpineRepository }
+  | {
+      kind: "apkindex";
+      url: string;
+      branch: string;
+      repository: AlpineRepository;
+      architecture: "x86_64";
+    };
+
+type SourceSuccess = "complete" | "complete-empty";
+type SourceGap = ScannerReportGap | "stale";
+type SourcePublication = { lastModified?: string };
+type SourceGood = SourceScope & SourcePublication & { status: SourceSuccess };
+type SourceBad = SourceScope & SourcePublication & { status: SourceGap; reason: string };
+export type AlpineSourceEvidence = SourceGood | SourceBad;
+
+type ReadSource<T> = { evidence: SourceGood; data: T } | { evidence: SourceBad };
+
+function sourceLabel(scope: SourceScope): string {
+  if (scope.kind === "branch-list") return "latest Alpine branch";
+  const name = scope.kind === "secdb" ? "secdb" : `APKINDEX (${scope.architecture})`;
+  return `${scope.branch} ${scope.repository} ${name}`;
+}
 
 export function alpineSourceFailure(error: unknown, context: string): string {
   const detail = sanitizeDisplayText(error instanceof Error ? error.message : String(error)).slice(
@@ -20,30 +53,112 @@ export function alpineSourceFailure(error: unknown, context: string): string {
   return `${detail || "source unavailable"} (${context})`;
 }
 
-async function readSource<T>(
+function sourceRefusal(
+  scope: SourceScope,
+  error: unknown,
+  fallback: SourceGap,
+  publication: SourcePublication = {},
+): ReadSource<never> {
+  const status =
+    error instanceof AlpineSourceError || error instanceof ApkIndexFormatError
+      ? error.status
+      : fallback;
+  return {
+    evidence: {
+      ...scope,
+      ...publication,
+      status,
+      reason: alpineSourceFailure(error, sourceLabel(scope)),
+    },
+  };
+}
+
+function readPublicationTime(lastModified: string | null): number {
+  if (!lastModified) throw new AlpineSourceError("missing HTTP Last-Modified", "missing");
+  const time = Date.parse(lastModified);
+  if (!Number.isFinite(time) || new Date(time).toUTCString() !== lastModified)
+    throw new AlpineSourceError("invalid HTTP Last-Modified", "malformed");
+  return time;
+}
+
+function requireCurrentPublication(time: number): void {
+  const age = Date.now() - time;
+  if (age < -MAX_CLOCK_SKEW_MS)
+    throw new AlpineSourceError(
+      "HTTP Last-Modified is more than five minutes in the future",
+      "malformed",
+    );
+  if (age > MAX_SOURCE_AGE_MS)
+    throw new AlpineSourceError("HTTP Last-Modified is more than 30 days old", "stale");
+}
+
+async function readSource<T extends { size: number } | string>(
   fetcher: ApkFetcher,
-  url: string,
-  label: string,
+  scope: SourceScope,
   parse: (body: Buffer) => T,
 ): Promise<ReadSource<T>> {
+  let response: AlpineSourceResponse;
   try {
-    return { data: parse(await fetcher(url)), label };
+    response = await fetcher(scope.url);
   } catch (error) {
-    return { failure: alpineSourceFailure(error, label) };
+    return sourceRefusal(scope, error, "unavailable");
   }
+  if (!response.body.length) return sourceRefusal(scope, "empty response body", "missing");
+  const publication: SourcePublication = {};
+  try {
+    const data = parse(response.body);
+    if (scope.kind !== "branch-list") {
+      const time = readPublicationTime(response.lastModified);
+      publication.lastModified = new Date(time).toISOString();
+      requireCurrentPublication(time);
+    }
+    const count = typeof data === "string" ? data.length : data.size;
+    return {
+      data,
+      evidence: { ...scope, ...publication, status: count ? "complete" : "complete-empty" },
+    };
+  } catch (error) {
+    return sourceRefusal(scope, error, "malformed", publication);
+  }
+}
+
+function readIndexOrigins(body: Buffer, branch: string): Map<string, string> {
+  const { text, description } = readApkIndexArchive(body);
+  if (!description?.length) throw new AlpineSourceError("APKINDEX has no DESCRIPTION", "missing");
+  if (description.length > 256 || !isUtf8(description))
+    throw new AlpineSourceError("invalid APKINDEX DESCRIPTION", "malformed");
+  const version = /^(v\d+\.\d+)\.\d+(?:-\d+-g[\da-f]{7,40})?$/.exec(
+    description.toString("utf8").trim(),
+  );
+  if (!version) throw new AlpineSourceError("unsupported APKINDEX DESCRIPTION", "unsupported");
+  if (version[1] !== branch)
+    throw new AlpineSourceError("APKINDEX DESCRIPTION names a different branch", "malformed");
+  return parseApkIndexOrigins(text, ARCHITECTURE);
 }
 
 async function readRepository(branch: string, repository: AlpineRepository, fetcher: ApkFetcher) {
   const root = `${branch}/${repository}`;
   const [secdb, index] = await Promise.all([
-    readSource(fetcher, `${SECDB}/${root}.json`, `${branch} ${repository} secdb`, (body) =>
-      readSecdbSource(body, { branch, repository }, ALPINE_SOURCE_MAX_BYTES),
+    readSource(
+      fetcher,
+      {
+        kind: "secdb",
+        url: `${SECDB}/${root}.json`,
+        branch,
+        repository,
+      },
+      (body) => readSecdbSource(body, { branch, repository }, ALPINE_SOURCE_MAX_BYTES),
     ),
     readSource(
       fetcher,
-      `${CDN}/${root}/x86_64/APKINDEX.tar.gz`,
-      `${branch} ${repository} APKINDEX (x86_64)`,
-      (body) => parseApkIndexOrigins(apkIndexText(body)),
+      {
+        kind: "apkindex",
+        url: `${CDN}/${root}/${ARCHITECTURE}/APKINDEX.tar.gz`,
+        branch,
+        repository,
+        architecture: ARCHITECTURE,
+      },
+      (body) => readIndexOrigins(body, branch),
     ),
   ]);
   return { secdb, index };
@@ -58,21 +173,35 @@ export async function readAlpineBranch(branch: string, fetcher: ApkFetcher) {
   const repositories = await Promise.all(
     REPOSITORIES.map((repo) => readRepository(branch, repo, fetcher)),
   );
-  const sources = repositories.flatMap(({ secdb, index }) => [secdb, index]);
+  const sources = repositories.flatMap(({ secdb, index }) => [secdb.evidence, index.evidence]);
   return {
-    failures: sources.flatMap((source) => ("failure" in source ? [source.failure] : [])),
-    checked: sources.flatMap((source) => ("label" in source ? [source.label] : [])),
+    sources,
+    failures: sources.flatMap((source) => ("reason" in source ? [source.reason] : [])),
+    checked: sources.filter((source) => !("reason" in source)).map(sourceLabel),
     originsComplete: repositories.every(({ index }) => "data" in index),
     secfixes: mergeSecdb(repositories.flatMap(({ secdb }) => sourceData(secdb))),
     origins: mergeApkIndexOrigins(repositories.flatMap(({ index }) => sourceData(index))),
   };
 }
 
-export async function readNewestStableBranch(fetcher: ApkFetcher): Promise<string> {
-  const bytes = await fetcher(`${SECDB}/`);
-  if (bytes.length > ALPINE_SOURCE_MAX_BYTES) throw new Error("secdb index: response too large");
-  if (!isUtf8(bytes)) throw new Error("secdb index: invalid UTF-8");
-  const branch = newestStableBranch(bytes.toString("utf8"));
-  if (!branch) throw new Error("secdb index lists no stable branch");
-  return branch;
+export async function readNewestStableBranch(fetcher: ApkFetcher): Promise<ReadSource<string>> {
+  return readSource(fetcher, { kind: "branch-list", url: `${SECDB}/` }, (bytes) => {
+    if (bytes.length > ALPINE_SOURCE_MAX_BYTES) throw new Error("secdb index: response too large");
+    if (!isUtf8(bytes)) throw new Error("secdb index: invalid UTF-8");
+    const branch = newestStableBranch(bytes.toString("utf8"));
+    if (!branch) throw new Error("secdb index lists no stable branch");
+    return branch;
+  });
+}
+
+export function aggregateAlpineStatus(
+  sources: readonly AlpineSourceEvidence[],
+  incomplete: boolean,
+  hasFindings: boolean,
+): ScannerEvidenceStatus {
+  if (!incomplete) return hasFindings ? "complete" : "complete-empty";
+  const first = sources[0];
+  if (first && "reason" in first && sources.every((source) => source.status === first.status))
+    return first.status;
+  return "partial";
 }
