@@ -67,12 +67,15 @@ describe("dockerfile apk floors: secdb and APKINDEX", () => {
   it("maps a subpackage to its origin through a gzipped APKINDEX", () => {
     const index = "P:libexpat\nV:2.10.0-r0\no:expat\n\nP:bash\nV:5.3.9-r1\no:bash\n";
     const gz = Buffer.concat([
-      gzipSync(tarOf({ ".SIGN.RSA.key.pub": "sig" })),
+      gzipSync(tarOf({ ".SIGN.RSA.key.pub": "sig" }).subarray(0, -1024)),
       gzipSync(tarOf({ DESCRIPTION: "v3.24", APKINDEX: index })),
     ]);
     const origins = parseApkIndexOrigins(apkIndexText(gz));
     assert.equal(origins.get("libexpat"), "expat");
-    assert.throws(() => apkIndexText(gzipSync(tarOf({ other: "x" }))), /no APKINDEX/);
+    assert.throws(
+      () => apkIndexText(gzipSync(tarOf({ other: "x" }))),
+      /unsupported or duplicate member: other/,
+    );
   });
 
   it("picks the newest stable branch from the secdb index", () => {
