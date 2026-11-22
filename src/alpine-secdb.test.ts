@@ -228,6 +228,16 @@ describe("parseSecdb (part 4)", () => {
         );
       }
     });
+
+    it(`rejects every C1 control character in a ${field}, like CSI (U+009B)`, () => {
+      for (let code = 0x80; code <= 0x9f; code++) {
+        assert.throws(
+          () => parseSecdb(feed(`before${String.fromCharCode(code)}after`)),
+          /secdb:/,
+          `C1 control character ${code}`,
+        );
+      }
+    });
   }
 });
 
