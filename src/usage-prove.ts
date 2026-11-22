@@ -26,7 +26,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { controlEnvWriteGate } from "./usage-prove-env.js";
+import { controlEnvWriteGate, NEGATIVE_CONTROL_SESSION } from "./usage-prove-env.js";
 
 export interface Control {
   name: string;
@@ -69,6 +69,7 @@ function run(
  */
 export function controlUnverifiableInstall(): Control {
   const payload = JSON.stringify({
+    session_id: NEGATIVE_CONTROL_SESSION,
     tool_name: "Bash",
     tool_input: { command: "$PM install some-package-that-must-not-install" },
   });
@@ -91,6 +92,7 @@ export function controlUnverifiableInstall(): Control {
  */
 export function controlHarmlessCommandAllowed(): Control {
   const payload = JSON.stringify({
+    session_id: NEGATIVE_CONTROL_SESSION,
     tool_name: "Bash",
     tool_input: { command: "git status --short" },
   });

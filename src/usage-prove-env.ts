@@ -5,6 +5,14 @@
  */
 import type { Control } from "./usage-prove.js";
 
+/**
+ * The `session_id` every control payload carries. A gate writes an audit row for each refusal, in
+ * the project the controls run in, so `kit check` added two refusals to the project's log on every
+ * run and nothing told them apart from an agent's (kit-research `agent-platform-2027-vs-kit`). The
+ * gates copy the payload's `session_id` into the row; this value marks the row as kit's own control.
+ */
+export const NEGATIVE_CONTROL_SESSION = "kit-negative-control";
+
 /** Runs the kit CLI with these arguments and this stdin, and returns the exit code. */
 export type RunKit = (args: string[], opts?: { input?: string }) => { code: number };
 
@@ -19,7 +27,11 @@ export type RunKit = (args: string[], opts?: { input?: string }) => { code: numb
 export function controlEnvWriteGate(run: RunKit): Control[] {
   const fakeKey = `sk_test_${"A".repeat(20)}`;
   const write = (file: string, content: string) =>
-    JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content } });
+    JSON.stringify({
+      session_id: NEGATIVE_CONTROL_SESSION,
+      tool_name: "Write",
+      tool_input: { file_path: file, content },
+    });
   const refused = run(["gate-env"], { input: write(".env", `STRIPE_SECRET_KEY=${fakeKey}\n`) });
   const allowed = run(["gate-env"], { input: write("notes.md", "nothing secret here\n") });
   const blocked = refused.code === 2;
