@@ -183,6 +183,10 @@ in to any vault is always your own account action; kit never does it for you.
 - `kit security scan-transcripts`: Scan supported text files in project agent directories and matching Claude, OpenCode, and Codex project caches.
   Kit reports unreadable files, size limits, and other gaps. The command succeeds only after a complete scan with no findings.
   The scan excludes the machine-wide Codex sessions store and agent worktree copies.
+- `kit check` row `local docker image IOCs`: Compare image names and registry digests in the selected Docker context with published indicators.
+  Kit checks the list against the daemon image count. The check does not scan image content.
+- `kit check` reads findings from `.kit-scan-results.jsonl` when the file exists. Kit reports unreadable or invalid reports and keeps usable findings.
+  The file cannot prove that the external scanner completed its scan or that the records are recent.
 - `kit security check-gitignore [--fix]`: Verify `.env*`, `*.pem`, `id_rsa`, `.kit/elevation.json` are ignored
 - `kit security verify-pull [--base <ref>]`: After `git pull`: audit new deps, gitignore drops, introduced secrets, policy changes
 - `kit security policy [init|add <pkg>|check]`: Dependency allowlist enforcement + per-key spend caps/TTL/scope

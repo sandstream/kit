@@ -16,6 +16,8 @@ export interface ExecResult {
   noNumericExitStatus?: true;
   /** The OS did not start the child. */
   didNotStart?: true;
+  /** The OS error code when the child failed to start. */
+  spawnErrorCode?: string;
 }
 
 /** 64 MiB, the limit most callers already set. A report grows with what a scanner finds. */
@@ -50,7 +52,10 @@ function failureResult(error: unknown): ExecResult {
   if (typeof e.code !== "number") result.noNumericExitStatus = true;
   if (e.code === MAXBUFFER_CODE) result.truncated = true;
   else if (e.killed === true && e.signal === "SIGTERM") result.timedOut = true;
-  else if (typeof e.code === "string" && !e.signal) result.didNotStart = true;
+  else if (typeof e.code === "string" && !e.signal) {
+    result.didNotStart = true;
+    result.spawnErrorCode = e.code;
+  }
   return result;
 }
 
