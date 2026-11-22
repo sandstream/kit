@@ -16,6 +16,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The merge commit and its parents: `HEAD~1` is the base the affected-tests step diffs against.
+          fetch-depth: 2
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -41,8 +44,21 @@ jobs:
       - name: Standards gate
         run: node dist/cli.js standards --enforce
 
+      # SHADOW MODE (docs/CI_AND_GIT_HOSTS.md, "Affected tests"): reports which tests a selection
+      # would have run. It selects nothing: the Test step below still runs every test, and neither
+      # shadow step can fail the job.
+      - name: Affected tests (shadow) - what a selection would run
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: node scripts/affected-tests.mjs --base HEAD~1 --json --summary "$GITHUB_STEP_SUMMARY" > "$RUNNER_TEMP/affected.json"
+
       - name: Test
         run: npm test
+
+      - name: Affected tests (shadow) - would the selection have caught the failures
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        run: node scripts/affected-tests.mjs --compare "$RUNNER_TEMP/affected.json" .kit-test-run.tap --summary "$GITHUB_STEP_SUMMARY"
 
       # kit's own test-coverage gate, enforced. `.kit-baseline.json` is committed, so
       # the 91 pre-existing untested files are frozen and only a NET-NEW untested
