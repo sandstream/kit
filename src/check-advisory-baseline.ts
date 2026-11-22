@@ -79,6 +79,7 @@ export async function checkAdvisoryBaseline(root: string): Promise<SecurityCheck
   }
 
   const outcome = runAudit(root, runner);
+  base.evidenceStatus = outcome.evidenceStatus;
   if (outcome.error) return incompleteAudit(base, baseline, outcome.advisories, outcome.error);
 
   const { added, stale, remaining } = diffAgainstBaseline(outcome.advisories, baseline);
