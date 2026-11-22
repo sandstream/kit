@@ -440,7 +440,7 @@ computed from the recorded observe window, and the flip refuses unless that verd
 
 | Command                                 | Purpose                                                                                                                                                                                                           |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kit broker enforce-readiness [--gate]` | Read the recorded observe window (`.kit-audit.jsonl`) and report whether flipping to enforce is safe: `ready` \| `would-block` (+ exactly what breaks) \| `untested`. `--gate` fails CI on any not-ready verdict. |
+| `kit broker enforce-readiness [--gate]` | Read the recorded observe window (`.kit-audit.jsonl`) and report whether flipping to enforce is safe: `ready` \| `would-block` (+ exactly what breaks) \| `untested` \| `unverifiable` (the hash chain of the log is broken, so its events are not evidence). `--gate` fails CI on any not-ready verdict. |
 | `kit broker enforce [--force]`          | Guided observe→enforce flip: readiness pre-flight (refuses unless `ready`; `--force` overrides), sets `[scope].enforce_runtime = true`, re-signs the profile scope, and audits the transition.                    |
 
 Invalid observe evidence is not a successful observation. Readiness reads the entire

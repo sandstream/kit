@@ -286,6 +286,29 @@ async function verifyAnchorStage(
   return { ...summary, verdict };
 }
 
+/** Report a missing or empty log. See `nothingVerified` for the rule. */
+async function reportNothingVerified(
+  report: AuditVerifyReport,
+  kind: "missing" | "empty",
+  opts: { failClosed: boolean; jsonMode: boolean },
+): Promise<boolean> {
+  const { nothingVerified } = await import("../audit-verify-empty.js");
+  const { hasAnyAnchoredLogs } = await import("../audit-anchor.js");
+  const outcome = nothingVerified(
+    kind,
+    report.logPath,
+    opts.failClosed || (await hasAnyAnchoredLogs()),
+  );
+  if (opts.jsonMode) {
+    report.ok = outcome.ok;
+    report.reason = outcome.reason;
+    return printAuditVerifyReport(report);
+  }
+  if (outcome.ok) console.warn(`${c.yellow}! ${outcome.message}${c.reset}`);
+  else console.error(`${c.red}✗ ${outcome.message}${c.reset}`);
+  return outcome.ok;
+}
+
 /**
  * `kit audit verify` - verify the keyless hash chain, then the external HMAC
  * anchor (key + sealed count) when one exists. See audit-anchor.ts for the
@@ -325,35 +348,16 @@ async function cmdAuditVerify(): Promise<boolean> {
     signatures: null,
     anchor: null,
   };
+  const fail = { failClosed: strictFlag || requireAnchor || requireExternal, jsonMode };
   let content: string;
   try {
     content = await readFile(logPath, "utf-8");
   } catch {
-    // Verify-by-absence is FALSE SECURITY: a deleted / never-anchored log must NOT
-    // report "verified". An erased trail is exactly what a tamper-evidence system
-    // must catch. Fail closed when strict, require_anchor, or this machine has
-    // anchored logs elsewhere (so an attacker can't erase the trail to pass green).
-    const { hasAnyAnchoredLogs } = await import("../audit-anchor.js");
-    const failClosed =
-      strictFlag || requireAnchor || requireExternal || (await hasAnyAnchoredLogs());
-    if (jsonMode) {
-      report.ok = !failClosed;
-      report.reason = "audit log unavailable; nothing verified";
-      return printAuditVerifyReport(report);
-    }
-    if (failClosed) {
-      console.error(
-        `${c.red}✗ no audit log at ${logPath} — refusing to report verified under strict / require_anchor / a machine that has anchored logs. An erased trail is a tamper signal, not a pass.${c.reset}`,
-      );
-      return false;
-    }
-    // Genuine fresh install (no strict, no require_anchor, never anchored): surface
-    // it as a WARN, not a silent dim pass.
-    console.warn(
-      `${c.yellow}! no audit log at ${logPath} yet — nothing to verify (fresh install)${c.reset}`,
-    );
-    return true;
+    return reportNothingVerified(report, "missing", fail);
   }
+  // An empty log is its own outcome. "Chain intact, 0 entries" would report a log that
+  // was emptied in the same words as a log that verifies.
+  if (content.trim().length === 0) return reportNothingVerified(report, "empty", fail);
   const r = verifyAuditChain(content);
   report.chain = r;
   if (!r.ok) {

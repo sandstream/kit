@@ -7,6 +7,7 @@ import { cmdBroker, enforceGateDecision } from "./broker.js";
 import { loadOrCreateIdentity } from "../identity.js";
 import { loadProfile, PROFILE_FILE } from "../profile/schema.js";
 import { rmTemp } from "../temp-cleanup.test-support.js";
+import { chainedAuditLog, observeEvent } from "../audit-chain.test-support.js";
 
 let dir: string;
 let cwd: string;
@@ -39,12 +40,12 @@ function setArgs(...sub: string[]): void {
   process.argv = ["node", "kit", "broker", ...sub];
 }
 
-function writeAudit(...lines: string[]): void {
-  writeFileSync(join(dir, ".kit-audit.jsonl"), lines.join("\n") + "\n", "utf-8");
+/** Write a log with a valid hash chain, as kit's own writer produces it. */
+function writeAudit(...events: Record<string, unknown>[]): void {
+  writeFileSync(join(dir, ".kit-audit.jsonl"), chainedAuditLog(events), "utf-8");
 }
 
-const observe = (wouldDeny: string[]): string =>
-  JSON.stringify({ operation: "bash", success: true, metadata: { phase: "observe", wouldDeny } });
+const observe = observeEvent;
 
 describe("cmdBroker enforce-readiness", () => {
   it("no audit file → untested, exit 0 (honest floor, never a green ready)", async () => {
@@ -110,16 +111,6 @@ describe("cmdBroker enforce-readiness", () => {
     assert.match(text, /egress evil\.test/);
   });
 
-  it("tolerates a malformed audit log without throwing", async () => {
-    writeAudit("{not json", "", observe(["r1"]), "null");
-    setArgs("enforce-readiness", "--json");
-    const ok = await cmdBroker();
-    assert.equal(ok, true);
-    const out = JSON.parse(logs.join("\n"));
-    assert.equal(out.verdict, "would-block");
-    assert.equal(out.opsObserved, 1);
-  });
-
   it("defaults to enforce-readiness when no subcommand is given", async () => {
     setArgs("--json");
     const ok = await cmdBroker();
@@ -172,8 +163,7 @@ describe("cmdBroker enforce (guided, signed flip)", () => {
   let origErr: typeof console.error;
 
   const SCOPED = `version = 1\n[scope]\negress = ["api.acme.com"]\nfs = ["src"]\n`;
-  const observe = (wouldDeny: string[]) =>
-    JSON.stringify({ operation: "bash", success: true, metadata: { phase: "observe", wouldDeny } });
+  const observe = observeEvent;
 
   beforeEach(() => {
     idDir = mkdtempSync(join(tmpdir(), "kit-broker-id-"));
@@ -206,8 +196,8 @@ describe("cmdBroker enforce (guided, signed flip)", () => {
   const setArgs = (...sub: string[]): void => {
     process.argv = ["node", "kit", "broker", ...sub];
   };
-  const writeAudit = (...lines: string[]): void =>
-    writeFileSync(join(projDir, ".kit-audit.jsonl"), lines.join("\n") + "\n", "utf-8");
+  const writeAudit = (...events: Record<string, unknown>[]): void =>
+    writeFileSync(join(projDir, ".kit-audit.jsonl"), chainedAuditLog(events), "utf-8");
 
   it("refuses when untested (no observe data) without --force; profile unchanged", async () => {
     setArgs("enforce", "--json");

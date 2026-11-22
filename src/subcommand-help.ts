@@ -29,7 +29,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "profile import":
     "Import a portable bundle on a fresh host — integrity-verify offline, fail-closed on tamper/revoked (authoritative only once the signer is anchored)",
   "broker enforce-readiness":
-    "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
+    "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested | unverifiable (the audit chain is broken) (--gate fails CI on any not-ready verdict)",
   "broker enforce":
     "Guided observe→enforce flip: readiness pre-flight (refuses unless ready; --force overrides), set [scope].enforce_runtime = true, re-sign the profile scope, and audit the transition",
   "browser doctor":

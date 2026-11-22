@@ -19,6 +19,16 @@ count, so a full rewrite (or a truncation/rollback) is invisible to the keyless
 check. The chain is tamper-EVIDENT against accidental or naive edits; it is not
 tamper-PROOF against a writer who recomputes it.
 
+An empty log is not an intact chain. When the log is missing, or exists and holds no entry,
+`kit audit verify` reports that nothing was verified, with a different message for each case.
+Both fail under `--strict`, `require_anchor`, `--require-external`, and on a machine that has
+anchored logs. On a fresh install both are a warning.
+
+Commands that read the log as evidence verify the chain first. `kit broker enforce-readiness`,
+`kit broker enforce` and the `exec-broker runtime` row of `kit doctor` report `unverifiable`
+when the chain is broken, and name the entry. They do not give a verdict from the events that
+are left. Limit: the hash chain does not show a log that lost its last lines. The anchor does.
+
 ## 2. External HMAC anchor (`kit audit anchor` / `kit audit verify`)
 
 A machine-local key lives at `~/.kit/audit-anchor.key` (0600, created on first
