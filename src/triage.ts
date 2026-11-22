@@ -279,26 +279,31 @@ function parseCaskInfo(json: unknown): BrewInfo {
 export function parseBrewInfo(json: unknown): BrewInfo {
   const formulae = (json as { formulae?: unknown[] })?.formulae;
   if (!Array.isArray(formulae) || formulae.length === 0) return parseCaskInfo(json);
-  const f = (Array.isArray(formulae) ? formulae[0] : undefined) as
-    | {
-        name?: string;
-        versions?: { stable?: string };
-        homepage?: string;
-        urls?: { head?: { url?: string }; stable?: { url?: string } };
-        deprecated?: boolean;
-        disabled?: boolean;
-      }
-    | undefined;
+  const f = formulae[0] as BrewFormula | undefined;
   if (!f || typeof f !== "object") return { deprecated: false, disabled: false };
   return {
-    name: typeof f.name === "string" ? f.name : undefined,
-    version: typeof f.versions?.stable === "string" ? f.versions.stable : undefined,
-    homepage: typeof f.homepage === "string" ? f.homepage : undefined,
+    name: str(f.name),
+    version: str(f.versions?.stable),
+    homepage: str(f.homepage),
     repoUrl:
       asRepoUrl(f.homepage) ?? asRepoUrl(f.urls?.head?.url) ?? asRepoUrl(f.urls?.stable?.url),
     deprecated: Boolean(f.deprecated),
     disabled: Boolean(f.disabled),
   };
+}
+
+interface BrewFormula {
+  name?: string;
+  versions?: { stable?: string };
+  homepage?: string;
+  urls?: { head?: { url?: string }; stable?: { url?: string } };
+  deprecated?: boolean;
+  disabled?: boolean;
+}
+
+/** A string field of untrusted JSON, or undefined. */
+function str(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 /**
