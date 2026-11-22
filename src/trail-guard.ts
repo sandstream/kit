@@ -15,7 +15,8 @@
  *     - a segment that names a trail file or a `~/.kit/` path and starts with a command that
  *       changes files (`rm`, `mv`, `truncate`, `sed`, `Remove-Item`, …) or redirects output into
  *       it;
- *     - `kit audit anchor` and `kit panic`, which re-seal or rotate on the agent's behalf.
+ *     - `kit audit anchor` and `kit panic`, which re-seal or rotate on the agent's behalf;
+ *     - `kit mcp callback`, which carries an OAuth authorization code a model should not see.
  *
  * Reading the log (`cat`, `kit audit verify`) and running the `~/.kit/bin/kit` wrapper stay
  * allowed. A person runs the refused commands themselves (with `!` in Claude Code). Out of
@@ -106,6 +107,9 @@ function redirectsIntoTrail(segment: string, home: string): boolean {
 export function trailCommandRefusal(command: string, home: string): string | null {
   if (/(^|[\s/\\"'])kit(?:\.cmd)?["']?\s+(?:audit\s+anchor|panic)\b/i.test(command)) {
     return "`kit audit anchor` and `kit panic` re-seal or rotate kit's trail; a person runs them, not the agent";
+  }
+  if (/(^|[\s/\\"'])kit(?:\.cmd)?["']?\s+mcp\s+callback\b/i.test(command)) {
+    return "`kit mcp callback` carries an OAuth authorization code; a person runs it in their own terminal, so the code never passes through the agent";
   }
   for (const segment of command.split(/&&|\|\||[;|\n]/)) {
     if (ANCHOR_FILES.test(segment)) {

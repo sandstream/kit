@@ -1614,6 +1614,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "callback": {
+          "kind": "command",
+          "summary": "Deliver a pasted OAuth callback address to the loopback listener on this machine (--for <authorization URL> checks it belongs to the sign-in); run it yourself, the gates refuse it from an agent",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "human",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "clear": {
           "kind": "command",
           "summary": "Remove stored token",
@@ -1662,7 +1671,17 @@
       },
       "kind": "group",
       "summary": "MCP server over stdio; 'kit mcp web' connects ChatGPT through an outbound secure tunnel",
-      "x-kit-accepted-flags": ["--env","--from-env","--help","--non-interactive","--paste","--read-only","--readonly","--version"],
+      "x-kit-accepted-flags": [
+        "--env",
+        "--for",
+        "--from-env",
+        "--help",
+        "--non-interactive",
+        "--paste",
+        "--read-only",
+        "--readonly",
+        "--version"
+      ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-flags-without-values": [

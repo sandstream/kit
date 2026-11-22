@@ -160,6 +160,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "mcp auth": "Show OAuth-flow guidance for vendor",
   "mcp set-token": "Headless / paste-token install",
   "mcp clear": "Remove stored token",
+  "mcp callback":
+    "Deliver a pasted OAuth callback address to the loopback listener on this machine (--for <authorization URL> checks it belongs to the sign-in); run it yourself, the gates refuse it from an agent",
   "mcp web":
     "Interactive ChatGPT-web setup through OpenAI Secure MCP Tunnel; keeps kit private and uses its existing stdio server",
   "hooks install": "Install hooks declared in [hooks]",
