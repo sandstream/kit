@@ -216,6 +216,21 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     label: "url-query-token",
     replacement: "$1[REDACTED]",
   },
+  // An OAuth callback or token request in a URL: the authorization `code` and the PKCE
+  // `code_verifier`. kit-research `t3code-mcp-sign-in-vs-kit`: a sign-in on a remote machine ends
+  // with the person pasting `http://localhost:<port>/callback?code=…&state=…` into a chat or a
+  // terminal, where a transcript keeps it. `code=` alone is too common a name (error codes,
+  // country codes), so it is redacted only in a query that also carries `state=`.
+  {
+    re: /([?&]code=)[A-Za-z0-9_\-+/%.~]{8,512}(?=[^\s"'<>]{0,2048}&state=)|([?&]state=[^\s"'<>&]{1,512}(?:&[^\s"'<>&=]{1,64}=[^\s"'<>&]{0,512}){0,8}&code=)[A-Za-z0-9_\-+/%.~]{8,512}/g,
+    label: "oauth-callback-code",
+    replacement: "$1$2[REDACTED]",
+  },
+  {
+    re: /\b(code_verifier=)[A-Za-z0-9_\-.~]{43,128}/g,
+    label: "oauth-code-verifier",
+    replacement: "$1[REDACTED]",
+  },
   // `Authorization: Bearer <token>` header text with an opaque (non-JWT-shaped) value.
   // The `jwt` pattern above only catches the `eyJ...` form; a provider that issues a
   // plain opaque bearer token (not a JWT) reflected into a log/error string slipped
