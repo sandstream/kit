@@ -157,6 +157,51 @@ def _walk(plugin_dir):
             yield os.path.join(root, name)
 
 
+def _mcp_servers(plugin_dir, manifest):
+    """(source, name, server) for each MCP server a plugin registers: `.mcp.json` at its root, and
+    `mcpServers` in plugin.json (inline, or a path to such a file)."""
+    out = []
+    declared = manifest.get("mcpServers")
+    sources = [(".mcp.json", os.path.join(plugin_dir, ".mcp.json"))]
+    if isinstance(declared, dict):
+        out += [("plugin.json", n, v) for n, v in sorted(declared.items()) if isinstance(v, dict)]
+    elif isinstance(declared, str):
+        rel = declared[2:] if declared.startswith("./") else declared
+        sources.append((rel, os.path.join(plugin_dir, *rel.split("/"))))
+    for source, path in sources:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        servers = data.get("mcpServers", data) if isinstance(data, dict) else {}
+        out += [(source, n, v) for n, v in sorted(servers.items()) if isinstance(v, dict)]
+    return out
+
+
+def _report_mcp_servers(rep, plugin_dir, manifest):
+    """An MCP server a plugin registers starts with every session, like a hook. Its command was not
+    reported at all (kit-research `fast-anything-vs-kit`: a plugin whose `.mcp.json` runs a binary
+    from PATH read as "0 hook command(s)", PASSED)."""
+    servers = _mcp_servers(plugin_dir, manifest)
+    rep.fact(f"plugin registers {len(servers)} MCP server(s)")
+    for source, name, server in servers:
+        if isinstance(server.get("url"), str):
+            host = URL_HOST.search(server["url"])
+            rep.warn(f"{source}: MCP server {name!r} is remote ({host.group(1) if host else 'unparsed URL'}) -- its tools and their output come from that host")
+            continue
+        command = str(server.get("command", ""))
+        args = [str(a) for a in server.get("args", [])] if isinstance(server.get("args"), list) else []
+        line = " ".join([command] + args)
+        _scan_script(rep, f"{source} MCP server {name!r}", line)
+        local = command.startswith(("./", "${CLAUDE_PLUGIN_ROOT}", "$CLAUDE_PLUGIN_ROOT")) or any(
+            "CLAUDE_PLUGIN_ROOT" in a for a in args)
+        if RUNNER.search(line) or local:
+            rep.fact(f"{source}: MCP server {name!r} runs `{line[:120]}`")
+        else:
+            rep.warn(f"{source}: MCP server {name!r} runs `{command}` from PATH on every session -- the plugin does not ship it; triage how that program is installed")
+
+
 def triage_local_plugin(rep, secrets_in):
     """Triage a local Claude Code plugin directory (one with .claude-plugin/plugin.json)."""
     plugin_dir = rep.target
@@ -164,6 +209,7 @@ def triage_local_plugin(rep, secrets_in):
     if isinstance(manifest, dict):
         rep.fact(f"plugin {manifest.get('name', '?')} {manifest.get('version', '')}".rstrip())
     _report_hooks(rep, plugin_dir, manifest or {})
+    _report_mcp_servers(rep, plugin_dir, manifest or {})
     read, unread, skills = 0, [], 0
     for full in _walk(plugin_dir):
         rel = os.path.relpath(full, plugin_dir).replace(os.sep, "/")
