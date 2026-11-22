@@ -8,12 +8,17 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   controlUnverifiableInstall,
   controlHarmlessCommandAllowed,
   proveFloor,
 } from "./usage-prove.js";
+import { NEGATIVE_CONTROL_SESSION } from "./usage-prove-env.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("the negative controls", () => {
   it("refuse an install whose target cannot be resolved", () => {
@@ -40,5 +45,24 @@ describe("the env-write gate controls in the floor proof", () => {
       names.some((n) => /env-write gate allows/.test(n)),
       names.join(" | "),
     );
+  });
+});
+
+describe("the audit rows the controls leave", () => {
+  it("are marked as kit's own controls, not an agent's refusals", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-control-rows-"));
+    const before = process.cwd();
+    process.chdir(dir);
+    t.after(() => {
+      process.chdir(before);
+      rmTemp(dir);
+    });
+    proveFloor();
+    const rows = readFileSync(join(dir, ".kit-audit.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { operation: string; metadata?: { session_id?: string } });
+    assert.deepEqual(rows.map((r) => r.operation).sort(), ["gate-bash", "gate-env"]);
+    for (const r of rows) assert.equal(r.metadata?.session_id, NEGATIVE_CONTROL_SESSION);
   });
 });
