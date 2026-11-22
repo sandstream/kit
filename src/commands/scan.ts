@@ -6,12 +6,25 @@ import { c } from "../utils/colors.js";
 import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { hasMarker, scanProvidersTracked } from "../scan-detect.js";
-import { mavenSbomScanners } from "../maven-sbom.js";
 import { DEFAULT_SCAN_TIMEOUT_MS, isFailedRun } from "../scan-abort.js";
-import { resolveProjectPaths } from "../projects-config.js";
-import { expandPerProject } from "../scan-projects.js";
+import {
+  applyScopeGate,
+  plannedScopeGaps,
+  planScans,
+  requiredScanIds,
+  scanScopeMessage,
+  type ScanScopeGap,
+} from "../scan-plan.js";
 import type { IntelStatus } from "../exploit-intel.js";
-import type { AirGapPlan, MergedFinding, ScanGate, ScannerDef, ScannerRun } from "../scanners.js";
+import {
+  scanHealthGate,
+  type AirGapPlan,
+  type MergedFinding,
+  type ScanGate,
+  type ScanGateOptions,
+  type ScannerDef,
+  type ScannerRun,
+} from "../scanners.js";
 
 /** Whether CISA KEV and FIRST EPSS answered this run, and why not. */
 interface IntelSummary {
@@ -31,6 +44,7 @@ interface ScanVerdict {
   suppressed: number;
   bad: number;
   gate: ScanGate;
+  scopeGaps: ScanScopeGap[];
   strict: boolean;
   ok: boolean;
 }
@@ -51,15 +65,17 @@ export async function cmdScan(): Promise<boolean> {
     return true;
   }
 
-  const selected = await selectScanners(cwd, config);
-  const airgap = await applyAirGap(selected, config);
+  const plan = planScans(cwd, config);
+  const airgap = await applyAirGap(plan.scanners, config);
   if (!airgap) return false;
-  const toolingTokens = await fetchToolingTokens(config, selected);
+  const scopeGaps = plannedScopeGaps(plan, airgap.scanners);
+  for (const gap of scopeGaps) console.error(`${c.yellow}! ${scanScopeMessage(gap)}${c.reset}`);
+  const policy = scanPolicy(config, plan.scanners);
+  const toolingTokens = await fetchToolingTokens(config, plan.scanners);
   const { merged, runs } = await executeScanners(cwd, airgap, toolingTokens);
 
   if (hasFlag(process.argv, "--update-baseline")) {
-    const { scanHealthGate } = await import("../scanners.js");
-    const gate = scanHealthGate(runs, scanPolicy(config));
+    const gate = assessScanHealth(runs, scopeGaps, { ...policy, strict: true });
     printGate(gate);
     if (!gate.ok || !hasCompletedScan(runs)) {
       console.error("Scan coverage cannot support a baseline update.");
@@ -68,7 +84,7 @@ export async function cmdScan(): Promise<boolean> {
     await updateScanBaseline(cwd, merged);
     return true;
   }
-  const verdict = await judgeScan(cwd, config, merged, runs);
+  const verdict = await judgeScan(cwd, config, { merged, runs, scopeGaps }, policy);
   await printVerdict(verdict);
   return verdict.ok;
 }
@@ -83,32 +99,6 @@ async function printDelegates(delegates: readonly string[] | undefined): Promise
       .join(", ");
     console.log(`${tag} ${s.id.padEnd(13)} ${s.format}${notes ? `  (${notes})` : ""}`);
   }
-}
-
-/** The enabled scanners, per declared project, plus the Maven SBOM and container-image scanners. */
-async function selectScanners(cwd: string, config: kitConfig): Promise<ScannerDef[]> {
-  const { SCANNERS, enabledScanners } = await import("../scanners.js");
-  const delegates = config.scan?.delegates;
-  // `[projects] paths`: a scanner that does not recurse runs once per project directory.
-  const declared = resolveProjectPaths(cwd, config.projects?.paths);
-  for (const r of declared.refused) {
-    console.error(`${c.yellow}! [projects] path not scanned: ${r.path} (${r.reason})${c.reset}`);
-  }
-  const selected = expandPerProject(enabledScanners(SCANNERS, delegates), declared.projects);
-  selected.push(...mavenSbomScanners(cwd, delegates));
-
-  // Container images (L1): `[scan].images` and, when asked, the Dockerfiles' FROM lines. Each image
-  // adds an osv-scanner and a trivy run that pull the image, so air-gap mode drops them below.
-  const { collectImages, configuredImages, imageScanners } = await import("../image-scan.js");
-  const imagePlan = collectImages(cwd, {
-    configured: configuredImages(config.scan?.images),
-    fromDockerfiles: config.scan?.images_from_dockerfiles === true,
-  });
-  for (const s of imagePlan.skipped) {
-    console.error(`${c.yellow}! image not scanned: ${s.ref} (${s.reason})${c.reset}`);
-  }
-  selected.push(...imageScanners(imagePlan.images, delegates));
-  return selected;
 }
 
 /**
@@ -232,12 +222,13 @@ async function executeScanners(
     {
       resolve: (bin) => resolveToolBin(bin),
       run: async (bin, args, timeoutMs, projectDir) => {
+        const scannerCwd = projectDir ? resolve(cwd, projectDir) : cwd;
         const r = await execFileNoThrow(bin, args, {
           timeout: timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
-          cwd: projectDir ? resolve(cwd, projectDir) : undefined,
+          cwd: scannerCwd,
           // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
           maxBuffer: 64 * 1024 * 1024,
-          env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, process.cwd()),
+          env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, scannerCwd),
         });
         return {
           ok: r.ok,
@@ -271,22 +262,33 @@ async function updateScanBaseline(cwd: string, merged: MergedFinding[]): Promise
   );
 }
 
-function scanPolicy(config: kitConfig) {
+function scanPolicy(config: kitConfig, planned: readonly ScannerDef[]) {
   return {
     strict: hasFlag(process.argv, "--strict") || envTruthy(process.env.KIT_CI_STRICT),
-    requiredScanners: config.governance?.scan?.required_scanners ?? [],
+    requiredScanners: requiredScanIds(config.governance?.scan?.required_scanners ?? [], planned),
   };
+}
+
+function assessScanHealth(
+  runs: ScannerRun[],
+  scopeGaps: ScanScopeGap[],
+  policy: ScanGateOptions,
+): ScanGate {
+  const gate = scanHealthGate(runs, policy);
+  applyScopeGate(gate, scopeGaps, policy);
+  return gate;
 }
 
 async function judgeScan(
   cwd: string,
   config: kitConfig,
-  merged: MergedFinding[],
-  runs: ScannerRun[],
+  evidence: { merged: MergedFinding[]; runs: ScannerRun[]; scopeGaps: ScanScopeGap[] },
+  policy: ReturnType<typeof scanPolicy>,
 ): Promise<ScanVerdict> {
-  const { suppressBaselined, scanHealthGate } = await import("../scanners.js");
+  const { suppressBaselined } = await import("../scanners.js");
   const { loadBaseline, baselineGet } = await import("../baseline.js");
   const accepted = new Set(baselineGet(await loadBaseline(cwd), "scan", "findings"));
+  const { merged, runs, scopeGaps } = evidence;
   const { kept, suppressed } = suppressBaselined(merged, accepted);
   const { findings, intel } = await withExploitIntel(kept, config);
   // A CVE in CISA KEV is exploited in the wild: it fails the scan whatever its severity label says.
@@ -298,9 +300,8 @@ async function judgeScan(
   // run (crashed/absent/no-token) must be able to force a non-zero exit so a green
   // verdict never hides a broken scanner. Backward-compatible — a non-running
   // scanner stays a loud WARN unless strict or a required scanner missed.
-  const policy = scanPolicy(config);
   const { strict } = policy;
-  const gate = scanHealthGate(runs, policy);
+  const gate = assessScanHealth(runs, scopeGaps, policy);
   if (strict && gate.ok && !hasCompletedScan(runs))
     gate.failures.push("No scanner completed. Scan coverage is unverified [strict].");
   // A feed that did not answer is a scanner that did not run: a warning, and a failure in strict.
@@ -309,7 +310,17 @@ async function judgeScan(
     else gate.warnings.push(note);
   }
   if (gate.failures.length > 0) gate.ok = false;
-  return { intel, runs, findings, suppressed, bad, gate, strict, ok: bad === 0 && gate.ok };
+  return {
+    intel,
+    runs,
+    findings,
+    suppressed,
+    bad,
+    gate,
+    scopeGaps,
+    strict,
+    ok: bad === 0 && gate.ok,
+  };
 }
 
 /**
@@ -359,7 +370,9 @@ async function printVerdict(v: ScanVerdict): Promise<void> {
       findings,
       reportGap,
     }));
-    console.log(JSON.stringify(toSarif(v.findings, coverage === undefined, scanners), null, 2));
+    console.log(
+      JSON.stringify(toSarif(v.findings, coverage === undefined, scanners, v.scopeGaps), null, 2),
+    );
     return;
   }
   if (hasFlag(process.argv, "--json")) {
@@ -375,6 +388,7 @@ async function printVerdict(v: ScanVerdict): Promise<void> {
           strict,
           exploitIntel: intel,
           coverage,
+          ...(v.scopeGaps.length ? { scopeGaps: v.scopeGaps } : {}),
         },
         null,
         2,
@@ -388,7 +402,7 @@ async function printVerdict(v: ScanVerdict): Promise<void> {
   );
   printRuns(v.runs);
   console.log("");
-  printFindings(v.findings, v.suppressed, completed);
+  printFindings(v.findings, v.suppressed, completed, v.scopeGaps.length > 0);
   const kev = v.findings.filter((f) => f.kev).length;
   if (v.bad > 0) {
     console.log(
@@ -420,10 +434,21 @@ function hasCompletedScan(runs: ScannerRun[]): boolean {
   return runs.some((run) => run.status === "ran");
 }
 
-function printFindings(findings: MergedFinding[], suppressed: number, completed: boolean): void {
+function printFindings(
+  findings: MergedFinding[],
+  suppressed: number,
+  completed: boolean,
+  scopeIncomplete: boolean,
+): void {
   if (findings.length === 0) {
     if (!completed) {
       console.log("  No scanner completed. Scan coverage is unverified.");
+      return;
+    }
+    if (scopeIncomplete) {
+      console.log(
+        `  ${c.yellow}Scan coverage is incomplete. No findings from the completed scans.${c.reset}`,
+      );
       return;
     }
     console.log(
