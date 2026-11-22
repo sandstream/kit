@@ -29,6 +29,13 @@ For `--all`, an empty index reports `no-anchors`. If all indexed logs are missin
 uses `all-logs-missing`. Both outcomes warn by default and fail when verification is required.
 With `--all --strict`, at least one log must verify. `--require-external` also fails on any missing log.
 
+When audit logging is enabled, `kit broker enforce` records `enforce-requested` before
+it updates the profile. It verifies the published signature before it records `enforce-enabled`.
+Both records carry the same `transitionId` and full profile digest. The profile signature file
+also contains a signature over that request ID and digest. Kit preserves unverifiable observe logs.
+A retry verifies the installed profile and the local seal. It can finish that signed request.
+If Kit cannot verify completion, it reports `audit: "incomplete"` and exits with code 1.
+
 The broker records observe events in the project's `.kit-audit.jsonl`.
 `kit broker enforce-readiness`, `kit broker enforce`, and `kit doctor` use the same log.
 Before they use observe events, they check the chain and the complete local HMAC seal.

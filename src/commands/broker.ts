@@ -11,19 +11,25 @@
  *       honest `untested` (no observe data — coverage is only what was observed, never a green).
  *   - `enforce` — the guided flip: run the readiness pre-flight, REFUSE without `--force` unless
  *       the verdict is `ready` (fail-closed — never silently enable a posture that will break the
- *       workflow), then set `[scope].enforce_runtime = true`, re-sign the profile scope, and audit
- *       the transition (`phase: "enforce-enabled"`). The re-sign is why the flip is attributable:
- *       enforce only takes effect under a valid signature.
+ *       workflow). Record the request when auditing is enabled. Sign and verify the updated
+ *       profile. Record the completed transition after the updated profile verifies.
  *
  * `enforce-readiness` reads the recorded audit log only — never executes anything. Deterministic,
  * zero-LLM. `--json` on every subcommand; `enforce-readiness --gate` turns a not-`ready` verdict
- * into a non-zero exit for CI; `enforce --force` overrides the readiness refusal.
+ * into a non-zero exit for CI. `enforce --force` overrides the readiness refusal.
  */
-import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import type { EnforceReadiness } from "../exec-broker/enforce-readiness.js";
+import type { KitProfile } from "../profile/schema.js";
+import type { ProfileSignResult } from "../profile/sign.js";
 import { BROKER_AUDIT_FILE, readObserveReadiness } from "../exec-broker/observe-evidence.js";
+import {
+  reconcileBrokerEnforceAudit,
+  startBrokerEnforceAudit,
+  type EnforceAuditStatus,
+} from "./broker-enforce-audit.js";
 
 /**
  * Pure pre-flight decision for the guided flip: only a `ready` verdict flips unforced. A
@@ -109,42 +115,104 @@ async function brokerEnforceReadiness(jsonMode: boolean, gate: boolean): Promise
   return gate ? readiness.verdict === "ready" : true;
 }
 
-/** Best-effort audit of the observe→enforce transition (design §2: the posture change is on the
- *  record). A missing .kit.toml / audit backend must never abort the flip — it already happened. */
-async function auditEnforceTransition(
+async function verifiedEnforceSignature(cwd: string, fingerprint: string) {
+  const { verifyProfileSignature } = await import("../profile/sign.js");
+  const verified = await verifyProfileSignature(cwd).catch(() => null);
+  return verified?.status === "valid" && verified.fingerprint === fingerprint ? verified : null;
+}
+
+async function publishEnforceProfile(
   cwd: string,
-  opsObserved: number,
-  forced: boolean,
-): Promise<void> {
+  profile: KitProfile,
+  expectedBytes: string,
+  requestId: string,
+): Promise<ProfileSignResult> {
   try {
-    const { loadConfig } = await import("../config.js");
-    const { mergeGovernanceConfigAsync } = await import("../governance.js");
-    const { logAuditEvent } = await import("../audit.js");
-    const cfg = await loadConfig(resolve(cwd, ".kit.toml"));
-    const gov = await mergeGovernanceConfigAsync(cfg.governance);
-    await logAuditEvent(gov, {
-      operation: "broker.enforce",
-      environment: gov.environment,
-      success: true,
-      metadata: { phase: "enforce-enabled", opsObserved, forced },
-    });
+    const { signProfile } = await import("../profile/sign.js");
+    const signed = await signProfile(cwd, { profile, expectedBytes, requestId });
+    if (!signed.ok) return signed;
+    const verified = signed.fingerprint
+      ? await verifiedEnforceSignature(cwd, signed.fingerprint)
+      : null;
+    if (verified?.enforcementRequestId !== requestId) {
+      return { ok: false, error: "The published profile signature could not be verified." };
+    }
+    return signed;
   } catch {
-    /* best-effort — the flip + re-sign are the source of truth, not this log line */
+    return { ok: false, error: "Could not write or verify the profile and signature." };
   }
+}
+
+function refuseEnforcement(jsonMode: boolean, reason: string, signed?: false): false {
+  if (jsonMode) console.log(JSON.stringify({ enforced: false, reason, signed }, null, 2));
+  else console.error(`${c.red}✗ ${reason}${c.reset}`);
+  return false;
+}
+
+function reportEnabled(
+  jsonMode: boolean,
+  signature: { fingerprint?: string; kid?: string },
+  audit: EnforceAuditStatus,
+  action: { alreadyEnforcing: true } | { reason: string; forced: boolean },
+): boolean {
+  const incomplete = audit === "incomplete";
+  const alreadyEnforcing = "alreadyEnforcing" in action;
+  const failure = "Enforce is active. The audit log is missing the completed transition.";
+  if (jsonMode) {
+    console.log(
+      JSON.stringify(
+        {
+          enforced: true,
+          alreadyEnforcing: alreadyEnforcing || undefined,
+          forced: alreadyEnforcing ? undefined : action.forced,
+          fingerprint: signature.fingerprint,
+          kid: signature.kid,
+          audit,
+          reason: incomplete ? failure : undefined,
+        },
+        null,
+        2,
+      ),
+    );
+  } else if (incomplete) {
+    console.error(`${c.red}✗ ${failure}${c.reset}`);
+  } else {
+    const reason = alreadyEnforcing ? "The signed profile already enables enforce." : action.reason;
+    console.log(`${c.green}✓ ${reason}${c.reset}`);
+    if (audit === "disabled") console.log("Audit logging is disabled for this project.");
+    console.log(`Commit .kit-profile.toml and .kit-profile.sig (${signature.fingerprint}).`);
+  }
+  return !incomplete;
 }
 
 async function brokerEnforce(jsonMode: boolean, force: boolean): Promise<boolean> {
   const cwd = process.cwd();
-  const { loadProfile, saveProfile } = await import("../profile/schema.js");
-  const { signProfile } = await import("../profile/sign.js");
+  const { canonicalProfileBytes, loadProfile, profileDigest, profileFingerprint } =
+    await import("../profile/schema.js");
 
   const profile = await loadProfile(cwd);
   if (!profile?.scope) {
-    const why =
-      "no [scope] to enforce — declare a scope in .kit-profile.toml and `kit profile sign` first";
-    if (jsonMode) console.log(JSON.stringify({ enforced: false, reason: why }, null, 2));
-    else console.error(`${c.red}✗ ${why}${c.reset}`);
-    return false;
+    return refuseEnforcement(
+      jsonMode,
+      "There is no [scope] in .kit-profile.toml. Declare a scope and run 'kit profile sign'.",
+    );
+  }
+
+  if (profile.scope.enforce_runtime === true) {
+    const fingerprint = profileFingerprint(profile);
+    const signature = await verifiedEnforceSignature(cwd, fingerprint);
+    if (!signature) {
+      return refuseEnforcement(
+        jsonMode,
+        "The enforcement profile has no valid signature. Run 'kit profile verify'.",
+      );
+    }
+    const audit = await reconcileBrokerEnforceAudit(
+      cwd,
+      signature.enforcementRequestId,
+      profileDigest(profile),
+    );
+    return reportEnabled(jsonMode, signature, audit, { alreadyEnforcing: true });
   }
 
   const readiness = await readObserveReadiness(cwd);
@@ -169,45 +237,31 @@ async function brokerEnforce(jsonMode: boolean, force: boolean): Promise<boolean
     return false;
   }
 
-  if (profile.scope.enforce_runtime === true) {
-    const msg = "already enforcing ([scope].enforce_runtime = true) — nothing to do";
-    if (jsonMode) console.log(JSON.stringify({ enforced: true, alreadyEnforcing: true }, null, 2));
-    else console.log(`${c.green}✓${c.reset} ${c.dim}${msg}${c.reset}`);
-    return true;
-  }
-
-  // Flip + re-sign: enforce only takes effect under a valid signature, so the transition is
-  // attributable. On a sign failure the scope won't verify → the runtime stays effectively off
-  // (not a silent enforce), and we surface it so the operator re-signs.
+  const expectedBytes = canonicalProfileBytes(profile);
+  const transitionId = randomUUID();
   profile.scope.enforce_runtime = true;
-  await saveProfile(profile, cwd);
-  const sig = await signProfile(cwd);
-  if (!sig.ok) {
-    const why = `set enforce_runtime = true, but re-signing failed (${sig.error}); the scope will not verify until signed — run \`kit profile sign\``;
-    if (jsonMode)
-      console.log(JSON.stringify({ enforced: false, signed: false, reason: why }, null, 2));
-    else console.error(`${c.red}✗ ${why}${c.reset}`);
-    return false;
-  }
-  await auditEnforceTransition(cwd, readiness.opsObserved, force);
+  const audit = await startBrokerEnforceAudit(cwd, readiness, force, {
+    transitionId,
+    fingerprint: profileFingerprint(profile),
+    profileDigest: profileDigest(profile),
+  });
+  if (!audit.ok) return refuseEnforcement(jsonMode, audit.reason);
 
-  if (jsonMode) {
-    console.log(
-      JSON.stringify(
-        { enforced: true, forced: force, fingerprint: sig.fingerprint, kid: sig.kid },
-        null,
-        2,
-      ),
+  // Prepare the signature before publishing the updated scope.
+  const sig = await publishEnforceProfile(cwd, profile, expectedBytes, transitionId);
+  if (!sig.ok) {
+    await audit.recordOutcome("enforce-failed");
+    return refuseEnforcement(
+      jsonMode,
+      `Could not sign and publish the enforcement profile. ${sig.error}`,
+      false,
     );
-    return true;
   }
-  console.log(
-    `${c.green}✓ enforce enabled${c.reset} ${c.dim}— ${decision.reason}; scope re-signed (${sig.fingerprint})${c.reset}`,
-  );
-  console.log(
-    `${c.dim}the exec-broker now DENIES declared ops outside [scope]. Commit .kit-profile.toml + .kit-profile.sig.${c.reset}`,
-  );
-  return true;
+  const auditStatus = await audit.recordOutcome("enforce-enabled");
+  return reportEnabled(jsonMode, sig, auditStatus, {
+    reason: `Enforce enabled. ${decision.reason}`,
+    forced: force,
+  });
 }
 
 export async function cmdBroker(): Promise<boolean> {

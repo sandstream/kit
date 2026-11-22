@@ -449,7 +449,7 @@
       "commands": {
         "enforce": {
           "kind": "command",
-          "summary": "Guided observe→enforce flip: readiness pre-flight (refuses unless ready; --force overrides), set [scope].enforce_runtime = true, re-sign the profile scope, and audit the transition",
+          "summary": "Enable broker enforcement and verify the signed profile. --force overrides readiness. When audit logging is enabled, the command records the request before it updates the profile.",
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
           "x-kit-flags-inherited": true,
@@ -467,7 +467,7 @@
         }
       },
       "kind": "group",
-      "summary": "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reports ready | would-block (+ what breaks) | untested | unverifiable (audit evidence cannot be verified); enforce does the guided, signed flip (refuses unless ready, --force overrides) (--json, --gate, --force)",
+      "summary": "Exec-broker runtime posture. enforce-readiness reports ready, would-block, untested, or unverifiable. enforce records the request when auditing is enabled and verifies the signed profile. --force overrides readiness. (--json, --gate, --force)",
       "x-kit-accepted-flags": [
         "--env",
         "--force",

@@ -55,7 +55,7 @@ function writeLog(content: string): void {
   writeFileSync(join(dir, ".kit-audit.jsonl"), content, "utf-8");
 }
 
-/** Three clean-looking events are left after the would-be denial in the middle is removed. */
+/** Two clean-looking events are left after the would-be denial in the middle is removed. */
 function logWithRemovedDenial(): string {
   const lines = chainedAuditLog([
     observeEvent([]),
@@ -107,8 +107,12 @@ describe("cmdBroker enforce on a log that does not verify", () => {
     assert.notEqual((await loadProfile(dir))?.scope?.enforce_runtime, true);
   });
 
-  it("--force still flips, as it does for the other not-ready verdicts", async () => {
+  it("--force can override unverifiable observations when the configured audit log accepts writes", async () => {
     writeLog(logWithRemovedDenial());
+    writeFileSync(
+      join(dir, ".kit.toml"),
+      '[governance.audit]\nenabled = true\nlog_file = "transition-audit.jsonl"\n',
+    );
     setArgs("enforce", "--force");
     assert.equal(await cmdBroker(), true);
     assert.equal((await loadProfile(dir))?.scope?.enforce_runtime, true);

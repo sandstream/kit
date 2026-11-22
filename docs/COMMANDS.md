@@ -435,20 +435,18 @@ Leases for the local services agents start: who started which container, Supabas
 
 ## Exec-broker runtime posture
 
-Graduating the exec-broker from observe to enforce is evidence-driven: the readiness verdict is
-computed from the recorded observe window, and the flip refuses unless that verdict says `ready`.
+The broker uses the recorded observe window to assess readiness.
+By default, the command requires a `ready` verdict before it enables enforcement.
 
 | Command                                 | Purpose                                                                                                                                                                                                           |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kit broker enforce-readiness [--gate]` | Read the recorded observe window (`.kit-audit.jsonl`) and report whether flipping to enforce is safe: `ready` \| `would-block` (+ exactly what breaks) \| `untested` \| `unverifiable` (audit evidence cannot be verified). `--gate` fails CI on any not-ready verdict. |
-| `kit broker enforce [--force]`          | Guided observe→enforce flip: readiness pre-flight (refuses unless `ready`; `--force` overrides), sets `[scope].enforce_runtime = true`, re-signs the profile scope, and audits the transition.                    |
+| `kit broker enforce [--force]`          | Enable enforcement with a verified signed profile. `--force` overrides readiness. If audit logging is enabled, record the request before the profile update. |
 
-Invalid observe evidence is not a successful observation. Readiness reads the entire
-audit file, so appending clean operations does not repair an older malformed record.
-Inspect and preserve that evidence; do not edit signed audit history to obtain a
-green result. After reviewing the intended scope and the malformed evidence, an
-operator can explicitly choose `kit broker enforce --force`. This records a forced
-transition, not a passing readiness check; it does not repair or discard the log.
+Inspect and preserve unverifiable observe evidence. With audit logging enabled, Kit requires a request
+record before the profile update. This also applies to `--force`.
+An incomplete transition exits 1 with `audit: "incomplete"`. A retry can finish a sealed request
+that matches the verified profile. See [Audit attestation](AUDIT_ATTESTATION.md).
 
 ## Traveling profile
 
