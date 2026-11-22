@@ -8,3 +8,9 @@
 # (the working tree is clean), but the blob stays in history. The token is GitHub's
 # published, long-dead documentation sample — nothing to rotate.
 d9f55afc26db3ed604946b44edf224c293405d3f:src/check-security.ts:github-pat:944
+
+# 0c07492 held a regular expression for the OpenSSH private-key header as a literal in
+# src/check-plaintext-credentials.ts (the row that looks for SSH keys without a passphrase).
+# The private-key rule matched the pattern itself; there is no key. The next commit assembles
+# the marker from parts (the working tree is clean), but the blob stays in history.
+0c074929791bbce189317be89beda8a3bc9dbd57:src/check-plaintext-credentials.ts:private-key:103
