@@ -3368,6 +3368,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "cargo": {
+          "kind": "command",
+          "summary": "crates.io release: cooling, yanked versions, OSV malicious records, owners; build-time code not read",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "check-deps": {
           "kind": "command",
           "summary": "Pre-commit gate: fail if staged deps lack triage entries",
@@ -3398,6 +3407,15 @@
         "gem": {
           "kind": "command",
           "summary": "RubyGems release: OSV malicious records, cooling, age; install-time code not read",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "go": {
+          "kind": "command",
+          "summary": "Go module release on the module proxy: cooling, OSV malicious records; module source not read",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,

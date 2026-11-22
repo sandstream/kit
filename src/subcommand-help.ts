@@ -180,6 +180,10 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Evaluate npm package: registry metadata (deprecation, age, maintainers, license, install scripts)",
   "triage pip": "PyPI evaluation",
   "triage gem": "RubyGems release: OSV malicious records, cooling, age; install-time code not read",
+  "triage cargo":
+    "crates.io release: cooling, yanked versions, OSV malicious records, owners; build-time code not read",
+  "triage go":
+    "Go module release on the module proxy: cooling, OSV malicious records; module source not read",
   "triage docker": "Docker image: CVE + sandbox",
   "triage repo": "GitHub repo evaluation",
   "triage skill": "Claude Code / agent skill evaluation",

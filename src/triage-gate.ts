@@ -44,6 +44,13 @@ export const CORE_RUNTIMES = new Set([
   "erlang",
 ]);
 
+/** Schemes whose target is a registry name the triage of that type reads as it stands. */
+const REGISTRY_SCHEMES = new Map<string, TriageType>([
+  ["crate", "cargo"],
+  ["gomod", "go"],
+  ["brew", "brew"],
+]);
+
 export type TriageMapping =
   | { kind: "runtime" }
   | { kind: "triage"; type: TriageType; target: string }
@@ -76,6 +83,9 @@ export function triageTargetFor(tool: string): TriageMapping {
   if (scheme === "npm") return { kind: "triage", type: "npm", target: rest };
   if (scheme === "pip" || scheme === "pipx") return { kind: "triage", type: "pip", target: rest };
   if (scheme === "gem") return { kind: "triage", type: "gem", target: rest };
+  // The bash gate's refs for `cargo install`, `go install` and `brew install` (install-gate-*.ts).
+  const registry = REGISTRY_SCHEMES.get(scheme);
+  if (registry) return { kind: "triage", type: registry, target: rest };
   // Everything else that names a repo (aqua/ubi/go/github/cargo/...) → repo triage.
   const ownerRepo = extractOwnerRepo(rest);
   if (ownerRepo) return { kind: "triage", type: "repo", target: `https://github.com/${ownerRepo}` };

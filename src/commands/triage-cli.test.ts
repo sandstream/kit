@@ -76,7 +76,10 @@ describe("kit triage checks before it evaluates anything", () => {
     const r = await triage("bogus");
     assert.equal(r.ok, false);
     assert.match(r.err, /Unknown triage type: bogus/);
-    assert.match(r.err, /Valid types: npm, pip, gem, brew, docker, repo, skill, mcp, model/);
+    assert.match(
+      r.err,
+      /Valid types: npm, pip, gem, cargo, go, brew, docker, repo, skill, mcp, model/,
+    );
     assert.match(r.err, /check-deps, check-skills/);
   });
 

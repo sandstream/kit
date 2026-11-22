@@ -34,6 +34,20 @@ function explainCarrier(tokens: readonly string[]): string | null {
   return null;
 }
 
+/** A cargo, go or brew install from somewhere other than the registry its triage reads. */
+function explainForeignSource(tokens: readonly string[]): string | null {
+  const sources = tokens
+    .filter((t) => /^(cargo|go|brew)-source:/.test(t))
+    .map((t) => t.slice(t.indexOf(":") + 1));
+  if (sources.length === 0) return null;
+  return (
+    `UNVERIFIED SOURCE: ${sources.join(", ")}. This install fetches from a source other than the ` +
+    "default registry (crates.io, proxy.golang.org, Homebrew), which package triage does not read. " +
+    "Triage the source repository with `kit triage repo <url>` and have a person run the install: " +
+    "kit refuses it here (fail-closed)."
+  );
+}
+
 /**
  * Explain an `indirect-bin:` refusal in terms of the HAZARD, not the machinery.
  *
@@ -56,7 +70,7 @@ function explainCarrier(tokens: readonly string[]): string | null {
 export function explainUnverifiable(tokens: readonly string[]): string | null {
   const piped = explainPiped(tokens);
   if (piped) return piped;
-  const carrier = explainCarrier(tokens);
+  const carrier = explainCarrier(tokens) ?? explainForeignSource(tokens);
   if (carrier) return carrier;
   const sources = tokens.filter((t) => t.startsWith("repo-source:"));
   if (sources.length > 0) {

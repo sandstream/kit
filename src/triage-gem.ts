@@ -12,15 +12,18 @@
  * native extension, and no gem code is downloaded or read.
  */
 import { join } from "node:path";
+import { defaultCoolingDeps, type CoolingDeps } from "./triage-cooling.js";
 import {
-  coolingCheck,
-  defaultCoolingDeps,
-  enforceFrom,
-  limitFrom,
-  supplyChainConfig,
-  type CoolingDeps,
-  type OsvVuln,
-} from "./triage-cooling.js";
+  advisoryLines,
+  failed,
+  maliciousByName,
+  osvLookup,
+  plain,
+  registryBase,
+  releaseCooling,
+  releaseVerdict,
+  type ReleaseTriageResult,
+} from "./triage-registry.js";
 import { readRegularFileIfPresent } from "./upstream-safe-read.js";
 
 const GEM_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -130,26 +133,7 @@ export const defaultGemDeps: GemTriageDeps = {
   },
 };
 
-export interface GemTriageResult {
-  passed: boolean;
-  output: string;
-}
-
-function osvGem(deps: CoolingDeps, airGap: boolean) {
-  const mirror = deps.env.KIT_OSV_API?.trim();
-  if (airGap && !mirror) return { skipped: "air-gap is on and no KIT_OSV_API mirror is named" };
-  const base = (mirror || "https://api.osv.dev").replace(/\/+$/, "");
-  return async (pkg: string, version: string): Promise<OsvVuln[] | null> => {
-    const body = { package: { name: pkg, ecosystem: "RubyGems" }, version };
-    const answer = (await deps.postJson(`${base}/v1/query`, body)) as { vulns?: OsvVuln[] } | null;
-    if (!answer || typeof answer !== "object") return null;
-    return Array.isArray(answer.vulns) ? answer.vulns.filter((v) => typeof v?.id === "string") : [];
-  };
-}
-
-function plain(value: string): string {
-  return value.replace(/[^\x20-\x7e]/g, "?").slice(0, 80);
-}
+export type GemTriageResult = ReleaseTriageResult;
 
 function ageDays(iso: string, now: number): number {
   return Math.floor((now - Date.parse(iso)) / DAY_MS);
@@ -173,63 +157,24 @@ function historyLines(view: GemRegistryView, version: string, now: number): stri
   return lines;
 }
 
-/** Advisory lines: a MAL- record is a malicious package; any other record is a known vulnerability. */
-async function advisoryLines(
-  osv: ReturnType<typeof osvGem>,
-  name: string,
-  version: string,
-): Promise<string[]> {
-  if (typeof osv !== "function") return [`  ~ NOT CHECKED: advisories -- ${osv.skipped}`];
-  const vulns = await osv(name, version);
-  if (vulns === null) return ["  ~ NOT CHECKED: advisories -- OSV could not be queried"];
-  const malicious = vulns.filter((v) => v.id.startsWith("MAL-")).map((v) => plain(v.id));
-  const other = vulns.filter((v) => !v.id.startsWith("MAL-")).map((v) => plain(v.id));
-  const lines: string[] = [];
-  if (malicious.length)
-    lines.push(`  x CRITICAL: malicious package: ${malicious.join(", ")} (OSV)`);
-  if (other.length)
-    lines.push(`  ! WARNING: known vulnerabilities in ${plain(version)}: ${other.join(", ")}`);
-  return lines;
-}
-
-/** Malicious-package records OSV holds for a gem name, any version; [] when none or not asked. */
-async function removedGemAdvisories(
-  deps: CoolingDeps,
-  airGap: boolean,
-  name: string,
-): Promise<string[]> {
-  const mirror = deps.env.KIT_OSV_API?.trim();
-  if (airGap && !mirror) return [];
-  const base = (mirror || "https://api.osv.dev").replace(/\/+$/, "");
-  const answer = (await deps.postJson(`${base}/v1/query`, {
-    package: { name, ecosystem: "RubyGems" },
-  })) as { vulns?: OsvVuln[] } | null;
-  const ids = (answer?.vulns ?? []).map((v) => v?.id).filter((id) => id?.startsWith("MAL-"));
-  return ids.length
-    ? [`  x CRITICAL: malicious package: ${ids.map((id) => plain(id)).join(", ")} (OSV)`]
-    : [];
-}
-
 /** Triage one gem release. Network through `deps` only; no gem code is fetched. */
 export async function triageGem(
   cwd: string,
   target: string,
   deps: GemTriageDeps,
 ): Promise<GemTriageResult> {
-  const fail = (line: string) => ({ passed: false, output: `${line}\n\nTRIAGE FAILED` });
   const parsed = parseGemTarget(target);
-  if (!parsed) return fail(`  x CRITICAL: '${plain(target)}' is not a gem name or name@version`);
+  if (!parsed) return failed(`  x CRITICAL: '${plain(target)}' is not a gem name or name@version`);
   const air = await deps.airGap(cwd);
-  const mirror = deps.env.KIT_RUBYGEMS_SOURCE?.trim();
-  if (air.enabled && !mirror)
-    return fail("  x CRITICAL: air-gap is on and no KIT_RUBYGEMS_SOURCE mirror is named");
-  const base = (mirror || "https://rubygems.org").replace(/\/+$/, "");
+  const base = registryBase(deps, air, "KIT_RUBYGEMS_SOURCE", "https://rubygems.org");
+  if (!base)
+    return failed("  x CRITICAL: air-gap is on and no KIT_RUBYGEMS_SOURCE mirror is named");
   const doc = await deps.getJson(`${base}/api/v1/versions/${encodeURIComponent(parsed.name)}.json`);
   const view = gemRegistryView(doc);
   if (!view) {
     // A removed gem is often a malicious one: say so when OSV knows, since the registry no longer can.
-    const known = await removedGemAdvisories(deps, air.enabled, parsed.name);
-    return fail(
+    const known = await maliciousByName(deps, air.enabled, "RubyGems", parsed.name);
+    return failed(
       [`  x CRITICAL: gem '${plain(parsed.name)}' not found on ${plain(base)}`, ...known].join(
         "\n",
       ),
@@ -237,41 +182,24 @@ export async function triageGem(
   }
   const version = parsed.version ?? newestStable(view);
   if (!version || !view.times[version])
-    return fail(
+    return failed(
       `  x CRITICAL: ${plain(parsed.name)}@${plain(String(version))} is not published (or was yanked)`,
     );
 
-  const now = deps.now();
-  const osv = osvGem(deps, air.enabled);
-  // The same limit and enforcement as npm and pip: [supply_chain] in .kit.toml, then the environment.
-  const cfg = await supplyChainConfig(cwd);
-  const limitDays = limitFrom(cfg, deps.env);
-  const enforce = enforceFrom(cfg, deps.env);
-  const cooling = await coolingCheck({
+  const osv = osvLookup(deps, air.enabled, "RubyGems");
+  const cooling = await releaseCooling(cwd, deps, {
     pkg: parsed.name,
     version,
     versions: view.versions,
     times: view.times,
-    limitDays,
-    enforce,
     current: lockedGemVersion(deps.lockfile(cwd), parsed.name),
-    now,
     osv,
   });
   const lines = [
-    ...historyLines(view, version, now),
+    ...historyLines(view, version, deps.now()),
     ...(await advisoryLines(osv, parsed.name, version)),
     ...cooling.lines,
     "  ~ NOT CHECKED: install-time code -- the registry does not say whether the gem has a native extension (extconf.rb runs during gem install); no gem file was downloaded or read",
   ];
-  // A cooling hold is its own verdict, not a failure: the release may pass once it is old enough.
-  const critical = lines.filter(
-    (l) => l.includes(" x CRITICAL:") && !cooling.lines.includes(l),
-  ).length;
-  const warnings = lines.filter((l) => l.includes(" ! WARNING:")).length;
-  const passed = critical === 0 && !cooling.held;
-  const verdict =
-    critical > 0 ? "TRIAGE FAILED" : cooling.held ? "TRIAGE HELD: cooling period" : "TRIAGE PASSED";
-  const summary = `Critical issues: ${critical}\nWarnings: ${warnings}\n${verdict}`;
-  return { passed, output: `${lines.join("\n")}\n\n${summary}` };
+  return releaseVerdict(lines, cooling);
 }
