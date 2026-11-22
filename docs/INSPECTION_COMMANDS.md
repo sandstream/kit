@@ -154,6 +154,19 @@ The output states that an external report does not verify the current account st
 Displayed findings mask recognized credentials and remove terminal controls.
 The parser retains original identities for other consumers.
 
+## Exploit intelligence in scan results
+
+The JSON result shows separate coverage for CISA KEV and FIRST EPSS.
+A complete empty response confirms that the feed returned no matches for the request.
+Kit keeps readable marks from partial replies. Those replies cannot clear the strict check or refresh the cache.
+A verified EPSS response can cache the absence of a score for each requested CVE.
+Kit reuses verified cache records for less than 24 hours.
+Kit refuses a CISA release older than the last verified release.
+Kit accepts EPSS score dates from the current UTC day and the previous UTC day.
+Kit requires complete responses from the configured feed addresses and refuses redirects.
+The previous cache format supplies fallback marks until Kit reads a verified response.
+Concurrent Kit processes merge verified updates before they replace the cache file.
+
 ## Global behavior
 
 Help and version requests take precedence and do not run the inspection handler.

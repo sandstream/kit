@@ -10,6 +10,7 @@ import { mavenSbomScanners } from "../maven-sbom.js";
 import { DEFAULT_SCAN_TIMEOUT_MS, isFailedRun } from "../scan-abort.js";
 import { resolveProjectPaths } from "../projects-config.js";
 import { expandPerProject } from "../scan-projects.js";
+import type { IntelStatus } from "../exploit-intel.js";
 import type { AirGapPlan, MergedFinding, ScanGate, ScannerDef, ScannerRun } from "../scanners.js";
 
 /** Whether CISA KEV and FIRST EPSS answered this run, and why not. */
@@ -17,6 +18,8 @@ interface IntelSummary {
   enabled: boolean;
   kevChecked: boolean;
   epssChecked: boolean;
+  kevStatus?: IntelStatus;
+  epssStatus?: IntelStatus;
   notes: string[];
 }
 
@@ -335,6 +338,8 @@ async function withExploitIntel(
       enabled: true,
       kevChecked: intel.kevChecked,
       epssChecked: intel.epssChecked,
+      kevStatus: intel.kevStatus,
+      epssStatus: intel.epssStatus,
       notes: intel.notes,
     },
   };

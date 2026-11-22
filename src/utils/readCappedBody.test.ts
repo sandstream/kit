@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { readCappedBody } from "./readCappedBody.js";
 
 it("reads an exact byte limit, including multibyte text", async () => {
-  const payload = Buffer.from("åäö", "utf8");
+  const payload = Buffer.from("café", "utf8");
   const response = new Response(payload);
   assert.deepEqual(await readCappedBody(response, payload.length), payload);
   assert.equal(response.body?.locked, false);

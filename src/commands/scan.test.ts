@@ -361,15 +361,24 @@ function seedCache(kev: boolean): string {
   writeFileSync(
     path,
     JSON.stringify({
-      v: 1,
+      v: 2,
       kev: {
         fetchedAt: at,
         catalogVersion: "test",
+        dateReleased: at,
+        count: 1,
         entries: kev
           ? { "CVE-2021-44228": { dateAdded: "2021-12-10", ransomware: true } }
           : { "CVE-2000-0001": { dateAdded: "2000-01-01", ransomware: false } },
       },
-      epss: { "CVE-2021-44228": { score: 0.97, percentile: 0.99, fetchedAt: at } },
+      epss: {
+        "CVE-2021-44228": {
+          mark: { score: 0.97, percentile: 0.99 },
+          scoreDate: at.slice(0, 10),
+          verified: true,
+          fetchedAt: at,
+        },
+      },
     }),
   );
   return path;
@@ -413,6 +422,8 @@ describe("kit scan: CISA KEV and FIRST EPSS", { skip }, () => {
       enabled: true,
       kevChecked: true,
       epssChecked: true,
+      kevStatus: "complete-empty",
+      epssStatus: "complete",
       notes: [],
     });
   });
