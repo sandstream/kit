@@ -4,7 +4,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -24,6 +24,8 @@ function fakeFetcher(seen: string[]): ApkFetcher {
     if (url.endsWith("/v3.24/main.json")) return Buffer.from(SECDB_MAIN);
     if (url.endsWith("/v3.24/community.json")) return Buffer.from('{"packages":[]}');
     if (url.endsWith("/v3.24/main/x86_64/APKINDEX.tar.gz")) return INDEX;
+    if (url.endsWith("/v3.24/community/x86_64/APKINDEX.tar.gz"))
+      return gzipSync(tarOf({ APKINDEX: "" }));
     throw new Error(`unexpected ${url}`);
   };
 }
@@ -89,5 +91,124 @@ describe("check apk floors", () => {
     t.after(() => rmTemp(dir));
     const r = await checkApkFloors(dir, fakeFetcher([]), {});
     assert.equal(r.status, "skip");
+  });
+
+  it("names the branch and the four sources a pass was judged against", async (t) => {
+    const dir = repoWith("libexpat>=2.10.0-r0");
+    t.after(() => rmTemp(dir));
+    const r = await checkApkFloors(dir, fakeFetcher([]), {});
+    assert.equal(r.status, "pass");
+    assert.match(
+      r.detail,
+      /checked on v3\.24 against secdb main\+community and APKINDEX main\+community/,
+    );
+  });
+});
+
+const CHMOD_SKIP =
+  process.platform === "win32" || process.getuid?.() === 0
+    ? "chmod 000 does not deny reads on Windows or to root"
+    : false;
+
+describe("check apk floors with a Dockerfile it cannot read", { skip: CHMOD_SKIP }, () => {
+  it("keeps the comparison unverified instead of dropping that file's floors", async (t) => {
+    const dir = repoWith("libexpat>=2.10.0-r0");
+    mkdirSync(join(dir, "worker"));
+    const locked = join(dir, "worker", "Dockerfile");
+    writeFileSync(locked, "FROM alpine:3.24\nRUN apk add 'zlib>=1.0-r0'\n");
+    chmodSync(locked, 0o000);
+    t.after(() => {
+      chmodSync(locked, 0o600);
+      rmTemp(dir);
+    });
+    const r = await checkApkFloors(dir, fakeFetcher([]), {});
+    assert.equal(r.status, "warn");
+    assert.equal(r.didNotRun, true);
+    assert.match(r.detail, /not read: worker\/Dockerfile/);
+  });
+
+  it("does not call a repository floor-free when its only Dockerfile cannot be read", async (t) => {
+    const dir = repoWith("libexpat>=2.10.0-r0");
+    const only = join(dir, "Dockerfile");
+    chmodSync(only, 0o000);
+    t.after(() => {
+      chmodSync(only, 0o600);
+      rmTemp(dir);
+    });
+    const r = await checkApkFloors(dir, fakeFetcher([]), {});
+    assert.equal(r.status, "warn");
+    assert.equal(r.didNotRun, true);
+    assert.match(r.detail, /not read: Dockerfile/);
+  });
+});
+
+describe("check apk floors with the default transport", () => {
+  it("keeps a partial HTTP source unverified even when its JSON is valid", async (t) => {
+    const dir = repoWith("libexpat>=2.8.5-r0");
+    t.after(() => rmTemp(dir));
+    let calls = 0;
+    t.mock.method(globalThis, "fetch", async (url: string) => {
+      calls++;
+      if (url.endsWith("/main.json")) return new Response('{"packages":[]}', { status: 206 });
+      return new Response(new Uint8Array(await fakeFetcher([])(url)));
+    });
+    const result = await checkApkFloors(dir, undefined, {});
+    assert.equal(result.status, "warn");
+    assert.equal(result.didNotRun, true);
+    assert.match(result.detail, /HTTP 206/);
+    assert.equal(calls, 5);
+  });
+
+  it("uses the default transport retry before judging the complete source data", async (t) => {
+    const dir = repoWith("libexpat>=2.10.0-r0");
+    t.after(() => rmTemp(dir));
+    let calls = 0;
+    const seen: string[] = [];
+    t.mock.method(globalThis, "fetch", async (url: string) => {
+      if (++calls === 1)
+        throw new TypeError("fetch failed", {
+          cause: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
+        });
+      return new Response(new Uint8Array(await fakeFetcher(seen)(url)));
+    });
+    const observed = await checkApkFloors(dir, undefined, {});
+    assert.equal(observed.status, "pass");
+    assert.notEqual(observed.didNotRun, true);
+    assert.equal(calls, 6);
+    assert.equal(seen.length, 5);
+  });
+
+  it("keeps an exhausted default fetch unverified with its network cause", async (t) => {
+    const dir = repoWith("libexpat>=2.10.0-r0");
+    t.after(() => rmTemp(dir));
+    let calls = 0;
+    t.mock.method(globalThis, "fetch", async () => {
+      calls++;
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
+      });
+    });
+    const observed = await checkApkFloors(dir, undefined, {});
+    assert.equal(observed.status, "warn");
+    assert.equal(observed.didNotRun, true);
+    assert.match(observed.detail, /3 attempts.*ETIMEDOUT/);
+    assert.equal(calls, 3);
+  });
+
+  it("refuses malformed source content without retrying successful HTTP responses", async (t) => {
+    const dir = repoWith("libexpat>=2.10.0-r0");
+    t.after(() => rmTemp(dir));
+    let calls = 0;
+    t.mock.method(globalThis, "fetch", async (url: string) => {
+      calls++;
+      const bytes = url.endsWith("/main.json")
+        ? Buffer.from("{invalid")
+        : await fakeFetcher([])(url);
+      return new Response(new Uint8Array(bytes));
+    });
+    const observed = await checkApkFloors(dir, undefined, {});
+    assert.equal(observed.status, "warn");
+    assert.equal(observed.didNotRun, true);
+    assert.equal(calls, 5);
   });
 });
