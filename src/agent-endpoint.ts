@@ -77,7 +77,7 @@ const ROW: Record<
   cleartext: {
     status: "fail",
     severity: "high",
-    why: "over plain HTTP: every prompt, tool result and secret crosses the network unencrypted",
+    why: "model traffic goes over plain HTTP: every prompt, tool result and secret crosses the network unencrypted",
   },
   "third-party": {
     status: "warn",
@@ -112,7 +112,7 @@ export function runAgentEndpoint(
         name: `${f.variable} points at ${f.host} (${s.where})`,
         status: r.status,
         severity: r.severity,
-        detail: `${f.variable} sends model traffic ${r.why}`,
+        detail: `${f.variable}: ${r.why}`,
         suggestion:
           "confirm you set this and who runs that host; kit cannot tell a chosen gateway from a planted one",
       });

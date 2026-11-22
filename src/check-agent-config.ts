@@ -5,6 +5,10 @@
  * `.claude/settings.json` produced no row in `kit check --category security`, while
  * `kit agent-audit` failed on the same project (kit-research
  * `supply-chain-2026-fundamentals-vs-kit`). The worms of 2026 persisted exactly there.
+ *
+ * The same held for a redirected model endpoint and a code-loading variable in a settings `env`
+ * block: `kit agent-audit` warned, `kit check` printed "agent-audit: no issues" (kit-research
+ * `dragos-canary-prompts-vs-kit`). Both rows are part of this view now.
  */
 import { homedir } from "node:os";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -23,6 +27,8 @@ export async function checkAgentConfig(
   const { checkPlaintextCredentials } = await import("./check-plaintext-credentials.js");
   const { userSurfaceDriftRows } = await import("./user-surface-drift.js");
   const { isReadOnlyMode } = await import("./read-only-mode.js");
+  const { runAgentPreload } = await import("./agent-preload.js");
+  const { runAgentEndpoint } = await import("./agent-endpoint.js");
   return [
     ...runAgentAudit(root),
     ...runUserAgentAudit(root, home, env),
@@ -32,5 +38,7 @@ export async function checkAgentConfig(
     ...checkWorktreeInclude(root),
     ...(await checkGitEmail(root)),
     ...checkPlaintextCredentials(home),
+    ...runAgentPreload(root, home, env),
+    ...runAgentEndpoint(root, home, env),
   ];
 }
