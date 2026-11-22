@@ -20,6 +20,7 @@ export async function checkAgentConfig(
   const { checkPreTrusted } = await import("./check-pretrusted.js");
   const { checkWorktreeInclude } = await import("./check-worktreeinclude.js");
   const { checkGitEmail } = await import("./check-git-email.js");
+  const { checkPlaintextCredentials } = await import("./check-plaintext-credentials.js");
   const { userSurfaceDriftRows } = await import("./user-surface-drift.js");
   const { isReadOnlyMode } = await import("./read-only-mode.js");
   return [
@@ -30,5 +31,6 @@ export async function checkAgentConfig(
     ...checkPreTrusted(root, home, env),
     ...checkWorktreeInclude(root),
     ...(await checkGitEmail(root)),
+    ...checkPlaintextCredentials(home),
   ];
 }
