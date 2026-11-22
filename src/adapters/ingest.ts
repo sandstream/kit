@@ -8,6 +8,7 @@
  *
  * Pure (string in → findings out); no I/O, so it's fully fixture-tested.
  */
+import type { AdvisoryPackage } from "../advisory-import-fact.js";
 import type { SecurityCheckResult } from "../check-security.js";
 import type { RuleRef } from "../rules/catalog.js";
 import { ingestCloudflareAudit } from "./ingest-cloudflare-audit.js";
@@ -187,7 +188,17 @@ export function parseOsv(json: string): SecurityCheckResult[] {
   return out;
 }
 
-function osvPackageFindings(p: OsvPackage): SecurityCheckResult[] {
+/** A dependency finding also says which package it is about, for the import fact beside it. */
+type DependencyFinding = SecurityCheckResult & { package?: AdvisoryPackage };
+
+/** The package as the report names it. Absent when the report gives no name. */
+function osvPackageRef(p: OsvPackage): { package?: AdvisoryPackage } {
+  const { name, ecosystem } = p.package ?? {};
+  if (typeof name !== "string") return {};
+  return { package: typeof ecosystem === "string" ? { name, ecosystem } : { name } };
+}
+
+function osvPackageFindings(p: OsvPackage): DependencyFinding[] {
   const name = p.package?.name ?? "(package)";
   const ver = p.package?.version ? `@${p.package.version}` : "";
   return (p.vulnerabilities ?? []).map((v) => ({
@@ -198,6 +209,7 @@ function osvPackageFindings(p: OsvPackage): SecurityCheckResult[] {
     severity: osvSeverity(v),
     rule: OSV_RULE,
     ...osvAliases(v),
+    ...osvPackageRef(p),
   }));
 }
 

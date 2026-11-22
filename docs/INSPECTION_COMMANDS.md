@@ -136,6 +136,25 @@ A SARIF run that reports `executionSuccessful: false` is not an empty report: wi
 is refused, and with results the findings are printed with a note that they are partial. Only
 SARIF 2.1.0 is read.
 
+An OSV finding names a package, so it carries one more fact: whether the source of the project in
+the current directory imports that package. The line is one of:
+
+- `imported by project source: a.ts, b.ts (+N more)`
+- `not imported by project source; in the lockfile as a dependency of <pkg>`
+- `not imported by anything kit read (dynamic or generated imports are not seen)`
+- `import use not checked: <reason>`
+
+In `--json` it is the `importFact` object on the finding (`status`, `text`, and `files`, `via` or
+`reason`); `package` holds the name and ecosystem the report gave. The fact never changes a
+finding's severity, status or order. It is a text-level read of npm/Node and Python source with
+no model and no network: an import statement inside a comment counts, an import built at run time
+or started from a script does not, and it says nothing about whether the vulnerable code is
+called. Only `package-lock.json` (version 2 and 3) is read for the dependency that brings a
+package in. A PyPI name can differ from its import name, so a Python package no file imports is
+reported as not checked unless its import name is on kit's short list. When the walk hits its
+bound (20,000 source files, 1 MB per file) the fact is `import use not checked`, never a partial
+answer. `kit scan` and `kit check` do not print the fact yet.
+
 `cloudflare-audit` reads the `findings.json` that Cloudflare's security-audit skill writes and
 validates. kit checks only the fields it reads: the verdict, a unique fingerprint, the title, a source
 trace with files and positive lines, and the overall severity of a confirmed record. A `confirmed`
