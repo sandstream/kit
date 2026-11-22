@@ -27,6 +27,7 @@
  * authed, etc.) emits a "skipped" finding instead of failing the whole sweep.
  */
 
+import { npmAuditLockfile, runNpmAudit } from "./npm-audit-scope.js";
 import { readFile, writeFile, mkdir, readdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -389,27 +390,9 @@ async function checkGitHubMeta(repo: string): Promise<PrescanFinding[]> {
 
 // ── Deep check: npm audit ──────────────────────────────────────────────────
 
-/**
- * Extract up to 3 representative package names from npm-audit's `vulnerabilities`
- * map for crit+high entries. Helps the operator know WHICH dep is exposed
- * without forcing them to re-run `npm audit` interactively.
- */
-function topAuditPackages(data: unknown): string[] {
-  const vulns = (data as { vulnerabilities?: Record<string, { severity?: string }> })
-    ?.vulnerabilities;
-  if (!vulns) return [];
-  const top: string[] = [];
-  for (const [name, info] of Object.entries(vulns)) {
-    if (top.length >= 3) break;
-    const sev = info?.severity?.toLowerCase();
-    if (sev === "critical" || sev === "high") top.push(name);
-  }
-  return top;
-}
-
 async function checkNpmAudit(repo: string): Promise<PrescanFinding[]> {
   if (!(await pathExists(join(repo, "package.json")))) return [];
-  if (!(await pathExists(join(repo, "package-lock.json")))) {
+  if (!npmAuditLockfile(repo)) {
     return [
       finding(
         repo,
@@ -420,46 +403,30 @@ async function checkNpmAudit(repo: string): Promise<PrescanFinding[]> {
       ),
     ];
   }
-  const NPM_AUDIT_TIMEOUT_MS = 120_000; // 2 min — large lockfiles can be slow
-  const NPM_AUDIT_BUFFER = 64 * 1024 * 1024; // 64 MB — monorepos emit large json
-  const parseAndFormat = (stdout: string): PrescanFinding[] => {
-    const data = JSON.parse(stdout);
-    const high = data?.metadata?.vulnerabilities?.high ?? 0;
-    const critical = data?.metadata?.vulnerabilities?.critical ?? 0;
-    if (high + critical === 0) return [];
-    const top = topAuditPackages(data);
-    const where = top.length ? ` — top: ${top.join(", ")}` : "";
-    return [
+  const { report, gap } = await runNpmAudit(repo, 120_000);
+  const findings: PrescanFinding[] = [];
+  const { high, critical } = report.metadata.vulnerabilities;
+  if (high + critical > 0) {
+    const top = Object.values(report.vulnerabilities)
+      .filter(({ severity }) => severity === "high" || severity === "critical")
+      .slice(0, 3)
+      .map(({ name }) => name);
+    findings.push(
       finding(
         repo,
         "npm-audit",
         critical > 0 ? "critical" : "high",
-        `${critical} critical + ${high} high vulnerabilities${where}`,
-        "npm audit fix; review individual reports",
+        `${critical} critical + ${high} high vulnerabilities (top: ${top.join(", ")})`,
+        "review individual npm audit findings",
       ),
-    ];
-  };
-  try {
-    const { stdout } = await exec("npm", ["audit", "--audit-level=high", "--json"], {
-      cwd: repo,
-      timeout: NPM_AUDIT_TIMEOUT_MS,
-      maxBuffer: NPM_AUDIT_BUFFER,
-    });
-    return parseAndFormat(stdout);
-  } catch (err) {
-    // npm audit exits non-zero when findings exist
-    const e = err as { stdout?: string };
-    if (e.stdout) {
-      try {
-        return parseAndFormat(e.stdout);
-      } catch {
-        /* fallthrough */
-      }
-    }
-    return [
-      finding(repo, "npm-audit-error", "info", "npm audit failed to parse", "manual investigation"),
-    ];
+    );
   }
+  if (gap) {
+    findings.push(
+      finding(repo, "npm-audit-error", "medium", gap.reason, "rerun the dependency audit"),
+    );
+  }
+  return findings;
 }
 
 // ── Deep check: workflow drift ─────────────────────────────────────────────

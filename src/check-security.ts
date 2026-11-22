@@ -50,6 +50,8 @@ import { osvFinding } from "./osv-summary.js";
 import { OSV_EXITS, readOsvReport } from "./osv-report.js";
 import { readTrivyReport } from "./trivy-report.js";
 import { readSemgrepReport } from "./semgrep-report.js";
+import { npmAuditLockfile, runNpmAudit } from "./npm-audit-scope.js";
+import { checkPipAudit } from "./check-pip-audit.js";
 import {
   scannerEvidence,
   scannerGap,
@@ -454,9 +456,12 @@ async function highFindingsResult(
   auditResult: unknown,
   high: number,
   critical: number,
+  allowExceptions: boolean,
 ): Promise<SecurityCheckResult> {
   const counts = `${critical} critical, ${high} high vulnerabilities`;
-  const { covered, note } = await auditDecision(root, auditResult);
+  const { covered, note } = allowExceptions
+    ? await auditDecision(root, auditResult)
+    : { covered: false, note: "" };
   if (covered) {
     return {
       category: "dependency",
@@ -495,9 +500,7 @@ export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> 
   // (#353). Skip honestly instead — it is not-applicable, not a failure, and those
   // repos' dependency vulnerabilities are still covered by osv-scanner. (No
   // false-green risk: OSV runs regardless.)
-  const hasNpmLock = await access(resolve(root, "package-lock.json"))
-    .then(() => true)
-    .catch(() => false);
+  const hasNpmLock = npmAuditLockfile(root) !== undefined;
   if (!hasNpmLock) {
     const other = (
       await Promise.all(
@@ -518,154 +521,19 @@ export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> 
     };
   }
 
-  try {
-    const timeout = Number(process.env.KIT_NPM_AUDIT_TIMEOUT_MS ?? "") || 300_000;
-    const { stdout } = await exec("npm", ["audit", "--audit-level=high", "--json"], {
-      timeout,
-      cwd: root,
-    });
-    // Exit 0 = npm found nothing >= high. But a broken / odd npm that exits 0
-    // with no report must NOT be read as a clean pass — be honest (warn), don't
-    // false-green.
-    if (!stdout || !stdout.trim()) {
-      return {
-        category: "dependency",
-        name: "npm audit",
-        status: "warn",
-        detail: "npm audit exited 0 but produced no report — could not confirm (unverified)",
-        severity: "low",
-        didNotRun: true,
-      };
-    }
-    return {
-      category: "dependency",
-      name: "npm audit",
-      status: "pass",
-      detail: "no high/critical vulnerabilities",
-    };
-  } catch (error: unknown) {
-    const failure =
-      error && typeof error === "object"
-        ? (error as {
-            stdout?: unknown;
-            code?: unknown;
-            killed?: unknown;
-            signal?: unknown;
-            message?: unknown;
-          })
-        : null;
-    if (failure?.stdout !== undefined) {
-      try {
-        const stdout =
-          typeof failure.stdout === "string"
-            ? failure.stdout
-            : Buffer.isBuffer(failure.stdout)
-              ? failure.stdout.toString("utf8")
-              : "";
-        const auditResult = JSON.parse(stdout);
-        const vulnerabilities = auditResult.metadata?.vulnerabilities || {};
-        const high = vulnerabilities.high || 0;
-        const critical = vulnerabilities.critical || 0;
-
-        if (high > 0 || critical > 0)
-          return await highFindingsResult(root, auditResult, high, critical);
-      } catch {
-        // JSON parse failed, treat as fail
-      }
-    }
-
-    const timedOut =
-      failure?.killed === true ||
-      failure?.code === "ETIMEDOUT" ||
-      failure?.signal === "SIGTERM" ||
-      (typeof failure?.message === "string" && /timed?\s*out/i.test(failure.message));
-    return {
-      category: "dependency",
-      name: "npm audit",
-      status: "warn",
-      detail: timedOut
-        ? "npm audit timed out — vulnerability status unverified"
-        : "npm audit could not run — vulnerability status unverified",
-      severity: "medium",
-      didNotRun: true,
-    };
-  }
-}
-
-/**
- * Run pip-audit for Python dependencies
- */
-async function checkPipAudit(root: string): Promise<SecurityCheckResult> {
-  try {
-    // Check if requirements.txt exists
-    await access(resolve(root, "requirements.txt"));
-  } catch {
-    return {
-      category: "dependency",
-      name: "pip-audit",
-      status: "skip",
-      detail: "no requirements.txt found",
-    };
-  }
-
-  // Resolve pip-audit mise-first (commonly a pipx / `mise use -g` global, off PATH
-  // when mise isn't activated); fall back to the bare name for non-mise installs.
-  const pipAuditBin = (await resolveToolBin("pip-audit")) ?? "pip-audit";
-  try {
-    // Check if pip-audit is installed
-    await exec(pipAuditBin, ["--version"], { timeout: 5_000, cwd: root });
-  } catch {
-    return {
-      category: "dependency",
-      name: "pip-audit",
-      status: "warn",
-      detail: "pip-audit not installed (run: pip install pip-audit)",
-      severity: "medium",
-      // requirements.txt is present (we returned above otherwise) → a Python
-      // project's CVEs are UNSCANNED because the tool is absent: a scanner-health
-      // failure under strict, not an honest skip.
-      didNotRun: true,
-    };
-  }
-
-  try {
-    const { stdout } = await exec(pipAuditBin, ["--format=json"], {
-      timeout: 30_000,
-      cwd: root,
-    });
-
-    const result = JSON.parse(stdout);
-    const vulns = result.dependencies || [];
-
-    if (vulns.length === 0) {
-      return {
-        category: "dependency",
-        name: "pip-audit",
-        status: "pass",
-        detail: "no vulnerabilities found",
-      };
-    }
-
-    const highSeverity = vulns.filter((v: { vulnerabilities?: Array<{ severity?: string }> }) =>
-      v.vulnerabilities?.some((vuln) => vuln.severity === "high" || vuln.severity === "critical"),
-    ).length;
-
-    return {
-      category: "dependency",
-      name: "pip-audit",
-      status: highSeverity > 0 ? "fail" : "warn",
-      detail: `${vulns.length} vulnerable dependencies`,
-      severity: highSeverity > 0 ? "high" : "medium",
-    };
-  } catch {
-    return {
-      category: "dependency",
-      name: "pip-audit",
-      status: "fail",
-      detail: "audit check failed",
-      severity: "high",
-    };
-  }
+  const timeout = Number(process.env.KIT_NPM_AUDIT_TIMEOUT_MS ?? "") || 300_000;
+  const { report, gap } = await runNpmAudit(root, timeout);
+  const { high, critical } = report.metadata.vulnerabilities;
+  const row: SecurityCheckResult =
+    high + critical > 0
+      ? await highFindingsResult(root, report, high, critical, !gap)
+      : {
+          category: "dependency",
+          name: "npm audit",
+          status: "pass",
+          detail: "no high or critical findings in the npm audit report",
+        };
+  return scannerEvidence(row, report.count, gap);
 }
 
 /**

@@ -25,7 +25,15 @@
 
 import { readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { npmAuditArgs, npmAuditGap, readNpmAuditReport } from "./npm-audit-report.js";
+import {
+  npmAuditLockfile,
+  npmScopeGap,
+  readNpmAuditScope,
+  type NpmAuditScope,
+} from "./npm-audit-scope.js";
+import type { ExecResult } from "./utils/execFileNoThrow.js";
 
 export const ADVISORY_BASELINE_FILE = ".kit/advisories.json";
 
@@ -65,8 +73,7 @@ export async function detectAuditRunner(root: string): Promise<AuditRunner | nul
   if (await has("pnpm-lock.yaml")) return { manager: "pnpm", command: ["pnpm", "audit", "--json"] };
   if (await has("yarn.lock"))
     return { manager: "yarn", command: ["yarn", "npm", "audit", "--json", "--all"] };
-  if (await has("package-lock.json"))
-    return { manager: "npm", command: ["npm", "audit", "--json"] };
+  if (npmAuditLockfile(root)) return { manager: "npm", command: ["npm", ...npmAuditArgs("info")] };
   return null;
 }
 
@@ -282,13 +289,62 @@ export interface AuditOutcome {
   manager: string;
 }
 
-/**
- * Run the manager's audit and parse it.
- *
- * A non-zero exit is normal — npm audit exits non-zero when it finds anything — so the exit code is
- * not the signal. The signal is whether the output parsed into advisories: no advisories AND no
- * parseable JSON means the audit did not run, and that must not read as a clean result.
- */
+function npmOutcome(
+  result: SpawnSyncReturns<string>,
+  root: string,
+  scope: NpmAuditScope,
+): AuditOutcome {
+  const { error, status, stdout, stderr } = result;
+  const code = error && "code" in error ? error.code : undefined;
+  const execution: ExecResult = {
+    stdout: stdout ?? "",
+    stderr: stderr ?? "",
+    exitCode: status ?? 1,
+    ok: status === 0 && !error,
+    noNumericExitStatus: status === null ? true : undefined,
+    didNotStart: code === "ENOENT" || code === "EACCES" ? true : undefined,
+    truncated: code === "ENOBUFS",
+    timedOut: code === "ETIMEDOUT",
+  };
+  const report = readNpmAuditReport(execution.stdout);
+  const gap = npmAuditGap(report, execution, "info") ?? npmScopeGap(root, scope, report.inventory);
+  const advisories = parseAuditJson(JSON.stringify({ vulnerabilities: report.vulnerabilities }));
+  const missingId = Object.values(report.vulnerabilities).some(({ via }) =>
+    via.some((entry) => typeof entry !== "string" && !GHSA.test(entry.url)),
+  );
+  const reason =
+    gap?.reason ??
+    (missingId ? "npm audit contains an advisory without a baseline GHSA identifier" : undefined);
+  return { advisories, error: reason, manager: "npm" };
+}
+
+function legacyAuditOutcome(r: SpawnSyncReturns<string>, manager: string): AuditOutcome {
+  if (r.error) return { advisories: [], error: r.error.message, manager: manager };
+  if (r.status === null) {
+    return {
+      advisories: [],
+      error: `${manager} audit was stopped (${r.signal})`,
+      manager: manager,
+    };
+  }
+  const out = r.stdout ?? "";
+  const reported = auditJsonError(out);
+  if (reported) return { advisories: [], error: reported, manager: manager };
+  const advisories = parseAuditJson(out);
+  if (advisories.length === 0) {
+    const looksLikeJson = out.trimStart().startsWith("{") || out.trimStart().startsWith("[");
+    if (!looksLikeJson) {
+      return {
+        advisories: [],
+        error: `${manager} audit produced no JSON (${(r.stderr ?? "").trim().slice(0, 80) || `exit ${r.status}`})`,
+        manager: manager,
+      };
+    }
+  }
+  return { advisories, manager: manager };
+}
+
+/** Run the selected manager. npm has an explicit versioned report contract. */
 export function runAudit(
   root: string,
   runner: AuditRunner,
@@ -296,33 +352,17 @@ export function runAudit(
   env: NodeJS.ProcessEnv = process.env,
 ): AuditOutcome {
   const [bin, ...args] = runner.command;
+  const scope = runner.manager === "npm" ? readNpmAuditScope(root) : undefined;
+  if (scope && "status" in scope) {
+    return { advisories: [], error: scope.reason, manager: runner.manager };
+  }
   const r = spawnSync(bin, args, {
     cwd: root,
     encoding: "utf-8",
     timeout: timeoutMs,
+    ...(runner.manager === "npm" ? { maxBuffer: 64 * 1024 * 1024 } : {}),
     env: { ...env, NO_COLOR: "1" },
   });
-  if (r.error) return { advisories: [], error: r.error.message, manager: runner.manager };
-  if (r.status === null) {
-    return {
-      advisories: [],
-      error: `${runner.manager} audit was stopped (${r.signal})`,
-      manager: runner.manager,
-    };
-  }
-  const out = r.stdout ?? "";
-  const reported = auditJsonError(out);
-  if (reported) return { advisories: [], error: reported, manager: runner.manager };
-  const advisories = parseAuditJson(out);
-  if (advisories.length === 0) {
-    const looksLikeJson = out.trimStart().startsWith("{") || out.trimStart().startsWith("[");
-    if (!looksLikeJson) {
-      return {
-        advisories: [],
-        error: `${runner.manager} audit produced no JSON (${(r.stderr ?? "").trim().slice(0, 80) || `exit ${r.status}`})`,
-        manager: runner.manager,
-      };
-    }
-  }
-  return { advisories, manager: runner.manager };
+  if (scope) return npmOutcome(r, root, scope);
+  return legacyAuditOutcome(r, runner.manager);
 }

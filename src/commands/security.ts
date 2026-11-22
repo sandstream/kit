@@ -741,6 +741,9 @@ async function cmdSecurityAdvisories(): Promise<boolean> {
   const outcome = runAudit(root, runner);
   if (outcome.error) {
     console.error(`${c.red}Audit could not run: ${outcome.error}${c.reset}`);
+    for (const a of outcome.advisories.slice(0, 3)) {
+      console.error(`  Confirmed finding: ${a.package} ${a.id} (${a.severity})`);
+    }
     return false;
   }
 
