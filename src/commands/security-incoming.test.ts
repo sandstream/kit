@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
@@ -94,6 +101,7 @@ it("drives enroll, stage, request, approve and status through the real CLI", () 
       "https://registry.npmjs.org",
     );
     assert.match(staged.candidateDigest, /^[0-9a-f]{64}$/);
+    assert.deepEqual(readdirSync(join(snapshot, "artifacts")), []);
     const checks = writeJson(f, "checks.json", [
       ...CHECKS,
       ...(f.store.read(f.repository)?.evidence ?? []),

@@ -63,12 +63,15 @@ export function inspectNpmArtifact(bytes: Buffer, selection: unknown): NpmArtifa
 export async function fetchAndInspectNpmArtifact(
   selection: unknown,
   policy: NpmArtifactFetchPolicy,
+  retain?: (verifiedBytes: Buffer) => void,
 ): Promise<NpmArtifactResult> {
   const copied = copySelection(selection);
   if ("status" in copied) return copied;
   const fetched = await fetchNpmTarball(copied.value.resolved, policy);
   if (fetched.status !== "retrieved") return fetched;
-  return inspectNpmArtifact(fetched.bytes, copied.value);
+  const inspected = inspectNpmArtifact(fetched.bytes, copied.value);
+  if (inspected.status === "verified") retain?.(fetched.bytes);
+  return inspected;
 }
 
 function copySelection(selection: unknown): { value: SelectedArtifact } | Refusal {

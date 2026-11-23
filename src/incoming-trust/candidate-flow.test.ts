@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { captureIncomingCandidate } from "./candidate-flow.js";
+import { captureIncomingCandidate, verifyRetainedIncomingCandidate } from "./candidate-flow.js";
 import { artifactVectors } from "./npm-artifact.test-support.js";
 import { withHttps } from "./npm-artifact-fetch.test-support.js";
 import { snapshotFixture } from "./snapshot.test-support.js";
@@ -51,6 +51,10 @@ describe("captureIncomingCandidate", () => {
           assert.match(result.candidate.candidateDigest, /^[0-9a-f]{64}$/);
           assert.equal(result.candidate.artifactCount, 1);
           assert.equal(result.snapshot.digest, result.candidate.checks[0]?.evidenceDigest);
+          assert.deepEqual(
+            readFileSync(join(fixture.destination, "artifacts", "0.tgz")),
+            Buffer.from(vector.base64, "base64"),
+          );
           // A changed source after capture does not change the captured inputs: a second capture
           // of the changed source gets a different identity, and the first stays as bound.
           writeFileSync(join(fixture.source, "extra.txt"), "changed after capture");
@@ -114,6 +118,52 @@ describe("captureIncomingCandidate: download", () => {
           if (result.status === "refused") assert.equal(result.reason, "snapshot-changed");
         },
       );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+describe("verifyRetainedIncomingCandidate", () => {
+  it("verifies offline and refuses a wrong digest, an altered archive or an incomplete bundle", async () => {
+    const fixture = snapshotFixture();
+    try {
+      const result = await withHttps(
+        (_request, response) => response.end(Buffer.from(vector.base64, "base64")),
+        async ({ origin, caPem }) => {
+          project(fixture.source, origin);
+          return captureIncomingCandidate({
+            source: fixture.source,
+            destination: fixture.destination,
+            fetchPolicy: { origins: [origin], caPem },
+          });
+        },
+      );
+      assert.equal(result.status, "bound", JSON.stringify(result));
+      if (result.status !== "bound") return;
+      const expected = {
+        snapshotDigest: result.snapshot.digest,
+        candidateDigest: result.candidate.candidateDigest,
+      };
+      writeFileSync(join(fixture.source, "package-lock.json"), "{}");
+      const verify = () => verifyRetainedIncomingCandidate(fixture.destination, expected);
+      assert.deepEqual(verify(), { ok: true });
+      assert.deepEqual(
+        verifyRetainedIncomingCandidate(fixture.destination, {
+          ...expected,
+          candidateDigest: "0".repeat(64),
+        }),
+        { ok: false, reason: "candidate-changed" },
+      );
+
+      const archive = join(fixture.destination, "artifacts", "0.tgz");
+      const bytes = readFileSync(archive);
+      // Flip the gzip modification time. The archive still extracts to the same files.
+      bytes[4] ^= 1;
+      writeFileSync(archive, bytes);
+      assert.deepEqual(verify(), { ok: false, reason: "candidate-changed" });
+      unlinkSync(archive);
+      assert.deepEqual(verify(), { ok: false, reason: "artifact-storage" });
     } finally {
       fixture.cleanup();
     }

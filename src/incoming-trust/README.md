@@ -128,10 +128,25 @@ Git, local and bundled sources have no byte verification yet. They refuse the wh
 The digest does not depend on the order of artifact results. It changes when the snapshot, an inventory field, the fetched bytes, the manifest scripts or the archive shape change.
 The returned checks (`snapshot`, `npm-artifacts`) match the `IncomingCheck` shape that `decide` expects. The digest does not authorize execution and does not isolate it.
 
-`captureIncomingCandidate` in `candidate-flow.ts` runs the whole flow. It captures the source once, reads `package.json` and the lockfile from the protected copy (never from the source again), fetches and inspects every locked artifact under the caller's host policy, verifies the snapshot again, and binds the candidate.
-It refuses with one of these reasons: `snapshot-failed`, `manifest-unreadable`, `lockfile-missing`, `lockfile-ambiguous` (both `package-lock.json` and `npm-shrinkwrap.json` exist), `lockfile-unreadable`, `artifact-limit` (default 1000), `artifact-refused` (the result names the artifact cause), `snapshot-changed` (the snapshot changed during the downloads), or any `bindIncomingCandidate` reason.
-A refusal after the capture returns the snapshot, and the caller owns that directory. The result does not authorize execution.
-The approval lifecycle, a launch lock and independent workload isolation remain separate work.
+`captureIncomingCandidate` in `candidate-flow.ts` captures the source once. It reads `package.json`
+and the lockfile from the protected copy. It fetches and inspects the locked artifacts under the
+caller's host policy. It retains their exact compressed bytes in `artifacts/` in inventory order.
+Kit limits each archive to 16 MiB and the combined compressed archives to 256 MiB.
+
+`verifyRetainedIncomingCandidate` verifies the captured tree and binds a fresh candidate from
+the retained artifacts without reading the source, a package cache or the network. It compares
+the result to the expected snapshot and candidate digests. Capture calls this check before it
+returns a bound candidate. Archive storage must contain exactly one regular private file for
+each artifact. A candidate staged before archive retention needs to be staged again to get
+the retained files.
+
+Capture refuses unreadable inputs, a missing lockfile, both lockfiles at once and incomplete
+or unsupported inventories. It caps inventories at 1,000 artifacts by default.
+`artifact-refused` includes the inspection or download cause. `artifact-storage` indicates
+missing, invalid or unwritable retained files. `snapshot-changed` and `candidate-changed`
+indicate a mismatch on verification. A refusal after capture returns the snapshot, and the
+caller owns that directory. The offline check authorizes no execution. A launch lock and
+independent workload isolation remain separate work.
 
 ## Approval lifecycle
 

@@ -1,15 +1,18 @@
-import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { bindIncomingCandidate, type IncomingCandidate } from "./candidate.js";
+import { inspectCandidateArchives, retainCandidateArchives } from "./candidate-artifacts.js";
 import { fetchAndInspectNpmArtifact, type NpmArtifactResult } from "./npm-artifact.js";
 import type { NpmArtifactFetchPolicy } from "./npm-artifact-fetch.js";
-import { inspectNpmLock, type NpmLockfileName } from "./npm-lock.js";
+import { inspectNpmLock, type NpmLockfileName, type NpmLockInventory } from "./npm-lock.js";
 import {
   captureIncomingSnapshot,
   verifyIncomingSnapshot,
   type IncomingSnapshot,
   type IncomingSnapshotLimits,
 } from "./snapshot.js";
+import { readSnapshotBytes } from "./snapshot-io.js";
+import { assertPrivateEntry } from "./snapshot-tree.js";
 
 const MAX_INPUT_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_ARTIFACTS = 1000;
@@ -34,6 +37,8 @@ export type IncomingCandidateFlowRefusal =
   | "lockfile-unreadable"
   | "artifact-limit"
   | "artifact-refused"
+  | "artifact-storage"
+  | "candidate-changed"
   | "snapshot-changed"
   | Extract<IncomingCandidate, { status: "refused" }>["reason"];
 
@@ -54,18 +59,93 @@ export type IncomingCandidateFlow =
 
 function readInput(tree: string, name: string): Buffer | "missing" | "unreadable" {
   const path = join(tree, name);
-  let fd: number | undefined;
   try {
-    // One descriptor for the check and the read, so the file cannot be swapped in between. A link is
-    // refused by the open itself where the platform supports it.
-    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    const info = fstatSync(fd);
-    if (!info.isFile() || info.size > MAX_INPUT_BYTES) return "unreadable";
-    return readFileSync(fd);
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable";
-  } finally {
-    if (fd !== undefined) closeSync(fd);
+    const info = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+    if (!info) return "missing";
+    assertPrivateEntry(path, info);
+    return readSnapshotBytes(path, info, MAX_INPUT_BYTES);
+  } catch {
+    return "unreadable";
+  }
+}
+
+function readInventory(
+  tree: string,
+  maxArtifacts: number,
+): NpmLockInventory | IncomingCandidateFlowRefusal {
+  const manifest = readInput(tree, "package.json");
+  if (typeof manifest === "string") return "manifest-unreadable";
+  const lock = selectLockfile(tree);
+  if (typeof lock === "string") return lock;
+  const inventory = inspectNpmLock({ manifest, lockfile: lock.bytes, lockfileName: lock.name });
+  if (inventory.artifacts.length > maxArtifacts) return "artifact-limit";
+  if (inventory.completeness.status !== "complete") return "inventory-incomplete";
+  if (
+    inventory.artifacts.some(
+      (entry) => entry.source !== "registry-tarball" && entry.source !== "remote-tarball",
+    )
+  ) {
+    return "artifact-source-unsupported";
+  }
+  return inventory;
+}
+
+/** Rebind the retained inputs with zero network access and compare to the expected candidate. */
+export function verifyRetainedIncomingCandidate(
+  destination: string,
+  expected: { snapshotDigest: string; candidateDigest: string },
+  options?: Pick<IncomingCandidateRequest, "snapshotLimits" | "maxArtifacts">,
+): { ok: true } | { ok: false; reason: IncomingCandidateFlowRefusal } {
+  const verifySnapshot = () =>
+    verifyIncomingSnapshot(
+      destination,
+      expected.snapshotDigest,
+      options?.snapshotLimits,
+      "candidate",
+    ).ok;
+  if (!verifySnapshot()) return { ok: false, reason: "snapshot-changed" };
+  const inventory = readInventory(
+    join(destination, "tree"),
+    options?.maxArtifacts ?? DEFAULT_MAX_ARTIFACTS,
+  );
+  if (typeof inventory === "string") return { ok: false, reason: inventory };
+  try {
+    const candidate = bindIncomingCandidate({
+      snapshotDigest: expected.snapshotDigest,
+      inventory,
+      artifacts: inspectCandidateArchives(destination, inventory.artifacts),
+    });
+    if (!verifySnapshot()) return { ok: false, reason: "snapshot-changed" };
+    return candidate.status === "bound" && candidate.candidateDigest === expected.candidateDigest
+      ? { ok: true }
+      : { ok: false, reason: "candidate-changed" };
+  } catch {
+    return { ok: false, reason: "artifact-storage" };
+  }
+}
+
+async function retainArtifacts(
+  destination: string,
+  inventory: NpmLockInventory,
+  policy: NpmArtifactFetchPolicy,
+): Promise<
+  | { artifacts: NpmArtifactResult[] }
+  | {
+      reason: "artifact-storage" | "artifact-refused";
+      artifact?: Exclude<NpmArtifactResult, { status: "verified" }>;
+    }
+> {
+  try {
+    const retain = retainCandidateArchives(destination);
+    const artifacts: NpmArtifactResult[] = [];
+    for (const selection of inventory.artifacts) {
+      const result = await fetchAndInspectNpmArtifact(selection, policy, retain);
+      if (result.status !== "verified") return { reason: "artifact-refused", artifact: result };
+      artifacts.push(result);
+    }
+    return { artifacts };
+  } catch {
+    return { reason: "artifact-storage" };
   }
 }
 
@@ -102,36 +182,25 @@ export async function captureIncomingCandidate(
     artifact?: Exclude<NpmArtifactResult, { status: "verified" }>,
   ): IncomingCandidateFlow => ({ status: "refused", reason, artifact, snapshot });
 
-  const manifest = readInput(snapshot.tree, "package.json");
-  if (typeof manifest === "string") return refuse("manifest-unreadable");
-  const lock = selectLockfile(snapshot.tree);
-  if (typeof lock === "string") return refuse(lock);
-
-  const inventory = inspectNpmLock({
-    manifest,
-    lockfile: lock.bytes,
-    lockfileName: lock.name,
-  });
-  if (inventory.artifacts.length > (request.maxArtifacts ?? DEFAULT_MAX_ARTIFACTS)) {
-    return refuse("artifact-limit");
-  }
-
-  const artifacts: NpmArtifactResult[] = [];
-  for (const selection of inventory.artifacts) {
-    const result = await fetchAndInspectNpmArtifact(selection, request.fetchPolicy);
-    if (result.status !== "verified") return refuse("artifact-refused", result);
-    artifacts.push(result);
-  }
-
-  // The snapshot sits on a writable disk for the whole fetch. Bind only if it is still the capture.
-  if (!verifyIncomingSnapshot(dirname(snapshot.tree), snapshot.digest, request.snapshotLimits).ok) {
-    return refuse("snapshot-changed");
-  }
+  const inventory = readInventory(snapshot.tree, request.maxArtifacts ?? DEFAULT_MAX_ARTIFACTS);
+  if (typeof inventory === "string") return refuse(inventory);
+  const destination = dirname(snapshot.tree);
+  const retained = await retainArtifacts(destination, inventory, request.fetchPolicy);
+  if ("reason" in retained) return refuse(retained.reason, retained.artifact);
   const candidate = bindIncomingCandidate({
     snapshotDigest: snapshot.digest,
     inventory,
-    artifacts,
+    artifacts: retained.artifacts,
   });
   if (candidate.status === "refused") return refuse(candidate.reason);
+  const verified = verifyRetainedIncomingCandidate(
+    destination,
+    {
+      snapshotDigest: snapshot.digest,
+      candidateDigest: candidate.candidateDigest,
+    },
+    request,
+  );
+  if (!verified.ok) return refuse(verified.reason);
   return { status: "bound", snapshot, candidate };
 }
