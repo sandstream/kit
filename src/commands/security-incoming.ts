@@ -237,7 +237,7 @@ function run(inv: Invocation): boolean {
   else if (result.ran)
     console.log(`Run ${result.runId} ${result.outcome} (exit ${result.code ?? "none"}).`);
   else console.error(`Incoming trust run refused: ${result.reason}`);
-  return result.ran && result.outcome === "exited" && result.code === 0;
+  return result.ran === true && result.outcome === "exited" && result.code === 0;
 }
 
 function simple(

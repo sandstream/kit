@@ -1,13 +1,20 @@
 import fs from "node:fs";
 import net from "node:net";
 import { spawnSync } from "node:child_process";
-import { once } from "node:events";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Worker } from "node:worker_threads";
 
-const [entry, authority, output, runId, approvalDeadline, runDeadline, parent, watchdog, timeout] =
-  process.argv.slice(1) as string[];
+export interface BootstrapRequest {
+  entry: string;
+  authority: string;
+  output: string;
+  runId: string;
+  approvalDeadline: number;
+}
+
+const { entry, authority, output, runId, approvalDeadline } = JSON.parse(
+  process.argv[1]!,
+) as BootstrapRequest;
 
 function denied(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
@@ -16,7 +23,7 @@ function denied(error: unknown): boolean {
 
 function denyAuthorityAccess(flags: string): boolean {
   try {
-    fs.closeSync(fs.openSync(authority!, flags));
+    fs.closeSync(fs.openSync(authority, flags));
   } catch (error) {
     return denied(error);
   }
@@ -48,33 +55,14 @@ async function verifyRestrictions(): Promise<boolean> {
   if (!denyAuthorityAccess("r") || !denyAuthorityAccess("r+")) return false;
   if (!denied(spawnSync(process.execPath, ["--version"], { timeout: 500 }).error)) return false;
   if (!(await denyConnection())) return false;
-  const marker = join(output!, ".kit-permission-" + runId);
+  const marker = join(output, ".kit-permission-" + runId);
   fs.writeFileSync(marker, "", { flag: "wx", mode: 0o600 });
   fs.unlinkSync(marker);
   return true;
 }
 
-async function armWatchdog(): Promise<boolean> {
-  if (process.ppid !== Number(parent)) return false;
-  const delay = Math.min(Number(timeout), Number(runDeadline) - Date.now());
-  if (!Number.isSafeInteger(delay) || delay <= 0) return false;
-  const url = new URL("data:text/javascript," + encodeURIComponent(watchdog!));
-  const worker = new Worker(url, {
-    execArgv: [],
-    workerData: { parent: Number(parent), delay },
-  });
-  const [status] = await once(worker, "message");
-  worker.unref();
-  return status === "ready" && process.ppid === Number(parent);
-}
-
-if (
-  !(await verifyRestrictions()) ||
-  !(await armWatchdog()) ||
-  Date.now() >= Number(approvalDeadline)
-)
-  process.exit(125);
-fs.writeSync(3, runId!);
+if (!(await verifyRestrictions()) || Date.now() >= approvalDeadline) process.exit(125);
+fs.writeSync(3, runId);
 fs.closeSync(3);
-process.argv = [process.execPath, entry!];
-await import(pathToFileURL(entry!).href);
+process.argv = [process.execPath, entry];
+await import(pathToFileURL(entry).href);

@@ -47,7 +47,7 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
 - `recover` moves a damaged store aside. It never deletes it. Every repository that shares the
   store directory needs a new enrollment afterwards.
 
-## What it does not do
+## Supported scope
 
 - Signing happens outside kit.
 - The supported run policy denies network access, credentials from the host and child processes.
@@ -72,7 +72,8 @@ it in the authority file's `policyDigest` field. Enroll the authority, stage the
 input, request and record the external approval, then call `run` with that
 verification report. Kit exits nonzero for refusal, timeout or a nonzero workload
 exit. The native tests exercise a bounded set of filesystem, credential, network
-and process restrictions. A watchdog stops the Node process at its time limit or when
-its launcher dies. The launcher owns ejection of the temporary images after the run.
+and process restrictions. A separate trusted supervisor stops the Node process at its time limit or when
+Kit dies, including while the workload process is suspended. The launcher owns ejection of the temporary images after the run.
+An unavailable supervisor report yields `ran: null` and a nonzero exit.
 
 Design and limits: [src/incoming-trust/README.md](../src/incoming-trust/README.md).

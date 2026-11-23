@@ -88,6 +88,7 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
 }
 
 function boundaryFailure(observed: IncomingRun | undefined, reason: string): IncomingRun {
+  if (observed?.ran === null) return observed;
   return observed?.ran
     ? { ...observed, outcome: "boundary-failed", boundaryReason: reason }
     : { ran: false, reason };

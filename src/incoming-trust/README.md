@@ -188,5 +188,5 @@ lock through startup and process completion. The executable comes from a separat
 image verified against the policy digest. This delegate requires zero network destinations,
 zero host credentials and zero child processes. It supports built-in modules and local
 JavaScript from the captured tree. It refuses retained package archives, preinstalled
-packages and native addons until the runtime can prove their provenance. The loader and its
-watchdog are TypeScript. See the operator guide for the policy and output format.
+packages and native addons until the runtime can prove their provenance. The TypeScript supervisor runs outside the sandbox. It owns the workload deadline
+and stops the process if Kit exits. See the operator guide for the policy and output format.

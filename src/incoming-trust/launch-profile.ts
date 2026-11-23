@@ -12,8 +12,7 @@ export const PROFILE_RULES = [
   '(import "system.sb")',
   '(allow process-exec (literal (param "KIT_RUNTIME")))',
   "(deny process-fork network* mach-lookup mach-register)",
-  "(deny signal (target others))",
-  "(allow signal (target self))",
+  "(deny signal)",
   "(deny system-socket ipc-posix* iokit-open* user-preference-read user-preference-write sysctl-write)",
   "(allow sysctl-read)",
   '(allow file-read* (subpath "/usr/lib") (subpath "/System/Library") (literal "/dev/null") (literal (param "KIT_RUNTIME")) (subpath (param "KIT_INPUT")) (subpath (param "KIT_OUTPUT")))',
@@ -25,13 +24,21 @@ export const PROFILE_RULES = [
 export function readLaunchScripts() {
   return {
     bootstrap: readFileSync(new URL("./launch-bootstrap.js", import.meta.url), "utf8"),
-    watchdog: readFileSync(new URL("./launch-watchdog.js", import.meta.url), "utf8"),
+    supervisor: readFileSync(new URL("./launch-supervisor.js", import.meta.url), "utf8"),
   };
 }
 
-export function runtimeProfile(paths: string[]): [string[], string] {
+export function runtimeProfile({
+  input,
+  output,
+  runtime,
+}: {
+  input: string;
+  output: string;
+  runtime: string;
+}): [string[], string] {
   const parents = new Set<string>();
-  for (const path of paths) {
+  for (const path of [input, output, runtime]) {
     let parent = dirname(path);
     for (;;) {
       parents.add(parent);

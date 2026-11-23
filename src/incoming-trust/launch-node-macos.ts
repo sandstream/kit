@@ -4,11 +4,13 @@ import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { sameIdentity } from "../utils/same-file.js";
 import { privateDirIsControlled } from "../utils/secure-perms.js";
-import { runtimeProfile, RUN_ENV, SEATBELT } from "./launch-profile.js";
+import { runtimeProfile, RUN_ENV } from "./launch-profile.js";
+import type { BootstrapRequest } from "./launch-bootstrap.js";
+import type { SupervisorReceipt, SupervisorRequest } from "./launch-supervisor.js";
 import type { PreparedLaunchPolicy } from "./launch-policy.js";
 import { containsSnapshotPath } from "./snapshot-storage.js";
 
-type Refusal = { ran: false; reason: string };
+type Refusal = { ran: false | null; reason: string };
 export type IncomingRun =
   | Refusal
   | {
@@ -52,7 +54,6 @@ function rootPaths(ctx: LaunchContext): { input: string; output: string; entry: 
 function invoke(ctx: LaunchContext, input: string, output: string, entry: string): IncomingRun {
   const { policyDigest, policy, scripts } = ctx.prepared;
   const { runtime } = ctx;
-  const deadline = Date.now() + policy.timeoutMs;
   const runId = createHash("sha256")
     .update(
       JSON.stringify([
@@ -64,10 +65,19 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
       ]),
     )
     .digest("hex");
-  const [metadata, profile] = runtimeProfile([input, output, runtime]);
-  const result = spawnSync(
-    SEATBELT,
-    [
+  const [metadata, profile] = runtimeProfile({ input, output, runtime });
+  const entryRequest: BootstrapRequest = {
+    entry,
+    authority: ctx.authority,
+    output,
+    runId,
+    approvalDeadline: ctx.deadline,
+  };
+  const supervisor: SupervisorRequest = {
+    parent: process.pid,
+    deadlineMs: policy.timeoutMs,
+    env: RUN_ENV,
+    args: [
       "-D",
       "KIT_RUNTIME=" + runtime,
       "-D",
@@ -82,44 +92,45 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
       "-e",
       scripts.bootstrap,
       "--",
-      entry,
-      ctx.authority,
-      output,
-      runId,
-      String(ctx.deadline),
-      String(deadline),
-      String(process.pid),
-      scripts.watchdog,
-      String(policy.timeoutMs),
+      JSON.stringify(entryRequest),
     ],
+  };
+  const result = spawnSync(
+    runtime,
+    ["--input-type=module", "-e", scripts.supervisor, "--", JSON.stringify(supervisor)],
     {
       cwd: output,
       env: RUN_ENV,
-      stdio: ["ignore", "pipe", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8",
-      timeout: policy.timeoutMs,
+      timeout: policy.timeoutMs + 10_000,
       killSignal: "SIGKILL",
-      maxBuffer: 1024 * 1024,
+      maxBuffer: 16 * 1024 * 1024,
     },
   );
-  if (result.output?.[3] !== runId) return { ran: false, reason: "runtime-proof-missing" };
-  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
-  const outcome =
-    code === "ETIMEDOUT" || (result.signal === "SIGKILL" && Date.now() >= deadline)
-      ? "timed-out"
-      : code === "ENOBUFS"
-        ? "output-limit"
-        : result.signal || result.error
-          ? "interrupted"
-          : "exited";
-  return {
-    ran: true,
-    runId,
-    code: result.status,
-    outcome,
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-  };
+  if (result.status !== 0 || result.error || !result.stdout)
+    return { ran: null, reason: "run-supervisor-result-unavailable" };
+  const confirmed = parseReceipt(result.stdout);
+  if (!confirmed) return { ran: null, reason: "run-supervisor-result-unavailable" };
+  const { proof, ...receipt } = confirmed;
+  return proof === runId
+    ? { ran: true, runId, ...receipt }
+    : { ran: false, reason: "runtime-proof-missing" };
+}
+
+function parseReceipt(output: string): SupervisorReceipt | undefined {
+  try {
+    const receipt = JSON.parse(output) as Partial<SupervisorReceipt> | null;
+    if (!receipt || typeof receipt.proof !== "string" || receipt.proof.length > 64)
+      return undefined;
+    if (receipt.code !== null && !Number.isInteger(receipt.code)) return undefined;
+    if (!["exited", "timed-out", "interrupted", "output-limit"].includes(receipt.outcome ?? ""))
+      return undefined;
+    if (typeof receipt.stdout !== "string" || typeof receipt.stderr !== "string") return undefined;
+    return receipt as SupervisorReceipt;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Starts the one supported delegate. The caller holds the lock and the sealed image. */
@@ -132,7 +143,7 @@ export function launchNodeOnMac(ctx: LaunchContext): IncomingRun {
     const outputIdentity = lstatSync(output, { bigint: true });
     const result = invoke(ctx, input, output, entry);
     if (
-      !result.ran &&
+      result.ran === false &&
       sameIdentity(outputIdentity, lstatSync(output, { bigint: true, throwIfNoEntry: false }))
     )
       rmdirSync(output);
