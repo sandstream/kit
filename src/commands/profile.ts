@@ -86,8 +86,9 @@ function renderDrift(drift: ProfileDrift): void {
     workflow: "workflows",
     plugin: "plugins",
     hook: "hooks",
+    "code-tool": "code tools",
   };
-  for (const kind of ["skill", "mcp", "workflow", "plugin", "hook"]) {
+  for (const kind of ["skill", "mcp", "workflow", "plugin", "hook", "code-tool"]) {
     const list = byKind.get(kind);
     if (!list || list.length === 0) continue;
     console.log(`  ${c.bold}${labels[kind]}${c.reset}`);
@@ -120,7 +121,10 @@ function renderDrift(drift: ProfileDrift): void {
 async function profileShow(jsonMode: boolean): Promise<boolean> {
   const profile = await loadProfile();
   if (!profile) return noProfileNotice(jsonMode);
-  const drift = computeProfileDrift(profile, await discoverActualState());
+  const drift = computeProfileDrift(
+    profile,
+    await discoverActualState(process.cwd(), profile.code_tool_paths),
+  );
   if (jsonMode) {
     console.log(JSON.stringify({ skipped: false, profile, drift }, null, 2));
     return true;
@@ -140,7 +144,10 @@ async function profileShow(jsonMode: boolean): Promise<boolean> {
 async function profileCheck(jsonMode: boolean, gate: boolean): Promise<boolean> {
   const profile = await loadProfile();
   if (!profile) return noProfileNotice(jsonMode);
-  const drift = computeProfileDrift(profile, await discoverActualState());
+  const drift = computeProfileDrift(
+    profile,
+    await discoverActualState(process.cwd(), profile.code_tool_paths),
+  );
   if (jsonMode) {
     console.log(JSON.stringify({ skipped: false, gate, ...drift }, null, 2));
     return gate ? drift.clean : true;
@@ -167,7 +174,7 @@ function toComponents(items: { name: string; source?: string }[]): ProfileCompon
 /** Snapshot the discoverable dimensions and carry the operator-authored sections over verbatim. */
 function freezeProfile(
   existing: KitProfile | null,
-  discovered: Pick<KitProfile, "skills" | "mcp" | "plugins" | "hooks">,
+  discovered: Pick<KitProfile, "skills" | "mcp" | "plugins" | "hooks" | "code_tools">,
   vaultStore: string | undefined,
 ): KitProfile {
   const next: KitProfile = {
@@ -176,7 +183,7 @@ function freezeProfile(
     ...discovered,
   };
   // Operator-authored sections travel verbatim.
-  for (const key of ["name", "workflows", "gates", "scope"] as const) {
+  for (const key of ["name", "workflows", "gates", "scope", "code_tool_paths"] as const) {
     if (existing?.[key]) Object.assign(next, { [key]: existing[key] });
   }
   if (vaultStore !== undefined) next.vault = { ...existing?.vault, store: vaultStore };
@@ -190,7 +197,7 @@ function printFrozen(next: KitProfile, existing: KitProfile | null): void {
   console.log(`${c.bold}kit profile freeze${c.reset} → ${c.bold}${PROFILE_FILE}${c.reset}`);
   const vault = next.vault?.store ? `, vault store=${next.vault.store}` : "";
   console.log(
-    `  ${c.green}✓${c.reset} ${n(next.skills)} skill(s), ${n(next.mcp)} mcp server(s), ${n(next.plugins)} plugin(s), ${n(next.hooks)} hook(s)${vault}`,
+    `  ${c.green}✓${c.reset} ${n(next.skills)} skill(s), ${n(next.mcp)} mcp server(s), ${n(next.plugins)} plugin(s), ${n(next.hooks)} hook(s)${next.code_tools ? `, ${n(next.code_tools)} code tool file(s)` : ""}${vault}`,
   );
   if (existing?.workflows || existing?.scope || existing?.gates) {
     console.log(
@@ -204,7 +211,7 @@ async function profileFreeze(jsonMode: boolean): Promise<boolean> {
   const cwd = process.cwd();
   const existing = await loadProfile();
   const { skills, mcpServers } = discoverAgentToolchain(cwd);
-  const actual = await discoverActualState(cwd);
+  const actual = await discoverActualState(cwd, existing?.code_tool_paths);
   const next = freezeProfile(
     existing,
     {
@@ -212,6 +219,7 @@ async function profileFreeze(jsonMode: boolean): Promise<boolean> {
       mcp: toComponents(mcpServers),
       plugins: toComponents(discoverPlugins(cwd)),
       hooks: actual.hooks,
+      ...(actual.codeTools ? { code_tools: actual.codeTools } : {}),
     },
     actual.vaultStore ?? existing?.vault?.store,
   );

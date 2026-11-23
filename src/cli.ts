@@ -947,7 +947,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   profile: {
     handler: cmdProfile,
     stability: "experimental",
-    help: "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, hooks, vault, gates, scope}, audit declared-vs-discovered drift, sign the scope/RoE, and export/import a portable signed bundle to a fresh host (show|freeze|check|sign|verify|export|import; --json, --gate, --key, --out)",
+    help: "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, hooks, code tools, vault, gates, scope}, audit declared-vs-discovered drift, sign the scope/RoE, and export/import a portable signed bundle to a fresh host (show|freeze|check|sign|verify|export|import; --json, --gate, --key, --out)",
   },
   broker: {
     handler: cmdBroker,
