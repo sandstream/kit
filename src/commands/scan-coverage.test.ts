@@ -262,3 +262,38 @@ describe("kit scan: Socket policy evidence", { skip }, () => {
     }
   });
 });
+
+describe("kit scan: Snyk coverage", { skip }, () => {
+  useFixture();
+
+  it("refuses a clean exit and empty SARIF without Snyk's native coverage report", async () => {
+    toml(f, '[scan]\ndelegates = ["snyk"]\n[governance.scan]\nrequired_scanners = ["snyk"]\n');
+    tool(f, "snyk", `echo '${EMPTY_SARIF}'`);
+    const result = await scan(f, ["--json"], { SNYK_TOKEN: "fixture" });
+    assert.equal(result.exitCode, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].reportGap, "missing");
+  });
+
+  it("keeps reported Snyk findings when the scope report is missing", async () => {
+    toml(f, '[scan]\ndelegates = ["snyk"]\n');
+    const sarif = JSON.stringify({
+      version: "2.1.0",
+      runs: [
+        {
+          tool: { driver: { name: "Snyk Open Source", properties: { artifactsScanned: 1 } } },
+          results: [
+            { ruleId: "SNYK-JS-FIXTURE-1", level: "error", message: { text: "Fixture issue" } },
+          ],
+        },
+      ],
+    });
+    tool(f, "snyk", `echo '${sarif}'; exit 1`);
+    const result = await scan(f, ["--strict", "--json"], { SNYK_TOKEN: "fixture" });
+    assert.equal(result.exitCode, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.runs[0].reportGap, "missing");
+    assert.match(report.findings[0].name, /SNYK-JS-FIXTURE-1/);
+  });
+});

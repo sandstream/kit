@@ -100,7 +100,7 @@ export interface ScannerDef {
   /** args that emit SARIF/OSV on stdout */
   args: string[];
   format: IngestFormat; // Format Kit ingests after any native evidence processing.
-  evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image" | "semgrep";
+  evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image" | "semgrep" | "snyk";
   /** env var that must be set (e.g. SNYK_TOKEN) */
   needsToken?: string;
   /** marker files that make the scanner applicable; undefined = always */
@@ -127,6 +127,7 @@ export const SCANNERS: ScannerDef[] = [
   {
     id: "snyk",
     bin: "snyk",
+    evidence: "snyk",
     args: ["test", "--sarif"],
     format: "sarif",
     needsToken: "SNYK_TOKEN",
@@ -422,6 +423,7 @@ export interface ScannerRun {
   packageCount?: number;
   checkCount?: number;
   fileCount?: number;
+  targetFiles?: string[];
 }
 
 /** Environment for a scanner child. PWD is reset because Go tools trust it over the real directory. */

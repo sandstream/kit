@@ -187,9 +187,12 @@ it("a base scanner requirement covers every scheduled project run", { skip }, as
   const f = makeFixture();
   try {
     const probe = [
-      'const { realpathSync } = require("node:fs");',
+      'const { realpathSync, writeFileSync } = require("node:fs");',
       "if (realpathSync(process.env.PWD) !== realpathSync(process.cwd())) process.exit(2);",
-      `process.stdout.write(${JSON.stringify(EMPTY_SARIF)});`,
+      'const output = process.argv.find((arg) => arg.startsWith("--json-file-output="));',
+      'const coverage = {path: realpathSync(process.cwd()), displayTargetFile: "package.json", dependencyCount: 0, uniqueCount: 0, ok: true, vulnerabilities: []};',
+      'writeFileSync(output.slice("--json-file-output=".length), JSON.stringify(coverage));',
+      'process.stdout.write(JSON.stringify({version: "2.1.0", runs: [{tool: {driver: {name: "Snyk Open Source", properties: {artifactsScanned: 0}}}, results: []}]}));',
     ].join("\n");
     for (const app of ["client", "service"]) {
       mkdirSync(join(f.dir, app));

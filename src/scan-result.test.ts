@@ -45,7 +45,12 @@ it("retains findings but blocks required coverage after a scanner failure or pau
 });
 
 it("accepts a documented finding exit when a completed report carries findings", async () => {
-  const { merged, runs } = await repoScan("snyk", { ok: false, stdout: report, exitCode: 1 });
+  const { merged, runs } = await repoScan("snyk", {
+    ok: false,
+    stdout: report,
+    exitCode: 1,
+    evidence: { status: "complete", packageCount: 1 },
+  });
   assert.equal(merged.length, 1);
   assert.equal(runs[0].status, "ran");
   assert.equal(scanHealthGate(runs, { requiredScanners: ["snyk"] }).ok, true);

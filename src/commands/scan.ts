@@ -244,6 +244,7 @@ async function executeScanners(
   const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
   const { runGrypeDirectory } = await import("../scan-grype-coverage.js");
   const { runSemgrepWithCoverage } = await import("../scan-semgrep-coverage.js");
+  const { runSnykWithCoverage } = await import("../scan-snyk-coverage.js");
   const { findIacFiles } = await import("../check-iac-detect.js");
   const { runTrivyWithCoverage } = await import("../scan-trivy-coverage.js");
 
@@ -271,6 +272,7 @@ async function executeScanners(
           });
         if (evidence === "grype-directory") return runGrypeDirectory(scannerCwd, args, run);
         if (evidence === "semgrep") return runSemgrepWithCoverage(scannerCwd, args, run);
+        if (evidence === "snyk") return runSnykWithCoverage(scannerCwd, args, run);
         if (evidence) return runTrivyWithCoverage(scannerCwd, args, evidence, run);
         return run(args, scannerCwd);
       },

@@ -159,6 +159,9 @@ For configuration scans, Kit requires checked Dockerfile and Compose targets and
 Kit retains the location and severity of secret findings and removes the matched secret text.
 Semgrep provides its scanned file count and SARIF findings from the same execution.
 A required Semgrep scan needs verified file coverage.
+Snyk reports the target files and dependency count from the same run.
+Kit compares that count and the issue IDs with the SARIF report.
+A scoped Snyk run can report zero dependencies.
 
 An OSV finding names a package, so it carries one more fact: whether the source of the project in
 the current directory imports that package. The line is one of:

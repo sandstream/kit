@@ -24,6 +24,7 @@ export type ScannerEvidence =
       packageCount?: number;
       checkCount?: number;
       fileCount?: number;
+      targetFiles?: string[];
       requiredFindings?: InventoryFinding[];
     }
   | { status: "not-applicable"; reason: string }
@@ -204,6 +205,7 @@ function applyScannerEvidence(settled: SettledScan, evidence?: ScannerEvidence):
       ...(evidence.packageCount === undefined ? {} : { packageCount: evidence.packageCount }),
       ...(evidence.checkCount === undefined ? {} : { checkCount: evidence.checkCount }),
       ...(evidence.fileCount === undefined ? {} : { fileCount: evidence.fileCount }),
+      ...(evidence.targetFiles === undefined ? {} : { targetFiles: evidence.targetFiles }),
     };
     if (run.status === "ran" && missingInventoryFindings(settled, evidence.requiredFindings))
       return {
