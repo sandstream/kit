@@ -1,0 +1,3 @@
+### Changed
+
+- The "default branch required reviews" row reads the repository's agent approval policies and says when an agent can give a required approval. With Anthropic's Claude Approvals, a tracked `.claude/approvals.yml` (or `.yaml`, in any directory) whose rule says `claude: approves` lets Claude post an approving review that GitHub counts. With one approval required the row now warns ("a change on those paths can merge with no person approving") and names the file and lines; with two or more it passes and names the agent. A policy in observe mode is not reported. The reader is per tool: OpenAI Codex's GitHub review posts comments and documents no setting that approves, so it has none.

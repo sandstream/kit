@@ -1,5 +1,6 @@
 /** Read-only default branch protection check for GitHub and GitLab. */
 import { execFileSync } from "node:child_process";
+import { agentApprovers, type AgentApprover } from "./agent-approval-policy.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -135,6 +136,7 @@ export async function auditRemoteRequiredReviews(
   remoteUrl: string,
   token: string | null,
   fetcher: Fetcher = fetch,
+  agents: AgentApprover[] = [],
 ): Promise<SecurityCheckResult> {
   const remote = parseGitRemote(remoteUrl);
   if (!remote) return reviewsUnverified("origin is not a supported GitHub or GitLab remote");
@@ -164,6 +166,7 @@ export async function auditRemoteRequiredReviews(
       project.default_branch,
       approvalsFromRules(rules),
       approvalsFromClassic(classic),
+      agents,
     );
     const bypass = await rulesetBypass(base, pullRequestRulesetIds(rules), token, fetcher);
     return withCallerBypass(row, project.default_branch, bypass);
@@ -247,7 +250,7 @@ export async function runBranchProtectionAudit(root: string): Promise<SecurityCh
       return [unverified(`configured ${name} unavailable`)];
     return [
       await auditRemoteBranchProtection(origin, resolved.value),
-      await auditRemoteRequiredReviews(origin, resolved.value),
+      await auditRemoteRequiredReviews(origin, resolved.value, fetch, agentApprovers(root)),
     ];
   } catch {
     return [unverified(`configured ${name} unavailable`)];
