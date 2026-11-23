@@ -64,6 +64,25 @@ describe("parseSnykJson", () => {
     assert.equal(valid?.vulnerabilities.length, 1);
     assert.equal(malformed?.coverage, "partial");
   });
+
+  it("marks unrecognized CLI severity as incomplete and retains known severities", () => {
+    const unsupported = { id: "unknown", severity: "unexpected" };
+    assert.throws(
+      () => parseSnykJson(JSON.stringify({ ok: false, vulnerabilities: [unsupported] })),
+      /Incomplete Snyk report/,
+    );
+    const [result] = parseSnykJson(
+      JSON.stringify({
+        ok: false,
+        vulnerabilities: [unsupported, { id: "valid", severity: "critical" }],
+      }),
+    );
+    assert.equal(result?.coverage, "partial");
+    assert.deepEqual(
+      result?.vulnerabilities.map(({ id, severity }) => [id, severity]),
+      [["valid", "critical"]],
+    );
+  });
 });
 
 describe("recordSnykFindings", () => {
@@ -95,15 +114,16 @@ describe("recordSnykFindings", () => {
 
 const jsonapi = { version: "1.0" };
 const options = { token: "fixture", orgSlug: "org", apiBase: "https://api.example.test" };
+const issue = (id: string) => ({ id, attributes: { title: id, effective_severity_level: "low" } });
 
 describe("fetchSnykIssues", () => {
   it("reads the next issue page and rejects an absent data array", async (t) => {
-    let second: unknown = { jsonapi, data: [{ id: "second", attributes: { title: "Second" } }] };
+    let second: unknown = { jsonapi, data: [issue("second")] };
     t.mock.method(globalThis, "fetch", async (url: URL) => {
       if (url.searchParams.has("starting_after")) return Response.json(second);
       return Response.json({
         jsonapi,
-        data: [{ id: "first", attributes: { title: "First" } }],
+        data: [issue("first")],
         links: { next: "?starting_after=fixture&version=2024-10-15" },
       });
     });
@@ -131,11 +151,11 @@ describe("fetchSnykIssues", () => {
       if (url.searchParams.has("starting_after")) {
         assert.equal(url.searchParams.get("scan_item.id"), "fixture-project");
         assert.equal(url.searchParams.get("version"), "2024-10-15");
-        return Response.json({ jsonapi, data: [{ id: "last", attributes: { title: "Last" } }] });
+        return Response.json({ jsonapi, data: [issue("last")] });
       }
       return Response.json({
         jsonapi,
-        data: [{ id: "first", attributes: { title: "First" } }],
+        data: [issue("first")],
         links: { next: { href: "?starting_after=fixture", meta: {} } },
       });
     });
@@ -160,6 +180,40 @@ describe("fetchSnykIssues", () => {
 });
 
 describe("Snyk issue coverage", () => {
+  it("marks unrecognized issue severity as incomplete and retains known severities", async (t) => {
+    const unspecified = { id: "missing", attributes: { title: "Missing severity" } };
+    const unsupported = {
+      id: "unknown",
+      attributes: { title: "Unknown severity", effective_severity_level: "unexpected" },
+    };
+    const valid = {
+      id: "valid",
+      attributes: { title: "Known severity", effective_severity_level: "high" },
+    };
+    const info = {
+      id: "info",
+      attributes: { title: "Info severity", effective_severity_level: "info" },
+    };
+    let data = [unspecified, unsupported];
+    t.mock.method(globalThis, "fetch", async () => Response.json({ jsonapi, data }));
+    await assert.rejects(() => fetchSnykIssues(options), /Invalid Snyk API issue response/);
+    data = [unspecified, valid, unsupported, info];
+    await assert.rejects(
+      () => fetchSnykIssues(options),
+      (error: unknown) => {
+        assert.ok(error instanceof IncompleteSnykIssuesError);
+        assert.deepEqual(
+          error.findings.map(({ id, severity }) => [id, severity]),
+          [
+            ["valid", "high"],
+            ["info", "low"],
+          ],
+        );
+        return true;
+      },
+    );
+  });
+
   it("requires a supported JSON API envelope before accepting an empty result", async (t) => {
     let page: unknown = { data: [] };
     t.mock.method(globalThis, "fetch", async () => Response.json(page));
@@ -168,7 +222,7 @@ describe("Snyk issue coverage", () => {
     await assert.rejects(() => fetchSnykIssues(options), /Invalid Snyk API issue response/);
     page = { jsonapi, data: [] };
     assert.deepEqual(await fetchSnykIssues(options), []);
-    page = { data: [{ id: "readable", attributes: { title: "Readable finding" } }] };
+    page = { data: [issue("readable")] };
     await assert.rejects(
       () => fetchSnykIssues(options),
       (error: unknown) => {
@@ -186,7 +240,7 @@ describe("Snyk issue coverage", () => {
     const fetchMock = t.mock.method(globalThis, "fetch", async () =>
       Response.json({
         jsonapi,
-        data: [{ id: "first", attributes: { title: "First" } }],
+        data: [issue("first")],
         links: { next: "?starting_after=fixture&ignored=true" },
       }),
     );

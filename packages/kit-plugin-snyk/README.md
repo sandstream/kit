@@ -10,7 +10,7 @@ npm install sandstream-kit-plugin-snyk
 
 ## Configuration
 
-Local JSON ingestion needs no API credential. API fetching requires `SNYK_TOKEN` or an explicit `token`, plus an organization slug.
+Local JSON ingestion needs no API credential. API fetching requires `SNYK_TOKEN` or an explicit `token`, plus an organization UUID.
 
 ## Usage: local CLI results
 
@@ -30,8 +30,9 @@ Save `snyk test --json` output to `snyk-results.json` first. The parser also acc
 The fetch function follows JSON:API pagination links on the same issue endpoint and preserves the requested filters. An empty issue list requires a JSON:API 1.x response.
 If a page fails after Kit reads some issues, `IncompleteSnykIssuesError.findings` contains those issues.
 The CLI parser marks an incomplete project with `coverage: "partial"` when it retains findings.
+An absent or unsupported severity makes either reader report incomplete coverage. Supported severities keep their existing mapping, including `info` to `low`.
 
-`fetchSnykIssues({ orgSlug, projectId? })` fetches issues with GET requests. Set `SNYK_TOKEN` in the environment, or pass `token` explicitly; `orgSlug` is required. `apiBase` can select a regional endpoint. Call `recordSnykFindings` with parsed CLI results when you want local log rows; the fetch function returns issue objects for your own handling.
+`fetchSnykIssues({ orgSlug, projectId? })` fetches issues with GET requests. Set `SNYK_TOKEN` in the environment or pass `token` explicitly. Pass the organization UUID as `orgSlug`. `apiBase` can select a regional endpoint. Call `recordSnykFindings` with parsed CLI results to write local log rows. The fetch function returns issue objects.
 
 ## API
 
@@ -44,7 +45,7 @@ From the repository root, run `npm run build` and `npm test` to compile and run 
 ## Troubleshooting
 
 - `SNYK_TOKEN not set`: configure a token for API fetching; saved CLI JSON needs no token.
-- API authorization error: verify the token, organization slug, and regional `apiBase`.
+- API authorization error: verify the token, organization UUID, and regional `apiBase`.
 - Zero recorded rows: inspect `results[].vulnerabilities` from `parseSnykJson`.
 
 ## Support

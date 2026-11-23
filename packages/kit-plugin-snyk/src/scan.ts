@@ -83,8 +83,10 @@ function textField(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-function severityOf(value: unknown): SnykVulnerability["severity"] {
-  return value === "critical" || value === "high" || value === "medium" ? value : "low";
+function severityOf(value: unknown): SnykVulnerability["severity"] | undefined {
+  if (value === "info" || value === "low") return "low";
+  if (value === "critical" || value === "high" || value === "medium") return value;
+  return undefined;
 }
 
 /**
@@ -130,12 +132,13 @@ function normalizeSnykResult(raw: unknown): SnykResult {
   const entries = Array.isArray(r.vulnerabilities) ? r.vulnerabilities : [];
   const vulnerabilities = entries.flatMap((v) => {
     const id = textField(v?.id);
-    if (!id) return [];
+    const severity = severityOf(v?.severity);
+    if (!id || !severity) return [];
     return [
       {
         id,
         title: textField(v.title) ?? "(no title)",
-        severity: severityOf(v.severity),
+        severity,
         packageName: textField(v.packageName),
         packageVersion: textField(v.version),
         fixedIn: Array.isArray(v.fixedIn)
@@ -205,7 +208,7 @@ export async function recordSnykFindings(
 export interface FetchSnykIssuesOptions {
   /** Snyk API token (read-only is sufficient). Defaults to SNYK_TOKEN env var. */
   token?: string;
-  /** Snyk org slug or UUID. Required. */
+  /** Required Snyk organization UUID. */
   orgSlug: string;
   /** Project ID to fetch issues for. Optional — defaults to org-wide. */
   projectId?: string;
@@ -323,7 +326,8 @@ function readSnykIssue(raw: unknown): SnykVulnerability[] {
   const issue = record(raw);
   const attributes = record(issue?.attributes);
   const id = textField(issue?.id);
-  if (!id || !attributes) return [];
+  const severity = severityOf(attributes?.effective_severity_level);
+  if (!id || !attributes || !severity) return [];
   const coordinate = firstRecord(attributes.coordinates);
   const representation = firstRecord(coordinate?.representations);
   const dep = record(representation?.dependency);
@@ -331,7 +335,7 @@ function readSnykIssue(raw: unknown): SnykVulnerability[] {
     {
       id,
       title: textField(attributes.title) ?? "(no title)",
-      severity: severityOf(attributes.effective_severity_level),
+      severity,
       packageName: textField(dep?.package_name),
       packageVersion: textField(dep?.package_version),
     },
