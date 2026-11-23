@@ -25,6 +25,24 @@ describe("legsOf", () => {
     assert.deepEqual([l.vector, l.payload, l.egress], [[], [], []]);
   });
 
+  it("an interpreter that runs any code holds all three legs; an exact command does not", () => {
+    for (const grant of [
+      "Bash(python3:*)",
+      "Bash(node:*)",
+      "Bash(npx tsx ./servers/*)",
+      "Bash(bun run *)",
+    ]) {
+      const legs = legsOf([grant]);
+      assert.deepEqual(
+        [legs.vector, legs.payload, legs.egress],
+        [[grant], [grant], [grant]],
+        grant,
+      );
+    }
+    const exact = legsOf(["Bash(node --version)"]);
+    assert.deepEqual([exact.vector, exact.payload, exact.egress], [[], [], []]);
+  });
+
   it("a network command in a Bash grant is a way out and a way in", () => {
     const l = legsOf(["Bash(curl https://example.com)"]);
     assert.ok(l.vector.length && l.egress.length);
@@ -367,6 +385,24 @@ describe("text from config files is shown safely", () => {
     } finally {
       rmTemp(root);
       rmTemp(home);
+    }
+  });
+});
+
+describe("runAgentTrifecta with an interpreter grant", () => {
+  it("warns for a main session that may run any Python and fetch the web", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({
+        permissions: { allow: ["Bash(python3:*)", "WebFetch"] },
+      }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      const row = rows.find((r) => r.name === "lethal trifecta: main session");
+      assert.equal(row?.status, "warn");
+      assert.match(row?.detail ?? "", /private data: Bash\(python3:\*\)/);
+    } finally {
+      rmTemp(root);
     }
   });
 });

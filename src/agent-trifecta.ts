@@ -25,6 +25,37 @@ export interface Legs {
 }
 
 const NETWORK_COMMANDS = ["curl", "wget", "http", "nc", "ncat", "ssh", "scp", "rsync"];
+/**
+ * Commands that run code the agent chooses. A grant to run one with a wildcard (`python3:*`,
+ * `node:*`, `npx tsx ./servers/*`) can read any file and open any connection, so it holds all
+ * three legs, like an unrestricted Bash. It counted as none: a session with `Bash(python3:*)` and
+ * `WebFetch` passed. Agents that call MCP servers through generated code ("code execution with
+ * MCP") hold exactly this grant (kit-research `mcp-code-mode-vs-kit`). An exact command with no
+ * wildcard (`node --version`) stays narrow.
+ */
+const INTERPRETERS = [
+  "node",
+  "nodejs",
+  "deno",
+  "bun",
+  "bunx",
+  "npx",
+  "tsx",
+  "ts-node",
+  "python",
+  "python3",
+  "py",
+  "uv",
+  "uvx",
+  "ruby",
+  "perl",
+  "php",
+  "pwsh",
+  "powershell",
+  "sh",
+  "bash",
+  "zsh",
+];
 const WEB_FAMILY = ["slack", "teams", "mail", "outlook", "discord", "github", "gitlab", "jira"]
   .concat(["atlassian", "confluence", "notion", "intercom", "zendesk", "browser", "chrome"])
   .concat(["playwright", "puppeteer", "fetch", "web", "search"]);
@@ -61,6 +92,10 @@ function split(grant: string): { name: string; arg: string | null } {
 function bashLegs(grant: string, arg: string | null, out: Legs): void {
   const first = (arg ?? "*").split(" ")[0].replace(":*", "");
   if (arg === null || first === "*" || first === "") {
+    out.vector.push(grant);
+    out.payload.push(grant);
+    out.egress.push(grant);
+  } else if (INTERPRETERS.includes(first) && (arg ?? "").includes("*")) {
     out.vector.push(grant);
     out.payload.push(grant);
     out.egress.push(grant);
