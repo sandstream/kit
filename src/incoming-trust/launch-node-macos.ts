@@ -4,7 +4,7 @@ import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { sameIdentity } from "../utils/same-file.js";
 import { privateDirIsControlled } from "../utils/secure-perms.js";
-import { runtimeProfile, RUN_ENV } from "./launch-profile.js";
+import { runtimeProfile, RUN_ENV, SEATBELT } from "./launch-profile.js";
 import type { BootstrapRequest } from "./launch-bootstrap.js";
 import type { SupervisorReceipt, SupervisorRequest } from "./launch-supervisor.js";
 import type { PreparedLaunchPolicy } from "./launch-policy.js";
@@ -74,6 +74,7 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
     approvalDeadline: ctx.deadline,
   };
   const supervisor: SupervisorRequest = {
+    executable: SEATBELT,
     parent: process.pid,
     deadlineMs: policy.timeoutMs,
     env: RUN_ENV,

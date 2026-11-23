@@ -5,7 +5,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { setTimeout as pause } from "node:timers/promises";
-import { readLaunchScripts, runtimeProfile, RUN_ENV } from "./launch-profile.js";
+import { readLaunchScripts, runtimeProfile, RUN_ENV, SEATBELT } from "./launch-profile.js";
 import type { SupervisorRequest } from "./launch-supervisor.js";
 import { snapshotFixture } from "./snapshot.test-support.js";
 
@@ -62,6 +62,7 @@ it(
     let supervisorPid: number | undefined;
     try {
       const request = {
+        executable: SEATBELT,
         args: syntheticArgs(root, marker),
         env: RUN_ENV,
         deadlineMs: 20_000,

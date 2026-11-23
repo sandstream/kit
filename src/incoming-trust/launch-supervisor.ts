@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { Readable } from "node:stream";
 
 export interface SupervisorRequest {
+  executable: string;
   parent: number;
   deadlineMs: number;
   args: string[];
@@ -37,7 +38,7 @@ function closed(child: ChildProcess): Promise<[number | null, NodeJS.Signals | n
 /** This trusted monitor lives in a separate process from candidate code. */
 async function supervise(request: SupervisorRequest): Promise<SupervisorReceipt | undefined> {
   if (process.ppid !== request.parent) return undefined;
-  const child = spawn("/usr/bin/sandbox-exec", request.args, {
+  const child = spawn(request.executable, request.args, {
     env: request.env,
     stdio: ["ignore", "pipe", "pipe", "pipe"],
   });
