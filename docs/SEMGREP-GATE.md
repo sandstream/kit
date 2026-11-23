@@ -47,7 +47,7 @@ source snippets in job logs. Review log access before adding sensitive material
 to tracked files.
 
 On Linux or macOS, run `python3 scripts/test-semgrep-gate.py` with Semgrep
-1.183.0 on `PATH` to exercise the scanner and gate against local fixtures.
+1.184.0 on `PATH` to exercise the scanner and gate against local fixtures.
 The fixtures skip on Windows because they use POSIX tools and file types.
 The suite is split across `scripts/test-semgrep-gate.py` (scan results),
 `scripts/test_semgrep_gate_links.py` (links, submodules, ignore files) and the shared
