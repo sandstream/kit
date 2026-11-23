@@ -186,7 +186,9 @@ The policy digest binds its runtime, system profile, host build, entry, private 
 directory, time limit and restriction rules. Kit holds the volume and the generation
 lock through startup and process completion. The executable comes from a separate read-only
 image verified against the policy digest. This delegate requires zero network destinations,
-zero host credentials and zero child processes. It supports built-in modules and local
-JavaScript from the captured tree. It refuses retained package archives, preinstalled
-packages and native addons until the runtime can prove their provenance. The TypeScript supervisor runs outside the sandbox. It owns the workload deadline
+zero host credentials and zero child processes. The runtime builds each supported locked npm
+package from the retained tarball. The verifier checks a read-only derived tree against the
+approved file manifest and the file digests produced by the archive parser. Kit binds its
+derivation recipe to the launch policy digest. Captured package directories, native addons and
+workspace links are refused. The TypeScript supervisor runs outside the sandbox. It owns the workload deadline
 and stops the process if Kit exits. See the operator guide for the policy and output format.

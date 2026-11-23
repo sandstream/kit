@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
-import { launchFixture } from "./launch-candidate.test-support.js";
+import { launchFixture, NATIVE_RUN_TEST_WINDOW_MS } from "./launch-candidate.test-support.js";
 import { launchIncomingCandidate } from "./launch-candidate.js";
 import { hasNativeImageTool } from "./native-image.test-support.js";
 
@@ -57,7 +57,7 @@ it(
           {
             cwd: f.repository,
             encoding: "utf8",
-            timeout: 25_000,
+            timeout: NATIVE_RUN_TEST_WINDOW_MS,
             env: {
               ...process.env,
               KIT_READ_ONLY: "0",

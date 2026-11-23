@@ -1,14 +1,11 @@
-import { opendirSync } from "node:fs";
-import { join } from "node:path";
 import { isReadOnlyMode } from "../read-only-mode.js";
 import type { IncomingTrustStore } from "./authority-store.js";
 import { incomingVerificationDigest } from "./decision-protocol.js";
 import { incomingVerification } from "./decision-schema.js";
 import { prepareLaunchPolicy } from "./launch-policy.js";
 import { launchNodeOnMac, type IncomingRun } from "./launch-node-macos.js";
-import { withSealedCandidate, withSealedRuntime } from "./sealed-candidate.js";
-import { readSnapshotManifest } from "./snapshot-io.js";
-import { snapshotLimits } from "./snapshot-limits.js";
+import { withSealedCandidate, withSealedRuntime, withSealedRunTree } from "./sealed-candidate.js";
+import { readApprovedRunTree } from "./runtime-tree.js";
 
 interface LaunchRequest {
   store: IncomingTrustStore;
@@ -16,26 +13,6 @@ interface LaunchRequest {
   source: string;
   verification: unknown;
   policy: unknown;
-}
-
-/** The lock already verified this manifest and archive layout from the pinned image. */
-function hasUnprovenDependencies(mounted: string): boolean {
-  const archives = opendirSync(join(mounted, "artifacts"));
-  try {
-    if (archives.readSync()) return true;
-  } finally {
-    archives.closeSync();
-  }
-  const raw = readSnapshotManifest(
-    join(mounted, "manifest.json"),
-    snapshotLimits().maxManifestBytes,
-  );
-  const manifest = JSON.parse(raw) as { entries: { path: string }[] };
-  return manifest.entries.some(
-    ({ path }) =>
-      path.toLowerCase().split("/").includes("node_modules") ||
-      path.toLowerCase().endsWith(".node"),
-  );
 }
 
 export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
@@ -63,20 +40,24 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
             mounted,
             verification,
             (deadline, authority) => {
-              if (hasUnprovenDependencies(mounted))
-                return { ran: false, reason: "run-dependencies-unproven" } as const;
-              const run = launchNodeOnMac({
-                prepared,
-                runtime,
-                mounted,
-                authority,
-                repository,
-                source,
-                verificationDigest,
-                deadline,
+              const approved = readApprovedRunTree(mounted);
+              if (!approved) return { ran: false, reason: "run-dependencies-unproven" } as const;
+              return withSealedRunTree(approved, (input, inputDigest) => {
+                const run = launchNodeOnMac({
+                  prepared,
+                  runtime,
+                  mounted,
+                  input,
+                  inputDigest,
+                  authority,
+                  repository,
+                  source,
+                  verificationDigest,
+                  deadline,
+                });
+                observation.result = run;
+                return run;
               });
-              observation.result = run;
-              return run;
             },
           );
         }),

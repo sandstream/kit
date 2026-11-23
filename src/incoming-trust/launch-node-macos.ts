@@ -16,6 +16,7 @@ export type IncomingRun =
   | {
       ran: true;
       runId: string;
+      inputDigest: string;
       code: number | null;
       outcome: "exited" | "timed-out" | "interrupted" | "output-limit" | "boundary-failed";
       boundaryReason?: string;
@@ -27,6 +28,8 @@ interface LaunchContext {
   runtime: string;
   prepared: PreparedLaunchPolicy;
   mounted: string;
+  input: string;
+  inputDigest: string;
   authority: string;
   repository: string;
   source: string;
@@ -35,12 +38,18 @@ interface LaunchContext {
 }
 
 function rootPaths(ctx: LaunchContext): { input: string; output: string; entry: string } {
-  const input = join(ctx.mounted, "tree");
+  const input = ctx.input;
   const output = ctx.prepared.policy.outputDirectory;
   const parent = dirname(output);
   if (realpathSync(parent) !== parent || !privateDirIsControlled(parent))
     throw new Error("uncontrolled output parent");
-  const protectedPaths = [ctx.repository, dirname(ctx.authority), ctx.source, dirname(ctx.mounted)];
+  const protectedPaths = [
+    ctx.repository,
+    dirname(ctx.authority),
+    ctx.source,
+    dirname(ctx.mounted),
+    input,
+  ];
   for (const path of protectedPaths.map((item) => realpathSync(item))) {
     if (containsSnapshotPath(path, output) || containsSnapshotPath(output, path))
       throw new Error("output overlaps protected input");
@@ -61,6 +70,7 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
         1,
         ctx.verificationDigest,
         policyDigest,
+        ctx.inputDigest,
         randomBytes(16).toString("hex"),
       ]),
     )
@@ -115,7 +125,7 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
   if (!confirmed) return { ran: null, reason: "run-supervisor-result-unavailable" };
   const { proof, ...receipt } = confirmed;
   return proof === runId
-    ? { ran: true, runId, ...receipt }
+    ? { ran: true, runId, inputDigest: ctx.inputDigest, ...receipt }
     : { ran: false, reason: "runtime-proof-missing" };
 }
 

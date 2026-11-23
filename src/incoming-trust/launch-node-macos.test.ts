@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { it } from "node:test";
 import { setTimeout as pause } from "node:timers/promises";
-import { launchFixture } from "./launch-candidate.test-support.js";
+import { launchFixture, NATIVE_RUN_TEST_WINDOW_MS } from "./launch-candidate.test-support.js";
 import { hasNativeImageTool } from "./native-image.test-support.js";
 
 type Fixture = Awaited<ReturnType<typeof launchFixture>>;
@@ -52,7 +52,7 @@ it(
     try {
       competitor.exec("PRAGMA busy_timeout = 0");
       const worker = runInProcess(f);
-      const limit = AbortSignal.timeout(25_000);
+      const limit = AbortSignal.timeout(NATIVE_RUN_TEST_WINDOW_MS);
       const result = once(worker, "message", { signal: limit });
       const exit = once(worker, "exit");
       const monitor = verifyLockDuringRun(f, competitor, limit);

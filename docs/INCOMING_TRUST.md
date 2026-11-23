@@ -42,7 +42,10 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
 - `run` starts an approved Node entry from the read-only tree through the macOS sandbox.
   It holds the generation lock through the bounded run. The delegate checks its permissions
   before it loads the entry from the read-only image. A separate image holds the verified Node
-  executable. JSON output contains the run ID, outcome and bounded process output.
+  executable. JSON output contains the run ID, runtime input digest, outcome and bounded process output.
+- For locked npm tarballs, Kit reconstructs the package locations from the lockfile and the
+  retained, verified archive bytes. It checks every file in the derived image under the
+  generation lock before startup. The runtime input digest includes the derived package files.
 - `rotate` replaces the signers and returns the store to pending, so no old approval survives.
 - `recover` moves a damaged store aside. It never deletes it. Every repository that shares the
   store directory needs a new enrollment afterwards.
@@ -52,9 +55,10 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
 - Signing happens outside kit.
 - The supported run policy denies network access, credentials from the host and child processes.
   It accepts a captured JavaScript entry and an empty, newly created output directory.
-  The supported entries use built-in Node modules and approved local code. Kit refuses retained
-  package archives, preinstalled package directories and native addons until it can verify
-  their runtime inputs.
+  It supports plain locked npm tarballs at top-level, aliased, scoped and nested package locations.
+  Kit rejects preinstalled package directories, native addons and workspace links. It creates package
+  files without npm, lifecycle hooks, caches or downloads at launch. The derived tree uses the same
+  input size and file count limits as the captured tree.
 - `stage` reads registry-tarball and remote-tarball sources only. Git and local sources are refused.
 - The sealed preflight has been exercised on macOS 27.2.1. Native Windows remains unverified.
 
@@ -67,7 +71,7 @@ authority store and retained inputs. Run support requires macOS arm64, the nativ
 disk image tools and the external sandbox executable. Local controls used macOS
 27.2.1 and Node 22.
 
-Generate the policy digest on the same runtime that will launch the workload. Put
+Generate the policy digest on the same runtime and Kit build that will launch the workload. Put
 it in the authority file's `policyDigest` field. Enroll the authority, stage the
 input, request and record the external approval, then call `run` with that
 verification report. Kit exits nonzero for refusal, timeout or a nonzero workload

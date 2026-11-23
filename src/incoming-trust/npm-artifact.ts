@@ -5,7 +5,7 @@ import {
   type NpmArtifactFetchPolicy,
 } from "./npm-artifact-fetch.js";
 import { verifyNpmIntegrity, type NpmIntegrityResult } from "./npm-artifact-integrity.js";
-import { inspectNpmTarball } from "./npm-artifact-archive.js";
+import { inspectNpmTarball, type NpmArchiveEntry } from "./npm-artifact-archive.js";
 import { inspectNpmManifest } from "./npm-artifact-manifest.js";
 import { packageName } from "./npm-lock-read.js";
 import { relativePath } from "./npm-lock-workspaces.js";
@@ -31,7 +31,11 @@ export type NpmArtifactResult =
   | Refusal;
 
 /** Inspect selected artifact data. This interface grants no execution permission. */
-export function inspectNpmArtifact(bytes: Buffer, selection: unknown): NpmArtifactResult {
+export function inspectNpmArtifact(
+  bytes: Buffer,
+  selection: unknown,
+  retain?: (root: string, entries: readonly NpmArchiveEntry[]) => void,
+): NpmArtifactResult {
   const copied = copySelection(selection);
   if ("status" in copied) return copied;
   const selected = copied.value;
@@ -41,10 +45,19 @@ export function inspectNpmArtifact(bytes: Buffer, selection: unknown): NpmArtifa
   owned.set(bytes);
   const integrity = verifyNpmIntegrity(owned, selected.integrity);
   if (integrity.status !== "verified") return integrity;
-  const archive = inspectNpmTarball(owned);
+  let entries: readonly NpmArchiveEntry[] = [];
+  const archive = inspectNpmTarball(
+    owned,
+    {},
+    retain &&
+      ((files) => {
+        entries = files;
+      }),
+  );
   if (archive.status !== "verified") return archive;
   const manifest = inspectNpmManifest(archive.manifestBytes, selected);
   if (manifest.status !== "verified") return manifest;
+  retain?.(archive.root, entries);
   return {
     status: "verified",
     selection: selected,

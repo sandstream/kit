@@ -23,6 +23,12 @@ import { captureIncomingSnapshot } from "./snapshot.js";
 import { snapshotLimits } from "./snapshot-limits.js";
 import { copySnapshotFile, readSnapshotFile } from "./snapshot-io.js";
 import { removeOwnedSnapshot } from "./snapshot-storage.js";
+import { snapshotDigest } from "./snapshot-format.js";
+import {
+  materializeRunTree,
+  verifyMaterializedRunTree,
+  type ApprovedRunTree,
+} from "./runtime-tree.js";
 
 type SealedFailure = {
   verified: false;
@@ -30,6 +36,7 @@ type SealedFailure = {
     | "read-only"
     | "sealed-platform-unsupported"
     | "sealed-input-unavailable"
+    | "sealed-run-tree-mismatch"
     | "sealed-teardown-failed";
 };
 
@@ -103,6 +110,29 @@ export function withSealedCandidate<T>(
   use: MountedOperation<T>,
 ): T | SealedFailure {
   return withPinnedImage((work) => copyRetainedCandidate(source, work), use, false);
+}
+
+/** The signed input mount remains pinned while this independently checked tree is used. */
+export function withSealedRunTree<T>(
+  approved: ApprovedRunTree,
+  use: (tree: string, digest: string) => T,
+): T | SealedFailure {
+  if (approved.inventory.artifacts.length === 0)
+    return use(join(approved.mounted, "tree"), snapshotDigest(approved.manifest));
+  let expected = "";
+  return withPinnedImage(
+    (workspace) => {
+      const prepared = materializeRunTree(approved, workspace);
+      expected = prepared.manifest;
+      return prepared.tree;
+    },
+    (mounted) => {
+      if (!verifyMaterializedRunTree(mounted, expected))
+        return { verified: false, reason: "sealed-run-tree-mismatch" } as const;
+      return use(mounted, snapshotDigest(expected));
+    },
+    false,
+  );
 }
 
 /** Execute the verified runtime from its own immutable volume. The candidate stays noexec. */

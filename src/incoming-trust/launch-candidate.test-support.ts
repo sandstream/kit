@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { signState, storeFixture } from "./authority-store.test-support.js";
-import { captureIncomingCandidate } from "./candidate-flow.js";
+import { captureIncomingCandidate, type IncomingCandidateFlow } from "./candidate-flow.js";
 import { prepareLaunchPolicy } from "./launch-policy.js";
+
+/** Native disk setup is timed separately from the signed workload deadline. */
+export const NATIVE_RUN_TEST_WINDOW_MS = 120_000;
 
 export async function launchFixture(
   script: (paths: { authority: string; sentinel: string }) => string,
   timeoutMs = 5000,
   populate?: (repository: string) => void,
+  capture?: (source: string, destination: string) => Promise<IncomingCandidateFlow>,
 ) {
   const fixture = storeFixture();
   try {
@@ -29,11 +33,12 @@ export async function launchFixture(
     writeFileSync(join(repository, "main.mjs"), script({ authority, sentinel }));
     populate?.(repository);
     const source = join(root, "sealed-source");
-    const captured = await captureIncomingCandidate({
-      source: repository,
-      destination: source,
-      fetchPolicy: { origins: [] },
-    });
+    const captured = await (capture?.(repository, source) ??
+      captureIncomingCandidate({
+        source: repository,
+        destination: source,
+        fetchPolicy: { origins: [] },
+      }));
     if (captured.status !== "bound") assert.fail(captured.reason);
     const policy = {
       schema: 1,
@@ -44,8 +49,8 @@ export async function launchFixture(
     const prepared = prepareLaunchPolicy(policy);
     if (!prepared.ok) assert.fail(prepared.reason);
     proof.authority.policyDigest = prepared.policyDigest;
-    proof.authority.maxVerificationAgeMs = 60_000;
-    proof.authority.maxApprovalAgeMs = 60_000;
+    proof.authority.maxVerificationAgeMs = NATIVE_RUN_TEST_WINDOW_MS;
+    proof.authority.maxApprovalAgeMs = NATIVE_RUN_TEST_WINDOW_MS;
     store.update(repository, { type: "enroll", authority: proof.authority });
     const pending = store.update(repository, {
       type: "stage",
@@ -58,7 +63,7 @@ export async function launchFixture(
     proof.now = now;
     proof.verification.createdAt = now;
     proof.approval.issuedAt = now;
-    proof.approval.expiresAt = now + 60_000;
+    proof.approval.expiresAt = now + NATIVE_RUN_TEST_WINDOW_MS;
     proof.verification.checks.push(...captured.candidate.checks);
     const signed = signState(fixture, pending);
     store.update(repository, signed);

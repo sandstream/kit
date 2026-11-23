@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   PROFILE_RULES,
   RUN_ENV,
@@ -12,6 +13,17 @@ import {
 } from "./launch-profile.js";
 import { relativePath } from "./npm-lock-workspaces.js";
 import { readSnapshotFile, unchanged } from "./snapshot-io.js";
+import { RUNTIME_TREE_RECIPE } from "./runtime-tree.js";
+
+const RUNTIME_TREE_MODULES = [
+  "runtime-tree.js",
+  "sealed-candidate.js",
+  "candidate-artifacts.js",
+  "candidate-flow.js",
+  "npm-artifact.js",
+  "npm-artifact-archive.js",
+  "snapshot-tree.js",
+] as const;
 
 interface IncomingLaunchPolicy {
   schema: 1;
@@ -83,7 +95,10 @@ export function prepareLaunchPolicy(value: unknown): PreparedLaunchPolicy | Refu
     const parent = realpathSync(dirname(value.outputDirectory));
     const outputDirectory = join(parent, basename(value.outputDirectory));
     const policy: IncomingLaunchPolicy = { ...value, outputDirectory };
-    const stamps = [runtime, SEATBELT, SEATBELT_SYSTEM_PROFILE].map(fingerprint);
+    const recipeFiles = RUNTIME_TREE_MODULES.map((filename) =>
+      fileURLToPath(new URL(filename, import.meta.url)),
+    );
+    const stamps = [runtime, SEATBELT, SEATBELT_SYSTEM_PROFILE, ...recipeFiles].map(fingerprint);
     const scripts = readLaunchScripts();
     const build = execFileSync("/usr/bin/sw_vers", ["-buildVersion"], {
       encoding: "utf8",
@@ -95,6 +110,7 @@ export function prepareLaunchPolicy(value: unknown): PreparedLaunchPolicy | Refu
       "kit.incoming-run-policy",
       1,
       "darwin-seatbelt-node",
+      RUNTIME_TREE_RECIPE,
       process.arch,
       build,
       stamps.map(({ path, sha256 }) => [path, sha256]),

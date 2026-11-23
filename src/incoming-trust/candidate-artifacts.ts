@@ -4,6 +4,7 @@ import { sameIdentity } from "../utils/same-file.js";
 import { secureDirStrict, secureFileStrict } from "../utils/secure-perms.js";
 import { inspectNpmArtifact, type NpmArtifactResult } from "./npm-artifact.js";
 import type { NpmArtifact } from "./npm-lock.js";
+import type { NpmArchiveEntry } from "./npm-artifact-archive.js";
 import { readSnapshotBytes, unchanged } from "./snapshot-io.js";
 import { assertPrivateEntry } from "./snapshot-tree.js";
 
@@ -58,6 +59,7 @@ function validateLayout(path: string, count: number): void {
 export function inspectCandidateArchives(
   destination: string,
   selections: readonly NpmArtifact[],
+  use?: (selection: NpmArtifact, root: string, entries: readonly NpmArchiveEntry[]) => void,
 ): NpmArtifactResult[] {
   const path = join(destination, "artifacts");
   const directory = privateDirectory(path);
@@ -69,7 +71,11 @@ export function inspectCandidateArchives(
     assertPrivateEntry(filename, info);
     const bytes = readSnapshotBytes(filename, info, Math.min(remaining, MAX_ARCHIVE_BYTES));
     remaining -= bytes.length;
-    return inspectNpmArtifact(bytes, selection);
+    return inspectNpmArtifact(
+      bytes,
+      selection,
+      use && ((root, entries) => use(selection, root, entries)),
+    );
   });
   if (!unchanged(directory, privateDirectory(path))) {
     throw new Error("Incoming candidate: artifact directory changed");

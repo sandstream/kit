@@ -69,9 +69,9 @@ function readInput(tree: string, name: string): Buffer | "missing" | "unreadable
   }
 }
 
-function readInventory(
+export function readRetainedNpmInventory(
   tree: string,
-  maxArtifacts: number,
+  maxArtifacts = DEFAULT_MAX_ARTIFACTS,
 ): NpmLockInventory | IncomingCandidateFlowRefusal {
   const manifest = readInput(tree, "package.json");
   if (typeof manifest === "string") return "manifest-unreadable";
@@ -104,7 +104,7 @@ export function verifyRetainedIncomingCandidate(
       "candidate",
     ).ok;
   if (!verifySnapshot()) return { ok: false, reason: "snapshot-changed" };
-  const inventory = readInventory(
+  const inventory = readRetainedNpmInventory(
     join(destination, "tree"),
     options?.maxArtifacts ?? DEFAULT_MAX_ARTIFACTS,
   );
@@ -188,7 +188,7 @@ export async function captureIncomingCandidate(
     artifact?: Exclude<NpmArtifactResult, { status: "verified" }>,
   ): IncomingCandidateFlow => ({ status: "refused", reason, artifact, snapshot });
 
-  const inventory = readInventory(snapshot.tree, request.maxArtifacts ?? DEFAULT_MAX_ARTIFACTS);
+  const inventory = readRetainedNpmInventory(snapshot.tree, request.maxArtifacts);
   if (typeof inventory === "string") return refuse(inventory);
   const destination = dirname(snapshot.tree);
   const retained = await retainArtifacts(destination, inventory, request.fetchPolicy);
