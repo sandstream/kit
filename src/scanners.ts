@@ -103,7 +103,7 @@ export interface ScannerDef {
   /** args that emit SARIF/OSV on stdout */
   args: string[];
   format: IngestFormat;
-  evidence?: "grype-directory";
+  evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image";
   /** env var that must be set (e.g. SNYK_TOKEN) */
   needsToken?: string;
   /** marker files that make the scanner applicable; undefined = always */
@@ -139,6 +139,7 @@ export const SCANNERS: ScannerDef[] = [
   {
     id: "trivy",
     bin: "trivy",
+    evidence: "trivy-fs",
     args: ["fs", "--skip-dirs", PROVIDER_GLOB, "--format", "sarif", "--quiet", "."],
     format: "sarif",
     // run against the pre-synced local DB; never reach out to update it
@@ -149,6 +150,7 @@ export const SCANNERS: ScannerDef[] = [
     // runs as root). `trivy fs` above looks at dependencies only. Applies only where such files exist.
     id: "trivy-config",
     bin: "trivy",
+    evidence: "trivy-config",
     args: ["config", "--skip-dirs", PROVIDER_GLOB, "--format", "sarif", "--quiet", "."],
     format: "sarif",
     detect: ["*.tf", "Dockerfile"],
@@ -411,6 +413,7 @@ export interface ScannerRun {
   noTarget?: boolean;
   reportGap?: IngestGap;
   packageCount?: number;
+  checkCount?: number;
 }
 
 /** Environment for a scanner child. PWD is reset because Go tools trust it over the real directory. */
@@ -496,7 +499,11 @@ export interface ScanDeps {
     evidence?: ScannerDef["evidence"],
   ): Promise<ScannerProcess>;
   hasEnv(name: string): boolean;
-  detect(markers: string[]): boolean;
+  detect(
+    markers: string[],
+    cwd?: string,
+    evidence?: ScannerDef["evidence"],
+  ): boolean | Promise<boolean>;
 }
 
 /** Run each applicable+installed scanner, ingest its output, merge into one verdict. */
@@ -507,7 +514,7 @@ export async function runScanners(
   const runs: ScannerRun[] = [];
   const perScanner: { id: string; findings: SecurityCheckResult[] }[] = [];
   for (const s of scanners) {
-    if (s.detect && !deps.detect(s.detect)) {
+    if (s.detect && !(await deps.detect(s.detect, s.cwd, s.evidence))) {
       runs.push({ id: s.id, status: "not-applicable", findings: 0 });
       continue;
     }

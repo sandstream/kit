@@ -87,16 +87,17 @@ function readResult(value: unknown, kind: ResultKind, report: ScannerReport): bo
   return valid && scope === "required";
 }
 
-function configKey(type: string, rawPath: string): string {
+export function trivyConfigKey(type: string, rawPath: string): string {
   const path = posix.normalize(rawPath.replaceAll("\\", "/"));
   const format = type === "docker-compose" ? "compose" : type;
-  return `${format}:${path}`;
+  const target = format === "terraform" && path.endsWith(".tf") ? posix.dirname(path) : path;
+  return `${format}:${target}`;
 }
 
-function expectedConfigKey(path: string): string {
+export function expectedTrivyConfigKey(path: string): string {
   const name = posix.basename(path);
-  if (name.endsWith(".tf")) return configKey("terraform", posix.dirname(path));
-  return configKey(name.startsWith("Dockerfile") ? "dockerfile" : "compose", path);
+  if (name.endsWith(".tf")) return trivyConfigKey("terraform", path);
+  return trivyConfigKey(name.startsWith("Dockerfile") ? "dockerfile" : "compose", path);
 }
 
 function applyConfigCoverage(
@@ -104,7 +105,7 @@ function applyConfigCoverage(
   expectedPaths: readonly string[],
   covered: Set<string>,
 ): void {
-  const expected = new Set(expectedPaths.map(expectedConfigKey));
+  const expected = new Set(expectedPaths.map(expectedTrivyConfigKey));
   const missing = [...expected].filter((target) => !covered.has(target));
   if (missing.length === 0) return;
   const seen = expected.size - missing.length;
@@ -129,7 +130,7 @@ function readTargets(
       reportText(row.Type) &&
       reportText(row.Target)
     )
-      targets.add(configKey(row.Type, row.Target));
+      targets.add(trivyConfigKey(row.Type, row.Target));
   }
   if (expectedPaths.length > 0) applyConfigCoverage(report, expectedPaths, targets);
   if (!report.gap && !covered) report.gap = report.count > 0 ? "partial" : "missing";

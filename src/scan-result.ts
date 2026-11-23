@@ -19,7 +19,12 @@ export type ScannerProcess = {
 export type InventoryFinding = { name: string; version: string };
 
 export type ScannerEvidence =
-  | { status: "complete"; packageCount: number; requiredFindings?: InventoryFinding[] }
+  | {
+      status: "complete";
+      packageCount?: number;
+      checkCount?: number;
+      requiredFindings?: InventoryFinding[];
+    }
   | { status: "not-applicable"; reason: string }
   | { status: "partial"; reportGap: IngestGap; reason: string };
 
@@ -196,7 +201,11 @@ function applyScannerEvidence(settled: SettledScan, evidence?: ScannerEvidence):
   if (!evidence) return settled;
   const run = settled.run;
   if (evidence.status === "complete") {
-    const scoped = { ...run, packageCount: evidence.packageCount };
+    const scoped = {
+      ...run,
+      ...(evidence.packageCount === undefined ? {} : { packageCount: evidence.packageCount }),
+      ...(evidence.checkCount === undefined ? {} : { checkCount: evidence.checkCount }),
+    };
     if (run.status === "ran" && missingInventoryFindings(settled, evidence.requiredFindings))
       return {
         ...settled,

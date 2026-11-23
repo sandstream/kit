@@ -149,6 +149,11 @@ An error without a policy verdict indicates that the scan did not complete.
 For a directory scan, Grype reports the scoped package inventory alongside its findings.
 If Grype reports no packages, a required Grype delegate cannot pass.
 An unreadable inventory or one that does not match the project makes coverage incomplete.
+Trivy checks the native package or configuration inventory before accepting its SARIF findings.
+Kit reports a run with no applicable inventory separately from a completed scan without findings.
+JSON output includes the reported package or check count when Kit can verify it.
+For configuration scans, Kit requires checked Dockerfile and Compose targets and Terraform modules from its bounded project discovery.
+Kit retains the location and severity of secret findings and removes the matched secret text.
 
 An OSV finding names a package, so it carries one more fact: whether the source of the project in
 the current directory imports that package. The line is one of:

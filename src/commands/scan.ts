@@ -243,6 +243,8 @@ async function executeScanners(
   const { resolveToolBin } = await import("../utils/resolveTool.js");
   const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
   const { runGrypeDirectory } = await import("../scan-grype-coverage.js");
+  const { findIacFiles } = await import("../check-iac-detect.js");
+  const { runTrivyWithCoverage } = await import("../scan-trivy-coverage.js");
 
   // A tracked file under .terraform/providers is not downloaded output: scan it like any other.
   const scanProviders = await scanProvidersTracked(cwd);
@@ -258,20 +260,24 @@ async function executeScanners(
       resolve: (bin) => resolveToolBin(bin),
       run: async (bin, args, timeoutMs, projectDir, evidence) => {
         const scannerCwd = projectDir ? resolve(cwd, projectDir) : cwd;
-        const run = (argv: string[], directory: string) =>
+        const run = (argv: string[], directory: string, limitMs?: number) =>
           execFileNoThrow(bin, argv, {
-            timeout: timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
+            timeout: limitMs ?? timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
             cwd: directory,
             // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
             maxBuffer: 64 * 1024 * 1024,
             env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, directory),
           });
-        return evidence === "grype-directory"
-          ? runGrypeDirectory(scannerCwd, args, run)
-          : run(args, scannerCwd);
+        if (evidence === "grype-directory") return runGrypeDirectory(scannerCwd, args, run);
+        if (evidence) return runTrivyWithCoverage(scannerCwd, args, evidence, run);
+        return run(args, scannerCwd);
       },
       hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
-      detect: (markers) => hasMarker(cwd, markers),
+      detect: async (markers, projectDir, evidence) => {
+        if (evidence === "trivy-config")
+          return (await findIacFiles(projectDir ? resolve(cwd, projectDir) : cwd)).length > 0;
+        return hasMarker(cwd, markers);
+      },
     },
     planned,
   );

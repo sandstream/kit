@@ -302,6 +302,7 @@ export function imageScanners(
       defs.push({
         id: `trivy:image:${ref}`,
         bin: "trivy",
+        evidence: "trivy-image",
         args: ["image", "--format", "sarif", "--quiet", ref],
         format: "sarif",
         cloudOnly: true,
