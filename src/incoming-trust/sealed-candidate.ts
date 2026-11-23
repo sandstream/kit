@@ -7,18 +7,16 @@ import {
   mkdtempSync,
   openSync,
   realpathSync,
+  type BigIntStats,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { isReadOnlyMode } from "../read-only-mode.js";
 import { sameIdentity } from "../utils/same-file.js";
 import { secureDirStrict } from "../utils/secure-perms.js";
 import type { IncomingPreflight } from "./retained-approval.js";
-import {
-  checkReadOnlyImage,
-  ejectReadOnlyImage,
-  mountReadOnlyImage,
-} from "./sealed-image-macos.js";
+import { checkReadOnlyImage } from "./sealed-image-macos.js";
+import { imageOwnerPaths, startImageOwner } from "./sealed-image-owner.js";
 import { captureIncomingSnapshot } from "./snapshot.js";
 import { snapshotLimits } from "./snapshot-limits.js";
 import { copySnapshotFile, readSnapshotFile } from "./snapshot-io.js";
@@ -47,6 +45,17 @@ export type SealedIncomingPreflight =
 
 type MountedOperation<T> = (mount: string, assertPinned: () => void) => T;
 
+interface ImageOwnerHost {
+  executable: string;
+  assertStableBuild: () => void;
+}
+
+interface ImageOptions {
+  executable?: boolean;
+  host?: ImageOwnerHost;
+  assertStableBuild?: () => void;
+}
+
 function copyRetainedCandidate(source: string, workspace: string): string {
   const limits = snapshotLimits();
   return captureIncomingSnapshot(source, join(workspace, "source"), {
@@ -60,31 +69,28 @@ function copyRetainedCandidate(source: string, workspace: string): string {
 
 function checkMountedCandidate<T>(
   work: string,
-  image: string,
-  copy: string,
+  root: { mount: string; unmounted: BigIntStats; volume: string },
+  assertOwner: () => void,
   use: MountedOperation<T>,
-  executable: boolean,
 ): T {
-  const mount = join(work, "mounted");
-  mkdirSync(mount, { mode: 0o700 });
-  const unmounted = lstatSync(mount, { bigint: true });
-  const volume = mountReadOnlyImage(image, copy, mount, work, executable);
-  const root = openSync(mount, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  const { mount, unmounted, volume } = root;
+  const handle = openSync(mount, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
     // On macOS the open directory keeps an ordinary eject from replacing the mounted path.
-    const mounted = fstatSync(root, { bigint: true });
+    const mounted = fstatSync(handle, { bigint: true });
     if (unmounted.dev === mounted.dev) throw new Error("Disk image has no distinct device");
     const assertPinned = () => {
       if (!sameIdentity(mounted, lstatSync(mount, { bigint: true })))
         throw new Error("Disk image mount changed");
       checkReadOnlyImage(mount, volume, work);
+      assertOwner();
     };
     assertPinned();
     const result = use(mount, assertPinned);
     assertPinned();
     return result;
   } finally {
-    closeSync(root);
+    closeSync(handle);
   }
 }
 
@@ -110,14 +116,16 @@ export function preflightSealedCandidate(
 export function withSealedCandidate<T>(
   source: string,
   use: MountedOperation<T>,
+  host?: ImageOwnerHost,
 ): T | SealedFailure {
-  return withPinnedImage((work) => copyRetainedCandidate(source, work), use, false);
+  return withPinnedImage((work) => copyRetainedCandidate(source, work), use, { host });
 }
 
 /** The signed input mount remains pinned while this independently checked tree is used. */
 export function withSealedRunTree<T>(
   approved: ApprovedRunTree,
-  use: (tree: string, digest: string) => T,
+  use: (tree: string, digest: string, assertPinned?: () => void) => T,
+  host: ImageOwnerHost,
 ): T | SealedFailure {
   if (approved.inventory.artifacts.length === 0)
     return use(join(approved.mounted, "tree"), snapshotDigest(approved.manifest));
@@ -128,12 +136,12 @@ export function withSealedRunTree<T>(
       expected = prepared.manifest;
       return prepared.tree;
     },
-    (mounted) => {
+    (mounted, assertPinned) => {
       if (!verifyMaterializedRunTree(mounted, expected))
         return { verified: false, reason: "sealed-run-tree-mismatch" } as const;
-      return use(mounted, snapshotDigest(expected));
+      return use(mounted, snapshotDigest(expected), assertPinned);
     },
-    false,
+    { host },
   );
 }
 
@@ -141,7 +149,8 @@ export function withSealedRunTree<T>(
 export function withSealedRuntime<T>(
   runtime: string,
   digest: string,
-  use: MountedOperation<T>,
+  use: (mount: string, assertPinned: () => void, ownerExecutable: string) => T,
+  assertStableBuild?: () => void,
 ): T | SealedFailure {
   const limit = 192 * 1024 * 1024;
   return withPinnedImage(
@@ -158,23 +167,23 @@ export function withSealedRuntime<T>(
       const entry = join(mount, "node");
       if (readSnapshotFile(entry, lstatSync(entry, { bigint: true }), limit).sha256 !== digest)
         throw new Error("Mounted runtime digest changed");
-      return use(entry, assertPinned);
+      return use(entry, assertPinned, join(dirname(mount), "runtime", "node"));
     },
-    true,
+    { executable: true, assertStableBuild },
   );
 }
 
 function withPinnedImage<T>(
   materialize: (work: string) => string,
   use: MountedOperation<T>,
-  executable: boolean,
+  options: ImageOptions,
 ): T | SealedFailure {
   if (isReadOnlyMode()) return { verified: false, reason: "read-only" };
   if (process.platform !== "darwin")
     return { verified: false, reason: "sealed-platform-unsupported" };
   try {
     const work = mkdtempSync(join(realpathSync(tmpdir()), "kit-incoming-sealed-"));
-    return verifyInWorkspace(work, materialize, use, executable);
+    return verifyInWorkspace(work, materialize, use, options);
   } catch {
     return { verified: false, reason: "sealed-input-unavailable" };
   }
@@ -184,14 +193,27 @@ function verifyInWorkspace<T>(
   work: string,
   materialize: (work: string) => string,
   use: MountedOperation<T>,
-  executable: boolean,
+  options: ImageOptions,
 ): T | SealedFailure {
   const identity = lstatSync(work, { bigint: true });
-  const image = join(work, "candidate.dmg");
+  let owner: ReturnType<typeof startImageOwner> | undefined;
   let result: T | SealedFailure;
   try {
     secureDirStrict(work);
-    result = checkMountedCandidate(work, image, materialize(work), use, executable);
+    const runtimeSource = options.executable ? materialize(work) : undefined;
+    options.host?.assertStableBuild();
+    options.assertStableBuild?.();
+    const hostExecutable = runtimeSource
+      ? join(runtimeSource, "node")
+      : (options.host?.executable ?? process.execPath);
+    owner = startImageOwner(work, identity, hostExecutable);
+    owner.awaitReady();
+    const source = runtimeSource ?? materialize(work);
+    const { mount } = imageOwnerPaths(work);
+    mkdirSync(mount, { mode: 0o700 });
+    const unmounted = lstatSync(mount, { bigint: true });
+    const volume = owner.mount({ source, executable: options.executable ?? false });
+    result = checkMountedCandidate(work, { mount, unmounted, volume }, owner.assertRunning, use);
   } catch (error) {
     result = {
       verified: false,
@@ -202,32 +224,11 @@ function verifyInWorkspace<T>(
     };
   }
   try {
-    if (lstatSync(image, { throwIfNoEntry: false })) releaseImage(image, work);
-    const mount = lstatSync(join(work, "mounted"), { bigint: true, throwIfNoEntry: false });
-    if (mount && mount.dev !== identity.dev) throw new Error("Disk image mount remains");
-    removeOwnedSnapshot(work, identity);
+    if (owner) owner.release();
+    else removeOwnedSnapshot(work, identity);
     if (lstatSync(work, { throwIfNoEntry: false })) throw new Error("Disk image workspace remains");
     return result;
   } catch {
     return { verified: false, reason: "sealed-teardown-failed" };
   }
-}
-
-function busyImage(error: unknown): boolean {
-  if (!error || typeof error !== "object" || !("stderr" in error)) return false;
-  return /busy|dissented|could not be unmounted/i.test(String(error.stderr));
-}
-
-function releaseImage(image: string, workspace: string): void {
-  const wait = new Int32Array(new SharedArrayBuffer(4));
-  for (const delay of [100, 200, 400, 800, 1600]) {
-    try {
-      ejectReadOnlyImage(image, workspace);
-      return;
-    } catch (error) {
-      if (!busyImage(error)) throw error;
-      Atomics.wait(wait, 0, 0, delay);
-    }
-  }
-  ejectReadOnlyImage(image, workspace);
 }

@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
-import { fork } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { setTimeout as pause } from "node:timers/promises";
 import { launchFixture, NATIVE_RUN_TEST_WINDOW_MS } from "./launch-candidate.test-support.js";
-import { hasNativeImageTool } from "./native-image.test-support.js";
+import { ejectFixtureImages, hasNativeImageTool } from "./native-image.test-support.js";
 
 type Fixture = Awaited<ReturnType<typeof launchFixture>>;
 
@@ -83,3 +84,104 @@ async function verifyLockDuringRun(f: Fixture, db: DatabaseSync, signal: AbortSi
   while (!existsSync(file)) await pause(20, undefined, { signal });
   assert.throws(() => db.exec("BEGIN IMMEDIATE"), /locked|busy/);
 }
+
+function startSignedCli(f: Fixture, scratch: string) {
+  const report = join(f.root, "report.json");
+  const policy = join(f.root, "policy.json");
+  writeFileSync(report, JSON.stringify(f.verification));
+  writeFileSync(policy, JSON.stringify(f.policy));
+  const cli = fileURLToPath(new URL("../cli.js", import.meta.url));
+  return spawn(
+    process.execPath,
+    [
+      cli,
+      "security",
+      "incoming",
+      "run",
+      "--json",
+      "--repo",
+      f.repository,
+      "--store",
+      f.directory,
+      "--snapshot-dir",
+      f.source,
+      "--policy",
+      policy,
+      "--verification",
+      report,
+    ],
+    {
+      cwd: f.repository,
+      env: { ...process.env, TMPDIR: scratch, KIT_READ_ONLY: "0", KIT_AUDIT_ANCHOR: "0" },
+      stdio: "ignore",
+    },
+  );
+}
+
+function killTestWorkload(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+it(
+  "reaps the suspended signed CLI workload and ejects its input and executable volumes after Kit dies",
+  { skip: !hasNativeImageTool || process.arch !== "arm64" },
+  async () => {
+    const f = await launchFixture(
+      () =>
+        [
+          'import { renameSync, writeFileSync } from "node:fs";',
+          'writeFileSync("pid.tmp", String(process.pid));',
+          'renameSync("pid.tmp", "pid");',
+          "setTimeout(() => {}, 30000);",
+        ].join("\n"),
+      30_000,
+    );
+    const scratch = join(f.root, "kit-temp");
+    mkdirSync(scratch, { mode: 0o700 });
+    const kit = startSignedCli(f, scratch);
+    const stopped = once(kit, "exit");
+    let pid: number | undefined;
+    try {
+      const marker = join(f.policy.outputDirectory, "pid");
+      const startup = AbortSignal.timeout(NATIVE_RUN_TEST_WINDOW_MS);
+      while (!existsSync(marker) && kit.exitCode === null && kit.signalCode === null)
+        await pause(50, undefined, { signal: startup });
+      assert.ok(existsSync(marker), "Kit stopped before the signed workload started");
+      pid = Number(readFileSync(marker, "utf8"));
+      assert.ok(Number.isInteger(pid) && pid > 0);
+      assert.equal(
+        readdirSync(scratch).filter((name) => name.startsWith("kit-incoming-sealed-")).length,
+        2,
+      );
+      process.kill(pid, "SIGSTOP");
+      assert.ok(kit.kill("SIGKILL"));
+      assert.deepEqual(await stopped, [null, "SIGKILL"]);
+      const teardown = AbortSignal.timeout(15_000);
+      while (readdirSync(scratch).some((name) => name.startsWith("kit-incoming-sealed-")))
+        await pause(50, undefined, { signal: teardown });
+      assert.throws(() => process.kill(pid!, 0), { code: "ESRCH" });
+      pid = undefined;
+    } finally {
+      try {
+        if (kit.exitCode === null && kit.signalCode === null) {
+          kit.kill("SIGKILL");
+          await stopped;
+        }
+        if (pid && pid > 0) killTestWorkload(pid);
+      } finally {
+        try {
+          const teardown = AbortSignal.timeout(15_000);
+          while (readdirSync(scratch).some((name) => name.startsWith("kit-incoming-sealed-")))
+            await pause(50, undefined, { signal: teardown });
+        } finally {
+          await ejectFixtureImages(scratch);
+          f.cleanup();
+        }
+      }
+    }
+  },
+);

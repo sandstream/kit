@@ -28,39 +28,58 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
   const observation: { result?: IncomingRun } = {};
   try {
     const verificationDigest = incomingVerificationDigest(verification);
+    const assertStableBuild = () => {
+      if (!prepared.checkRuntime()) throw new Error("Kit host runtime changed");
+    };
     const result = withSealedRuntime(
       prepared.runtime,
       prepared.runtimeDigest,
-      (runtime, assertRuntime) =>
-        withSealedCandidate(source, (mounted, assertPinned) => {
-          assertRuntime();
-          assertPinned();
-          return store.withApprovedInputs(
-            repository,
-            mounted,
-            verification,
-            (deadline, authority) => {
-              const approved = readApprovedRunTree(mounted, prepared.policy.npmArtifacts);
-              if (!approved.ok) return { ran: false, reason: approved.reason } as const;
-              return withSealedRunTree(approved.tree, (input, inputDigest) => {
-                const run = launchNodeOnMac({
-                  prepared,
-                  runtime,
-                  mounted,
-                  input,
-                  inputDigest,
-                  authority,
-                  repository,
-                  source,
-                  verificationDigest,
-                  deadline,
-                });
-                observation.result = run;
-                return run;
-              });
-            },
-          );
-        }),
+      (runtime, assertRuntime, ownerExecutable) => {
+        const imageOwnerHost = { executable: ownerExecutable, assertStableBuild };
+        return withSealedCandidate(
+          source,
+          (mounted, assertPinned) => {
+            assertRuntime();
+            assertPinned();
+            return store.withApprovedInputs(
+              repository,
+              mounted,
+              verification,
+              (deadline, authority) => {
+                const approved = readApprovedRunTree(mounted, prepared.policy.npmArtifacts);
+                if (!approved.ok) return { ran: false, reason: approved.reason } as const;
+                return withSealedRunTree(
+                  approved.tree,
+                  (input, inputDigest, assertRunTree) => {
+                    const run = launchNodeOnMac({
+                      prepared,
+                      runtime,
+                      mounted,
+                      input,
+                      inputDigest,
+                      authority,
+                      repository,
+                      source,
+                      verificationDigest,
+                      deadline,
+                      assertBoundaries: () => {
+                        assertRuntime();
+                        assertPinned();
+                        assertRunTree?.();
+                      },
+                    });
+                    observation.result = run;
+                    return run;
+                  },
+                  imageOwnerHost,
+                );
+              },
+            );
+          },
+          imageOwnerHost,
+        );
+      },
+      assertStableBuild,
     );
     return "ran" in result ? result : boundaryFailure(observation.result, result.reason);
   } catch {

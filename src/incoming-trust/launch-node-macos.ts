@@ -35,6 +35,7 @@ interface LaunchContext {
   source: string;
   verificationDigest: string;
   deadline: number;
+  assertBoundaries: () => void;
 }
 
 function rootPaths(ctx: LaunchContext): { input: string; output: string; entry: string } {
@@ -106,6 +107,12 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
       JSON.stringify(entryRequest),
     ],
   };
+  try {
+    ctx.assertBoundaries();
+  } catch {
+    return { ran: false, reason: "run-containment-unavailable" };
+  }
+  if (Date.now() >= ctx.deadline) return { ran: false, reason: "stale-approval" };
   const result = spawnSync(
     runtime,
     ["--input-type=module", "-e", scripts.supervisor, "--", JSON.stringify(supervisor)],

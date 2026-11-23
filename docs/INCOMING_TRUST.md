@@ -87,7 +87,9 @@ input, request and record the external approval, then call `run` with that
 verification report. Kit exits nonzero for refusal, timeout or a nonzero workload
 exit. The native tests exercise a bounded set of filesystem, credential, network
 and process restrictions. A separate trusted supervisor stops the Node process at its time limit or when
-Kit dies, including while the workload process is suspended. The launcher owns ejection of the temporary images after the run.
+Kit dies, including while the workload process is suspended. A separate host
+process owns each temporary image. It ejects the image after normal completion
+or if Kit exits abruptly while macOS keeps running.
 An unavailable supervisor report yields `ran: null` and a nonzero exit.
 
 Design and limits: [src/incoming-trust/README.md](../src/incoming-trust/README.md).
