@@ -1,10 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { osvFinding, osvSeverity } from "./osv-summary.js";
+import { osvFinding as summarizeOsvFindings, osvSeverity } from "./osv-summary.js";
+import { readOsvReport } from "./osv-report.js";
+
+const osvFinding = (name: string, raw: string) => summarizeOsvFindings(name, readOsvReport(raw));
 
 const pkg = (name: string, version: string, scores: string[], ecosystem = "npm") => ({
   package: { name, version, ecosystem },
-  vulnerabilities: scores.map(() => ({})),
+  vulnerabilities: scores.map((_, index) => ({ id: "fixture-advisory-" + index })),
   groups: scores.map((max_severity) => ({ max_severity })),
 });
 
@@ -87,7 +90,7 @@ describe("osvFinding: untrusted lockfile text and malware", () => {
       vulnerabilities: [{ id: "MAL-2026-1" }],
       groups: [{ max_severity: "" }],
     };
-    const r = osvFinding("osv-scanner (deps)", payload(evil as never));
+    const r = osvFinding("osv-scanner (deps)", payload(evil));
     assert.equal(r.severity, "critical");
   });
 

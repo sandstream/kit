@@ -1,5 +1,5 @@
 import type { NpmLockInventory, NpmLockIssue } from "./npm-lock.js";
-import { parseNpmObject } from "./npm-json.js";
+import { parseJsonObject } from "../utils/json-object.js";
 
 export const dependencySections = [
   "dependencies",
@@ -37,7 +37,7 @@ export function text(value: unknown): string | null {
 }
 
 export function readObject(bytes: Uint8Array, reader: Reader): JsonRecord | null {
-  const result = parseNpmObject(bytes, 16 * 1024 * 1024);
+  const result = parseJsonObject(bytes, 16 * 1024 * 1024);
   if ("issues" in result) {
     for (const entry of result.issues) issue(reader, entry.code, "", entry.message);
     return null;

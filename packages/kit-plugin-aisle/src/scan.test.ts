@@ -138,6 +138,57 @@ describe("aisle nano-analyzer plugin", () => {
       rmSync(repoDir, { recursive: true, force: true });
     }
   });
+
+  it("rejects an unrelated triage envelope", () => {
+    assert.throws(
+      () => parseAisleNanoTriageJson('{"error":"fixture"}'),
+      /expected a findings array/,
+    );
+  });
+
+  it("accepts a clean upstream summary when the producer omits triage.json", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "aisle-output-"));
+    try {
+      const summary = {
+        files_scanned: 1,
+        clean_files: 1,
+        error_files: 0,
+        files_skipped: 0,
+        per_file: [{ file: "src/example.c", status: "ok", severities: { high: 0 } }],
+      };
+      writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary));
+      assert.deepEqual(await ingestAisleNanoOutputDir(outDir, outDir), { written: 0 });
+      summary.per_file[0]!.severities.high = 1;
+      writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary));
+      await assert.rejects(() => ingestAisleNanoOutputDir(outDir, outDir), { code: "ENOENT" });
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("retains findings and reports incomplete coverage when a file scan failed", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "aisle-output-"));
+    try {
+      const summary = JSON.parse(SUMMARY);
+      summary.files_scanned = 2;
+      summary.error_files = 1;
+      summary.per_file.push({ file: "src/error.c", status: "error", severities: {} });
+      writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary));
+      writeFileSync(join(outDir, "triage.json"), "[]");
+      await assert.rejects(
+        () => ingestAisleNanoOutputDir(outDir, outDir),
+        /Incomplete AISLE report/,
+      );
+
+      writeFileSync(join(outDir, "triage.json"), TRIAGE);
+      assert.deepEqual(await ingestAisleNanoOutputDir(outDir, outDir), {
+        written: 1,
+        coverage: "partial",
+      });
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("stable finding id (CodeQL alert 90, polynomial ReDoS)", () => {

@@ -393,16 +393,27 @@ const FACT_LINE =
   /^ +(?:imported by project source: |not imported by project source; |not imported by anything kit read |import use not checked: ).*\n/gm;
 
 describe("kit ingest osv: the fact rides beside the finding", () => {
-  function run(files: Record<string, string>, args: string[]): string {
+  function run(files: Record<string, string>, args: string[], report: unknown = REPORT): string {
     const fixture = createCliContractFixture();
     roots.push(fixture.root);
-    write(fixture.cwd, { ...files, "report.json": JSON.stringify(REPORT) });
+    write(fixture.cwd, { ...files, "report.json": JSON.stringify(report) });
     const result = fixture.run(["ingest", "osv", "report.json", ...args]);
     assert.equal(result.status, 0, result.stderr);
     return result.stdout;
   }
   const findingsOf = (stdout: string) =>
     (JSON.parse(stdout) as { count: number; findings: Record<string, unknown>[] }).findings;
+
+  it("keeps import facts and marks partial coverage when an OSV result is unreadable", () => {
+    const stdout = run(NPM_PROJECT, ["--json"], {
+      results: [...REPORT.results, { packages: null }],
+    });
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.coverage, "partial");
+    assert.equal(parsed.reportGap, "malformed");
+    assert.equal(parsed.count, 5);
+    assert.equal(parsed.findings[3].importFact.text, "imported by project source: src/app.ts");
+  });
 
   it("JSON: findings carry importFact, and without it they are byte-identical to the parser's", () => {
     const outcome = ingestStrict("osv", JSON.stringify(REPORT));

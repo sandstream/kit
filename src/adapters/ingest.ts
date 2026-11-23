@@ -71,6 +71,7 @@ interface SarifResult {
   properties?: { "security-severity"?: string };
 }
 interface SarifRun {
+  properties?: Record<string, unknown>;
   tool?: { driver?: { name?: string; rules?: SarifRule[] } };
   results?: SarifResult[];
 }
@@ -119,7 +120,10 @@ function sarifFinding(
 
 export function parseSarif(json: string): SecurityCheckResult[] {
   const log = readSarifLog(json);
-  if (!log) return [];
+  return log ? sarifFindings(log) : [];
+}
+
+function sarifFindings(log: SarifLog): SecurityCheckResult[] {
   const out: SecurityCheckResult[] = [];
   for (const run of log.runs ?? []) {
     const tool = run.tool?.driver?.name ?? "sarif";
@@ -181,6 +185,10 @@ export function parseOsv(json: string): SecurityCheckResult[] {
   } catch {
     return [];
   }
+  return osvFindings(log);
+}
+
+function osvFindings(log: OsvLog): SecurityCheckResult[] {
   const out: SecurityCheckResult[] = [];
   for (const r of log.results ?? []) {
     for (const p of r.packages ?? []) out.push(...osvPackageFindings(p));
@@ -236,8 +244,25 @@ export function ingest(format: IngestFormat, json: string): SecurityCheckResult[
   return format === "sarif" ? parseSarif(json) : format === "osv" ? parseOsv(json) : [];
 }
 
-export type IngestOutcome =
-  { ok: true; findings: SecurityCheckResult[]; notes?: string[] } | { ok: false; reason: string };
+export type IngestGap = "missing" | "partial" | "malformed" | "unsupported";
+
+export interface DeclaredScannerCoverage {
+  id: string;
+  status: string;
+  findings: number;
+  reportGap?: IngestGap;
+}
+
+export type IngestOutcome = (
+  | {
+      ok: true;
+      findings: SecurityCheckResult[];
+      notes?: string[];
+      coverage?: "partial";
+      reportGap?: IngestGap;
+    }
+  | { ok: false; reason: string; reportGap?: IngestGap }
+) & { scannerCoverage?: DeclaredScannerCoverage[] };
 
 type FieldCheck = (value: unknown) => boolean;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -258,98 +283,252 @@ function fields(checks: Record<string, FieldCheck>): FieldCheck {
 }
 
 const sarifProperties = fields({ "security-severity": isString, tags: arrayOf(isString) });
-const sarifRun = fields({
+const sarifNotifications = arrayOf(fields({ level: isString }));
+const sarifInvocation: FieldCheck = (value) =>
+  isRecord(value) &&
+  typeof value.executionSuccessful === "boolean" &&
+  fields({
+    toolExecutionNotifications: sarifNotifications,
+    toolConfigurationNotifications: sarifNotifications,
+  })(value);
+
+const sarifResult = fields({
+  ruleId: isString,
+  level: isString,
+  message: fields({ text: isString }),
+  properties: sarifProperties,
+  locations: arrayOf(
+    fields({
+      physicalLocation: fields({
+        artifactLocation: fields({ uri: isString }),
+        region: fields({ startLine: isLine }),
+      }),
+    }),
+  ),
+});
+
+const sarifRunFields = fields({
   tool: fields({
     driver: fields({
       name: isString,
       rules: arrayOf(fields({ id: isString, properties: sarifProperties })),
     }),
   }),
-  results: arrayOf(
-    fields({
-      ruleId: isString,
-      level: isString,
-      message: fields({ text: isString }),
-      properties: sarifProperties,
-      locations: arrayOf(
-        fields({
-          physicalLocation: fields({
-            artifactLocation: fields({ uri: isString }),
-            region: fields({ startLine: isLine }),
-          }),
-        }),
-      ),
-    }),
-  ),
+  invocations: arrayOf(sarifInvocation),
+  results: (value) => value === null || arrayOf(sarifResult)(value),
 });
-const osvResult = fields({
-  packages: arrayOf(
-    fields({
-      package: fields({ name: isString, ecosystem: isString, version: isString }),
-      vulnerabilities: arrayOf(
-        fields({
-          id: isString,
-          summary: isString,
-          database_specific: fields({ severity: isString }),
-        }),
-      ),
-    }),
-  ),
+function sarifRun(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value) || !isRecord(value.tool) || !isRecord(value.tool.driver)) return false;
+  const name = value.tool.driver.name;
+  return typeof name === "string" && name.trim().length > 0 && sarifRunFields(value);
+}
+
+/** Read only validated records when a peer record damages the report. */
+function readableSarifRun(value: unknown): Record<string, unknown> | undefined {
+  if (sarifRun(value)) return value;
+  if (!isRecord(value)) return undefined;
+  const results = Array.isArray(value.results) ? value.results.filter(sarifResult) : undefined;
+  const invocations = Array.isArray(value.invocations)
+    ? value.invocations.filter(sarifInvocation)
+    : undefined;
+  const recovered = { ...value, results, invocations };
+  return sarifRun(recovered) ? recovered : undefined;
+}
+
+const osvVulnerability = fields({
+  id: isString,
+  summary: isString,
+  database_specific: fields({ severity: isString }),
 });
+const osvPackage = fields({
+  package: fields({ name: isString, ecosystem: isString, version: isString }),
+  vulnerabilities: arrayOf(osvVulnerability),
+});
+function osvResult(value: unknown): value is OsvResult {
+  return isRecord(value) && Array.isArray(value.packages) && value.packages.every(osvPackage);
+}
 
-/**
- * Strict ingest: distinguishes a *valid but empty* report (scanner ran, found
- * nothing) from *malformed/unexpected* output (scanner errored, printed junk, or
- * emitted a different format). The lenient `ingest()` collapses both to `[]`,
- * which lets a broken scanner masquerade as "ran clean" — dangerous in a
- * consolidated security verdict. Callers that gate on scanner health (e.g.
- * `kit scan`) must use this and treat `ok:false` as an error, not a pass.
- */
-/** A SARIF run whose invocation says it did not finish (`executionSuccessful: false`). */
-const stoppedRun = (run: unknown): boolean =>
-  isRecord(run) &&
-  Array.isArray(run.invocations) &&
-  run.invocations.some((i) => isRecord(i) && i.executionSuccessful === false);
+function readableOsvPackage(value: unknown): OsvPackage | undefined {
+  if (osvPackage(value)) return value as OsvPackage;
+  if (!isRecord(value)) return undefined;
+  const vulnerabilities = Array.isArray(value.vulnerabilities)
+    ? value.vulnerabilities.filter(osvVulnerability)
+    : [];
+  const recovered = { ...value, vulnerabilities };
+  return osvPackage(recovered) ? (recovered as OsvPackage) : undefined;
+}
 
-/**
- * A SARIF log, validated. A scanner that stopped is not a scanner that found nothing: a stopped
- * run with no results is refused, and findings from a log with a stopped run carry a note that
- * they are partial (kit-research `openai-daybreak-red-team-vs-kit`). Only SARIF 2.1.0 is read.
- */
-function sarifOutcome(parsed: unknown, json: string): IngestOutcome {
-  if (!isRecord(parsed) || !Array.isArray(parsed.runs))
-    return { ok: false, reason: "not a SARIF log (no `runs` array)" };
-  if (parsed.version !== undefined && parsed.version !== "2.1.0")
-    return { ok: false, reason: "unsupported SARIF version (kit reads SARIF 2.1.0)" };
-  if (!parsed.runs.every(sarifRun)) return { ok: false, reason: "invalid SARIF report structure" };
-  const findings = parseSarif(json);
-  const stopped = parsed.runs.filter(stoppedRun).length;
-  if (stopped === 0) return { ok: true, findings };
-  if (findings.length === 0)
-    return {
-      ok: false,
-      reason: `the scanner reports ${stopped} run(s) did not finish (executionSuccessful: false) and returned no results; that is not a clean scan`,
-    };
-  const note = `${stopped} SARIF run(s) did not finish (executionSuccessful: false); these findings are partial.`;
-  return { ok: true, findings, notes: [note] };
+function readableOsvResult(value: unknown): OsvResult | undefined {
+  if (osvResult(value)) return value;
+  if (!isRecord(value) || !Array.isArray(value.packages)) return undefined;
+  const packages = value.packages.map(readableOsvPackage).filter((entry) => entry !== undefined);
+  return { packages };
+}
+
+function ingestOsvReport(parsed: unknown): IngestOutcome {
+  if (!isRecord(parsed)) return reportFailure("malformed", "not an OSV report");
+  const { results } = parsed;
+  if (results === null) return reportFailure("missing", "OSV report has no results array");
+  if (!Array.isArray(results)) return reportFailure("malformed", "invalid OSV report structure");
+  if (results.every(osvResult)) return { ok: true, findings: osvFindings({ results }) };
+  const readable = results.map(readableOsvResult).filter((entry) => entry !== undefined);
+  const findings = osvFindings({ results: readable });
+  return incompleteReport("malformed", findings, ["The OSV report contains invalid records."]);
+}
+
+function reportFailure(reportGap: IngestGap, reason: string): IngestOutcome {
+  return { ok: false, reportGap, reason };
+}
+
+function incompleteReport(
+  reportGap: IngestGap,
+  findings: SecurityCheckResult[],
+  notes: string[],
+): IngestOutcome {
+  return findings.length > 0
+    ? { ok: true, findings, coverage: "partial", reportGap, notes }
+    : reportFailure(reportGap, notes.join(" ") + " Scan coverage is unverified.");
+}
+
+function hasErrorNotification(notifications: unknown): boolean {
+  return (
+    Array.isArray(notifications) &&
+    notifications.some((entry) => isRecord(entry) && entry.level === "error")
+  );
+}
+
+function sarifRunCoverage(run: Record<string, unknown>) {
+  const invocations = Array.isArray(run.invocations) ? run.invocations.filter(isRecord) : [];
+  return {
+    hasResults: Array.isArray(run.results),
+    stopped: invocations.some((entry) => entry.executionSuccessful === false),
+    errors: invocations.some(
+      (entry) =>
+        hasErrorNotification(entry.toolExecutionNotifications) ||
+        hasErrorNotification(entry.toolConfigurationNotifications),
+    ),
+  };
+}
+
+const SCANNER_STATUSES = new Set([
+  "ran",
+  "not-applicable",
+  "not-installed",
+  "no-token",
+  "error",
+  "partial",
+  "timed-out",
+]);
+const REPORT_GAPS = new Set(["missing", "partial", "malformed", "unsupported"]);
+
+function scannerCoverageEntry(value: unknown): value is DeclaredScannerCoverage {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.status === "string" &&
+    SCANNER_STATUSES.has(value.status) &&
+    typeof value.findings === "number" &&
+    Number.isSafeInteger(value.findings) &&
+    value.findings >= 0 &&
+    (value.reportGap === undefined ||
+      (typeof value.reportGap === "string" && REPORT_GAPS.has(value.reportGap)))
+  );
+}
+
+function kitScanCoverage(runs: SarifRun[]) {
+  const scanners: DeclaredScannerCoverage[] = [];
+  let malformed = false;
+  let partial = false;
+  for (const run of runs) {
+    if (run.tool?.driver?.name !== "kit" || run.properties === undefined) continue;
+    if (!isRecord(run.properties)) {
+      malformed = true;
+      continue;
+    }
+    const { scannerCoverage, scopeGaps } = run.properties;
+    if (scopeGaps !== undefined) {
+      if (!Array.isArray(scopeGaps) || !scopeGaps.every(isRecord)) malformed = true;
+      else if (scopeGaps.length > 0) partial = true;
+    }
+    if (scannerCoverage === undefined) continue;
+    if (!Array.isArray(scannerCoverage)) {
+      malformed = true;
+      continue;
+    }
+    const records = scannerCoverage.filter(scannerCoverageEntry);
+    if (records.length !== scannerCoverage.length) malformed = true;
+    if (!records.some((scanner) => scanner.status === "ran")) partial = true;
+    for (const { id, status, findings, reportGap } of records) {
+      if (reportGap || (status !== "ran" && status !== "not-applicable")) partial = true;
+      scanners.push({ id, status, findings, reportGap });
+    }
+  }
+  return { scanners, malformed, partial };
+}
+
+/** Read findings and declared coverage from a SARIF 2.1.0 report. */
+export function ingestSarifReport(parsed: unknown): IngestOutcome {
+  if (!isRecord(parsed)) return reportFailure("malformed", "not a SARIF log");
+  const { version, runs } = parsed;
+  if (version !== undefined && typeof version !== "string")
+    return reportFailure("malformed", "invalid SARIF version field");
+  if (version !== undefined && version !== "2.1.0")
+    return reportFailure("unsupported", "unsupported SARIF version (kit reads SARIF 2.1.0)");
+  if (runs === null || (version === "2.1.0" && runs === undefined))
+    return reportFailure("missing", "SARIF log has no runs array");
+  if (!Array.isArray(runs)) return reportFailure("malformed", "invalid SARIF report structure");
+  if (runs.length === 0) return reportFailure("missing", "SARIF log contains no runs");
+  const readable = runs.map(readableSarifRun).filter(isRecord);
+  const normalized = readable as SarifRun[];
+  const findings = sarifFindings({ runs: normalized });
+  const declared = kitScanCoverage(normalized);
+  const outcome = sarifCoverage(readable, findings, {
+    malformed: !runs.every(sarifRun) || declared.malformed,
+    declaredPartial: declared.partial,
+  });
+  const scannerCoverage = declared.scanners;
+  return scannerCoverage.length ? { ...outcome, scannerCoverage } : outcome;
+}
+
+function sarifCoverage(
+  runs: Record<string, unknown>[],
+  findings: SecurityCheckResult[],
+  { malformed, declaredPartial }: { malformed: boolean; declaredPartial: boolean },
+): IngestOutcome {
+  const coverage = runs.map(sarifRunCoverage);
+  const stopped = coverage.some((run) => run.stopped);
+  const errors = coverage.some((run) => run.errors);
+  const missingResults = coverage.some((run) => !run.hasResults);
+  if (!stopped && !errors && !missingResults && !malformed && !declaredPartial) {
+    return { ok: true, findings };
+  }
+
+  const notes: string[] = [];
+  if (stopped) notes.push("The SARIF report contains a stopped run (executionSuccessful: false).");
+  if (errors) notes.push("The SARIF report contains an execution or configuration error.");
+  if (missingResults) notes.push("At least one SARIF run has no results array.");
+  if (declaredPartial) notes.push("The Kit SARIF report declares incomplete scan coverage.");
+  if (malformed) notes.push("The SARIF report contains invalid records.");
+  const missing =
+    !stopped && !errors && !declaredPartial && coverage.every((run) => !run.hasResults);
+  return incompleteReport(
+    malformed ? "malformed" : missing ? "missing" : "partial",
+    findings,
+    notes,
+  );
 }
 
 export function ingestStrict(format: IngestFormat, json: string): IngestOutcome {
+  if (!json.trim()) return reportFailure("missing", "scanner report is empty");
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
   } catch {
-    return { ok: false, reason: "output is not valid JSON" };
+    return reportFailure("malformed", "output is not valid JSON");
   }
-  if (format === "sarif") return sarifOutcome(parsed, json);
-  if (format === "osv") {
-    if (!isRecord(parsed) || !Array.isArray(parsed.results)) {
-      return { ok: false, reason: "not an OSV report (no `results` array)" };
-    }
-    if (!parsed.results.every(osvResult))
-      return { ok: false, reason: "invalid OSV report structure" };
-    return { ok: true, findings: parseOsv(json) };
-  }
+  if (format === "sarif") return ingestSarifReport(parsed);
+  if (format === "osv") return ingestOsvReport(parsed);
   if (format === "cloudflare-audit") return ingestCloudflareAudit(parsed);
   return { ok: false, reason: "unknown report format" };
 }

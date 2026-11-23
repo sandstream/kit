@@ -47,6 +47,8 @@ export interface AisleNanoSummary {
   timestamp?: string;
   target?: string;
   model?: string;
+  coverage?: "partial";
+  completeEmpty?: true;
   per_file?: Array<{
     file?: string;
     severities?: Record<string, number>;
@@ -96,6 +98,12 @@ export function normalizeSeverity(raw: unknown, fallback: Severity = "medium"): 
 }
 
 export function parseAisleNanoTriageJson(text: string): AisleNanoTriageFinding[] {
+  const { findings, partial } = readTriageReport(text);
+  if (partial) throw new Error("Invalid AISLE triage report: invalid finding records");
+  return findings;
+}
+
+function readTriageReport(text: string) {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -114,9 +122,11 @@ export function parseAisleNanoTriageJson(text: string): AisleNanoTriageFinding[]
         typeof parsed === "object" &&
         Array.isArray((parsed as { findings?: unknown[] }).findings)
       ? (parsed as { findings: unknown[] }).findings
-      : [];
+      : undefined;
+  if (!raw) throw new Error("Invalid AISLE triage report: expected a findings array");
 
-  return raw.map(normalizeTriageFinding);
+  const findings = raw.map(normalizeTriageFinding).filter((finding) => finding !== undefined);
+  return { findings, partial: findings.length !== raw.length };
 }
 
 export function parseAisleNanoSummaryJson(text: string): AisleNanoSummary {
@@ -131,25 +141,58 @@ export function parseAisleNanoSummaryJson(text: string): AisleNanoSummary {
       },
     );
   }
-  if (!parsed || typeof parsed !== "object") return {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid AISLE summary: expected a JSON object");
+  }
 
   const r = parsed as {
     timestamp?: string;
     target?: string;
     model?: string;
     per_file?: unknown[];
+    files_scanned?: unknown;
+    error_files?: unknown;
+    files_skipped?: unknown;
+    clean_files?: unknown;
   };
+  if (!Array.isArray(r.per_file)) throw new Error("Invalid AISLE summary: expected per_file array");
+  const perFile = r.per_file.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const value = entry as { file?: unknown; severities?: unknown; status?: unknown };
+    const file = str(value.file);
+    const severities = objectRecord(value.severities);
+    return file ? [{ file, severities, status: value.status }] : [];
+  });
+  const partial =
+    perFile.length === 0 ||
+    perFile.length !== r.per_file.length ||
+    (r.files_scanned !== undefined && r.files_scanned !== r.per_file.length) ||
+    (r.error_files !== undefined && r.error_files !== 0) ||
+    (r.files_skipped !== undefined && r.files_skipped !== 0) ||
+    perFile.some(
+      (entry) => !entry.severities || (entry.status !== undefined && entry.status !== "ok"),
+    );
+  const completeEmpty =
+    !partial &&
+    r.files_scanned === perFile.length &&
+    r.clean_files === perFile.length &&
+    r.error_files === 0 &&
+    r.files_skipped === 0 &&
+    perFile.every(
+      ({ status, severities }) =>
+        status === "ok" &&
+        severities &&
+        Object.keys(severities).length > 0 &&
+        Object.values(severities).every((count) => count === 0),
+    );
 
   return {
     timestamp: str(r.timestamp),
     target: str(r.target),
     model: str(r.model),
-    per_file: Array.isArray(r.per_file)
-      ? r.per_file.map((entry) => {
-          const e = (entry ?? {}) as { file?: string; severities?: Record<string, number> };
-          return { file: str(e.file), severities: objectRecord(e.severities) };
-        })
-      : [],
+    per_file: perFile.map(({ file, severities }) => ({ file, severities })),
+    ...(partial ? { coverage: "partial" as const } : {}),
+    ...(completeEmpty ? { completeEmpty: true as const } : {}),
   };
 }
 
@@ -230,22 +273,36 @@ export async function ingestAisleNanoOutputDir(
   outputDir: string,
   cwd: string = process.cwd(),
   opts: Omit<RecordAisleNanoOptions, "summary"> = {},
-): Promise<{ written: number }> {
-  const triageText = await readFile(join(outputDir, "triage.json"), "utf-8");
-  const triage = parseAisleNanoTriageJson(triageText);
-
+): Promise<{ written: number; coverage?: "partial" }> {
   let summary: AisleNanoSummary | undefined;
   try {
     summary = parseAisleNanoSummaryJson(await readFile(join(outputDir, "summary.json"), "utf-8"));
-  } catch (err) {
-    if (!isMissingFile(err)) throw err;
+  } catch {
+    // The triage report can still supply findings when summary coverage is unavailable.
+  }
+  let triage;
+  try {
+    triage = readTriageReport(await readFile(join(outputDir, "triage.json"), "utf-8"));
+  } catch (error) {
+    if (summary?.completeEmpty && (error as NodeJS.ErrnoException).code === "ENOENT")
+      return { written: 0 };
+    throw error;
   }
 
-  return recordAisleNanoFindings(triage, cwd, { ...opts, summary });
+  const partial =
+    triage.partial ||
+    !summary ||
+    summary.coverage === "partial" ||
+    (triage.findings.length === 0 && !summary.completeEmpty);
+  const result = await recordAisleNanoFindings(triage.findings, cwd, { ...opts, summary });
+  if (!partial) return result;
+  if (result.written === 0)
+    throw new Error("Incomplete AISLE report: no findings could be retained");
+  return { ...result, coverage: "partial" };
 }
 
-function normalizeTriageFinding(raw: unknown): AisleNanoTriageFinding {
-  if (!raw || typeof raw !== "object") return {};
+function normalizeTriageFinding(raw: unknown): AisleNanoTriageFinding | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const r = raw as {
     id?: string;
     file?: string;
@@ -259,13 +316,16 @@ function normalizeTriageFinding(raw: unknown): AisleNanoTriageFinding {
     triage_md?: string;
     all_rounds?: unknown[];
   };
+  const verdict = str(r.verdict)?.toUpperCase();
+  if (!verdict || !["VALID", "INVALID", "UNCERTAIN"].includes(verdict)) return undefined;
+  if (!str(r.finding_title) && !str(r.title)) return undefined;
   return {
     id: str(r.id),
     file: str(r.file),
     finding_title: str(r.finding_title),
     title: str(r.title),
     severity: str(r.severity),
-    verdict: str(r.verdict),
+    verdict,
     confidence: numberOrUndefined(r.confidence),
     verdicts_str: str(r.verdicts_str),
     reasoning: str(r.reasoning),
@@ -334,16 +394,8 @@ function objectRecord(value: unknown): Record<string, number> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(value)) {
-    if (typeof v === "number" && Number.isFinite(v)) out[k.toLowerCase()] = v;
+    if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) return undefined;
+    out[k.toLowerCase()] = v;
   }
   return out;
-}
-
-function isMissingFile(err: unknown): boolean {
-  return Boolean(
-    err &&
-    typeof err === "object" &&
-    "code" in err &&
-    (err as { code?: unknown }).code === "ENOENT",
-  );
 }

@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseSnykJson, recordSnykFindings, fetchSnykIssues } from "./scan.js";
+import {
+  parseSnykJson,
+  recordSnykFindings,
+  fetchSnykIssues,
+  IncompleteSnykIssuesError,
+} from "./scan.js";
 
 const SINGLE_PROJECT = JSON.stringify({
   ok: false,
@@ -51,10 +56,13 @@ describe("parseSnykJson", () => {
     assert.throws(() => parseSnykJson("{not-json"), /Invalid Snyk JSON/);
   });
 
-  it("tolerates empty / malformed result objects", () => {
-    const empty = parseSnykJson("{}");
-    assert.equal(empty[0]!.vulnerabilities.length, 0);
-    assert.equal(empty[0]!.ok, false);
+  it("rejects malformed empty reports and marks incomplete projects with readable peers", () => {
+    for (const report of ["{}", "null", "[]"]) {
+      assert.throws(() => parseSnykJson(report), /Incomplete Snyk report/);
+    }
+    const [valid, malformed] = parseSnykJson(`[${SINGLE_PROJECT},{}]`);
+    assert.equal(valid?.vulnerabilities.length, 1);
+    assert.equal(malformed?.coverage, "partial");
   });
 });
 
@@ -62,9 +70,8 @@ describe("recordSnykFindings", () => {
   it("appends one JSONL line per vulnerability", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-snyk-"));
     try {
-      const results = parseSnykJson(SINGLE_PROJECT);
-      const { written } = await recordSnykFindings(results, dir);
-      assert.equal(written, 1);
+      const results = parseSnykJson(`[${SINGLE_PROJECT},{}]`);
+      assert.deepEqual(await recordSnykFindings(results, dir), { written: 1, coverage: "partial" });
       const text = readFileSync(join(dir, ".kit-scan-results.jsonl"), "utf-8");
       const line = JSON.parse(text.trim());
       assert.equal(line.source, "snyk");
@@ -87,6 +94,47 @@ describe("recordSnykFindings", () => {
 });
 
 describe("fetchSnykIssues", () => {
+  const options = { token: "fixture", orgSlug: "org", apiBase: "https://api.example.test" };
+
+  it("reads the next issue page and rejects an absent data array", async (t) => {
+    let second: unknown = { data: [{ id: "second", attributes: { title: "Second" } }] };
+    t.mock.method(globalThis, "fetch", async (url: URL) => {
+      if (url.searchParams.has("starting_after")) return Response.json(second);
+      return Response.json({
+        data: [{ id: "first", attributes: { title: "First" } }],
+        links: { next: "?starting_after=fixture&version=2024-10-15" },
+      });
+    });
+    assert.deepEqual(
+      (await fetchSnykIssues(options)).map((issue) => issue.id),
+      ["first", "second"],
+    );
+
+    second = {};
+    await assert.rejects(
+      () => fetchSnykIssues(options),
+      (error: unknown) => {
+        assert.ok(error instanceof IncompleteSnykIssuesError);
+        assert.deepEqual(
+          error.findings.map((issue) => issue.id),
+          ["first"],
+        );
+        return true;
+      },
+    );
+  });
+
+  it("refuses a pagination link to another origin before requesting it", async (t) => {
+    const fetchMock = t.mock.method(globalThis, "fetch", async () =>
+      Response.json({ data: [], links: { next: "https://other.example.test/page" } }),
+    );
+    await assert.rejects(
+      () => fetchSnykIssues(options),
+      /pagination link changes the issue endpoint/,
+    );
+    assert.equal(fetchMock.mock.callCount(), 1);
+  });
+
   for (const source of ["explicit", "env"]) {
     it(`masks a known ${source} token in an HTTP error`, async (t) => {
       const token = "snyk:v42";

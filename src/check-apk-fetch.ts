@@ -1,4 +1,6 @@
-const MAX_BYTES = 16 * 1024 * 1024;
+import type { ScannerReportGap } from "./check-scanner-evidence.js";
+
+export const ALPINE_SOURCE_MAX_BYTES = 16 * 1024 * 1024;
 const ATTEMPTS = 3;
 const NETWORK_CODES = new Set([
   "ETIMEDOUT",
@@ -15,14 +17,21 @@ const NETWORK_CODES = new Set([
 ]);
 
 /** Fetch one fixed Alpine source. Exhausted or permanent failures reject. */
-export type ApkFetcher = (url: string) => Promise<Buffer>;
+export type ApkFetcher = (url: string) => Promise<AlpineSourceResponse>;
 
-class ApkFetchError extends Error {
+export interface AlpineSourceResponse {
+  body: Buffer;
+  lastModified: string | null;
+}
+
+export class AlpineSourceError extends Error {
   constructor(
     message: string,
+    readonly status: ScannerReportGap | "stale" = "unavailable",
     readonly retryable = false,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
@@ -47,7 +56,7 @@ function networkCodes(error: unknown): string[] {
 }
 
 function canRetry(error: unknown): boolean {
-  if (error instanceof ApkFetchError) return error.retryable;
+  if (error instanceof AlpineSourceError) return error.retryable;
   if (error instanceof Error && error.name === "TimeoutError") return true;
   const codes = networkCodes(error);
   return codes.length > 0 && codes.every((code) => NETWORK_CODES.has(code));
@@ -74,10 +83,13 @@ async function rejectResponse(response: Response, error: Error): Promise<never> 
 
 async function readBody(response: Response): Promise<Buffer> {
   const length = response.headers.get("content-length");
-  if (length !== null && (!/^\d+$/.test(length) || Number(length) > MAX_BYTES))
+  if (length !== null && (!/^\d+$/.test(length) || Number(length) > ALPINE_SOURCE_MAX_BYTES))
     return rejectResponse(
       response,
-      new ApkFetchError(`Alpine source exceeds ${MAX_BYTES} bytes or has an invalid length`),
+      new AlpineSourceError(
+        `Alpine source exceeds ${ALPINE_SOURCE_MAX_BYTES} bytes or has an invalid length`,
+        "malformed",
+      ),
     );
   if (!response.body) return Buffer.alloc(0);
   const reader = response.body.getReader();
@@ -88,7 +100,11 @@ async function readBody(response: Response): Promise<Buffer> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > MAX_BYTES) throw new ApkFetchError(`Alpine source exceeds ${MAX_BYTES} bytes`);
+      if (total > ALPINE_SOURCE_MAX_BYTES)
+        throw new AlpineSourceError(
+          `Alpine source exceeds ${ALPINE_SOURCE_MAX_BYTES} bytes`,
+          "malformed",
+        );
       chunks.push(Buffer.from(value));
     }
     return Buffer.concat(chunks, total);
@@ -99,28 +115,44 @@ async function readBody(response: Response): Promise<Buffer> {
   }
 }
 
-async function fetchOnce(url: string): Promise<Buffer> {
-  const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(20_000) });
+async function fetchOnce(url: string): Promise<AlpineSourceResponse> {
+  const response = await fetch(url, {
+    redirect: "error",
+    cache: "no-cache",
+    signal: AbortSignal.timeout(20_000),
+  });
   if (response.status !== 200) {
     const retryable =
       response.status === 408 ||
       response.status === 429 ||
       (response.status >= 500 && response.status <= 599);
+    const status = alpineHttpGap(response.status);
     return rejectResponse(
       response,
-      new ApkFetchError(`HTTP ${response.status} from Alpine source`, retryable),
+      new AlpineSourceError(`HTTP ${response.status} from Alpine source`, status, retryable),
     );
   }
   if (response.headers.has("content-range"))
-    return rejectResponse(response, new ApkFetchError("Partial Alpine response has Content-Range"));
-  return readBody(response);
+    return rejectResponse(
+      response,
+      new AlpineSourceError("Partial Alpine response has Content-Range", "partial"),
+    );
+  return { body: await readBody(response), lastModified: response.headers.get("last-modified") };
+}
+
+function alpineHttpGap(status: number): ScannerReportGap {
+  if (status === 206) return "partial";
+  if (status === 204 || status === 404 || status === 410) return "missing";
+  return "unavailable";
 }
 
 function sourceUrl(value: string): void {
   const url = new URL(value);
   const allowed = ["https://secdb.alpinelinux.org", "https://dl-cdn.alpinelinux.org"];
   if (!allowed.includes(url.origin) || url.username || url.password || url.hash)
-    throw new ApkFetchError("Expected an HTTPS Alpine source without credentials or a fragment");
+    throw new AlpineSourceError(
+      "Expected an HTTPS Alpine source without credentials or a fragment",
+    );
 }
 
 /** Retry transient source failures; preserve TLS, redirect, status, timeout, and byte limits. */
@@ -135,9 +167,13 @@ export const defaultApkFetcher: ApkFetcher = async (url) => {
         const codes = networkCodes(error);
         const detail = codes.length ? ` [${codes.join(", ")}]` : "";
         const unit = attempt === 1 ? "attempt" : "attempts";
-        throw new Error(`Alpine fetch failed after ${attempt} ${unit}: ${message}${detail}`, {
-          cause: error,
-        });
+        const status = error instanceof AlpineSourceError ? error.status : "unavailable";
+        throw new AlpineSourceError(
+          `Alpine fetch failed after ${attempt} ${unit}: ${message}${detail}`,
+          status,
+          false,
+          { cause: error },
+        );
       }
       await new Promise<void>((resolve) => setTimeout(resolve, 250 * attempt));
     }

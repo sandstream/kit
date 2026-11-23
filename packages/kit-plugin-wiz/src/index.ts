@@ -1,6 +1,7 @@
 export {
   makeClient,
   fetchIssues,
+  IncompleteWizIssuesError,
   recordWizIssues,
   type WizClient,
   type WizIssue,

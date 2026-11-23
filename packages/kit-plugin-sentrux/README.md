@@ -8,7 +8,8 @@ Ingests Sentrux architecture-scan JSON into kit's local scan-results log. It doe
 npm install sandstream-kit-plugin-sentrux
 ```
 
-Run `sentrux check . --json` or `sentrux gate --json` in your own environment and save its JSON output.
+Use a saved Sentrux JSON report with a `violations` or `issues` array. The current upstream
+`sentrux check` and `sentrux gate` commands produce text output.
 
 ## Configuration
 
@@ -28,6 +29,10 @@ console.log(`${recorded.written} findings recorded`);
 `parseSentruxJson` normalizes a health score, gate result, metrics, and violations. `recordSentruxFindings` appends one row per violation to `.kit-scan-results.jsonl`; a failed gate with no listed violation still produces a finding. No Sentrux credential is read by this package.
 
 ## API
+
+When part of a report is invalid, the parser retains readable violations and sets
+`coverage: "partial"`. An incomplete report without a readable violation or a failing
+gate verdict produces an error.
 
 `parseSentruxJson(text)` returns a normalized score, metrics, gate result, and violations. `recordSentruxFindings(result, cwd?)` appends violation rows to the chosen project's `.kit-scan-results.jsonl` and returns the number written.
 

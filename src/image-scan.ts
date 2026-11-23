@@ -7,12 +7,14 @@
  * or carry a control character. Pulling an image is network, so these runs are cloud-only and are
  * dropped in air-gap mode.
  */
-import { readdirSync } from "node:fs";
+import { opendirSync, type Dir, type Dirent } from "node:fs";
+import { join } from "node:path";
+import type { ScannerReportGap } from "./check-scanner-evidence.js";
+import { sanitizeDisplayText } from "./display-text.js";
 import { isScannerEnabled } from "./scanners.js";
 import type { ScannerDef } from "./scanners.js";
 import { readRegularFileIfPresent } from "./upstream-safe-read.js";
 import { stripControl } from "./upstream-sources.js";
-import { join } from "node:path";
 
 export interface ImageRef {
   ref: string;
@@ -23,6 +25,7 @@ export interface ImageRef {
 export interface SkippedImage {
   ref: string;
   reason: string;
+  evidenceStatus?: ScannerReportGap | "stale";
 }
 
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$/;
@@ -73,40 +76,49 @@ function substitute(token: string, args: ReadonlyMap<string, string>): string | 
   return unresolved || out.includes("$") ? null : out;
 }
 
+function recordDefault(definition: string | undefined, args: Map<string, string>): void {
+  if (!definition) return;
+  const [name, ...rest] = definition.split("=");
+  if (rest.length > 0) args.set(name, unquote(rest.join("=")));
+}
+
 /** The images a Dockerfile builds on. `scratch` and earlier stage names are not images. */
 export function parseDockerfileImages(text: string): { images: string[]; skipped: SkippedImage[] } {
   const images: string[] = [];
   const skipped: SkippedImage[] = [];
   const args = new Map<string, string>();
-  const stages = new Set<string>();
+  const localBases = new Set(["scratch"]);
   for (const line of joinContinuations(text)) {
     const words = line.trim().split(/\s+/);
     const keyword = (words[0] ?? "").toLowerCase();
-    if (keyword === "arg" && words[1]) {
-      const [name, ...rest] = words[1].split("=");
-      if (rest.length > 0) args.set(name, unquote(rest.join("=")));
+    if (keyword === "arg") {
+      recordDefault(words[1], args);
       continue;
     }
     if (keyword !== "from") continue;
     const operands = words.slice(1).filter((w) => !w.startsWith("--"));
     const token = operands[0];
-    if (operands[1]?.toLowerCase() === "as" && operands[2]) stages.add(operands[2].toLowerCase());
     if (!token) {
       skipped.push({
-        ref: stripControl(line.trim()).slice(0, 80),
+        ref: sanitizeDisplayText(line).slice(0, 80),
         reason: "FROM line without an image",
+        evidenceStatus: "malformed",
       });
       continue;
     }
-    if (token.toLowerCase() === "scratch" || stages.has(token.toLowerCase())) continue;
     const ref = substitute(token, args);
+    const usesLocalBase = localBases.has(ref?.toLowerCase() ?? "");
+    if (operands[1]?.toLowerCase() === "as" && operands[2])
+      localBases.add(operands[2].toLowerCase());
+    if (usesLocalBase) continue;
     if (ref === null) {
       skipped.push({
-        ref: stripControl(token).slice(0, 80),
+        ref: sanitizeDisplayText(token).slice(0, 80),
         reason: "uses an unresolved ARG, so the image is not known",
+        evidenceStatus: "unsupported",
       });
     } else if (!isSafeImageRef(ref)) {
-      skipped.push({ ref: stripControl(ref).slice(0, 80), reason: "not a valid image reference" });
+      skipped.push(invalidReference(ref, "FROM"));
     } else if (!images.includes(ref)) {
       images.push(ref);
     }
@@ -120,34 +132,86 @@ function isDockerfileName(name: string): boolean {
   );
 }
 
-/** Dockerfile paths under `root`, relative and sorted. Symlinks and vendored folders are skipped. */
-export function findDockerfiles(root: string): string[] {
-  const found: string[] = [];
+export interface DockerfileInventoryGap {
+  path: string;
+  reason: string;
+  evidenceStatus: ScannerReportGap;
+}
+
+type DockerfileInventory = { files: string[]; gaps: DockerfileInventoryGap[] };
+
+function walkableDirectory(name: string): boolean {
+  return !name.startsWith(".") && !SKIPPED_DIRS.has(name);
+}
+
+/** Find relative Dockerfile paths and record where the bounded walk could not finish. */
+export function discoverDockerfiles(root: string): DockerfileInventory {
+  const inventory: DockerfileInventory = { files: [], gaps: [] };
   let seen = 0;
-  const walk = (rel: string, depth: number): void => {
-    let entries;
-    try {
-      entries = readdirSync(join(root, rel), { withFileTypes: true });
-    } catch {
+  let stopped = false;
+  function incomplete(path: string, reason: string): void {
+    inventory.gaps.push({ path, reason, evidenceStatus: "partial" });
+  }
+  function halt(path: string, reason: string): void {
+    incomplete(path, reason);
+    stopped = true;
+  }
+  function visit(entry: Dirent, parent: string, depth: number): void {
+    const name = entry.name;
+    const isDirectory = entry.isDirectory();
+    if (isDirectory && !walkableDirectory(name)) return;
+    if (stripControl(name) !== name) {
+      incomplete(parent || ".", "entry has a control character in its name");
       return;
     }
-    for (const entry of entries) {
-      if (++seen > MAX_ENTRIES || found.length >= MAX_DOCKERFILES) return;
-      if (stripControl(entry.name) !== entry.name) continue; // a name with control characters is never printed
-      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isFile() && isDockerfileName(entry.name)) found.push(childRel);
-      else if (
-        entry.isDirectory() &&
-        depth < MAX_DEPTH &&
-        !entry.name.startsWith(".") &&
-        !SKIPPED_DIRS.has(entry.name)
-      ) {
-        walk(childRel, depth + 1);
+    const path = parent ? `${parent}/${name}` : name;
+    if (isDirectory) {
+      if (depth >= MAX_DEPTH) incomplete(path, "depth limit reached");
+      else walk(path, depth + 1);
+    } else if (!isDockerfileName(name)) {
+      return;
+    } else if (entry.isFile()) {
+      if (inventory.files.length >= MAX_DOCKERFILES) return halt(path, "Dockerfile limit reached");
+      inventory.files.push(path);
+    } else {
+      inventory.gaps.push({
+        path,
+        reason: "Dockerfile is not a regular file",
+        evidenceStatus: "unsupported",
+      });
+    }
+  }
+  function walk(rel: string, depth: number): void {
+    let directory: Dir | undefined;
+    const path = rel || ".";
+    try {
+      directory = opendirSync(join(root, rel));
+      while (!stopped) {
+        const entry = directory.readSync();
+        if (!entry) break;
+        if (++seen > MAX_ENTRIES) halt(path, "entry limit reached");
+        else visit(entry, rel, depth);
+      }
+    } catch {
+      incomplete(path, "directory could not be read");
+    } finally {
+      try {
+        directory?.closeSync();
+      } catch {
+        incomplete(path, "directory could not be closed");
       }
     }
-  };
+  }
+
   walk("", 0);
-  return found.sort();
+  inventory.files.sort();
+  inventory.gaps.sort((a, b) => a.path.localeCompare(b.path));
+  return inventory;
+}
+
+/** Dockerfile paths under root, relative and sorted. */
+export function findDockerfiles(root: string): string[] {
+  return discoverDockerfiles(root).files;
 }
 
 /** `[scan].images` as read from a config that is not schema-checked: a list of strings, else nothing. */
@@ -162,6 +226,14 @@ export interface CollectOptions {
   fromDockerfiles: boolean;
 }
 
+function invalidReference(ref: string, fallback: string): SkippedImage {
+  return {
+    ref: sanitizeDisplayText(ref).slice(0, 80) || fallback,
+    reason: "not a valid image reference",
+    evidenceStatus: "malformed",
+  };
+}
+
 export function collectImages(
   root: string,
   options: CollectOptions,
@@ -173,22 +245,33 @@ export function collectImages(
   };
   for (const ref of options.configured) {
     if (isSafeImageRef(ref)) add(ref, "[scan].images");
-    else
-      skipped.push({ ref: stripControl(ref).slice(0, 80), reason: "not a valid image reference" });
+    else skipped.push(invalidReference(ref, "[scan].images"));
   }
   if (!options.fromDockerfiles) return { images, skipped };
-  for (const rel of findDockerfiles(root)) {
+  const { files, gaps } = discoverDockerfiles(root);
+  for (const { path, reason, evidenceStatus } of gaps) {
+    skipped.push({ ref: sanitizeDisplayText(path) || ".", reason, evidenceStatus });
+  }
+  for (const rel of files) {
+    const target = sanitizeDisplayText(rel) || "Dockerfile";
     let text: string | null;
     try {
       text = readRegularFileIfPresent(join(root, rel));
-    } catch (err) {
-      skipped.push({ ref: rel, reason: err instanceof Error ? err.message : "could not be read" });
+    } catch {
+      skipped.push({
+        ref: target,
+        reason: "Dockerfile could not be read",
+        evidenceStatus: "partial",
+      });
       continue;
     }
-    if (text === null) continue;
+    if (text === null) {
+      skipped.push({ ref: target, reason: "Dockerfile disappeared", evidenceStatus: "stale" });
+      continue;
+    }
     const parsed = parseDockerfileImages(text);
     for (const ref of parsed.images) add(ref, "Dockerfile");
-    for (const s of parsed.skipped) skipped.push({ ref: `${rel}: ${s.ref}`, reason: s.reason });
+    for (const s of parsed.skipped) skipped.push({ ...s, ref: `${target}: ${s.ref}` });
   }
   return { images, skipped };
 }
@@ -210,6 +293,7 @@ export function imageScanners(
         bin: "osv-scanner",
         args: ["scan", "image", "--format", "json", ref],
         format: "osv",
+        findingsExit: 1,
         cloudOnly: true,
         timeoutMs: IMAGE_TIMEOUT_MS,
       });

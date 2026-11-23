@@ -98,7 +98,8 @@ kit scan
 
 The bundle dir contains:
 
-- `manifest.json` — `{ version, artifacts: [{ path, sha256, env? }] }`
+- `manifest.json` contains `version: 1` and a non-empty `artifacts` array.
+  Each artifact has `path` and `sha256` fields and can include an `env` field.
 - `manifest.json.sig` — a base64 **Ed25519** signature over `manifest.json`, made
   on the connected host with the key whose public half is `KIT_THREAT_DATA_PUBKEY`
 - the artifacts themselves (e.g. `grype.db`, `osv.db`, a bumblebee catalog)
@@ -109,6 +110,11 @@ then sets each artifact's declared `env` var to its absolute path (e.g.
 bad signature, checksum mismatch, missing/extra-path artifact — rejects the whole
 bundle and `kit scan` refuses to run (fail-closed).** The bundle author declares
 the `env` wiring per artifact, so kit hard-codes no scanner-version specifics.
+
+Set `threat_data_max_age_days` to a positive integer in `[air_gap]` to require
+a signed bundle with an ISO-8601 `created` timestamp. Kit rejects a bundle
+older than this limit. When present, `created` must be valid and cannot be in
+the future. Kit reports rejected bundles as partial coverage in JSON and SARIF.
 
 Build the bundle on a connected host (sync DBs → write manifest with SHA-256 →
 `openssl pkeyutl -sign` / equivalent Ed25519 signing), then transfer it in.

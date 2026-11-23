@@ -1,4 +1,4 @@
-import { parseNpmObject } from "./npm-json.js";
+import { parseJsonObject } from "../utils/json-object.js";
 
 export type NpmManifestResult =
   | {
@@ -43,7 +43,7 @@ export function inspectNpmManifest(
 ): NpmManifestResult {
   if (!Buffer.isBuffer(bytes)) return { status: "rejected", reason: "invalid-manifest-bytes" };
   if (!identity(expected)) return { status: "rejected", reason: "invalid-expected-identity" };
-  const parsed = parseNpmObject(bytes, 1024 * 1024);
+  const parsed = parseJsonObject(bytes, 1024 * 1024);
   if ("issues" in parsed) {
     const reasons = {
       "invalid-utf8": "invalid-manifest-utf8",

@@ -31,7 +31,8 @@ Extra keys are ignored, so you can carry your own metadata on the same line.
 - **`critical` / `high` → FAIL** the security gate (same policy as `npm audit` high/critical).
 - **`medium` / `low` → WARN** (surfaced, non-blocking by default).
 - Findings are grouped per `source`; the summary reports the counts and the worst severity.
-- **No file → no-op.** Ingestion is invisible until a tool actually emits findings.
+- **No file → no-op.** An existing file with no records shows a skip with missing evidence.
+- Use a regular UTF-8 file of up to 8 MiB. Kit reports a coverage gap if it cannot read the file.
 
 ## Guarantees (no false green)
 
@@ -39,8 +40,9 @@ Extra keys are ignored, so you can carry your own metadata on the same line.
   finding kit produced, and it **never emits a `pass`** — a garbage or hostile file
   cannot turn the gate green. The only lever a line has is `severity`, and a
   `critical` severity fails regardless of any other keys.
-- **Unparseable lines are surfaced, never silently dropped** — a bad line becomes a
-  low-severity `external findings (parse)` warning telling you to fix the emitter.
+- Kit keeps usable findings from a report with unparseable lines.
+  It reports an `external findings (parse)` warning and fails the default scanner-health gate.
+- This finding-only format provides no proof that a scanner completed its run or that the findings are recent.
 - Deterministic and zero-LLM, like the rest of `kit check`.
 
 ## Freshness is the emitter's job

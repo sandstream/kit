@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  Dir,
+  mkdirSync,
+  mkdtempSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -63,6 +72,13 @@ describe("parseDockerfileImages", () => {
     assert.deepEqual(got.skipped, []);
   });
 
+  it("collects a base even when its new stage has the same name", () => {
+    const got = parseDockerfileImages(
+      "ARG BASE=alpine\nARG EMPTY=scratch\nFROM alpine AS alpine\nFROM ${BASE}\nFROM $EMPTY\n",
+    );
+    assert.deepEqual(got, { images: ["alpine"], skipped: [] });
+  });
+
   it("resolves an ARG default, in both ${NAME} and $NAME form", () => {
     const text = "ARG BASE=node:22\nFROM ${BASE}\nARG TWO=nginx:1.27\nFROM $TWO\n";
     assert.deepEqual(parseDockerfileImages(text).images, ["node:22", "nginx:1.27"]);
@@ -72,6 +88,7 @@ describe("parseDockerfileImages", () => {
     const got = parseDockerfileImages("ARG BASE\nFROM ${BASE}\n");
     assert.deepEqual(got.images, []);
     assert.match(got.skipped[0].reason, /unresolved/);
+    assert.equal(got.skipped[0].evidenceStatus, "unsupported");
   });
 
   it("reports an unsafe reference and does not return it", () => {
@@ -81,21 +98,24 @@ describe("parseDockerfileImages", () => {
   });
 });
 
-describe("findDockerfiles and collectImages", () => {
-  function inProject(files: Record<string, string>, body: (dir: string) => void): void {
-    const dir = mkdtempSync(join(tmpdir(), "kit-image-scan-"));
-    try {
-      for (const [f, text] of Object.entries(files)) {
-        const full = join(dir, f);
-        mkdirSync(dirname(full), { recursive: true });
-        writeFileSync(full, text);
-      }
-      body(dir);
-    } finally {
-      rmTemp(dir);
-    }
-  }
+const dockerfileOptions = { configured: [], fromDockerfiles: true };
+const chmodSkip = process.platform === "win32" || process.getuid?.() === 0;
 
+function inProject(files: Record<string, string>, body: (dir: string) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), "kit-image-scan-"));
+  try {
+    for (const [f, text] of Object.entries(files)) {
+      const full = join(dir, f);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, text);
+    }
+    body(dir);
+  } finally {
+    rmTemp(dir);
+  }
+}
+
+describe("Dockerfile discovery and filesystem types", () => {
   it("finds Dockerfile, Dockerfile.*, *.Dockerfile and Containerfile, but not vendored folders", () =>
     inProject(
       {
@@ -116,12 +136,118 @@ describe("findDockerfiles and collectImages", () => {
       },
     ));
 
-  it("does not follow a symlinked Dockerfile", () =>
+  it("reports a symlinked Dockerfile without reading its target", () =>
     inProject({ "real.txt": "FROM secret:1\n" }, (dir) => {
       symlinkSync(join(dir, "real.txt"), join(dir, "Dockerfile"));
       assert.deepEqual(findDockerfiles(dir), []);
+      assert.deepEqual(collectImages(dir, dockerfileOptions), {
+        images: [],
+        skipped: [
+          {
+            ref: "Dockerfile",
+            reason: "Dockerfile is not a regular file",
+            evidenceStatus: "unsupported",
+          },
+        ],
+      });
     }));
 
+  it(
+    "reports a named pipe Dockerfile without opening it",
+    { skip: process.platform === "win32" },
+    (t) =>
+      inProject({}, (dir) => {
+        const fifo = spawnSync("mkfifo", [join(dir, "Containerfile")]);
+        if (fifo.error && "code" in fifo.error && fifo.error.code === "ENOENT")
+          return t.skip("mkfifo is unavailable");
+        assert.ifError(fifo.error);
+        assert.equal(fifo.status, 0);
+        assert.deepEqual(collectImages(dir, dockerfileOptions), {
+          images: [],
+          skipped: [
+            {
+              ref: "Containerfile",
+              reason: "Dockerfile is not a regular file",
+              evidenceStatus: "unsupported",
+            },
+          ],
+        });
+      }),
+  );
+});
+
+describe("collectImages reports incomplete Dockerfile inventory", () => {
+  it("reports a Dockerfile removed between discovery and reading", (t) =>
+    inProject({ Dockerfile: "FROM a:1\n", Containerfile: "FROM b:1\n" }, (dir) => {
+      const close = Dir.prototype.closeSync;
+      const probe = t.mock.method(Dir.prototype, "closeSync", function (this: Dir) {
+        close.call(this);
+        if (this.path === dir) unlinkSync(join(dir, "Dockerfile"));
+      });
+      try {
+        assert.deepEqual(collectImages(dir, dockerfileOptions), {
+          images: [{ ref: "b:1", source: "Dockerfile" }],
+          skipped: [
+            { ref: "Dockerfile", reason: "Dockerfile disappeared", evidenceStatus: "stale" },
+          ],
+        });
+      } finally {
+        probe.mock.restore();
+      }
+    }));
+
+  it("reports the depth limit and keeps images in scope", () =>
+    inProject(
+      {
+        "a/b/c/Dockerfile": "FROM a:1 AS base\nFROM scratch\nFROM base\n",
+        "a/b/c/deep\u2028/Dockerfile": "FROM b:1\n",
+        "a/b/c/node_modules/Dockerfile": "FROM c:1\n",
+        "a/b/c/.hidden/Dockerfile": "FROM d:1\n",
+      },
+      (dir) => {
+        assert.deepEqual(collectImages(dir, dockerfileOptions), {
+          images: [{ ref: "a:1", source: "Dockerfile" }],
+          skipped: [
+            { ref: "a/b/c/deep", reason: "depth limit reached", evidenceStatus: "partial" },
+          ],
+        });
+      },
+    ));
+
+  it("reports unreadable files and directories as partial", { skip: chmodSkip }, () =>
+    inProject(
+      {
+        Dockerfile: "FROM a:1\n",
+        Containerfile: "FROM b:1\n",
+        "locked/Dockerfile": "FROM c:1\n",
+      },
+      (dir) => {
+        const file = join(dir, "Dockerfile");
+        const folder = join(dir, "locked");
+        try {
+          chmodSync(file, 0);
+          chmodSync(folder, 0);
+          assert.deepEqual(collectImages(dir, dockerfileOptions), {
+            images: [{ ref: "b:1", source: "Dockerfile" }],
+            skipped: [
+              { ref: "locked", reason: "directory could not be read", evidenceStatus: "partial" },
+              {
+                ref: "Dockerfile",
+                reason: "Dockerfile could not be read",
+                evidenceStatus: "partial",
+              },
+            ],
+          });
+        } finally {
+          chmodSync(file, 0o600);
+          chmodSync(folder, 0o700);
+        }
+      },
+    ),
+  );
+});
+
+describe("collectImages reports configured and parsed images", () => {
   it("lists configured images first, then Dockerfile images when asked, deduplicated", () =>
     inProject({ Dockerfile: "FROM node:22\nFROM nginx:1.27\n" }, (dir) => {
       const got = collectImages(dir, {
@@ -141,7 +267,7 @@ describe("findDockerfiles and collectImages", () => {
       assert.deepEqual(collectImages(dir, { configured: [], fromDockerfiles: false }).images, []);
     }));
 
-  it("reports an unsafe configured reference and a Dockerfile it could not read", () =>
+  it("reports an unsafe configured reference as malformed", () =>
     inProject({}, (dir) => {
       const got = collectImages(dir, { configured: ["-bad", "ok:1"], fromDockerfiles: false });
       assert.deepEqual(
@@ -149,6 +275,21 @@ describe("findDockerfiles and collectImages", () => {
         ["ok:1"],
       );
       assert.match(got.skipped[0].reason, /not a valid image reference/);
+      assert.equal(got.skipped[0].evidenceStatus, "malformed");
+    }));
+
+  it("keeps the parser's evidence status when collecting a Dockerfile", () =>
+    inProject({ Dockerfile: "FROM ${BASE}\n" }, (dir) => {
+      assert.deepEqual(collectImages(dir, dockerfileOptions), {
+        images: [],
+        skipped: [
+          {
+            ref: "Dockerfile: ${BASE}",
+            reason: "uses an unresolved ARG, so the image is not known",
+            evidenceStatus: "unsupported",
+          },
+        ],
+      });
     }));
 });
 
@@ -238,7 +379,7 @@ describe("skipped references carry no terminal control characters", () => {
   });
 
   it(
-    "ignores a Dockerfile in a folder whose name has control characters",
+    "reports a Dockerfile directory with terminal controls using its parent as the target",
     { skip: process.platform === "win32" },
     () => {
       const dir = mkdtempSync(join(tmpdir(), "kit-image-scan-"));
@@ -247,6 +388,16 @@ describe("skipped references carry no terminal control characters", () => {
         mkdirSync(evil);
         writeFileSync(join(evil, "Dockerfile"), "FROM a:1\n");
         assert.deepEqual(findDockerfiles(dir), []);
+        assert.deepEqual(collectImages(dir, { configured: [], fromDockerfiles: true }), {
+          images: [],
+          skipped: [
+            {
+              ref: ".",
+              reason: "entry has a control character in its name",
+              evidenceStatus: "partial",
+            },
+          ],
+        });
       } finally {
         rmTemp(dir);
       }

@@ -70,6 +70,21 @@ export interface SnykResult {
   ok: boolean;
   projectName?: string;
   uniqueCount?: number;
+  coverage?: "partial";
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function textField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function severityOf(value: unknown): SnykVulnerability["severity"] {
+  return value === "critical" || value === "high" || value === "medium" ? value : "low";
 }
 
 /**
@@ -87,18 +102,17 @@ export function parseSnykJson(text: string): SnykResult[] {
       cause: err,
     });
   }
-  // multi-project: Snyk returns an array of result objects.
-  if (Array.isArray(parsed)) {
-    return parsed.map(normalizeSnykResult);
+  const projects = Array.isArray(parsed) ? parsed : [parsed];
+  const results = projects.map(normalizeSnykResult);
+  const partial = results.some((result) => result.coverage === "partial");
+  if (!results.length || (partial && results.every((result) => !result.vulnerabilities.length))) {
+    throw new Error("Incomplete Snyk report: no findings could be retained");
   }
-  return [normalizeSnykResult(parsed)];
+  return results;
 }
 
 function normalizeSnykResult(raw: unknown): SnykResult {
-  if (!raw || typeof raw !== "object") {
-    return { vulnerabilities: [], ok: true };
-  }
-  const r = raw as {
+  const r = (record(raw) ?? {}) as {
     vulnerabilities?: Array<{
       id?: string;
       title?: string;
@@ -113,20 +127,38 @@ function normalizeSnykResult(raw: unknown): SnykResult {
     projectName?: string;
     uniqueCount?: number;
   };
+  const entries = Array.isArray(r.vulnerabilities) ? r.vulnerabilities : [];
+  const vulnerabilities = entries.flatMap((v) => {
+    const id = textField(v?.id);
+    if (!id) return [];
+    return [
+      {
+        id,
+        title: textField(v.title) ?? "(no title)",
+        severity: severityOf(v.severity),
+        packageName: textField(v.packageName),
+        packageVersion: textField(v.version),
+        fixedIn: Array.isArray(v.fixedIn)
+          ? v.fixedIn.filter((entry) => typeof entry === "string")
+          : undefined,
+        cvssScore: typeof v.cvssScore === "number" ? v.cvssScore : undefined,
+        cwe: Array.isArray(v.identifiers?.CWE)
+          ? v.identifiers.CWE.filter((entry) => typeof entry === "string")
+          : undefined,
+      },
+    ];
+  });
+  const partial =
+    !Array.isArray(r.vulnerabilities) ||
+    typeof r.ok !== "boolean" ||
+    (r.ok === false && entries.length === 0) ||
+    entries.length !== vulnerabilities.length;
   return {
-    vulnerabilities: (r.vulnerabilities ?? []).map((v) => ({
-      id: v.id ?? "",
-      title: v.title ?? "(no title)",
-      severity: (v.severity as SnykVulnerability["severity"]) ?? "low",
-      packageName: v.packageName,
-      packageVersion: v.version,
-      fixedIn: v.fixedIn,
-      cvssScore: v.cvssScore,
-      cwe: v.identifiers?.CWE,
-    })),
-    ok: r.ok ?? false,
-    projectName: r.projectName,
-    uniqueCount: r.uniqueCount,
+    vulnerabilities,
+    ok: !partial && r.ok === true,
+    projectName: textField(r.projectName),
+    uniqueCount: typeof r.uniqueCount === "number" ? r.uniqueCount : undefined,
+    ...(partial ? { coverage: "partial" as const } : {}),
   };
 }
 
@@ -138,7 +170,7 @@ function normalizeSnykResult(raw: unknown): SnykResult {
 export async function recordSnykFindings(
   results: SnykResult[],
   cwd: string = process.cwd(),
-): Promise<{ written: number }> {
+): Promise<{ written: number; coverage?: "partial" }> {
   const path = resolve(cwd, SCAN_RESULTS_FILE);
   const now = new Date().toISOString();
   const lines: string[] = [];
@@ -161,9 +193,13 @@ export async function recordSnykFindings(
       );
     }
   }
-  if (lines.length === 0) return { written: 0 };
+  const partial = results.some((result) => result.coverage === "partial");
+  if (lines.length === 0) {
+    if (partial) throw new Error("Incomplete Snyk report: no findings could be retained");
+    return { written: 0 };
+  }
   await appendFile(path, lines.join("\n") + "\n", "utf-8");
-  return { written: lines.length };
+  return { written: lines.length, ...(partial ? { coverage: "partial" as const } : {}) };
 }
 
 export interface FetchSnykIssuesOptions {
@@ -177,6 +213,16 @@ export interface FetchSnykIssuesOptions {
   apiBase?: string;
 }
 
+export class IncompleteSnykIssuesError extends Error {
+  constructor(
+    readonly findings: SnykVulnerability[],
+    cause: unknown,
+  ) {
+    super("Snyk issue coverage is incomplete", { cause });
+    this.name = "IncompleteSnykIssuesError";
+  }
+}
+
 /**
  * Read-only Snyk API fetch. Uses `GET /rest/orgs/{org}/issues`. Throws on
  * unauthorized — caller surfaces to the user instead of silently failing.
@@ -187,42 +233,100 @@ export async function fetchSnykIssues(opts: FetchSnykIssuesOptions): Promise<Sny
   const base = opts.apiBase ?? DEFAULT_API_BASE;
   const params = new URLSearchParams({ version: "2024-10-15" });
   if (opts.projectId) params.set("scan_item.id", opts.projectId);
-  const url = `${base}/rest/orgs/${encodeURIComponent(opts.orgSlug)}/issues?${params}`;
+  const firstUrl = new URL(
+    `${base}/rest/orgs/${encodeURIComponent(opts.orgSlug)}/issues?${params}`,
+  );
+  let url: URL | undefined = firstUrl;
+  const seen = new Set<string>();
+  const findings: SnykVulnerability[] = [];
+  try {
+    while (url) {
+      if (seen.has(url.href) || seen.size >= 100) {
+        throw new Error("Snyk API pagination did not finish within 100 distinct pages");
+      }
+      seen.add(url.href);
+      const page = await readSnykIssuePage(url, token);
+      findings.push(...page.findings);
+      if (page.malformed) throw new Error("Invalid Snyk API issue response");
+      url = nextSnykPage(url, page.next, firstUrl);
+    }
+  } catch (error) {
+    if (findings.length) throw new IncompleteSnykIssuesError(findings, error);
+    throw error;
+  }
+  return findings;
+}
+
+function nextSnykPage(current: URL, next: unknown, first: URL): URL | undefined {
+  if (next === undefined || next === null) return undefined;
+  if (typeof next !== "string" || !next.trim()) throw new Error("Invalid Snyk API pagination link");
+  const url = URL.parse(next, current);
+  if (
+    !url ||
+    url.origin !== first.origin ||
+    url.pathname !== first.pathname ||
+    url.username ||
+    url.password
+  ) {
+    throw new Error("Snyk API pagination link changes the issue endpoint");
+  }
+  for (const key of ["version", "scan_item.id"]) {
+    const expected = first.searchParams.get(key);
+    const supplied = url.searchParams.getAll(key);
+    if (supplied.some((value) => value !== expected)) {
+      throw new Error("Snyk API pagination link changes the issue scope");
+    }
+    if (expected !== null && supplied.length === 0) url.searchParams.set(key, expected);
+  }
+  url.hash = "";
+  return url;
+}
+
+async function readSnykIssuePage(url: URL, token: string) {
   const res = await fetch(url, {
     headers: {
       Authorization: `token ${token}`,
       Accept: "application/vnd.api+json",
     },
+    redirect: "error",
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     throw new Error(`Snyk API ${res.status}: ${await safeText(res, [token])}`);
   }
-  const body = (await res.json()) as {
-    data?: Array<{
-      id?: string;
-      attributes?: {
-        title?: string;
-        effective_severity_level?: string;
-        coordinates?: Array<{
-          representations?: Array<{
-            dependency?: { package_name?: string; package_version?: string };
-          }>;
-        }>;
-      };
-    }>;
-  };
-  return (body.data ?? []).map((iss) => {
-    const dep = iss.attributes?.coordinates?.[0]?.representations?.[0]?.dependency;
-    return {
-      id: iss.id ?? "",
-      title: iss.attributes?.title ?? "(no title)",
-      severity:
-        (iss.attributes?.effective_severity_level as SnykVulnerability["severity"]) ?? "low",
-      packageName: dep?.package_name,
-      packageVersion: dep?.package_version,
-    };
-  });
+  const body = record(await res.json());
+  if (!Array.isArray(body?.data))
+    throw new Error("Invalid Snyk API response: expected a data array");
+  const findings = body.data.flatMap(readSnykIssue);
+  const links = record(body.links);
+  const malformed =
+    body.data.length !== findings.length ||
+    (body.errors !== undefined && (!Array.isArray(body.errors) || body.errors.length > 0)) ||
+    (body.links !== undefined && !links);
+  return { findings, malformed, next: links?.next };
+}
+
+function firstRecord(value: unknown) {
+  return Array.isArray(value) ? record(value[0]) : undefined;
+}
+
+function readSnykIssue(raw: unknown): SnykVulnerability[] {
+  const issue = record(raw);
+  const attributes = record(issue?.attributes);
+  const id = textField(issue?.id);
+  if (!id || !attributes) return [];
+  const coordinate = firstRecord(attributes.coordinates);
+  const representation = firstRecord(coordinate?.representations);
+  const dep = record(representation?.dependency);
+  return [
+    {
+      id,
+      title: textField(attributes.title) ?? "(no title)",
+      severity: severityOf(attributes.effective_severity_level),
+      packageName: textField(dep?.package_name),
+      packageVersion: textField(dep?.package_version),
+    },
+  ];
 }
 
 async function safeText(res: Response, knownSecrets: readonly string[]): Promise<string> {
