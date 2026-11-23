@@ -23,6 +23,10 @@ const DAEMON_ABSENT =
   /^Cannot connect to the Docker daemon at [^\r\n]+\. Is the docker daemon running\?\r?\n?$/i;
 const UNIX_SOCKET_ABSENT =
   /^failed to connect to the docker API at unix:\/\/[^;\r\n]+; check if the path is correct and if the daemon is running: dial unix [^\r\n]+: connect: (?:no such file or directory|connection refused)\r?\n?$/i;
+const WINDOWS_PIPE_ABSENT =
+  /^failed to connect to the docker API at npipe:\/\/\/\/\.\/pipe\/([\w.-]+); check if the path is correct and if the daemon is running: open \/\/\.\/pipe\/\1: The system cannot find the file specified\.\r?\n?$/i;
+const LEGACY_WINDOWS_PIPE_ABSENT =
+  /^error during connect: (?:(?:this error may indicate that the docker daemon is not running|in the default daemon configuration on Windows, the docker client must be run with elevated privileges to connect): )?(?:Get|Head) "http:\/\/%2F%2F\.%2Fpipe%2F([\w.-]+)\/[^"\r\n]+": open \/\/\.\/pipe\/\1: The system cannot find the file specified\.\r?\n?$/i;
 
 interface LocalImage {
   repository: string;
@@ -143,7 +147,10 @@ function optionalDockerScope(listing: ExecResult): SecurityCheckResult | undefin
   if (
     !listing.ok &&
     listing.exitCode === 1 &&
-    (DAEMON_ABSENT.test(listing.stderr) || UNIX_SOCKET_ABSENT.test(listing.stderr))
+    (DAEMON_ABSENT.test(listing.stderr) ||
+      UNIX_SOCKET_ABSENT.test(listing.stderr) ||
+      WINDOWS_PIPE_ABSENT.test(listing.stderr) ||
+      LEGACY_WINDOWS_PIPE_ABSENT.test(listing.stderr))
   )
     return { ...row, detail: "Docker daemon is not reachable. Kit did not compare images." };
   return undefined;

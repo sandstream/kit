@@ -160,6 +160,37 @@ describe("Docker inventory scope and process status", () => {
     assert.equal(denied.evidenceStatus, "unavailable");
   });
 
+  it("recognizes a missing Windows Docker pipe without masking access errors", async () => {
+    const diagnostics = [
+      'error during connect: this error may indicate that the docker daemon is not running: Get "http://%2F%2F.%2Fpipe%2Fdocker_engine/v1.48/images/json": open //./pipe/docker_engine: ',
+      'error during connect: in the default daemon configuration on Windows, the docker client must be run with elevated privileges to connect: Head "http://%2F%2F.%2Fpipe%2Fdocker_engine/_ping": open //./pipe/docker_engine: ',
+      "failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine; check if the path is correct and if the daemon is running: open //./pipe/dockerDesktopLinuxEngine: ",
+    ];
+    const absent = "The system cannot find the file specified.\r\n";
+    const listing = { stdout: "", exitCode: 1, ok: false };
+
+    for (const diagnostic of diagnostics) {
+      const missing = await checkDockerIocs(lister({ ...listing, stderr: diagnostic + absent }));
+      assert.equal(missing.status, "skip", diagnostic);
+      assert.equal(missing.evidenceStatus, "missing");
+
+      const denied = await checkDockerIocs(
+        lister({ ...listing, stderr: diagnostic + "Access is denied.\r\n" }),
+      );
+      assert.equal(denied.status, "warn");
+      assert.equal(denied.evidenceStatus, "unavailable");
+    }
+
+    const partial = await checkDockerIocs(
+      lister({
+        ...listing,
+        stdout: makeRow("example/image", "v1", CLEAN),
+        stderr: diagnostics[0] + absent,
+      }),
+    );
+    assert.equal(partial.evidenceStatus, "partial");
+  });
+
   it("reports generic errors instead of treating the Docker scope as absent", async () => {
     const r = await checkDockerIocs(
       lister({ stdout: "", stderr: "permission denied", exitCode: 1, ok: false }),
