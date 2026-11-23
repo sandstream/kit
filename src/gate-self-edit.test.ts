@@ -43,12 +43,54 @@ const write = (tool_input: Record<string, unknown>) =>
     reader({ [SETTINGS]: CURRENT }),
   );
 
-describe("gateSettingsWriteRefusal", () => {
-  it("allows a write that adds another tool's hook and keeps kit's", () => {
+describe("gateSettingsWriteRefusal: a new hook", () => {
+  it("refuses a write that adds a hook next to kit's, on any event", () => {
     const next = settings([GATE, ENV, "bash .claude/hooks/guard.sh"]);
-    assert.equal(write({ file_path: ".claude/settings.json", content: next }), null);
+    const r = write({ file_path: ".claude/settings.json", content: next });
+    assert.match(r ?? "", /would add a hook to settings\.json \(PreToolUse: bash \.claude/);
+    const stop = JSON.parse(CURRENT) as { hooks: Record<string, unknown> };
+    stop.hooks.Stop = [{ hooks: [{ type: "command", command: "node ./tools/listen.js" }] }];
+    assert.match(
+      write({ file_path: ".claude/settings.json", content: JSON.stringify(stop) }) ?? "",
+      /Stop: node \.\/tools\/listen\.js/,
+    );
   });
 
+  it("allows a write that changes other settings and keeps every hook", () => {
+    const next = JSON.parse(CURRENT) as Record<string, unknown>;
+    next.permissions = { deny: ["Read(.env)"] };
+    assert.equal(
+      write({ file_path: ".claude/settings.json", content: JSON.stringify(next) }),
+      null,
+    );
+    assert.equal(
+      write({ file_path: ".claude/settings.json", content: settings([ENV, GATE]) }),
+      null,
+    );
+  });
+
+  it("refuses a new hook in a settings file beside the one that wires the gate", () => {
+    const local = resolve(CWD, ".claude", "settings.local.json");
+    const r = gateSettingsWriteRefusal(
+      { tool_input: { file_path: local, content: settings(["sh ./x.sh"]) } },
+      CWD,
+      HOME,
+      reader({ [SETTINGS]: CURRENT }),
+    );
+    assert.match(r ?? "", /would add a hook to settings\.local\.json/);
+  });
+
+  it("names a hook that is not a command by its entry", () => {
+    const next = JSON.parse(CURRENT) as { hooks: Record<string, unknown> };
+    next.hooks.Stop = [{ hooks: [{ type: "prompt", prompt: "x" }] }];
+    assert.match(
+      write({ file_path: ".claude/settings.json", content: JSON.stringify(next) }) ?? "",
+      /Stop: \{"type":"prompt"/,
+    );
+  });
+});
+
+describe("gateSettingsWriteRefusal: kit's own gate entries", () => {
   it("refuses a write that drops gate-bash", () => {
     const r = write({ file_path: ".claude/settings.json", content: settings([ENV]) });
     assert.match(r ?? "", /remove or change kit's gate hooks/);
@@ -135,7 +177,7 @@ describe("helpers", () => {
 });
 
 describe("gate-env refuses an agent unwiring its gate (real CLI)", () => {
-  it("exits 2 on the removal and 0 on an added hook", (t) => {
+  it("exits 2 on the removal and on an added hook, 0 on another change", (t) => {
     const dir = mkdtempSync(join(tmpdir(), "kit-self-edit-"));
     t.after(() => rmTemp(dir));
     const home = join(dir, ".home");
@@ -164,6 +206,9 @@ describe("gate-env refuses an agent unwiring its gate (real CLI)", () => {
     const removed = gate(settings([ENV]));
     assert.equal(removed.status, 2, removed.stderr);
     assert.match(removed.stderr, /remove or change kit's gate hooks/);
-    assert.equal(gate(settings([GATE, ENV, "bash x.sh"])).status, 0);
+    const added = gate(settings([GATE, ENV, "bash x.sh"]));
+    assert.equal(added.status, 2, added.stderr);
+    assert.match(added.stderr, /would add a hook to settings\.json/);
+    assert.equal(gate(JSON.stringify({ ...JSON.parse(CURRENT), model: "x" })).status, 0);
   });
 });
