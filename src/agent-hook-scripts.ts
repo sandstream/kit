@@ -21,8 +21,21 @@ import { readInstructionFile } from "./instruction-scan.js";
 
 const SCRIPT = /\.(m?js|cjs|ts|mts|sh|bash|zsh|py|rb|ps1)$/i;
 
-/** `[event, command]` for every hook command in a settings.json text. */
-function hookCommands(json: string): Array<[string, string]> {
+/** The commands of one hook group: nested `hooks[]` (Claude Code, Codex, Gemini CLI) or a flat entry (Cursor). */
+function groupCommands(group: unknown): string[] {
+  const nested = (group as { hooks?: unknown } | null)?.hooks;
+  const entries = Array.isArray(nested) ? nested : [group];
+  return entries
+    .map((h) => (h as { command?: unknown } | null)?.command)
+    .filter((cmd): cmd is string => typeof cmd === "string" && cmd.length > 0);
+}
+
+/**
+ * `[event, command]` for every hook command in a settings JSON text. Claude Code, Codex and Gemini
+ * CLI nest commands under `hooks.<Event>[].hooks[]`; Cursor's `.cursor/hooks.json` lists them flat
+ * under `hooks.<event>[]`. Both shapes are read.
+ */
+export function hookCommands(json: string): Array<[string, string]> {
   let obj: unknown;
   try {
     obj = JSON.parse(json);
@@ -34,14 +47,7 @@ function hookCommands(json: string): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
     if (!Array.isArray(groups)) continue;
-    for (const g of groups) {
-      const hs = (g as { hooks?: unknown })?.hooks;
-      if (!Array.isArray(hs)) continue;
-      for (const h of hs) {
-        const cmd = (h as { command?: unknown })?.command;
-        if (typeof cmd === "string" && cmd) out.push([event, cmd]);
-      }
-    }
+    for (const g of groups) for (const cmd of groupCommands(g)) out.push([event, cmd]);
   }
   return out;
 }

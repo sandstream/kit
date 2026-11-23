@@ -22,7 +22,8 @@
  *
  * Pure analyzers (string in → findings out); `runAgentAudit` is the file-reading wrapper.
  */
-import { hookScriptRows } from "./agent-hook-scripts.js";
+import { hookCommands, hookScriptRows } from "./agent-hook-scripts.js";
+import { parse as parseToml } from "smol-toml";
 import {
   closeSync,
   constants,
@@ -192,17 +193,7 @@ export function auditSettingsCommands(json: string): { where: string; why: strin
   if (statusLine && typeof statusLine === "object") {
     check((statusLine as { command?: unknown }).command, "statusLine.command");
   }
-  const hooks = (obj as { hooks?: unknown })?.hooks;
-  if (hooks && typeof hooks === "object") {
-    for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
-      if (!Array.isArray(groups)) continue;
-      for (const g of groups) {
-        const hs = (g as { hooks?: unknown })?.hooks;
-        if (!Array.isArray(hs)) continue;
-        for (const h of hs) check((h as { command?: unknown })?.command, `hooks.${event}`);
-      }
-    }
-  }
+  for (const [event, cmd] of hookCommands(json)) check(cmd, `hooks.${event}`);
   return out;
 }
 
@@ -288,7 +279,26 @@ const CONFIG_FILES = [
   // Codex hooks: same shape as `.claude/settings.json` hooks, run on every matching event once the
   // project's `.codex/` layer is trusted.
   ".codex/hooks.json",
+  // Cursor's hooks (flat entries) and Gemini CLI's settings (Claude Code's shape). kit wires its own
+  // gate into both, and neither was read: a hook there piping a download into a shell gave no row
+  // (kit-research `agent-config-audit-vs-kit`).
+  ".cursor/hooks.json",
+  ".gemini/settings.json",
 ];
+
+/**
+ * The text the hook and status-line checks read. Codex keeps hooks in `.codex/config.toml` too
+ * (`[[hooks.SessionStart]]`, where kit writes its own gate), and the JSON-only checks never saw
+ * them; the parsed TOML is handed over as JSON. A file that does not parse is read as text.
+ */
+function hookView(rel: string, content: string): string {
+  if (!rel.endsWith(".toml")) return content;
+  try {
+    return JSON.stringify(parseToml(content));
+  } catch {
+    return content;
+  }
+}
 
 const HOOK_DIRS = [".git/hooks", ".githooks", ".husky"];
 
@@ -505,8 +515,9 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
         ),
       );
     }
-    out.push(...hookScriptRows(content, cwd, rel));
-    for (const c of auditSettingsCommands(content)) {
+    const view = hookView(rel, content);
+    out.push(...hookScriptRows(view, cwd, rel));
+    for (const c of auditSettingsCommands(view)) {
       out.push(
         result(
           `malware-shaped command in ${rel} (${c.where})`,
