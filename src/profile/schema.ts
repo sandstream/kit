@@ -101,6 +101,8 @@ export interface KitProfile {
   mcp?: ProfileComponent[];
   workflows?: ProfileComponent[];
   plugins?: ProfileComponent[];
+  /** Hooks of `.claude/settings.json` (src/profile/hooks.ts). Absent in a profile frozen before kit recorded them. */
+  hooks?: ProfileComponent[];
   vault?: ProfileVault;
   gates?: ProfileGates;
   scope?: ProfileScope;
@@ -136,6 +138,7 @@ const kitProfileSchema = z
     mcp: z.array(componentSchema).optional(),
     workflows: z.array(componentSchema).optional(),
     plugins: z.array(componentSchema).optional(),
+    hooks: z.array(componentSchema).optional(),
     vault: z
       .object({
         store: z.string().optional(),
