@@ -91,7 +91,11 @@ function renderFloor(f: UsageFacts): string[] {
   ];
   if (fl.events === 0) {
     out.push(
-      line(`${c.dim}no .kit-audit.jsonl here — nothing has been audited in this repo${c.reset}`),
+      line(
+        fl.controls > 0
+          ? `${c.dim}only kit's own negative controls logged (${num(fl.controls)}): not counted${c.reset}`
+          : `${c.dim}no .kit-audit.jsonl here — nothing has been audited in this repo${c.reset}`,
+      ),
     );
     return out;
   }
@@ -105,6 +109,14 @@ function renderFloor(f: UsageFacts): string[] {
       `${num(fl.bypassedCommits).padStart(6)}  ${c.dim}--no-verify${c.reset}`,
     ),
   );
+  if (fl.controls > 0) {
+    out.push(
+      line(
+        `  ${c.dim}kit's own negative controls${c.reset}`,
+        `${num(fl.controls).padStart(6)}  ${c.dim}not counted${c.reset}`,
+      ),
+    );
+  }
   if (fl.actorUnknown) {
     // Say it rather than presenting test-generated events as operator activity.
     out.push(line(""));

@@ -30,6 +30,8 @@ import { isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
 
+import { NEGATIVE_CONTROL_SESSION } from "./usage-prove-env.js";
+
 export interface CoverageFacts {
   /** When the run these numbers come from happened, or null when no run is on disk. */
   at: string | null;
@@ -50,6 +52,13 @@ export interface FloorFacts {
   byOperation: Array<[string, number]>;
   /** Commits recorded as having bypassed the hook (`--no-verify`). */
   bypassedCommits: number;
+  /**
+   * Refusals kit's own negative controls caused (`kit check`, `kit usage --prove`), marked with
+   * `metadata.session_id` (src/usage-prove-env.ts). Counted here and in neither `events` nor
+   * `refusals`: two of them came with every `kit check`, so the floor reported refusals that no
+   * agent caused (kit-research `read-where-agents-fail-vs-kit`).
+   */
+  controls: number;
   /**
    * True when the log carries no `cwd` on its entries, so operator activity cannot be told apart
    * from test-generated activity. Reported rather than silently mixed: kit's own repo has 7194
@@ -230,8 +239,18 @@ export function coverageFromRuns(cwd: string): CoverageFacts {
   };
 }
 
+function isNegativeControl(e: Record<string, unknown>): boolean {
+  const meta = e.metadata;
+  return (
+    !!meta &&
+    typeof meta === "object" &&
+    (meta as { session_id?: unknown }).session_id === NEGATIVE_CONTROL_SESSION
+  );
+}
+
 export function floorFromLogs(cwd: string): FloorFacts {
-  const events = readJsonl(join(cwd, ".kit-audit.jsonl"));
+  const logged = readJsonl(join(cwd, ".kit-audit.jsonl"));
+  const events = logged.filter((e) => !isNegativeControl(e));
   const refusals = events.filter((e) => e.success === false);
   const counts = new Map<string, number>();
   for (const e of refusals) {
@@ -243,6 +262,7 @@ export function floorFromLogs(cwd: string): FloorFacts {
     refusals: refusals.length,
     byOperation: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6),
     bypassedCommits: readJsonl(join(cwd, ".kit-skipped-commits.jsonl")).length,
+    controls: logged.length - events.length,
     actorUnknown: events.length > 0 && events.every((e) => typeof e.cwd !== "string"),
   };
 }

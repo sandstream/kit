@@ -34,6 +34,7 @@ const facts: UsageFacts = {
       ["odd|name", 3],
     ],
     bypassedCommits: 55,
+    controls: 6,
     actorUnknown: true,
   },
   triage: { runs: 41, byType: [["npm", 18]], latest: { type: "pip", target: "fastmcp-slim" } },
@@ -57,6 +58,7 @@ describe("kit usage --markdown", () => {
       "a backslash is escaped before the pipe it precedes",
     );
     assert.match(md, /⚠️ \*\*55\*\* commits bypassed the pre-commit hook/);
+    assert.match(md, /_6 refusals by kit's own negative controls .* are not counted\._/);
     assert.match(md, /_No saved check run\. Run `kit check` once\._/);
     assert.match(md, /Latest: `pip fastmcp-slim`/);
     assert.doesNotMatch(md, /[│╭╮╰╯├┤─]/);

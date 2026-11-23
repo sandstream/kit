@@ -23,6 +23,7 @@ import {
   machineFromAnchor,
   memoryFromDb,
 } from "./usage-report.js";
+import { NEGATIVE_CONTROL_SESSION } from "./usage-prove-env.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function scratch(): string {
@@ -117,6 +118,26 @@ describe("floorFromLogs", () => {
         ].join("\n"),
       );
       assert.equal(floorFromLogs(dir).actorUnknown, false);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("counts kit's own negative controls apart from what was refused", () => {
+    const dir = scratch();
+    try {
+      const control = { phase: "pretooluse-deny", session_id: NEGATIVE_CONTROL_SESSION };
+      writeFileSync(
+        join(dir, ".kit-audit.jsonl"),
+        [
+          JSON.stringify({ operation: "gate-bash", success: false, metadata: control }),
+          JSON.stringify({ operation: "gate-env", success: false, metadata: control }),
+          JSON.stringify({ operation: "gate-fs", success: false, metadata: { session_id: "s1" } }),
+        ].join("\n"),
+      );
+      const fl = floorFromLogs(dir);
+      assert.deepEqual([fl.events, fl.refusals, fl.controls], [1, 1, 2]);
+      assert.deepEqual(fl.byOperation, [["gate-fs", 1]]);
     } finally {
       rmTemp(dir);
     }
