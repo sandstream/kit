@@ -16,6 +16,7 @@ import { resolve, dirname, join, isAbsolute } from "node:path";
 import { gateSettingsFile, preToolUseGroups } from "./gate-settings.js";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
+import { portableGateCommand, portableGatesMode } from "./portable-gate.js";
 import {
   GATE_SUBCOMMANDS,
   commandIncludesSubcommand,
@@ -756,6 +757,14 @@ export function kitSubcommandInvocation(sub: string): string {
   return `kit ${sub}`; // last resort — relies on PATH
 }
 
+/**
+ * The gate command for the Claude settings file of `cwd`: the portable line when the repository
+ * commits its gates (src/portable-gate.ts), the machine's own wrapper otherwise.
+ */
+function settingsGateInvocation(sub: string, cwd: string): string {
+  return portableGatesMode(cwd) ? portableGateCommand(sub) : kitSubcommandInvocation(sub);
+}
+
 export interface HookInstallResult {
   file: string;
   action: "created" | "updated" | "unchanged" | "skipped" | "failed";
@@ -927,7 +936,7 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
 
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
-  const desired = kitGateInvocation();
+  const desired = settingsGateInvocation("gate-bash", cwd);
   const existing = refreshSettingsGateCommand(pre, "gate-bash", desired);
   if (existing.found) {
     markGatesInstalled(cwd); // gate present → record it for liveness (idempotent)
@@ -982,7 +991,7 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
 
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
-  const desired = kitSubcommandInvocation("gate-env");
+  const desired = settingsGateInvocation("gate-env", cwd);
   const existing = refreshSettingsGateCommand(pre, "gate-env", desired);
   if (existing.found) {
     markGatesInstalled(cwd);
@@ -1033,7 +1042,7 @@ export async function installLimitsGate(cwd: string = process.cwd()): Promise<Ho
     settings = {};
   }
   const pre = ((settings.hooks ??= {}).PreToolUse ??= []);
-  const desired = kitSubcommandInvocation("gate-limits");
+  const desired = settingsGateInvocation("gate-limits", cwd);
   const existing = refreshSettingsGateCommand(pre, "gate-limits", desired);
   if (existing.found && !existing.updated) {
     return { file, action: "unchanged", detail: "limits gate already wired" };
@@ -1080,8 +1089,8 @@ export async function installBrokerGates(cwd: string = process.cwd()): Promise<H
 
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
-  const desiredEgress = kitSubcommandInvocation("gate-egress");
-  const desiredFs = kitSubcommandInvocation("gate-fs");
+  const desiredEgress = settingsGateInvocation("gate-egress", cwd);
+  const desiredFs = settingsGateInvocation("gate-fs", cwd);
   const egress = refreshSettingsGateCommand(pre, "gate-egress", desiredEgress);
   const fs = refreshSettingsGateCommand(pre, "gate-fs", desiredFs);
   if (egress.found && fs.found) {

@@ -748,7 +748,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   "agent-config": {
     handler: cmdAgentConfigEntry,
     stability: "stable",
-    help: "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md / GEMINI.md / .augment-guidelines; --user wires the gates into ~/.claude/settings.json for every checkout",
+    help: "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md / GEMINI.md / .augment-guidelines; --user wires the gates into ~/.claude/settings.json for every checkout; --portable-gates commits gate lines that run on any machine with kit and refuse when kit is missing",
   },
   "worktree-gates": {
     handler: cmdWorktreeGates,

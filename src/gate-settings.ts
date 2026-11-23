@@ -6,6 +6,7 @@
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { portableGatesMode } from "./portable-gate.js";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 
 export interface PreToolUseGroup {
@@ -16,8 +17,13 @@ export interface PreToolUseGroup {
 const SHARED_SETTINGS = ".claude/settings.json";
 const LOCAL_SETTINGS = ".claude/settings.local.json";
 
-/** The settings file a gate is written to: the local one when the shared one is tracked by git. */
+/**
+ * The settings file a gate is written to: the local one when the shared one is tracked by git.
+ * With portable gate lines (src/portable-gate.ts) the command works on any machine that has kit,
+ * so the shared file is the right place, tracked or not.
+ */
 export async function gateSettingsFile(cwd: string): Promise<string> {
+  if (portableGatesMode(cwd)) return SHARED_SETTINGS;
   const tracked = await execFileNoThrow(
     "git",
     ["ls-files", "--error-unmatch", "--", SHARED_SETTINGS],

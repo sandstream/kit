@@ -112,7 +112,20 @@ export async function cmdAgentConfigEntry(): Promise<boolean> {
   const ok = await cmdAgentConfig();
   // Opt-in gates, after the defaults; here so cmdAgentConfig keeps its frozen size.
   if (hasFlag(process.argv, "--limits-gate")) await reportLimitsGate();
+  if (hasFlag(process.argv, "--portable-gates")) await reportPortableGates();
   return ok;
+}
+
+/** Say what `--portable-gates` wrote (the installers above read the flag themselves). */
+async function reportPortableGates(): Promise<void> {
+  const { holdsPortableGate } = await import("../portable-gate.js");
+  if (!holdsPortableGate(process.cwd())) {
+    console.log("portable gates: not written (no Claude Code project here, or read-only mode)");
+    return;
+  }
+  console.log(
+    "portable gates: .claude/settings.json holds gate lines that run on any machine with kit. Commit that file. On a machine without kit they refuse every gated tool call and say how to install it.",
+  );
 }
 
 /** Install `kit gate-limits` (`--limits-gate`) and print a line for it. */

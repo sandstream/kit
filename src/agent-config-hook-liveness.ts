@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { WRAPPER_MARKER } from "./kit-wrapper.js";
 import { getKitVersionSync } from "./update-check.js";
+import { effectiveHookCommand } from "./portable-gate.js";
 import { shellSplit } from "./utils/shellSplit.js";
 
 export const GATE_SUBCOMMANDS = ["gate-bash", "gate-env", "gate-egress", "gate-fs", "gate-limits"];
@@ -16,7 +17,9 @@ export function commandIncludesSubcommand(command: string, sub: string): boolean
   }
 }
 
-export function parseHookCommand(command: string): string[] {
+export function parseHookCommand(hookCommand: string): string[] {
+  // A committed portable gate line is read as the direct command it starts on this machine.
+  const command = effectiveHookCommand(hookCommand);
   // POSIX shell escaping treats backslash as an escape. In cmd.exe it is a
   // literal path separator, including outside quotes.
   return shellSplit(process.platform === "win32" ? command.replace(/\\/g, "\\\\") : command);
