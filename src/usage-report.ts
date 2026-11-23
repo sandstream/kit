@@ -30,6 +30,7 @@ import { isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
 
+import { groupRefusals, type ReasonGroup } from "./refusal-reasons.js";
 import { NEGATIVE_CONTROL_SESSION } from "./usage-prove-env.js";
 
 export interface CoverageFacts {
@@ -50,6 +51,8 @@ export interface FloorFacts {
   refusals: number;
   /** Refusal counts per operation, most frequent first. */
   byOperation: Array<[string, number]>;
+  /** Refusals grouped by gate and by the shape of their reason (src/refusal-reasons.ts). */
+  byReason: ReasonGroup[];
   /** Commits recorded as having bypassed the hook (`--no-verify`). */
   bypassedCommits: number;
   /**
@@ -261,6 +264,7 @@ export function floorFromLogs(cwd: string): FloorFacts {
     events: events.length,
     refusals: refusals.length,
     byOperation: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6),
+    byReason: groupRefusals(refusals),
     bypassedCommits: readJsonl(join(cwd, ".kit-skipped-commits.jsonl")).length,
     controls: logged.length - events.length,
     actorUnknown: events.length > 0 && events.every((e) => typeof e.cwd !== "string"),

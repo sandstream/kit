@@ -44,6 +44,15 @@ function floor(f: UsageFacts): string[] {
       "",
     );
   }
+  if (fl.byReason.length > 0) {
+    out.push(
+      ...table(
+        ["Reason", "Gate", "Count"],
+        fl.byReason.map((g) => [g.reason, `\`${g.operation}\``, num(g.count)]),
+      ),
+      "",
+    );
+  }
   if (fl.bypassedCommits > 0) {
     out.push(`⚠️ **${num(fl.bypassedCommits)}** commits bypassed the pre-commit hook.`, "");
   }
