@@ -47,6 +47,12 @@ function floor(f: UsageFacts): string[] {
   if (fl.bypassedCommits > 0) {
     out.push(`⚠️ **${num(fl.bypassedCommits)}** commits bypassed the pre-commit hook.`, "");
   }
+  if (fl.controls > 0) {
+    out.push(
+      `_${num(fl.controls)} refusals by kit's own negative controls (\`kit check\`, \`kit usage --prove\`) are not counted._`,
+      "",
+    );
+  }
   if (fl.actorUnknown) {
     out.push("_Entries carry no cwd, so operator and test activity are counted together._", "");
   }
