@@ -134,7 +134,7 @@ Missing results, a stopped run, or a reported execution error indicate a coverag
 A partial report with readable findings prints them and adds `"coverage": "partial"` to JSON output.
 A partial report without findings exits 1. Kit reads SARIF 2.1.0.
 
-An OSV package without advisories must identify the package or Git commit.
+An OSV package without advisories must include a name, version, and ecosystem, or a full Git commit hash.
 Kit accepts the package inventory from OSV-Scanner's `--all-packages` output.
 An advisory group that refers to a missing advisory makes the report incomplete.
 Kit retains the advisories it can read.

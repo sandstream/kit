@@ -251,7 +251,18 @@ syncBuiltinESMExports();
     ? [EMPTY_SARIF]
     : [
         { results: [] },
-        { results: [{ packages: [{ package: { name: "public-package" }, vulnerabilities: [] }] }] },
+        {
+          results: [
+            {
+              packages: [
+                {
+                  package: { name: "public-package", version: "1.0.0", ecosystem: "npm" },
+                  vulnerabilities: [],
+                },
+              ],
+            },
+          ],
+        },
       ]) {
     it(`${format}: accepts a legitimate empty report ${JSON.stringify(data)}`, () => {
       const result = fixture.run(["ingest", format, report(data), "--json"]);

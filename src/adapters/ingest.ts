@@ -142,7 +142,7 @@ interface OsvVuln {
   database_specific?: { severity?: string };
 }
 interface OsvPackage {
-  package?: { name?: string; ecosystem?: string; version?: string };
+  package?: { name?: string; ecosystem?: string; version?: string; commit?: string };
   vulnerabilities?: OsvVuln[];
 }
 interface OsvResult {
@@ -359,13 +359,16 @@ function osvVulnerability(value: unknown): value is OsvVuln & { id: string } {
   return isRecord(value) && nonBlank(value.id) && osvVulnerabilityFields(value);
 }
 
-function identifiedOsvPackage(value: unknown, declaresVulnerabilities: boolean): boolean {
+function identifiedOsvPackage(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  if (nonBlank(value.commit)) return true;
   return (
-    nonBlank(value.name) &&
-    (declaresVulnerabilities || (nonBlank(value.version) && nonBlank(value.ecosystem)))
+    isGitCommitHash(value.commit) ||
+    (nonBlank(value.name) && nonBlank(value.version) && nonBlank(value.ecosystem))
   );
+}
+
+function isGitCommitHash(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(value);
 }
 
 function completeOsvGroups(groups: unknown, ids: ReadonlySet<string>): boolean {
@@ -385,13 +388,22 @@ function osvPackage(value: unknown): value is OsvPackage {
   const vulnerabilities = Array.isArray(value.vulnerabilities) ? value.vulnerabilities : [];
   const ids = new Set(vulnerabilities.map((vulnerability: { id: string }) => vulnerability.id));
   return (
-    completeOsvGroups(value.groups, ids) &&
-    (ids.size > 0 || identifiedOsvPackage(value.package, Array.isArray(value.vulnerabilities)))
+    completeOsvGroups(value.groups, ids) && (ids.size > 0 || identifiedOsvPackage(value.package))
   );
 }
 
 function osvResult(value: unknown): value is OsvResult {
   return isRecord(value) && Array.isArray(value.packages) && value.packages.every(osvPackage);
+}
+
+function readableOsvIdentity(value: unknown): OsvPackage["package"] {
+  if (!isRecord(value)) return undefined;
+  return {
+    name: nonBlank(value.name) ? value.name : undefined,
+    ecosystem: nonBlank(value.ecosystem) ? value.ecosystem : undefined,
+    version: nonBlank(value.version) ? value.version : undefined,
+    commit: isGitCommitHash(value.commit) ? value.commit : undefined,
+  };
 }
 
 function readableOsvPackage(value: unknown): OsvPackage | undefined {
@@ -401,7 +413,7 @@ function readableOsvPackage(value: unknown): OsvPackage | undefined {
     ? value.vulnerabilities.filter(osvVulnerability)
     : [];
   const recovered = {
-    package: osvPackageIdentity(value.package) ? value.package : undefined,
+    package: readableOsvIdentity(value.package),
     vulnerabilities,
   };
   return osvPackage(recovered) ? recovered : undefined;
@@ -505,10 +517,10 @@ function kitScanCoverage(runs: SarifRun[]) {
   return { scanners, malformed, partial };
 }
 
-function kitScopeCoverage(scopeGaps: unknown): "complete" | "malformed" | "partial" {
-  if (scopeGaps === undefined) return "complete";
+function kitScopeCoverage(scopeGaps: unknown): "none" | "malformed" | "partial" {
+  if (scopeGaps === undefined) return "none";
   if (!Array.isArray(scopeGaps) || !scopeGaps.every(isRecord)) return "malformed";
-  return scopeGaps.length ? "partial" : "complete";
+  return scopeGaps.length ? "partial" : "none";
 }
 
 function kitDelegateCoverage(scannerCoverage: unknown) {

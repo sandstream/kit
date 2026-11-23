@@ -263,6 +263,8 @@ describe("ingestStrict: OSV records and report extensions", () => {
       { package: {} },
       { vulnerabilities: [] },
       { package: { name: "fixture" } },
+      { package: { name: "fixture" }, vulnerabilities: [] },
+      { package: { commit: "unknown" }, vulnerabilities: [] },
       {
         package: { name: "fixture", version: "1", ecosystem: "npm" },
         groups: [{ ids: ["OSV-A"] }],
@@ -277,7 +279,7 @@ describe("ingestStrict: OSV records and report extensions", () => {
   it("accepts package-only records in OSV-Scanner all-packages output", () => {
     const packages = [
       { package: { name: "fixture", version: "1", ecosystem: "npm" } },
-      { package: { name: "", version: "", ecosystem: "", commit: "1234ab" } },
+      { package: { name: "", version: "", ecosystem: "", commit: "ab".repeat(20) } },
     ];
     const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
     assert.deepEqual(outcome, { ok: true, findings: [] });
@@ -311,6 +313,22 @@ describe("OSV advisory retention and report extensions", () => {
       outcome.findings.map(({ name }) => name),
       ["(package): OSV-A"],
     );
+  });
+
+  it("keeps a readable package name and ecosystem when the version is malformed", () => {
+    const packages = [
+      {
+        package: { name: "fixture", ecosystem: "npm", version: 42 },
+        vulnerabilities: [{ id: "OSV-A" }],
+      },
+    ];
+    const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
+    assert.ok(outcome.ok);
+    assert.equal(outcome.coverage, "partial");
+    const finding = outcome.findings[0];
+    assert.ok(finding && "package" in finding);
+    assert.equal(finding.name, "fixture: OSV-A");
+    assert.deepEqual(finding.package, { name: "fixture", ecosystem: "npm" });
   });
 
   it("retains optional fields and unknown extensions on valid reports", () => {
