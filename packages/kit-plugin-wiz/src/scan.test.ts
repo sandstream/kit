@@ -141,6 +141,61 @@ describe("fetchIssues", () => {
   });
 });
 
+describe("Wiz response scope", () => {
+  const client = { apiUrl: "https://api.example.test/graphql", accessToken: "fixture" };
+
+  it("keeps distinct findings and marks repeated issue IDs as incomplete", async (t) => {
+    t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+      const { variables } = JSON.parse(String(init.body));
+      const ids = variables.after ? ["first", "second"] : ["first"];
+      return Response.json({
+        data: {
+          issues: {
+            nodes: ids.map((id) => ({ id, severity: "HIGH", status: "OPEN" })),
+            pageInfo: {
+              hasNextPage: !variables.after,
+              endCursor: variables.after ? null : "cursor",
+            },
+          },
+        },
+      });
+    });
+    await assert.rejects(
+      () => fetchIssues(client, { limit: 3 }),
+      (error: unknown) => {
+        assert.ok(error instanceof IncompleteWizIssuesError);
+        assert.deepEqual(
+          error.findings.map(({ id }) => id),
+          ["first", "second"],
+        );
+        assert.match(String(error.cause), /repeated issue ID/);
+        return true;
+      },
+    );
+  });
+
+  it("keeps OAuth and issue requests on the configured endpoint", async (t) => {
+    const requests: RequestInit[] = [];
+    t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+      requests.push(init);
+      return url.endsWith("/token")
+        ? Response.json({ access_token: "fixture" })
+        : Response.json({ data: { issues: { nodes: [], pageInfo: { hasNextPage: false } } } });
+    });
+    const configured = await makeClient({
+      clientId: "fixture",
+      clientSecret: "test-only",
+      apiUrl: client.apiUrl,
+      authUrl: "https://auth.example.test/token",
+    });
+    assert.deepEqual(await fetchIssues(configured), []);
+    assert.deepEqual(
+      requests.map(({ redirect }) => redirect),
+      ["error", "error"],
+    );
+  });
+});
+
 describe("Wiz issue API errors", () => {
   for (const status of [403, 200]) {
     it(`masks the minted access token in a ${status} issue response`, async (t) => {
