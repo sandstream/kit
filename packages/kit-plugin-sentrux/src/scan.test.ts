@@ -59,6 +59,109 @@ describe("sentrux plugin", () => {
   });
 });
 
+describe("native Sentrux rule reports", () => {
+  it("distinguishes an empty native rule run from a run that checked no rules", () => {
+    const report = { pass: true, rules_checked: 1, violation_count: 0, violations: [] };
+    assert.equal(parseSentruxJson(JSON.stringify(report)).gatePassed, true);
+    assert.throws(
+      () => parseSentruxJson(JSON.stringify({ pass: true, violations: [] })),
+      /Invalid Sentrux report/,
+    );
+    for (const change of [
+      { rules_checked: 0 },
+      { rules_checked: "1" },
+      { violation_count: 1 },
+      { violation_count: undefined },
+      { pass: undefined },
+      { truncated: { rules_checked: 1, total_rules_defined: 3 } },
+    ]) {
+      assert.throws(
+        () => parseSentruxJson(JSON.stringify({ ...report, ...change })),
+        /Invalid Sentrux report/,
+      );
+    }
+  });
+
+  it("retains native findings and flags inconsistent counts as partial", () => {
+    const violation = {
+      rule: "boundary",
+      severity: "Error",
+      message: "Synthetic layer separation",
+      files: ["src/app/demo.js", "src/core/internal/message.js"],
+    };
+    const report = { pass: false, rules_checked: 2, violation_count: 1, violations: [violation] };
+    const parsed = parseSentruxJson(JSON.stringify(report));
+    assert.equal(parsed.gatePassed, false);
+    assert.equal(parsed.coverage, undefined);
+    assert.equal(parsed.violations[0]?.file, "src/app/demo.js");
+    assert.deepEqual(parsed.violations[0]?.files, violation.files);
+    const contradictory = parseSentruxJson(JSON.stringify({ ...report, pass: true }));
+    assert.equal(contradictory.gatePassed, false);
+    assert.equal(contradictory.coverage, "partial");
+    assert.deepEqual(contradictory.violations, parsed.violations);
+    const partial = parseSentruxJson(
+      JSON.stringify({
+        ...report,
+        pass: true,
+        violation_count: 2,
+      }),
+    );
+    assert.equal(partial.gatePassed, false);
+    assert.equal(partial.coverage, "partial");
+    assert.deepEqual(partial.violations, parsed.violations);
+  });
+
+  it("keeps warning-only passes and retains findings with invalid peer metadata", () => {
+    const warning = { rule: "layers", message: "Review layer", severity: "Warning" };
+    const report = { pass: true, rules_checked: 1, violation_count: 1, violations: [warning] };
+    assert.equal(parseSentruxJson(JSON.stringify(report)).gatePassed, true);
+    const result = parseSentruxJson(
+      JSON.stringify({
+        ...report,
+        violation_count: 2,
+        violations: [
+          warning,
+          { rule: "boundary", severity: { toString: null }, files: [null, "src/core.js"] },
+        ],
+      }),
+    );
+    assert.equal(result.coverage, "partial");
+    assert.equal(result.gatePassed, false);
+    assert.deepEqual(
+      result.violations.map(({ rule }) => rule),
+      ["layers", "boundary"],
+    );
+    assert.deepEqual(result.violations[1]?.files, ["src/core.js"]);
+  });
+});
+
+it("includes native coverage in the finding record and recording receipt", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "kit-sentrux-"));
+  try {
+    const files = ["src/a.ts", "src/b.ts"];
+    const result = parseSentruxJson(
+      JSON.stringify({
+        pass: false,
+        rules_checked: 3,
+        violation_count: 1,
+        truncated: { rules_checked: 3, total_rules_defined: 4 },
+        violations: [{ rule: "boundary", files }],
+      }),
+    );
+    const ruleCoverage = { checkedRules: 3, reportedViolations: 1, definedRules: 4 };
+    assert.equal(result.gatePassed, false);
+    assert.deepEqual(await recordSentruxFindings(result, dir), {
+      written: 1,
+      coverage: "partial",
+      ruleCoverage,
+    });
+    const row = JSON.parse(readFileSync(join(dir, ".kit-scan-results.jsonl"), "utf8"));
+    assert.deepEqual(row.ruleCoverage, ruleCoverage);
+    assert.deepEqual(row.files, files);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 describe("Sentrux finding output", () => {
   it("records valid violations from a partial report and returns its coverage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-sentrux-"));

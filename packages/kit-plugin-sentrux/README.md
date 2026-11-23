@@ -8,8 +8,9 @@ Ingests Sentrux architecture-scan JSON into kit's local scan-results log. It doe
 npm install sandstream-kit-plugin-sentrux
 ```
 
-Use a saved Sentrux JSON report with a `violations` or `issues` array. The current upstream
-`sentrux check` and `sentrux gate` commands produce text output.
+Use a saved Sentrux JSON report with a `violations` or `issues` array. For the Sentrux MCP
+`check_rules` tool, save the JSON text from the response content item as the report body.
+The `sentrux check` and `sentrux gate` commands produce text output.
 
 ## Configuration
 
@@ -30,9 +31,11 @@ console.log(`${recorded.written} findings recorded`);
 
 ## API
 
-When part of a report is invalid, the parser retains readable violations and sets
-`coverage: "partial"`. An incomplete report without a readable violation or a failing
-gate verdict produces an error.
+For native `check_rules` reports, a clean result requires at least one checked rule and a
+violation count that matches the list. Kit treats a truncated rule run as incomplete.
+The result and recording receipt include the reported rule counts when available. When part of a report is invalid, the parser retains
+readable violations and sets `coverage: "partial"`. An incomplete report without a readable
+violation or a failing gate verdict produces an error.
 
 `parseSentruxJson(text)` returns a normalized score, metrics, gate result, and violations. `recordSentruxFindings(result, cwd?)` appends violation rows to the chosen project's `.kit-scan-results.jsonl` and returns the number written.
 
@@ -52,4 +55,4 @@ Report package issues in [sandstream/kit issues](https://github.com/sandstream/k
 
 ## Version
 
-Current package version: `0.1.2`. See [CHANGELOG.md](./CHANGELOG.md).
+Current package version: `0.1.3`. See [CHANGELOG.md](./CHANGELOG.md).
