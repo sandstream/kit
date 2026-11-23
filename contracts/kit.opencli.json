@@ -118,7 +118,7 @@
     },
     "agent-config": {
       "kind": "command",
-      "summary": "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md / GEMINI.md / .augment-guidelines; --user wires the gates into ~/.claude/settings.json for every checkout",
+      "summary": "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md / GEMINI.md / .augment-guidelines; --user wires the gates into ~/.claude/settings.json for every checkout; --portable-gates commits gate lines that run on any machine with kit and refuse when kit is missing",
       "x-kit-accepted-flags": [
         "--apply",
         "--broker-gate",
@@ -130,6 +130,7 @@
         "--no-install-gate",
         "--non-interactive",
         "--plan",
+        "--portable-gates",
         "--read-only",
         "--readonly",
         "--user",
@@ -3163,6 +3164,7 @@
         "--no-install-gate",
         "--non-interactive",
         "--plan",
+        "--portable-gates",
         "--read-only",
         "--readonly",
         "--user",
@@ -3306,6 +3308,7 @@
         "--no-install-gate",
         "--non-interactive",
         "--plan",
+        "--portable-gates",
         "--read-only",
         "--readonly",
         "--role",

@@ -1,0 +1,3 @@
+### Added
+
+- `kit agent-config --portable-gates` writes the Claude Code gate entries to `.claude/settings.json` as lines that can be committed. kit's usual gate command names a wrapper that exists only on the machine where `kit agent-config` ran, so kit kept the gates out of a tracked settings file, and a fresh checkout on another machine or an agent host had none. A portable line runs kit's wrapper when the machine has one and `kit` from `PATH` otherwise; where kit is not installed it exits 2 with the install command, so gated tool calls are refused instead of running ungated. Once the file holds such a line, later `kit agent-config` runs keep the gates there. kit recognises the line by exact text. Not verified on native Windows or macOS: the line needs `sh`.
