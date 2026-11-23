@@ -19,10 +19,11 @@
 import { resolve } from "node:path";
 import { loadConfig } from "../config.js";
 import { discoverAgentToolchain, discoverPlugins } from "../agent-sbom.js";
+import { discoverCodeTools } from "./code-tools.js";
 import { discoverHooks } from "./hooks.js";
 import type { KitProfile, ProfileComponent } from "./schema.js";
 
-export type ComponentKind = "skill" | "mcp" | "workflow" | "plugin" | "hook";
+export type ComponentKind = "skill" | "mcp" | "workflow" | "plugin" | "hook" | "code-tool";
 
 export type DriftStatus = "in-sync" | "version-drift" | "removed" | "added";
 
@@ -76,6 +77,8 @@ export interface DiscoveredState {
   plugins: DiscoveredComponent[] | null;
   /** Hooks of the project's `.claude/settings.json`. */
   hooks: DiscoveredComponent[];
+  /** Files matched by the profile's `code_tool_paths`; null or absent when none are declared. */
+  codeTools?: DiscoveredComponent[] | null;
   /** Global vault store from `.kit.toml` `secrets.store`, or undefined if none/unreadable. */
   vaultStore?: string;
 }
@@ -87,6 +90,7 @@ const KIND_ORDER: Record<ComponentKind, number> = {
   workflow: 2,
   plugin: 3,
   hook: 4,
+  "code-tool": 5,
 };
 
 /** Compare one component kind's declared set against its discovered set. */
@@ -148,8 +152,18 @@ function hookDrift(declared: KitProfile, actual: DiscoveredState): DriftEntry[] 
   return declared.hooks ? driftForKind("hook", declared.hooks, actual.hooks) : [];
 }
 
-function hooksNotRecorded(declared: KitProfile, actual: DiscoveredState): ComponentKind[] {
-  return !declared.hooks && actual.hooks.length > 0 ? ["hook"] : [];
+/** Code-tool drift, judged only when the profile declares paths and holds a frozen list. */
+function codeToolDrift(declared: KitProfile, actual: DiscoveredState): DriftEntry[] {
+  const found = actual.codeTools ?? null;
+  return declared.code_tools && found ? driftForKind("code-tool", declared.code_tools, found) : [];
+}
+
+/** Kinds present in the project that this profile was frozen without a list for. */
+function kindsNotRecorded(declared: KitProfile, actual: DiscoveredState): ComponentKind[] {
+  const out: ComponentKind[] = [];
+  if (!declared.hooks && actual.hooks.length > 0) out.push("hook");
+  if (!declared.code_tools && (actual.codeTools?.length ?? 0) > 0) out.push("code-tool");
+  return out;
 }
 
 /**
@@ -163,6 +177,7 @@ export function computeProfileDrift(declared: KitProfile, actual: DiscoveredStat
     ...driftForKind("workflow", declared.workflows, actual.workflows),
     ...driftForKind("plugin", declared.plugins, actual.plugins),
     ...hookDrift(declared, actual),
+    ...codeToolDrift(declared, actual),
   ];
 
   entries.sort(
@@ -190,7 +205,7 @@ export function computeProfileDrift(declared: KitProfile, actual: DiscoveredStat
   const driftCount =
     entries.filter((e) => e.status !== "in-sync").length + (vault?.status === "drift" ? 1 : 0);
 
-  const notRecorded = hooksNotRecorded(declared, actual);
+  const notRecorded = kindsNotRecorded(declared, actual);
   return { entries, vault, unaudited, notRecorded, driftCount, clean: driftCount === 0 };
 }
 
@@ -201,7 +216,10 @@ export function computeProfileDrift(declared: KitProfile, actual: DiscoveredStat
  * `null` — there is no on-disk workflow convention to reconcile against yet, so drift honestly
  * reports declared workflows as unaudited rather than pretending they are absent.
  */
-export async function discoverActualState(cwd = process.cwd()): Promise<DiscoveredState> {
+export async function discoverActualState(
+  cwd = process.cwd(),
+  codeToolPaths?: readonly string[],
+): Promise<DiscoveredState> {
   const { skills, mcpServers } = discoverAgentToolchain(cwd);
   const plugins = discoverPlugins(cwd);
   let vaultStore: string | undefined;
@@ -217,6 +235,7 @@ export async function discoverActualState(cwd = process.cwd()): Promise<Discover
     workflows: null,
     plugins: plugins.map((p) => ({ name: p.name, version: p.version })),
     hooks: discoverHooks(cwd),
+    codeTools: discoverCodeTools(cwd, codeToolPaths),
     vaultStore,
   };
 }

@@ -2381,7 +2381,7 @@
         }
       },
       "kind": "group",
-      "summary": "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, hooks, vault, gates, scope}, audit declared-vs-discovered drift, sign the scope/RoE, and export/import a portable signed bundle to a fresh host (show|freeze|check|sign|verify|export|import; --json, --gate, --key, --out)",
+      "summary": "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, hooks, code tools, vault, gates, scope}, audit declared-vs-discovered drift, sign the scope/RoE, and export/import a portable signed bundle to a fresh host (show|freeze|check|sign|verify|export|import; --json, --gate, --key, --out)",
       "x-kit-accepted-flags": [
         "--env",
         "--gate",
