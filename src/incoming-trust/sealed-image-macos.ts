@@ -1,0 +1,141 @@
+import { execFileSync } from "node:child_process";
+import { lstatSync } from "node:fs";
+
+const DISKUTIL = "/usr/sbin/diskutil";
+const HDIUTIL = "/usr/bin/hdiutil";
+const PLUTIL = "/usr/bin/plutil";
+
+function run(tool: string, args: string[], cwd: string, input?: Buffer): Buffer {
+  return execFileSync(tool, args, {
+    cwd,
+    input,
+    env: { LANG: "C", PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: 120_000,
+    killSignal: "SIGKILL",
+    maxBuffer: 1024 * 1024,
+  });
+}
+
+function plist(bytes: Buffer, cwd: string): Record<string, unknown> {
+  const json = run(PLUTIL, ["-convert", "json", "-o", "-", "-"], cwd, bytes);
+  const value: unknown = JSON.parse(json.toString("utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid disk image metadata");
+  return value as Record<string, unknown>;
+}
+
+function entities(value: Record<string, unknown>): Record<string, unknown>[] {
+  const rows = value["system-entities"];
+  if (!Array.isArray(rows) || rows.some((row) => !row || typeof row !== "object"))
+    throw new Error("Invalid disk image entities");
+  return rows;
+}
+
+function apfsVolume(rows: Record<string, unknown>[]): string {
+  const volumes = rows.filter((row) => row["filesystem-type"] === "apfs");
+  const id = volumes[0]?.["dev-entry"];
+  if (volumes.length !== 1 || typeof id !== "string" || !/^disk\d+s\d+$/.test(id))
+    throw new Error("Unexpected APFS volume");
+  return id;
+}
+
+function isImageCreationDissent(error: unknown): boolean {
+  if (!(error instanceof Error) || !("status" in error) || typeof error.status !== "number")
+    return false;
+  const { stderr, stdout } = error as Error & { stderr?: Buffer; stdout?: Buffer };
+  const output = `${stderr ?? ""}\n${stdout ?? ""}`;
+  return /com\.apple\.DiskImages2\.ErrorDomain (?:error |Code=)156\b|Dissented with status 0xC010\b/i.test(
+    output,
+  );
+}
+
+function createDataImage(image: string, source: string, cwd: string): void {
+  const args = ["image", "create", "from", "--format", "UDRO", source, image];
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  // DiskImages can briefly fail to unmount its own temporary volume during creation.
+  for (const delay of [100, 300]) {
+    try {
+      run(DISKUTIL, args, cwd);
+      return;
+    } catch (error) {
+      if (!isImageCreationDissent(error)) throw error;
+      Atomics.wait(wait, 0, 0, delay);
+      if (lstatSync(image, { throwIfNoEntry: false })) throw error;
+    }
+  }
+  run(DISKUTIL, args, cwd);
+}
+
+export function mountReadOnlyImage(
+  image: string,
+  source: string,
+  mount: string,
+  cwd: string,
+  executable = false,
+): string {
+  if (executable) {
+    // The folder-based diskutil command can undersize an image for the Node executable.
+    run(
+      HDIUTIL,
+      ["create", "-fs", "APFS", "-format", "UDRO", "-size", "256m", "-srcfolder", source, image],
+      cwd,
+    );
+  } else {
+    createDataImage(image, source, cwd);
+  }
+  const attached = run(
+    DISKUTIL,
+    ["image", "attach", "--plist", "--readOnly", "--noMount", image],
+    cwd,
+  );
+  const volume = apfsVolume(entities(plist(attached, cwd)));
+  run(
+    DISKUTIL,
+    [
+      "mount",
+      "readOnly",
+      "nobrowse",
+      "-mountOptions",
+      executable ? "exec,nosuid,nodev" : "noexec,nosuid,nodev",
+      "-mountPoint",
+      mount,
+      volume,
+    ],
+    cwd,
+  );
+  return volume;
+}
+
+export function checkReadOnlyImage(mount: string, volume: string, cwd: string): void {
+  const info = plist(run(DISKUTIL, ["info", "-plist", mount], cwd), cwd);
+  if (
+    info.MountPoint !== mount ||
+    info.DeviceIdentifier !== volume ||
+    info.Writable !== false ||
+    info.WritableMedia !== false ||
+    info.WritableVolume !== false
+  )
+    throw new Error("Disk image is not mounted read-only");
+}
+
+function findImageDevice(image: string, cwd: string): string | undefined {
+  const { images } = plist(run(HDIUTIL, ["info", "-plist"], cwd), cwd);
+  if (!Array.isArray(images)) throw new Error("Invalid attached image list");
+  const matches = images.filter((row) => row && row["image-path"] === image);
+  if (matches.length === 0) return undefined;
+  const rows = entities(matches[0]);
+  const whole = rows.find((row) => row["content-hint"] === "GUID_partition_scheme");
+  const device = whole?.["dev-entry"];
+  if (matches.length !== 1 || typeof device !== "string" || !/^\/dev\/disk\d+$/.test(device))
+    throw new Error("Ambiguous attached image device");
+  return device;
+}
+
+/** Resolve the owned image before ejecting. Device identifiers can be reused after a detach. */
+export function ejectReadOnlyImage(image: string, cwd: string): void {
+  const device = findImageDevice(image, cwd);
+  if (device === undefined) return;
+  run(DISKUTIL, ["eject", device], cwd);
+  if (findImageDevice(image, cwd) !== undefined) throw new Error("Disk image is still attached");
+}

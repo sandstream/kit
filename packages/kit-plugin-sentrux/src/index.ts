@@ -4,4 +4,5 @@ export {
   type Severity,
   type SentruxViolation,
   type SentruxResult,
+  type SentruxRuleCoverage,
 } from "./scan.js";

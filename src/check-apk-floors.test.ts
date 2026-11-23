@@ -7,27 +7,33 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
-import { APK_FLOORS_NAME, checkApkFloors, type ApkFetcher } from "./check-apk-floors.js";
-import { tarOf } from "./apk-index.test-support.js";
+import { APK_FLOORS_NAME, type ApkFetcher } from "./check-apk-floors.js";
+import {
+  alpineFixtureFetcher,
+  alpineHttpFixture,
+  apkIndexFixture,
+  checkApkFloorsFixture,
+  secdbFixture,
+  secdbIndexFixture,
+} from "./apk-index.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
-const SECDB_MAIN = JSON.stringify({
-  packages: [{ pkg: { name: "expat", secfixes: { "2.10.0-r0": ["CVE-2026-117610"] } } }],
-});
-const INDEX = gzipSync(tarOf({ APKINDEX: "P:libexpat\nV:2.10.0-r0\no:expat\n" }));
+const SECDB_MAIN = secdbFixture("v3.24", "main", [
+  { pkg: { name: "expat", secfixes: { "2.10.0-r0": ["CVE-2026-117610"] } } },
+]);
+const INDEX = apkIndexFixture("v3.24", "P:libexpat\nV:2.10.0-r0\no:expat\n");
 
 function fakeFetcher(seen: string[]): ApkFetcher {
-  return async (url) => {
+  return alpineFixtureFetcher(async (url) => {
     seen.push(url);
-    if (url === "https://secdb.alpinelinux.org/") return Buffer.from('<a href="v3.24/">v3.24/</a>');
-    if (url.endsWith("/v3.24/main.json")) return Buffer.from(SECDB_MAIN);
-    if (url.endsWith("/v3.24/community.json")) return Buffer.from('{"packages":[]}');
+    if (url === "https://secdb.alpinelinux.org/") return secdbIndexFixture("v3.24");
+    if (url.endsWith("/v3.24/main.json")) return SECDB_MAIN;
+    if (url.endsWith("/v3.24/community.json")) return secdbFixture("v3.24", "community");
     if (url.endsWith("/v3.24/main/x86_64/APKINDEX.tar.gz")) return INDEX;
     if (url.endsWith("/v3.24/community/x86_64/APKINDEX.tar.gz"))
-      return gzipSync(tarOf({ APKINDEX: "" }));
+      return apkIndexFixture("v3.24", "");
     throw new Error(`unexpected ${url}`);
-  };
+  });
 }
 
 function repoWith(floor: string): string {
@@ -44,7 +50,7 @@ describe("check apk floors", () => {
     const dir = repoWith("libexpat>=2.8.5-r0");
     t.after(() => rmTemp(dir));
     const seen: string[] = [];
-    const r = await checkApkFloors(dir, fakeFetcher(seen), {});
+    const r = await checkApkFloorsFixture(dir, fakeFetcher(seen), {});
     assert.equal(r.name, APK_FLOORS_NAME);
     assert.equal(r.status, "warn");
     assert.match(r.detail, /libexpat>=2\.8\.5-r0 admits versions fixed in 2\.10\.0-r0 on v3\.24/);
@@ -57,7 +63,7 @@ describe("check apk floors", () => {
   it("passes a floor at the fix", async (t) => {
     const dir = repoWith("libexpat>=2.10.0-r0");
     t.after(() => rmTemp(dir));
-    const r = await checkApkFloors(dir, fakeFetcher([]), {});
+    const r = await checkApkFloorsFixture(dir, fakeFetcher([]), {});
     assert.equal(r.status, "pass");
   });
 
@@ -65,7 +71,7 @@ describe("check apk floors", () => {
     const dir = repoWith("libexpat>=2.8.5-r0");
     t.after(() => rmTemp(dir));
     const seen: string[] = [];
-    const r = await checkApkFloors(dir, fakeFetcher(seen), { KIT_AIRGAP: "1" });
+    const r = await checkApkFloorsFixture(dir, fakeFetcher(seen), { KIT_AIRGAP: "1" });
     assert.equal(r.status, "skip");
     assert.match(r.detail, /unverified/);
     assert.deepEqual(seen, []);
@@ -74,7 +80,7 @@ describe("check apk floors", () => {
   it("is a check that did not run, not a pass, when secdb is unreachable", async (t) => {
     const dir = repoWith("libexpat>=2.8.5-r0");
     t.after(() => rmTemp(dir));
-    const r = await checkApkFloors(
+    const r = await checkApkFloorsFixture(
       dir,
       async () => {
         throw new Error("offline");
@@ -89,14 +95,14 @@ describe("check apk floors", () => {
   it("skips a repository without apk floors", async (t) => {
     const dir = mkdtempSync(join(tmpdir(), "kit-apk-floors-"));
     t.after(() => rmTemp(dir));
-    const r = await checkApkFloors(dir, fakeFetcher([]), {});
+    const r = await checkApkFloorsFixture(dir, fakeFetcher([]), {});
     assert.equal(r.status, "skip");
   });
 
   it("names the branch and the four sources a pass was judged against", async (t) => {
     const dir = repoWith("libexpat>=2.10.0-r0");
     t.after(() => rmTemp(dir));
-    const r = await checkApkFloors(dir, fakeFetcher([]), {});
+    const r = await checkApkFloorsFixture(dir, fakeFetcher([]), {});
     assert.equal(r.status, "pass");
     assert.match(
       r.detail,
@@ -121,7 +127,7 @@ describe("check apk floors with a Dockerfile it cannot read", { skip: CHMOD_SKIP
       chmodSync(locked, 0o600);
       rmTemp(dir);
     });
-    const r = await checkApkFloors(dir, fakeFetcher([]), {});
+    const r = await checkApkFloorsFixture(dir, fakeFetcher([]), {});
     assert.equal(r.status, "warn");
     assert.equal(r.didNotRun, true);
     assert.match(r.detail, /not read: worker\/Dockerfile/);
@@ -135,7 +141,7 @@ describe("check apk floors with a Dockerfile it cannot read", { skip: CHMOD_SKIP
       chmodSync(only, 0o600);
       rmTemp(dir);
     });
-    const r = await checkApkFloors(dir, fakeFetcher([]), {});
+    const r = await checkApkFloorsFixture(dir, fakeFetcher([]), {});
     assert.equal(r.status, "warn");
     assert.equal(r.didNotRun, true);
     assert.match(r.detail, /not read: Dockerfile/);
@@ -150,12 +156,14 @@ describe("check apk floors with the default transport", () => {
     t.mock.method(globalThis, "fetch", async (url: string) => {
       calls++;
       if (url.endsWith("/main.json")) return new Response('{"packages":[]}', { status: 206 });
-      return new Response(new Uint8Array(await fakeFetcher([])(url)));
+      return alpineHttpFixture(await fakeFetcher([])(url));
     });
-    const result = await checkApkFloors(dir, undefined, {});
+    const result = await checkApkFloorsFixture(dir, undefined, {});
     assert.equal(result.status, "warn");
     assert.equal(result.didNotRun, true);
     assert.match(result.detail, /HTTP 206/);
+    assert.equal(result.evidenceStatus, "partial");
+    assert.equal(result.evidenceSources?.[1]?.status, "partial");
     assert.equal(calls, 5);
   });
 
@@ -169,9 +177,9 @@ describe("check apk floors with the default transport", () => {
         throw new TypeError("fetch failed", {
           cause: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
         });
-      return new Response(new Uint8Array(await fakeFetcher(seen)(url)));
+      return alpineHttpFixture(await fakeFetcher(seen)(url));
     });
-    const observed = await checkApkFloors(dir, undefined, {});
+    const observed = await checkApkFloorsFixture(dir, undefined, {});
     assert.equal(observed.status, "pass");
     assert.notEqual(observed.didNotRun, true);
     assert.equal(calls, 6);
@@ -188,7 +196,7 @@ describe("check apk floors with the default transport", () => {
         cause: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
       });
     });
-    const observed = await checkApkFloors(dir, undefined, {});
+    const observed = await checkApkFloorsFixture(dir, undefined, {});
     assert.equal(observed.status, "warn");
     assert.equal(observed.didNotRun, true);
     assert.match(observed.detail, /3 attempts.*ETIMEDOUT/);
@@ -201,12 +209,10 @@ describe("check apk floors with the default transport", () => {
     let calls = 0;
     t.mock.method(globalThis, "fetch", async (url: string) => {
       calls++;
-      const bytes = url.endsWith("/main.json")
-        ? Buffer.from("{invalid")
-        : await fakeFetcher([])(url);
-      return new Response(new Uint8Array(bytes));
+      if (url.endsWith("/main.json")) return new Response("{invalid");
+      return alpineHttpFixture(await fakeFetcher([])(url));
     });
-    const observed = await checkApkFloors(dir, undefined, {});
+    const observed = await checkApkFloorsFixture(dir, undefined, {});
     assert.equal(observed.status, "warn");
     assert.equal(observed.didNotRun, true);
     assert.equal(calls, 5);

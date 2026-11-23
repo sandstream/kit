@@ -55,6 +55,7 @@ export type AnchoredLogOutcome = "verified" | "stalled" | "missing" | "failed";
  */
 export type AnchoredLogDetail =
   | "verified"
+  | "empty-log"
   | "log-gone"
   | "unsealed-tail"
   | "anchor-key-changed"
@@ -89,10 +90,12 @@ export interface AnchoredLogsReport {
   results: AnchoredLogStatus[];
   counts: Record<AnchoredLogOutcome, number>;
   /**
-   * Whether the command should exit 0. Strict mode fails stalled seals.
-   * Required external verification also fails missing logs and an empty union.
+   * Whether the command should exit 0. Strict mode requires evidence and fails stalled seals.
+   * Required external verification also fails missing logs.
    */
   ok: boolean;
+  /** Why the report has no audit evidence. */
+  reason?: "no-anchors" | "all-logs-missing";
   /** Echoed back so a `--json` reader can tell which policy produced `ok`. */
   strict: boolean;
   requireExternal?: boolean;
@@ -128,6 +131,14 @@ function classifyIntactSeal(
   a: AnchorVerifyResult,
   requireExternal?: boolean,
 ): AnchoredLogStatus {
+  if (a.entries === 0) {
+    return {
+      ...common,
+      outcome: "failed",
+      detail: "empty-log",
+      message: "The audit log is empty. No entries were verified.",
+    };
+  }
   const tail = a.newSinceAnchor ?? 0;
   const verdict = decideAnchorVerdict({
     result: a,
@@ -336,7 +347,6 @@ export async function verifyAnchoredLogs(
     ...report,
     strict,
     requireExternal: opts.requireExternal === true,
-    ok: report.ok && (!opts.requireExternal || results.length > 0),
   };
 }
 
@@ -355,10 +365,14 @@ export function summarizeAnchoredLogs(
     failed: 0,
   };
   for (const r of results) counts[r.outcome]++;
+  let reason: AnchoredLogsReport["reason"];
+  if (results.length === 0) reason = "no-anchors";
+  else if (results.every((row) => row.detail === "log-gone")) reason = "all-logs-missing";
   return {
     results: [...results],
     counts,
-    ok: counts.failed === 0 && (!strict || counts.stalled === 0),
+    ok: counts.failed === 0 && (!strict || (counts.stalled === 0 && counts.verified > 0)),
+    reason,
     strict,
   };
 }

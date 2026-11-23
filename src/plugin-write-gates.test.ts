@@ -93,7 +93,8 @@ const NON_MUTATING_NON_GET: Record<string, string> = {
   "fly/gql":
     "shared GraphQL transport — the mutating callers (setAppSecrets, unsetAppSecrets) gate",
   "wiz/makeClient": "OAuth client-credentials grant — the POST obtains a token, it writes nothing",
-  "wiz/fetchIssues": "GraphQL read — the query travels in a POST body",
+  "wiz/readWizPage":
+    "The POST body contains the fixed GraphQL Issues query and pagination variables",
   "sentry/postIssueComment":
     "internal helper reached only from updateIssue, which is gated before it runs",
 };

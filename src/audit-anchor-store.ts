@@ -9,6 +9,8 @@ import { externalReceiptIdentity, validExternalStatement } from "./audit-externa
 
 export type AnchorStore = Record<string, AnchorRecord>;
 
+export class AuditAnchorIndexAccessError extends Error {}
+
 export async function readAnchorStore(path: string): Promise<AnchorStore> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
@@ -20,9 +22,11 @@ export async function readAnchorStore(path: string): Promise<AnchorStore> {
     }
     return parsed as AnchorStore;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    // eslint-disable-next-line preserve-caught-error -- Parser errors can disclose index content.
-    throw new Error(
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return {};
+    const Failure = code === "EACCES" || code === "EPERM" ? AuditAnchorIndexAccessError : Error;
+    // Parser errors can disclose index content.
+    throw new Failure(
       "The audit anchor index is unreadable or invalid. Preserve it before recovery.",
     );
   }

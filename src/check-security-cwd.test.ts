@@ -34,7 +34,12 @@ import {
   checkSecretsInCode,
   checkSecurity,
 } from "./check-security.js";
-import { fakeNpmAudit, npmPath } from "./check-security-cwd-fixture.test-support.js";
+import {
+  fakeNpmAudit,
+  initNpmAuditTarget,
+  npmPath,
+  writeNpmAuditCwdFixture,
+} from "./check-security-cwd-fixture.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 /** A project whose .gitignore covers every .env spelling the check looks for. */
@@ -278,17 +283,9 @@ describe("target-sensitive security subprocesses use the governed tree", () => {
     const target = mkdtempSync(join(tmpdir(), "kit-npm-target-"));
     const bin = mkdtempSync(join(tmpdir(), "kit-npm-bin-"));
     try {
-      writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
-      writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
+      initNpmAuditTarget(target);
       writeFileSync(join(target, ".target-marker"), "target\n");
-      fakeNpmAudit(
-        bin,
-        target,
-        `if [ -f .target-marker ]; then\n  printf '%s' '{"metadata":{"vulnerabilities":{"high":1,"critical":0}}}'\n  exit 1\nfi\nprintf '%s' '{"metadata":{"vulnerabilities":{"high":0,"critical":0}}}'`,
-        `const high = require('node:fs').existsSync('.target-marker') ? 1 : 0;
-process.stdout.write(JSON.stringify({ metadata: { vulnerabilities: { high, critical: 0 } } }));
-process.exit(high ? 1 : 0);`,
-      );
+      writeNpmAuditCwdFixture(bin, target);
 
       const result = await withPath(npmPath(bin), () => inCwd(caller, () => checkNpmAudit(target)));
       assert.equal(result.status, "fail");
@@ -304,8 +301,7 @@ process.exit(high ? 1 : 0);`,
     const target = mkdtempSync(join(tmpdir(), "kit-npm-timeout-"));
     const bin = mkdtempSync(join(tmpdir(), "kit-npm-bin-"));
     try {
-      writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
-      writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
+      initNpmAuditTarget(target);
       fakeNpmAudit(bin, target, "sleep 1", "setTimeout(() => {}, 1000);");
 
       const result = await withPath(npmPath(bin), () =>
@@ -325,8 +321,7 @@ process.exit(high ? 1 : 0);`,
     const target = mkdtempSync(join(tmpdir(), "kit-npm-network-"));
     const bin = mkdtempSync(join(tmpdir(), "kit-npm-bin-"));
     try {
-      writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
-      writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
+      initNpmAuditTarget(target);
       fakeNpmAudit(
         bin,
         target,

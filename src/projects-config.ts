@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { z } from "zod";
 
@@ -34,6 +34,7 @@ export const ProjectsSchema = z
 export interface RefusedProject {
   path: string;
   reason: string;
+  evidenceStatus: "missing" | "unsupported" | "unavailable";
 }
 
 export interface ResolvedProjects {
@@ -48,16 +49,35 @@ function trimSlashes(path: string): string {
   return path.slice(0, end);
 }
 
-function judge(root: string, declared: string): { path: string } | { reason: string } {
-  if (leavesRepo(declared)) return { reason: "outside the repository" };
+type ProjectRefusal = Omit<RefusedProject, "path">;
+const OUTSIDE = { evidenceStatus: "unsupported", reason: "outside the repository" } as const;
+const ROOT = {
+  evidenceStatus: "unsupported",
+  reason: "the root is the repo level, not a project",
+} as const;
+
+function checkDirectory(root: string, path: string): ProjectRefusal | undefined {
+  const absolute = resolve(root, path);
+  try {
+    const resolved = realpathSync(absolute);
+    const back = relative(realpathSync(root), resolved);
+    if (back === "") return ROOT;
+    if (leavesRepo(back)) return OUTSIDE;
+    if (!statSync(resolved).isDirectory())
+      return { evidenceStatus: "unsupported", reason: "not a directory" };
+    accessSync(resolved, constants.R_OK | constants.X_OK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { evidenceStatus: "missing", reason: "does not exist" };
+    return { evidenceStatus: "unavailable", reason: "could not read the project directory" };
+  }
+}
+
+function judge(root: string, declared: string): { path: string } | ProjectRefusal {
+  if (leavesRepo(declared)) return OUTSIDE;
   const path = trimSlashes(normalize(declared));
-  if (path === "." || path === "") return { reason: "the root is the repo level, not a project" };
-  const abs = resolve(root, path);
-  if (!existsSync(abs)) return { reason: "does not exist" };
-  if (!statSync(abs).isDirectory()) return { reason: "not a directory" };
-  const back = relative(realpathSync(root), realpathSync(abs));
-  if (back.startsWith("..") || isAbsolute(back)) return { reason: "outside the repository" };
-  return { path: path.split("\\").join("/") };
+  if (path === "." || path === "") return ROOT;
+  return checkDirectory(root, path) ?? { path: path.split("\\").join("/") };
 }
 
 /** The declared project paths that are real directories inside the repo, and the ones refused. */
@@ -69,7 +89,7 @@ export function resolveProjectPaths(
   const refused: RefusedProject[] = [];
   for (const d of declared ?? []) {
     const verdict = judge(join(root), d);
-    if ("reason" in verdict) refused.push({ path: d, reason: verdict.reason });
+    if ("reason" in verdict) refused.push({ path: d, ...verdict });
     else if (!projects.includes(verdict.path)) projects.push(verdict.path);
   }
   return { projects, refused };

@@ -10,6 +10,7 @@ import type { AddressInfo } from "node:net";
 import type { kitConfig } from "./config.js";
 import { lockedPackagesAt, tagDeployed, tagWithDeployed } from "./deployed-exposure.js";
 import { osvFinding } from "./osv-summary.js";
+import { readOsvReport } from "./osv-report.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const git = (cwd: string, ...args: string[]) =>
@@ -134,12 +135,12 @@ const osvPayload = JSON.stringify({
       packages: [
         {
           package: { name: "lodash", version: "4.17.20", ecosystem: "npm" },
-          vulnerabilities: [{}],
+          vulnerabilities: [{ id: "fixture-advisory" }],
           groups: [{ max_severity: "7.5" }],
         },
         {
           package: { name: "hono", version: "4.13.7", ecosystem: "npm" },
-          vulnerabilities: [{}],
+          vulnerabilities: [{ id: "fixture-advisory" }],
           groups: [{ max_severity: "5.3" }],
         },
       ],
@@ -147,9 +148,11 @@ const osvPayload = JSON.stringify({
   ],
 });
 
+const osvReport = readOsvReport(osvPayload);
+
 describe("osvFinding exposes the affected packages", () => {
   it("lists name and version for every vulnerable package", () => {
-    const r = osvFinding("osv-scanner (deps)", osvPayload);
+    const r = osvFinding("osv-scanner (deps)", osvReport);
     assert.deepEqual(r.affected, [
       { name: "lodash", version: "4.17.20" },
       { name: "hono", version: "4.13.7" },
@@ -158,7 +161,7 @@ describe("osvFinding exposes the affected packages", () => {
 });
 
 describe("tagDeployed", () => {
-  const row = (): SecurityCheckResult => osvFinding("osv-scanner (deps)", osvPayload);
+  const row = (): SecurityCheckResult => osvFinding("osv-scanner (deps)", osvReport);
 
   it("separates what is in the deployed lockfile from what is only on the branch", () => {
     const [tagged] = tagDeployed([row()], {
@@ -210,7 +213,7 @@ async function withService(body: unknown, fn: (url: string) => Promise<void>): P
 
 const config = (url: string): kitConfig =>
   ({ deploy: { health: { production: { url } } } }) as unknown as kitConfig;
-const row = (): SecurityCheckResult[] => [osvFinding("osv-scanner (deps)", osvPayload)];
+const row = (): SecurityCheckResult[] => [osvFinding("osv-scanner (deps)", osvReport)];
 
 describe("tagWithDeployed reads the commit from the service and the lockfile from git", () => {
   it("tags against the commit the service reports, not the checked-out one", async () => {

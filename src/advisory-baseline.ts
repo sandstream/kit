@@ -6,7 +6,7 @@
  * moment something NEW appears. The design that makes this work, rather than rot:
  *
  *   - **The repo's own package manager does the auditing.** npm, pnpm, yarn or bun, whichever the
- *     lockfile says. No new tool to install, and no cloud service that gets handed the manifest.
+ *     lockfile says. Completeness is assessed against that manager's report contract.
  *   - **The known list is data, not code** (`.kit/advisories.json`), so a dependency bump produces a
  *     small readable diff instead of a code change.
  *   - **The file may only shrink.** An entry that no longer applies is an ERROR, not a shrug:
@@ -16,16 +16,24 @@
  *   - **Remaining debt is summarised per severity** on every run, so the size is visible without
  *     opening the file.
  *
- * The parser is deliberately shape-tolerant. npm, pnpm, yarn-berry and bun each report audits in a
- * different JSON shape, and all four bury the same three facts — a GHSA id, a package name, a
- * severity — at different depths. Walking the tree for those three is more durable than four
- * bespoke parsers, and when the walk finds nothing in a non-zero exit the check says it could not
- * run rather than reporting a clean audit.
+ * Package managers validate different sources and emit different evidence. Parse their runtime
+ * outcomes before deciding whether it is safe to compare with or update a baseline.
  */
 
 import { readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { npmAuditArgs, npmAuditGap, readNpmAuditReport } from "./npm-audit-report.js";
+import {
+  npmAuditLockfile,
+  npmScopeGap,
+  readNpmAuditScope,
+  type NpmAuditScope,
+} from "./npm-audit-scope.js";
+import type { ScannerEvidenceStatus } from "./check-scanner-evidence.js";
+import { managerAuditRunner, runManagerAudit } from "./manager-audit-run.js";
+import { isAdditionalManager } from "./manager-audit-scope.js";
+import type { ExecResult } from "./utils/execFileNoThrow.js";
 
 export const ADVISORY_BASELINE_FILE = ".kit/advisories.json";
 
@@ -48,6 +56,8 @@ export interface Baseline {
 export interface AuditRunner {
   manager: string;
   command: string[];
+  proofCommand?: string[];
+  versionCommand?: string[];
 }
 
 /** Which package manager's audit to run, decided by the lockfile that is actually committed. */
@@ -60,13 +70,11 @@ export async function detectAuditRunner(root: string): Promise<AuditRunner | nul
       return false;
     }
   };
-  if (await has("bun.lockb")) return { manager: "bun", command: ["bun", "audit", "--json"] };
-  if (await has("bun.lock")) return { manager: "bun", command: ["bun", "audit", "--json"] };
-  if (await has("pnpm-lock.yaml")) return { manager: "pnpm", command: ["pnpm", "audit", "--json"] };
-  if (await has("yarn.lock"))
-    return { manager: "yarn", command: ["yarn", "npm", "audit", "--json", "--all"] };
-  if (await has("package-lock.json"))
-    return { manager: "npm", command: ["npm", "audit", "--json"] };
+  if (await has("bun.lockb")) return managerAuditRunner("bun");
+  if (await has("bun.lock")) return managerAuditRunner("bun");
+  if (await has("pnpm-lock.yaml")) return managerAuditRunner("pnpm");
+  if (await has("yarn.lock")) return managerAuditRunner("yarn");
+  if (npmAuditLockfile(root)) return { manager: "npm", command: ["npm", ...npmAuditArgs("info")] };
   return null;
 }
 
@@ -108,11 +116,8 @@ const PACKAGE_NAME = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 const GHSA = /GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}/i;
 
 /**
- * Pull advisories out of whatever shape the manager produced.
- *
- * Every node in the tree is examined for the three facts that matter. A node contributes an
- * advisory only when all three are present, so partial structures are skipped rather than guessed
- * at — and the caller can tell "no advisories" from "could not read the output" by the count.
+ * Extract identifiers from an already validated report. The count alone does not establish
+ * completeness. Each subprocess also needs its own report and coverage checks.
  */
 export function parseAuditJson(text: string): Advisory[] {
   const found = new Map<string, Advisory>();
@@ -256,73 +261,82 @@ export async function writeBaseline(root: string, advisories: Advisory[]): Promi
   await writeFile(join(root, ADVISORY_BASELINE_FILE), renderBaseline(advisories), "utf-8");
 }
 
-/**
- * `npm audit --json` prints `{"error": {...}}` when it cannot reach the registry. That is valid JSON
- * with no advisories, so without this check a failed audit reads as a clean one.
- */
-export function auditJsonError(text: string): string | undefined {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("{")) return undefined;
-  try {
-    const value = JSON.parse(trimmed) as { error?: unknown };
-    if (value.error === undefined) return undefined;
-    const e = value.error as { code?: unknown; summary?: unknown };
-    const detail =
-      typeof value.error === "string" ? value.error : `${e.code ?? ""} ${e.summary ?? ""}`;
-    return `audit reported an error: ${detail.trim().slice(0, 120)}`;
-  } catch {
-    return undefined;
-  }
-}
-
 export interface AuditOutcome {
   advisories: Advisory[];
   /** Set when the audit could not produce a readable result — never treated as "clean". */
   error?: string;
+  evidenceStatus?: ScannerEvidenceStatus;
   manager: string;
 }
 
-/**
- * Run the manager's audit and parse it.
- *
- * A non-zero exit is normal — npm audit exits non-zero when it finds anything — so the exit code is
- * not the signal. The signal is whether the output parsed into advisories: no advisories AND no
- * parseable JSON means the audit did not run, and that must not read as a clean result.
- */
+function npmExecution(result: SpawnSyncReturns<string>): ExecResult {
+  const { error, status, stdout, stderr } = result;
+  const code = error && "code" in error ? error.code : undefined;
+  return {
+    stdout: stdout ?? "",
+    stderr: stderr ?? "",
+    exitCode: status ?? 1,
+    ok: status === 0 && !error,
+    noNumericExitStatus: status === null ? true : undefined,
+    didNotStart: code === "ENOENT" || code === "EACCES" ? true : undefined,
+    truncated: code === "ENOBUFS",
+    timedOut: code === "ETIMEDOUT",
+  };
+}
+
+function npmOutcome(
+  result: SpawnSyncReturns<string>,
+  root: string,
+  scope: NpmAuditScope,
+): AuditOutcome {
+  const execution = npmExecution(result);
+  const report = readNpmAuditReport(execution.stdout);
+  const gap = npmAuditGap(report, execution, "info") ?? npmScopeGap(root, scope, report.inventory);
+  const advisories = parseAuditJson(JSON.stringify({ vulnerabilities: report.vulnerabilities }));
+  const missingId = Object.values(report.vulnerabilities).some(({ via }) =>
+    via.some((entry) => typeof entry !== "string" && !GHSA.test(entry.url)),
+  );
+  const reason =
+    gap?.reason ??
+    (missingId ? "npm audit contains an advisory without a baseline GHSA identifier" : undefined);
+  return {
+    advisories,
+    error: reason,
+    evidenceStatus:
+      gap?.status ?? (missingId ? "partial" : report.count ? "complete" : "complete-empty"),
+    manager: "npm",
+  };
+}
+
+/** Run the selected manager and validate the evidence before returning a baseline verdict. */
 export function runAudit(
   root: string,
   runner: AuditRunner,
   timeoutMs = 180_000,
   env: NodeJS.ProcessEnv = process.env,
 ): AuditOutcome {
+  const { manager } = runner;
+  if (isAdditionalManager(manager)) return runManagerAudit(root, runner, manager, timeoutMs, env);
+  if (manager !== "npm") {
+    return {
+      manager,
+      advisories: [],
+      evidenceStatus: "unsupported",
+      error: "unsupported audit manager",
+    };
+  }
+
+  const scope = readNpmAuditScope(root);
+  if ("status" in scope) {
+    return { advisories: [], error: scope.reason, evidenceStatus: scope.status, manager };
+  }
   const [bin, ...args] = runner.command;
   const r = spawnSync(bin, args, {
     cwd: root,
     encoding: "utf-8",
     timeout: timeoutMs,
+    maxBuffer: 64 * 1024 * 1024,
     env: { ...env, NO_COLOR: "1" },
   });
-  if (r.error) return { advisories: [], error: r.error.message, manager: runner.manager };
-  if (r.status === null) {
-    return {
-      advisories: [],
-      error: `${runner.manager} audit was stopped (${r.signal})`,
-      manager: runner.manager,
-    };
-  }
-  const out = r.stdout ?? "";
-  const reported = auditJsonError(out);
-  if (reported) return { advisories: [], error: reported, manager: runner.manager };
-  const advisories = parseAuditJson(out);
-  if (advisories.length === 0) {
-    const looksLikeJson = out.trimStart().startsWith("{") || out.trimStart().startsWith("[");
-    if (!looksLikeJson) {
-      return {
-        advisories: [],
-        error: `${runner.manager} audit produced no JSON (${(r.stderr ?? "").trim().slice(0, 80) || `exit ${r.status}`})`,
-        manager: runner.manager,
-      };
-    }
-  }
-  return { advisories, manager: runner.manager };
+  return npmOutcome(r, root, scope);
 }

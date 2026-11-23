@@ -29,7 +29,12 @@ import { applyScanAllowlist } from "../scan-allow-run.js";
 import { existsSync } from "node:fs";
 import { cmdSecurityScanBuild } from "./security-scan-build.js";
 import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
-import { scanTranscripts } from "../scan-transcripts.js";
+import {
+  scanTranscripts,
+  transcriptCoverageDetail,
+  type TranscriptHit,
+} from "../scan-transcripts.js";
+import { sanitizeDisplayText } from "../display-text.js";
 import { sampleCosts } from "../cost-monitor.js";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "../check-gitignore.js";
 import { cmdSecurityVerifyPull } from "./security-verify-pull.js";
@@ -523,28 +528,41 @@ async function cmdSecurityScanArtifact(): Promise<boolean> {
 }
 
 async function cmdSecurityScanTranscripts(): Promise<boolean> {
-  const hits = await scanTranscripts(process.cwd());
-  if (hits.length === 0) {
-    console.log(
-      `${c.green}✓ scan-transcripts: no credentials found in agent state or prompt cache.${c.reset}`,
+  const scan = await scanTranscripts();
+  if (scan.evidenceStatus === "missing") {
+    console.error(
+      `${c.yellow}? scan-transcripts: No supported agent transcript directories.${c.reset}`,
     );
+    return false;
+  }
+  const coverage = transcriptCoverageDetail(scan);
+  if (scan.evidenceStatus === "complete-empty") {
+    console.log(`${c.green}✓ scan-transcripts: No credentials found. ${coverage}${c.reset}`);
     return true;
   }
+  if (scan.hits.length > 0) printTranscriptHits(scan.hits);
+  if (scan.evidenceStatus !== "complete")
+    console.error(`${c.yellow}? scan-transcripts: ${coverage}${c.reset}`);
+  return false;
+}
+
+function printTranscriptHits(hits: TranscriptHit[]): void {
   const total = hits.reduce((sum, h) => sum + h.findings.length, 0);
   console.error(
     `${c.red}✗ scan-transcripts: ${total} potential secret(s) in ${hits.length} transcript/cache file(s):${c.reset}`,
   );
   for (const hit of hits.slice(0, 20)) {
-    const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
-    console.error(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
+    const labels = hit.findings.map((f) => f.label).join(", ");
+    console.error(
+      `  ${c.red}•${c.reset} ${sanitizeDisplayText(hit.file)}  ${c.dim}${labels}${c.reset}`,
+    );
   }
   if (hits.length > 20) {
     console.error(`  ${c.dim}… and ${hits.length - 20} more${c.reset}`);
   }
   console.error(
-    `\n${c.yellow}Rotate the leaked credential and purge the offending file(s) — they get replayed into every future agent prompt until cleared.${c.reset}\n`,
+    `\n${c.yellow}Rotate the leaked credential and purge the affected files.${c.reset}\n`,
   );
-  return false;
 }
 
 async function cmdSecurityCosts(): Promise<boolean> {
@@ -741,6 +759,9 @@ async function cmdSecurityAdvisories(): Promise<boolean> {
   const outcome = runAudit(root, runner);
   if (outcome.error) {
     console.error(`${c.red}Audit could not run: ${outcome.error}${c.reset}`);
+    for (const a of outcome.advisories.slice(0, 3)) {
+      console.error(`  Confirmed finding: ${a.package} ${a.id} (${a.severity})`);
+    }
     return false;
   }
 

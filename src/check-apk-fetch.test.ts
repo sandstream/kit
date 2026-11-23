@@ -18,11 +18,16 @@ it("recovers from the observed dual-stack failure with a bounded retry", async (
   t.mock.method(globalThis, "fetch", async (input: string, options: RequestInit) => {
     assert.equal(input, URL);
     assert.equal(options.redirect, "error");
+    assert.equal(options.cache, "no-cache");
     assert.ok(options.signal);
     if (++calls === 1) throw connectionFailure();
-    return new Response("complete source");
+    return new Response("complete source", {
+      headers: { "last-modified": "Fri, 01 May 2026 15:00:00 GMT" },
+    });
   });
-  assert.equal((await defaultApkFetcher(URL)).toString(), "complete source");
+  const response = await defaultApkFetcher(URL);
+  assert.equal(response.body.toString(), "complete source");
+  assert.equal(response.lastModified, "Fri, 01 May 2026 15:00:00 GMT");
   assert.equal(calls, 2);
 });
 
@@ -47,7 +52,7 @@ for (const status of [408, 429, 503]) {
     t.mock.method(globalThis, "fetch", async () => {
       return ++calls === 1 ? new Response(null, { status }) : new Response("complete");
     });
-    assert.equal((await defaultApkFetcher(URL)).toString(), "complete");
+    assert.equal((await defaultApkFetcher(URL)).body.toString(), "complete");
     assert.equal(calls, 2);
   });
 }
@@ -123,7 +128,7 @@ it("accepts a complete body at the byte limit", async (t) => {
         headers: { "content-length": String(payload.length) },
       }),
   );
-  const bytes = await defaultApkFetcher(URL);
+  const { body: bytes } = await defaultApkFetcher(URL);
   assert.equal(bytes.length, payload.length);
   assert.equal(bytes[0], 19);
   assert.equal(bytes[bytes.length - 1], 23);
@@ -147,7 +152,7 @@ it("retries a timeout before accepting a complete source", async (t) => {
     if (++calls === 1) throw new DOMException("attempt timeout", "TimeoutError");
     return new Response("complete");
   });
-  assert.equal((await defaultApkFetcher(URL)).toString(), "complete");
+  assert.equal((await defaultApkFetcher(URL)).body.toString(), "complete");
   assert.equal(calls, 2);
 });
 
@@ -165,7 +170,7 @@ it("discards a partial body before retrying a connection reset", async (t) => {
       }),
     );
   });
-  assert.equal((await defaultApkFetcher(URL)).toString(), "complete");
+  assert.equal((await defaultApkFetcher(URL)).body.toString(), "complete");
   assert.equal(calls, 2);
 });
 

@@ -25,3 +25,10 @@ describe("apk version ordering", () => {
     assert.equal(compareApkVersions("latest", "1.0"), null);
   });
 });
+
+it("leaves numerically ambiguous versions unverified", () => {
+  assert.equal(compareApkVersions("9007199254740992", "9007199254740993"), null);
+  assert.equal(compareApkVersions("1.0-r9007199254740992", "1.0-r1"), null);
+  assert.equal(compareApkVersions("1.0_rc9007199254740992", "1.0"), null);
+  assert.equal(compareApkVersions("9007199254740990", "9007199254740991"), -1);
+});

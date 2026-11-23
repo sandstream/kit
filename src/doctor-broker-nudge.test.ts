@@ -8,16 +8,31 @@ import { loadOrCreateIdentity } from "./identity.js";
 import { PROFILE_FILE } from "./profile/schema.js";
 import { signProfile } from "./profile/sign.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
-import { chainedAuditLog, observeEvent } from "./audit-chain.test-support.js";
+import { chainedAuditLog, observeEvent, writeSealedAuditLog } from "./audit-chain.test-support.js";
+
+const rtRow = async (proj: string) =>
+  (await runDoctor({}, proj)).checks.find((c) => c.name === "exec-broker runtime");
+
+async function signedObserveProfile(proj: string): Promise<void> {
+  writeFileSync(
+    join(proj, PROFILE_FILE),
+    `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = "observe"\n`,
+    "utf-8",
+  );
+  await signProfile(proj);
+}
 
 describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () => {
   let idDir: string;
   let proj: string;
   let savedId: string | undefined;
+  let savedAnchor: string | undefined;
 
   beforeEach(() => {
     idDir = mkdtempSync(join(tmpdir(), "kit-id-"));
     proj = mkdtempSync(join(tmpdir(), "kit-nudge-"));
+    savedAnchor = process.env.KIT_AUDIT_ANCHOR_DIR;
+    process.env.KIT_AUDIT_ANCHOR_DIR = join(idDir, "anchors");
     savedId = process.env.KIT_IDENTITY_DIR;
     process.env.KIT_IDENTITY_DIR = idDir;
     loadOrCreateIdentity();
@@ -26,61 +41,61 @@ describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () =>
   afterEach(() => {
     if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = savedId;
+    if (savedAnchor === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
+    else process.env.KIT_AUDIT_ANCHOR_DIR = savedAnchor;
     rmTemp(idDir);
     rmTemp(proj);
   });
 
-  const observe = observeEvent;
-  const rtRow = async () =>
-    (await runDoctor({}, proj)).checks.find((c) => c.name === "exec-broker runtime");
+  it("names the reason for missing or empty observe evidence", async () => {
+    await signedObserveProfile(proj);
+    const missing = await rtRow(proj);
+    assert.equal(missing?.status, "warn");
+    assert.match(missing.detail, /log is missing/i);
 
-  async function signedObserveProfile(): Promise<void> {
-    writeFileSync(
-      join(proj, PROFILE_FILE),
-      `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = "observe"\n`,
-      "utf-8",
-    );
-    await signProfile(proj);
-  }
+    writeFileSync(join(proj, ".kit-audit.jsonl"), "");
+    const empty = await rtRow(proj);
+    assert.equal(empty?.status, "warn");
+    assert.match(empty.detail, /log is empty/i);
+  });
 
   it("a clean observe window nudges to 'kit broker enforce'", async () => {
-    await signedObserveProfile();
-    writeFileSync(
+    await signedObserveProfile(proj);
+    await writeSealedAuditLog(
       join(proj, ".kit-audit.jsonl"),
-      chainedAuditLog([observe([]), observe([])]),
-      "utf-8",
+      chainedAuditLog([observeEvent([]), observeEvent([])]),
+      join(idDir, "anchors"),
     );
-    const row = await rtRow();
-    assert.ok(row);
-    assert.equal(row.status, "warn");
+    const row = await rtRow(proj);
+    assert.equal(row?.status, "warn");
     assert.match(row.detail, /kit broker enforce/);
     assert.match(row.detail, /none would be denied/);
   });
 
   it("a would-block observe window points to enforce-readiness, not the flip", async () => {
-    await signedObserveProfile();
-    writeFileSync(
+    await signedObserveProfile(proj);
+    await writeSealedAuditLog(
       join(proj, ".kit-audit.jsonl"),
-      chainedAuditLog([observe(["egress evil.test not in scope"])]),
-      "utf-8",
+      chainedAuditLog([observeEvent(["egress evil.test not in scope"])]),
+      join(idDir, "anchors"),
     );
-    const row = await rtRow();
-    assert.ok(row);
-    assert.equal(row.status, "warn");
+    const row = await rtRow(proj);
+    assert.equal(row?.status, "warn");
     assert.match(row.detail, /enforce-readiness/);
     assert.doesNotMatch(row.detail, /Safe to graduate/);
   });
 
   it("a log with a broken chain never nudges to the flip", async () => {
-    await signedObserveProfile();
-    const lines = chainedAuditLog([observe([]), observe(["egress evil.test"]), observe([])]).split(
-      "\n",
-    );
+    await signedObserveProfile(proj);
+    const lines = chainedAuditLog([
+      observeEvent([]),
+      observeEvent(["egress evil.test"]),
+      observeEvent([]),
+    ]).split("\n");
     writeFileSync(join(proj, ".kit-audit.jsonl"), [lines[0], lines[2], ""].join("\n"), "utf-8");
-    const row = await rtRow();
-    assert.ok(row);
-    assert.equal(row.status, "warn");
-    assert.match(row.detail, /audit chain is broken/);
+    const row = await rtRow(proj);
+    assert.equal(row?.status, "warn");
+    assert.match(row.detail, /Cannot verify the OBSERVE audit log/);
     assert.match(row.detail, /kit audit verify/);
     assert.doesNotMatch(row.detail, /Safe to graduate/);
   });

@@ -11,21 +11,21 @@ import {
   fstatSync,
   lstatSync,
   openSync,
-  readFileSync,
+  readSync,
 } from "node:fs";
 import { sameIdentity } from "./utils/same-file.js";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
 /**
- * The file's text, or null when it does not exist. Throws a fixed-message error otherwise.
+ * The file's bytes, or null when it does not exist. Throws a fixed-message error otherwise.
  * The file is opened first and every check runs on the open descriptor, never on the path, so it
  * cannot be swapped between a check and the read. `O_NOFOLLOW` makes the open itself refuse a
  * symlink and `O_NONBLOCK` keeps a named pipe from waiting for a writer, where the platform has
  * them. Where it has no `O_NOFOLLOW` (Windows) the opened file is compared with the path's own
  * entry afterwards, and the read still goes through the descriptor.
  */
-export function readRegularFileIfPresent(path: string): string | null {
+export function readRegularFileBytesIfPresent(path: string, maxBytes = MAX_BYTES): Buffer | null {
   let fd: number;
   try {
     fd = openSync(
@@ -41,12 +41,29 @@ export function readRegularFileIfPresent(path: string): string | null {
   try {
     const stat = fstatSync(fd, { bigint: true });
     if (!stat.isFile()) throw new Error("is not a regular file");
-    if (stat.size > BigInt(MAX_BYTES)) throw new Error("is too large to read");
+    if (stat.size > BigInt(maxBytes)) throw new Error("is too large to read");
     if (constants.O_NOFOLLOW === undefined) rejectLink(path, stat);
-    return readFileSync(fd, "utf-8");
+    return readFileBytes(fd, Number(stat.size));
   } finally {
     closeSync(fd);
   }
+}
+
+function readFileBytes(fd: number, expectedSize: number): Buffer {
+  const bytes = Buffer.allocUnsafe(expectedSize + 1);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const read = readSync(fd, bytes, offset, bytes.length - offset, null);
+    if (read === 0) break;
+    offset += read;
+  }
+  if (offset !== expectedSize) throw new Error("file size changed while it was read");
+  return bytes.subarray(0, offset);
+}
+
+/** The UTF-8 text of a checked regular file, or null when it does not exist. */
+export function readRegularFileIfPresent(path: string): string | null {
+  return readRegularFileBytesIfPresent(path)?.toString("utf8") ?? null;
 }
 
 /** Without `O_NOFOLLOW`: refuse when the path is a link or no longer names the file that was opened. */

@@ -8,19 +8,20 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  existsSync,
-  chmodSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { generateKeyPairSync, sign as cryptoSign, createHash } from "node:crypto";
-import { runCli, type CliResult } from "../cli-run.test-support.js";
 import { rmTemp } from "../temp-cleanup.test-support.js";
+import {
+  EMPTY_SARIF,
+  makeFixture,
+  scan,
+  SOCKET_FAIL,
+  SOCKET_PASS,
+  toml,
+  tool,
+  type Fixture,
+} from "./scan.test-support.js";
 
 // Fake tools are POSIX shell scripts, and Windows cannot run them from execFile.
 const skip = process.platform === "win32" ? "fake tools are /bin/sh scripts (POSIX only)" : false;
@@ -28,63 +29,15 @@ const skip = process.platform === "win32" ? "fake tools are /bin/sh scripts (POS
 const ANSI = /\x1b\[[0-9;]*m/g;
 const plain = (s: string) => s.replace(ANSI, "");
 
-const EMPTY_SARIF = JSON.stringify({
-  version: "2.1.0",
-  runs: [{ tool: { driver: { name: "grype", rules: [] } }, results: [] }],
-});
-
-interface Fixture {
-  dir: string;
-  bin: string;
-}
-
-function makeFixture(): Fixture {
-  const dir = mkdtempSync(join(tmpdir(), "kit-scan-char-"));
-  const bin = join(dir, ".fakebin");
-  mkdirSync(bin);
-  writeFileSync(join(dir, "package.json"), '{"name":"t","dependencies":{}}');
-  // `which <tool>` prints the fake's path when a fake exists, else exits 1 (not installed).
-  tool(
-    { dir, bin },
-    "which",
-    `[ -x "${bin}/$1" ] && [ "$1" != which ] && { echo "${bin}/$1"; exit 0; }\nexit 1`,
-  );
-  return { dir, bin };
-}
-
-function tool(f: Fixture, name: string, body: string): void {
-  const p = join(f.bin, name);
-  writeFileSync(p, `#!/bin/sh\n${body}\n`);
-  chmodSync(p, 0o755);
-}
-
-function toml(f: Fixture, text: string): void {
-  writeFileSync(join(f.dir, ".kit.toml"), text);
-}
-
-function scan(f: Fixture, args: string[], env: Record<string, string> = {}): Promise<CliResult> {
-  return runCli(["scan", ...args], f.dir, {
-    PATH: f.bin,
-    SOCKET_SECURITY_API_TOKEN: "",
-    SNYK_TOKEN: "",
-    KIT_SEMGREP_CONFIG: "",
-    KIT_AIRGAP: "",
-    KIT_CI_STRICT: "",
-    KIT_THREAT_DATA_DIR: "",
-    KIT_THREAT_DATA_PUBKEY: "",
-    ...env,
-  });
-}
-
 /** A signed threat-data bundle with one artifact that sets env KIT_TD_PROBE. */
-function makeBundle(f: Fixture): { dir: string; pubPath: string } {
+function makeBundle(f: Fixture, overrides = {}): { dir: string; pubPath: string } {
   const dir = join(f.dir, ".td");
   mkdirSync(dir);
   const bytes = "db";
   writeFileSync(join(dir, "db.bin"), bytes);
   const manifest = {
     version: 1,
-    created: "2026-11-10T00:00:00.000Z",
+    created: new Date().toISOString(),
     artifacts: [
       {
         path: "db.bin",
@@ -92,6 +45,7 @@ function makeBundle(f: Fixture): { dir: string; pubPath: string } {
         env: "KIT_TD_PROBE",
       },
     ],
+    ...overrides,
   };
   const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2));
   writeFileSync(join(dir, "manifest.json"), manifestBytes);
@@ -140,25 +94,25 @@ describe("kit scan: delegates and output modes", { skip }, () => {
 
   it("text mode: a failing exit-gate scanner is one high finding and exit 1", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\n');
-    tool(f, "socket", "exit 1");
+    tool(f, "socket", SOCKET_FAIL);
     const r = await scan(f, [], { SOCKET_SECURITY_API_TOKEN: "t" });
     assert.equal(r.exitCode, 1, r.stdout + r.stderr);
     const out = plain(r.stdout);
     assert.match(out, /^kit scan {2}external scanners → one merged verdict\n/);
-    assert.match(out, /\n {2}✓ socket {2}1 finding\(s\)\n/);
+    assert.match(out, /\n {2}✗ socket {2}partial: .*policy coverage/);
     assert.match(out, /\n {2}HIGH {5}socket: [^\n]+ {2}\[socket\]\n/);
-    assert.match(out, /\n1 high\/critical\n$/);
+    assert.match(out, /\n1 high\/critical\n/);
   });
 
-  it("text mode: no findings and a not-installed scanner warn without failing", async () => {
+  it("text mode: incomplete Socket coverage and an absent scanner warn by default", async () => {
     toml(f, '[scan]\ndelegates = ["socket", "grype"]\n');
-    tool(f, "socket", "exit 0");
+    tool(f, "socket", SOCKET_PASS);
     const r = await scan(f, [], { SOCKET_SECURITY_API_TOKEN: "t" });
     assert.equal(r.exitCode, 0, r.stdout + r.stderr);
     const out = plain(r.stdout);
     assert.match(out, /\n {2}− grype {2}not-installed[^\n]*\n/);
-    assert.match(out, /\n {2}✓ socket {2}0 finding\(s\)\n/);
-    assert.match(out, /\n {2}no findings from the scanners that ran\n/);
+    assert.match(out, /\n {2}✗ socket {2}partial: .*policy coverage/);
+    assert.match(out, /No scanner completed. Scan coverage is unverified/);
     assert.match(out, /\n {2}! [^\n]*grype[^\n]*\n/);
     assert.match(out, /use --strict or \[governance\.scan\] required_scanners to hard-fail/);
   });
@@ -169,7 +123,7 @@ describe("kit scan: scanner-health gate", { skip }, () => {
 
   it("--strict turns a not-installed scanner into a failure", async () => {
     toml(f, '[scan]\ndelegates = ["socket", "grype"]\n');
-    tool(f, "socket", "exit 0");
+    tool(f, "socket", SOCKET_PASS);
     const r = await scan(f, ["--strict"], { SOCKET_SECURITY_API_TOKEN: "t" });
     assert.equal(r.exitCode, 1, r.stdout + r.stderr);
     assert.match(plain(r.stdout), /\n {2}✗ [^\n]*grype[^\n]*\n/);
@@ -177,7 +131,7 @@ describe("kit scan: scanner-health gate", { skip }, () => {
   });
 
   it("KIT_CI_STRICT and [governance.scan] required_scanners also fail the gate", async () => {
-    tool(f, "socket", "exit 0");
+    tool(f, "socket", SOCKET_PASS);
     toml(f, '[scan]\ndelegates = ["socket", "grype"]\n');
     const viaEnv = await scan(f, [], { SOCKET_SECURITY_API_TOKEN: "t", KIT_CI_STRICT: "1" });
     assert.equal(viaEnv.exitCode, 1, viaEnv.stdout);
@@ -191,7 +145,7 @@ describe("kit scan: scanner-health gate", { skip }, () => {
 
   it("--json prints runs, findings, suppressed, ok, scannerGate, strict and exploitIntel", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\n');
-    tool(f, "socket", "exit 1");
+    tool(f, "socket", SOCKET_FAIL);
     const r = await scan(f, ["--json"], { SOCKET_SECURITY_API_TOKEN: "t" });
     assert.equal(r.exitCode, 1, r.stderr);
     const j = JSON.parse(r.stdout);
@@ -203,8 +157,12 @@ describe("kit scan: scanner-health gate", { skip }, () => {
       "scannerGate",
       "strict",
       "exploitIntel",
+      "coverage",
     ]);
-    assert.deepEqual(j.runs, [{ id: "socket", status: "ran", findings: 1 }]);
+    assert.equal(j.runs[0].id, "socket");
+    assert.equal(j.runs[0].status, "partial");
+    assert.equal(j.runs[0].findings, 1);
+    assert.equal(j.coverage, "partial");
     assert.equal(j.findings.length, 1);
     assert.equal(j.findings[0].severity, "high");
     assert.equal(j.suppressed, 0);
@@ -215,7 +173,7 @@ describe("kit scan: scanner-health gate", { skip }, () => {
 
   it("--sarif prints a SARIF log of the findings and keeps the exit code", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\n');
-    tool(f, "socket", "exit 1");
+    tool(f, "socket", SOCKET_FAIL);
     const r = await scan(f, ["--sarif", "--json"], { SOCKET_SECURITY_API_TOKEN: "t" });
     assert.equal(r.exitCode, 1, r.stderr);
     const s = JSON.parse(r.stdout);
@@ -228,8 +186,17 @@ describe("kit scan: baseline and tooling tokens", { skip }, () => {
   useFixture();
 
   it("--update-baseline accepts the findings; the next run suppresses them and passes", async () => {
-    toml(f, '[scan]\ndelegates = ["socket"]\n');
-    tool(f, "socket", "exit 1");
+    toml(f, '[scan]\ndelegates = ["grype"]\n');
+    const sarif = JSON.stringify({
+      version: "2.1.0",
+      runs: [
+        {
+          tool: { driver: { name: "grype", rules: [] } },
+          results: [{ ruleId: "fixture", level: "error", message: { text: "fixture finding" } }],
+        },
+      ],
+    });
+    tool(f, "grype", `echo '${sarif}'`);
     const env = { SOCKET_SECURITY_API_TOKEN: "t" };
     const up = await scan(f, ["--update-baseline"], env);
     assert.equal(up.exitCode, 0, up.stderr);
@@ -238,7 +205,7 @@ describe("kit scan: baseline and tooling tokens", { skip }, () => {
       /^baseline updated {2}1 scan finding\(s\) accepted into \.kit-baseline\.json\n$/,
     );
     const bl = JSON.parse(readFileSync(join(f.dir, ".kit-baseline.json"), "utf8"));
-    assert.equal(JSON.stringify(bl).includes("socket"), true);
+    assert.equal(JSON.stringify(bl).includes("grype"), true);
 
     const r = await scan(f, [], env);
     assert.equal(r.exitCode, 0, r.stdout);
@@ -257,17 +224,20 @@ describe("kit scan: baseline and tooling tokens", { skip }, () => {
       "infisical",
       `echo "$@" > "${f.dir}/infisical-args"\necho '[{"key":"SOCKET_SECURITY_API_TOKEN","value":"from-vault"}]'`,
     );
-    tool(f, "socket", '[ "$SOCKET_SECURITY_API_TOKEN" = from-vault ] && exit 0\nexit 1');
+    tool(f, "socket", `[ "$SOCKET_SECURITY_API_TOKEN" = from-vault ] || exit 1\n${SOCKET_PASS}`);
     const r = await scan(f, ["--json"]);
     assert.equal(r.exitCode, 0, r.stdout + r.stderr);
-    assert.deepEqual(JSON.parse(r.stdout).runs, [{ id: "socket", status: "ran", findings: 0 }]);
+    const run = JSON.parse(r.stdout).runs[0];
+    assert.equal(run.id, "socket");
+    assert.equal(run.status, "partial");
+    assert.equal(run.findings, 0);
     assert.match(readFileSync(join(f.dir, "infisical-args"), "utf8"), /--env prod --projectId p1/);
     assert.equal(r.stdout.includes("from-vault"), false);
   });
 
   it("without a tooling project, a missing token is no-token", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\n');
-    tool(f, "socket", "exit 0");
+    tool(f, "socket", SOCKET_PASS);
     const j = JSON.parse((await scan(f, ["--json"])).stdout);
     assert.deepEqual(j.runs, [{ id: "socket", status: "no-token", findings: 0 }]);
   });
@@ -304,7 +274,7 @@ describe("kit scan: air-gap threat data", { skip }, () => {
 
   it("air-gap with a threat-data dir and no public key fails closed before any scanner", async () => {
     toml(f, '[scan]\ndelegates = ["grype"]\n');
-    tool(f, "grype", `touch "${f.dir}/grype-ran"\necho '${EMPTY_SARIF}'`);
+    tool(f, "grype", `: > "${f.dir}/grype-ran"\necho '${EMPTY_SARIF}'`);
     const r = await scan(f, [], { KIT_AIRGAP: "1", KIT_THREAT_DATA_DIR: join(f.dir, "td") });
     assert.equal(r.exitCode, 1);
     assert.match(
@@ -316,7 +286,7 @@ describe("kit scan: air-gap threat data", { skip }, () => {
 
   it("air-gap rejects a threat-data bundle that does not verify, before any scanner", async () => {
     toml(f, '[scan]\ndelegates = ["grype"]\n');
-    tool(f, "grype", `touch "${f.dir}/grype-ran"\necho '${EMPTY_SARIF}'`);
+    tool(f, "grype", `: > "${f.dir}/grype-ran"\necho '${EMPTY_SARIF}'`);
     const b = makeBundle(f);
     writeFileSync(join(b.dir, "db.bin"), "tampered");
     const r = await scan(f, [], {
@@ -347,12 +317,80 @@ describe("kit scan: air-gap threat data", { skip }, () => {
   });
 });
 
+describe("kit scan: threat-data evidence", { skip }, () => {
+  useFixture();
+
+  function configureBundle(overrides = {}): Record<string, string> {
+    toml(f, '[scan]\ndelegates = ["grype"]\n');
+    tool(f, "grype", `: > "${f.dir}/grype-ran"\necho '${EMPTY_SARIF}'`);
+    const b = makeBundle(f, overrides);
+    return { KIT_AIRGAP: "1", KIT_THREAT_DATA_DIR: b.dir, KIT_THREAT_DATA_PUBKEY: b.pubPath };
+  }
+
+  for (const [label, overrides, status] of [
+    ["unknown version", { version: 999 }, "unsupported"],
+    ["empty inventory", { artifacts: [] }, "malformed"],
+    ["bad creation date", { created: "2026-02-30T01:00:00Z" }, "malformed"],
+  ] as const) {
+    it(`rejects a signed bundle with ${label} before starting the scanner`, async () => {
+      const r = await scan(f, ["--strict", "--json"], configureBundle(overrides));
+      assert.equal(r.exitCode, 1, r.stdout + r.stderr);
+      assert.equal(existsSync(join(f.dir, "grype-ran")), false);
+      const report = JSON.parse(r.stdout);
+      assert.equal(report.ok, false);
+      assert.equal(report.coverage, "partial");
+      assert.equal(report.scopeGaps[0].kind, "threat-data");
+      assert.equal(report.scopeGaps[0].evidenceStatus, status);
+    });
+  }
+
+  it("reports stale evidence in SARIF and preserves the old baseline", async () => {
+    const env = configureBundle({ created: "2000-01-01T00:00:00Z" });
+    toml(f, '[scan]\ndelegates = ["grype"]\n[air_gap]\nthreat_data_max_age_days = 30\n');
+    const r = await scan(f, ["--sarif"], env);
+    assert.equal(r.exitCode, 1, r.stdout + r.stderr);
+    const run = JSON.parse(r.stdout).runs[0];
+    assert.equal(run.invocations[0].executionSuccessful, false);
+    assert.equal(run.properties.scopeGaps[0].evidenceStatus, "stale");
+    const baseline = join(f.dir, ".kit-baseline.json");
+    const original = '{"scan":{"findings":["previous"]}}\n';
+    writeFileSync(baseline, original);
+    assert.equal((await scan(f, ["--update-baseline"], env)).exitCode, 1);
+    assert.equal(readFileSync(baseline, "utf8"), original);
+    assert.equal(existsSync(join(f.dir, "grype-ran")), false);
+  });
+
+  it("requires a signed creation date when a maximum age is configured", async () => {
+    const env = configureBundle({ created: undefined });
+    toml(f, '[scan]\ndelegates = ["grype"]\n[air_gap]\nthreat_data_max_age_days = 30\n');
+    const r = await scan(f, ["--json"], env);
+    assert.equal(r.exitCode, 1, r.stdout + r.stderr);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.ok, false);
+    assert.equal(report.scopeGaps[0].evidenceStatus, "missing");
+    assert.equal(existsSync(join(f.dir, "grype-ran")), false);
+  });
+
+  it("keeps a verified bundle's diagnostic out of machine output", async () => {
+    const env = configureBundle();
+    for (const flag of ["--json", "--sarif"]) {
+      const r = await scan(f, [flag, "--strict"], env);
+      assert.equal(r.exitCode, 0, r.stdout + r.stderr);
+      const report = JSON.parse(r.stdout);
+      if (flag === "--sarif") assert.equal(report.runs[0].invocations[0].executionSuccessful, true);
+      else assert.equal(report.ok, true);
+      assert.match(plain(r.stderr), /verified threat-data bundle/);
+    }
+    assert.equal(existsSync(join(f.dir, "grype-ran")), true);
+  });
+});
+
 describe("kit scan: projects, images and severities", { skip }, () => {
   useFixture();
 
   it("a [projects] path that does not exist is refused with a warning", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\n[projects]\npaths = ["missing"]\n');
-    tool(f, "socket", "exit 0");
+    tool(f, "socket", SOCKET_PASS);
     const r = await scan(f, [], { SOCKET_SECURITY_API_TOKEN: "t" });
     assert.equal(r.exitCode, 0, r.stdout + r.stderr);
     assert.match(plain(r.stderr), /! \[projects\] path not scanned: missing \(does not exist\)/);
@@ -360,7 +398,7 @@ describe("kit scan: projects, images and severities", { skip }, () => {
 
   it("a [scan] image that is not a valid reference is skipped with a warning", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\nimages = ["not a valid ref"]\n');
-    tool(f, "socket", "exit 0");
+    tool(f, "socket", SOCKET_PASS);
     const r = await scan(f, [], { SOCKET_SECURITY_API_TOKEN: "t" });
     assert.equal(r.exitCode, 0, r.stdout + r.stderr);
     assert.match(plain(r.stderr), /! image not scanned: not a valid ref \([^)]+\)/);
@@ -417,15 +455,24 @@ function seedCache(kev: boolean): string {
   writeFileSync(
     path,
     JSON.stringify({
-      v: 1,
+      v: 2,
       kev: {
         fetchedAt: at,
         catalogVersion: "test",
+        dateReleased: at,
+        count: 1,
         entries: kev
           ? { "CVE-2021-44228": { dateAdded: "2021-12-10", ransomware: true } }
           : { "CVE-2000-0001": { dateAdded: "2000-01-01", ransomware: false } },
       },
-      epss: { "CVE-2021-44228": { score: 0.97, percentile: 0.99, fetchedAt: at } },
+      epss: {
+        "CVE-2021-44228": {
+          mark: { score: 0.97, percentile: 0.99 },
+          scoreDate: at.slice(0, 10),
+          verified: true,
+          fetchedAt: at,
+        },
+      },
     }),
   );
   return path;
@@ -469,6 +516,8 @@ describe("kit scan: CISA KEV and FIRST EPSS", { skip }, () => {
       enabled: true,
       kevChecked: true,
       epssChecked: true,
+      kevStatus: "complete-empty",
+      epssStatus: "complete",
       notes: [],
     });
   });

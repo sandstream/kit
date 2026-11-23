@@ -312,15 +312,6 @@ async function scopeDegradationStatus(cwd: string): Promise<"warn" | "fail"> {
  *   pass  enforce_runtime set + scope verified — governed MCP ops are mediated against the signed scope
  *   fail  enforce_runtime set + scope unsigned/tampered — opted in but untrustworthy: governed ops fail-closed-denied
  */
-/** Read the recorded audit log for the observe→enforce nudge; "" when absent/unreadable. */
-async function readAuditLog(cwd: string): Promise<string> {
-  try {
-    return await readFile(join(cwd, ".kit-audit.jsonl"), "utf-8");
-  } catch {
-    return "";
-  }
-}
-
 async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   const name = "exec-broker runtime";
   const category = "security";
@@ -351,18 +342,18 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
       };
     }
     // Evidence-based nudge (E3): read the recorded observe window and point to the exact next step.
-    const { assessObserveEvidence } = await import("./exec-broker/observe-evidence.js");
-    const r = assessObserveEvidence(await readAuditLog(cwd));
+    const { describeUntestedObserveEvidence, readObserveReadiness } =
+      await import("./exec-broker/observe-evidence.js");
+    const r = await readObserveReadiness(cwd);
     let detail: string;
     if (r.verdict === "unverifiable") {
-      detail = `runtime in OBSERVE, but the audit chain is broken at ${r.evidenceBreak}. The observe events are not evidence. Run 'kit audit verify' before graduating`;
+      detail = `Cannot verify the OBSERVE audit log: ${r.evidenceBreak}. Inspect the broker log with 'kit audit verify' before enabling enforce.`;
     } else if (r.verdict === "ready") {
       detail = `runtime in OBSERVE — ${r.opsObserved} op(s) observed, none would be denied. Safe to graduate: run 'kit broker enforce'`;
     } else if (r.verdict === "would-block") {
       detail = `runtime in OBSERVE — ${r.wouldBlockOps} of ${r.opsObserved} observed op(s) would be denied under enforce; run 'kit broker enforce-readiness' to see them, then declare in [scope] + re-sign`;
     } else {
-      detail =
-        "runtime in OBSERVE — gates run but never deny, and no would-be denials are recorded yet. Exercise the workflow, then 'kit broker enforce-readiness' before graduating";
+      detail = `Runtime is in OBSERVE. ${describeUntestedObserveEvidence(r.untestedReason)}. Exercise the workflow, then run 'kit broker enforce-readiness'.`;
     }
     return { name, status: "warn", detail, category };
   }
@@ -388,13 +379,7 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   };
 }
 
-/**
- * Deep skill-scanner delegate posture. The optional SkillSpector (NVIDIA) delegate deepens
- * `kit triage skill --deep` (static Stage 1 only — kit never runs its LLM stage). Optional, so its
- * absence is a `skip`, not a failure:
- *   pass  installed — deep static skill triage is available
- *   skip  not installed — --deep falls back to kit's built-in checks
- */
+/** Report the SkillSpector version probe. A scan verifies report compatibility. */
 async function checkDeepSkillScanner(): Promise<DoctorCheck> {
   const name = "deep skill scanner";
   const category = "security";
@@ -404,7 +389,7 @@ async function checkDeepSkillScanner(): Promise<DoctorCheck> {
     ? {
         name,
         status: "pass",
-        detail: `SkillSpector ${s.version ? `${s.version} ` : ""}— deep skill triage available (static Stage 1 only; kit never runs its LLM stage)`,
+        detail: `SkillSpector version probe passed${s.version ? ` (${s.version})` : ""}. Coverage requires a deep scan.`,
         category,
       }
     : { name, status: "skip", detail: s.detail, category };

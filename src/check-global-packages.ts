@@ -17,14 +17,15 @@ import { lstatSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { parseOsvVulnCount } from "./check-security.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import { inventoryNodeInstalls } from "./check-installs.js";
 import type { InstallEntry, InstallRoots } from "./check-installs.js";
 import { osvFinding } from "./osv-summary.js";
+import { OSV_EXITS, readOsvReport } from "./osv-report.js";
+import { scannerEvidence, scannerGap } from "./check-scanner-evidence.js";
 import { airGapView } from "./triage-cooling.js";
 import type { AirGapView } from "./triage-cooling.js";
-import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { execFileNoThrow, type ExecResult } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { detectRuntimes } from "./upstream-runtimes.js";
 import { readRegularFileIfPresent } from "./upstream-safe-read.js";
@@ -210,7 +211,7 @@ function whereText(pkgs: GlobalPackage[], affected: { name: string; version: str
 /** The verdict for the packages and the scanner output. Pure. */
 export function judgeGlobalPackages(
   pkgs: GlobalPackage[],
-  osvStdout: string | null,
+  run: GlobalOsvRun | null,
 ): SecurityCheckResult {
   if (pkgs.length === 0) {
     return {
@@ -219,35 +220,43 @@ export function judgeGlobalPackages(
       detail: "no global npm packages found in the Node installs or the npm prefix",
     };
   }
-  if (osvStdout === null)
+  if (run === null)
     return unverified(`osv-scanner gave no result for ${pkgs.length} global npm packages`);
-  const count = parseOsvVulnCount(osvStdout);
-  if (count < 0)
-    return unverified(
-      `osv-scanner output could not be read for ${pkgs.length} global npm packages`,
-    );
+  const report = readOsvReport(run.stdout);
+  const { count } = report;
+  const gap = scannerGap(report, { ...run, ok: run.code === 0, exitCode: run.code }, OSV_EXITS);
   if (count === 0) {
-    return {
+    const row: SecurityCheckResult = {
       ...base,
       status: "pass",
       detail: `${pkgs.length} global npm packages, none with a known vulnerability`,
     };
+    return scannerEvidence(row, count, gap);
   }
-  const finding = osvFinding(NAME, osvStdout);
+  const finding = osvFinding(NAME, report);
   const affected = finding.affected ?? [];
   const names = [...new Set(affected.map((a) => a.name))].filter((n) => NPM_NAME.test(n));
   const detail = finding.detail.replace(/\s*-run: osv-scanner -r \.$/, "");
-  return {
-    ...finding,
-    detail: `${detail}. Where: ${whereText(pkgs, affected)}`,
-    suggestion: names.length
-      ? names
-          .slice(0, MAX_UPDATE_NAMES)
-          .map((n) => `npm install -g ${n}@latest`)
-          .join("; ")
-      : undefined,
-  };
+  return scannerEvidence(
+    {
+      ...finding,
+      detail: `${detail}. Where: ${whereText(pkgs, affected)}`,
+      suggestion: names.length
+        ? names
+            .slice(0, MAX_UPDATE_NAMES)
+            .map((n) => `npm install -g ${n}@latest`)
+            .join("; ")
+        : undefined,
+    },
+    count,
+    gap,
+  );
 }
+
+type GlobalOsvRun = { code: number } & Pick<
+  ExecResult,
+  "stdout" | "truncated" | "timedOut" | "noNumericExitStatus" | "didNotStart"
+>;
 
 export interface GlobalDeps {
   platform: string;
@@ -256,7 +265,7 @@ export interface GlobalDeps {
   packages: (roots: InstallRoots, installs: InstallEntry[]) => GlobalPackage[];
   detectNode: (root: string) => { declared: string | null } | null;
   osvBin: () => Promise<string | null>;
-  runOsv: (bin: string, dir: string) => Promise<{ stdout: string; code: number }>;
+  runOsv: (bin: string, dir: string) => Promise<GlobalOsvRun>;
   airGap: (cwd: string) => Promise<AirGapView>;
 }
 
@@ -279,17 +288,21 @@ function defaultDeps(): GlobalDeps {
         timeout: 120_000,
         cwd: dir,
       });
-      return { stdout: r.stdout, code: r.exitCode };
+      return { ...r, code: r.exitCode };
     },
     airGap: airGapView,
   };
 }
 
-async function scan(bin: string, pkgs: GlobalPackage[], d: GlobalDeps): Promise<string | null> {
+async function scan(
+  bin: string,
+  pkgs: GlobalPackage[],
+  d: GlobalDeps,
+): Promise<GlobalOsvRun | null> {
   const dir = mkdtempSync(join(tmpdir(), "kit-global-packages-"));
   try {
     writeFileSync(join(dir, "package-lock.json"), syntheticLockfile(pkgs), { mode: 0o600 });
-    return (await d.runOsv(bin, dir)).stdout;
+    return await d.runOsv(bin, dir);
   } catch {
     return null;
   } finally {

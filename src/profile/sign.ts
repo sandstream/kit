@@ -28,14 +28,54 @@ import {
   hardwareRequired,
 } from "../keystore/index.js";
 import type { PolicySignature } from "../policy-doc.js";
+import { applySignedPairAtomically } from "../signed-file-pair.js";
 import {
   loadProfile,
+  serializeProfile,
+  PROFILE_FILE,
   canonicalProfileBytes,
+  profileDigest,
   profileFingerprint,
+  type KitProfile,
   type ProfileScope,
 } from "./schema.js";
 
 export const PROFILE_SIG_FILE = ".kit-profile.sig";
+
+interface ProfileSignatureRecord extends PolicySignature {
+  enforcement?: { requestId: string; sig: string };
+}
+
+function enforcementRequestBytes(profile: KitProfile, requestId: string): string {
+  return JSON.stringify(["kit.profile.enforcement", requestId, profileDigest(profile)]);
+}
+
+function verifiedEnforcementRequest(
+  profile: KitProfile,
+  proof: ProfileSignatureRecord["enforcement"],
+  publicKey: string,
+): string | undefined {
+  if (typeof proof?.requestId !== "string" || typeof proof.sig !== "string") return undefined;
+  const bytes = enforcementRequestBytes(profile, proof.requestId);
+  return verifySignature(bytes, Buffer.from(proof.sig, "base64"), publicKey)
+    ? proof.requestId
+    : undefined;
+}
+
+function previousEnforcementProof(
+  cwd: string,
+  profile: KitProfile,
+  publicKey: string,
+): ProfileSignatureRecord["enforcement"] {
+  try {
+    const { enforcement } = JSON.parse(
+      readFileSync(getProfileSigPath(cwd), "utf8"),
+    ) as ProfileSignatureRecord;
+    return verifiedEnforcementRequest(profile, enforcement, publicKey) ? enforcement : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function getProfileSigPath(cwd: string): string {
   return resolve(cwd, PROFILE_SIG_FILE);
@@ -49,13 +89,47 @@ export interface ProfileSignResult {
   rooted?: boolean;
 }
 
+interface ProfileReplacement {
+  profile: KitProfile;
+  expectedBytes: string;
+  requestId: string;
+}
+
+async function publishReplacement(
+  cwd: string,
+  replacement: ProfileReplacement,
+  record: ProfileSignatureRecord,
+  signature: string,
+): Promise<string | undefined> {
+  const { profile, expectedBytes, requestId } = replacement;
+  const verified = verifyProfileRecord(profile, record, cwd, {});
+  if (verified.status !== "valid") return verified.detail;
+  if (verified.enforcementRequestId !== requestId) {
+    return "The enforcement request signature could not be verified.";
+  }
+  const current = await loadProfile(cwd);
+  if (!current || canonicalProfileBytes(current) !== expectedBytes) {
+    return "The profile changed during signing. Review it and retry.";
+  }
+  const result = applySignedPairAtomically(
+    { document: resolve(cwd, PROFILE_FILE), signature: getProfileSigPath(cwd), kind: "profile" },
+    Buffer.from(serializeProfile(profile)),
+    Buffer.from(signature),
+  );
+  return result.ok ? undefined : result.detail;
+}
+
 /**
  * Sign the profile at `cwd`, writing `.kit-profile.sig`. Signs through the resolved keystore
  * (file / command / hardware) exactly like `kit policy sign`, and fails closed when a
  * hardware-rooted identity is mandated but the active backend isn't one.
+ * If a replacement is supplied, prepare its signature before saving the profile.
  */
-export async function signProfile(cwd = process.cwd()): Promise<ProfileSignResult> {
-  const profile = await loadProfile(cwd);
+export async function signProfile(
+  cwd = process.cwd(),
+  replacement?: ProfileReplacement,
+): Promise<ProfileSignResult> {
+  const profile = replacement?.profile ?? (await loadProfile(cwd));
   if (!profile) return { ok: false, error: "no profile declared" };
 
   const res = resolveKeyStore();
@@ -77,18 +151,32 @@ export async function signProfile(cwd = process.cwd()): Promise<ProfileSignResul
   const kid = identityId(pub);
   const bytes = canonicalProfileBytes(profile);
   let sigB64: string;
+  let enforcement: ProfileSignatureRecord["enforcement"];
   try {
     sigB64 = res.store.sign(bytes).toString("base64");
+    if (replacement) {
+      const { requestId } = replacement;
+      const proof = res.store.sign(enforcementRequestBytes(profile, requestId));
+      enforcement = { requestId, sig: proof.toString("base64") };
+    }
   } catch (e) {
     return { ok: false, error: `signing failed: ${(e as Error).message}` };
   }
-  const record: PolicySignature = {
+  if (!replacement) enforcement = previousEnforcementProof(cwd, profile, pub);
+  const record: ProfileSignatureRecord = {
     kid,
     sig: sigB64,
     ts: new Date().toISOString(),
     fingerprint: profileFingerprint(profile),
+    enforcement,
   };
-  writeFileSync(getProfileSigPath(cwd), JSON.stringify(record, null, 2) + "\n", "utf-8");
+  const signature = JSON.stringify(record, null, 2) + "\n";
+  if (replacement) {
+    const error = await publishReplacement(cwd, replacement, record, signature);
+    if (error) return { ok: false, error };
+  } else {
+    writeFileSync(getProfileSigPath(cwd), signature, "utf-8");
+  }
   return { ok: true, kid, fingerprint: record.fingerprint, rooted: isHardwareRooted(res) };
 }
 
@@ -99,6 +187,7 @@ export interface ProfileVerifyResult {
   detail: string;
   kid?: string;
   fingerprint?: string;
+  enforcementRequestId?: string;
   /** Where the verifying key came from. */
   via?: "key" | "local" | "org";
   /** True when a committed org trust anchor (.kit-policy.signers) is present. */
@@ -116,13 +205,21 @@ export async function verifyProfileSignature(
   const profile = await loadProfile(cwd);
   if (!profile) return { status: "unsigned", detail: "no profile declared" };
 
-  let record: PolicySignature;
+  let record: ProfileSignatureRecord;
   try {
-    record = JSON.parse(readFileSync(getProfileSigPath(cwd), "utf-8")) as PolicySignature;
+    record = JSON.parse(readFileSync(getProfileSigPath(cwd), "utf-8")) as ProfileSignatureRecord;
   } catch {
     return { status: "unsigned", detail: `no ${PROFILE_SIG_FILE} (run kit profile sign)` };
   }
+  return verifyProfileRecord(profile, record, cwd, opts);
+}
 
+function verifyProfileRecord(
+  profile: KitProfile,
+  record: ProfileSignatureRecord,
+  cwd: string,
+  opts: { key?: string },
+): ProfileVerifyResult {
   let fingerprint: string;
   try {
     fingerprint = profileFingerprint(profile);
@@ -133,19 +230,8 @@ export async function verifyProfileSignature(
     };
   }
 
+  const { pubkey, via } = findProfileSigner(cwd, record.kid, opts.key);
   const anchored = hasPolicyAnchor(cwd);
-  let pubkey: string | null = null;
-  let via: ProfileVerifyResult["via"] = undefined;
-  if (opts.key) {
-    pubkey = existsSync(opts.key) ? readFileSync(opts.key, "utf-8") : opts.key;
-    via = "key";
-  } else if (localPublicKeys().get(record.kid)) {
-    pubkey = localPublicKeys().get(record.kid)!;
-    via = "local";
-  } else if (policySignersMap(cwd).get(record.kid)) {
-    pubkey = policySignersMap(cwd).get(record.kid)!;
-    via = "org";
-  }
   if (!pubkey) {
     return {
       status: "unverifiable",
@@ -194,9 +280,25 @@ export async function verifyProfileSignature(
     detail: `signed by ${record.kid}${via === "org" ? " (org trust anchor)" : ""}`,
     kid: record.kid,
     fingerprint,
+    enforcementRequestId: verifiedEnforcementRequest(profile, record.enforcement, pubkey),
     via,
     anchored,
   };
+}
+
+function findProfileSigner(
+  cwd: string,
+  kid: string,
+  givenKey?: string,
+): { pubkey?: string; via?: ProfileVerifyResult["via"] } {
+  if (givenKey) {
+    const pubkey = existsSync(givenKey) ? readFileSync(givenKey, "utf-8") : givenKey;
+    return { pubkey, via: "key" };
+  }
+  const local = localPublicKeys().get(kid);
+  if (local) return { pubkey: local, via: "local" };
+  const org = policySignersMap(cwd).get(kid);
+  return org ? { pubkey: org, via: "org" } : {};
 }
 
 /**

@@ -96,10 +96,16 @@ export function copySnapshotFile(
   }
 }
 
+export function readSnapshotBytes(path: string, info: BigIntStats, maxBytes: number): Buffer {
+  const chunks: Buffer[] = [];
+  readSnapshotFile(path, info, maxBytes, (chunk) => chunks.push(Buffer.from(chunk)));
+  return Buffer.concat(chunks);
+}
+
 export function readSnapshotManifest(path: string, maxBytes: number): string {
   const info = lstatSync(path, { bigint: true });
   if (info.size > BigInt(maxBytes)) throw new Error("Incoming snapshot: manifest-limit");
-  const chunks: Buffer[] = [];
-  readSnapshotFile(path, info, maxBytes, (chunk) => chunks.push(Buffer.from(chunk)));
-  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks));
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+    readSnapshotBytes(path, info, maxBytes),
+  );
 }
