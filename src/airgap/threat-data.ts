@@ -61,22 +61,24 @@ export function parseManifest(json: string): ThreatManifest {
   if (!Array.isArray(m.artifacts) || m.artifacts.length === 0) {
     throw new Error("manifest: `artifacts` must be a non-empty array");
   }
-  for (const [i, a] of m.artifacts.entries()) {
-    if (!a || typeof a.path !== "string" || !a.path) {
-      throw new Error(`manifest: artifact[${i}] missing \`path\``);
-    }
-    if (typeof a.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(a.sha256)) {
-      throw new Error(`manifest: artifact[${i}] (${a.path}) has no valid sha256`);
-    }
-    if (a.env !== undefined && (typeof a.env !== "string" || !/^[A-Z_][A-Z0-9_]*$/.test(a.env))) {
-      throw new Error(`manifest: artifact[${i}] (${a.path}) has an invalid env var name`);
-    }
-    if (a.path.includes("..") || a.path.startsWith("/")) {
-      // never let a manifest point outside the bundle dir
-      throw new Error(`manifest: artifact[${i}] path escapes the bundle: ${a.path}`);
-    }
-  }
+  m.artifacts.forEach(validateThreatArtifact);
   return m as ThreatManifest;
+}
+
+function validateThreatArtifact(a: ThreatArtifact, i: number): void {
+  if (!a || typeof a.path !== "string" || !a.path) {
+    throw new Error(`manifest: artifact[${i}] missing \`path\``);
+  }
+  if (typeof a.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(a.sha256)) {
+    throw new Error(`manifest: artifact[${i}] (${a.path}) has no valid sha256`);
+  }
+  if (a.env !== undefined && (typeof a.env !== "string" || !/^[A-Z_][A-Z0-9_]*$/.test(a.env))) {
+    throw new Error(`manifest: artifact[${i}] (${a.path}) has an invalid env var name`);
+  }
+  if (a.path.includes("..") || a.path.startsWith("/")) {
+    // never let a manifest point outside the bundle dir
+    throw new Error(`manifest: artifact[${i}] path escapes the bundle: ${a.path}`);
+  }
 }
 
 class UnsupportedManifestVersion extends Error {}

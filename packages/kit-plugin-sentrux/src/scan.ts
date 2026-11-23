@@ -56,7 +56,7 @@ function normalizeSeverity(raw: unknown): Severity {
  * `architecture_score`, or `total`; the gate flag may be `gate.passed`,
  * `passed`, or `ok`; violations may be `violations` or `issues`.
  */
-export function parseSentruxJson(text: string): SentruxResult {
+function readSentruxReport(text: string) {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -69,7 +69,7 @@ export function parseSentruxJson(text: string): SentruxResult {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
     throw new Error("Invalid Sentrux report: expected a JSON object");
-  const r = parsed as {
+  return parsed as {
     score?: number;
     architecture_score?: number;
     total?: number;
@@ -80,22 +80,31 @@ export function parseSentruxJson(text: string): SentruxResult {
     violations?: unknown[];
     issues?: unknown[];
   };
+}
 
+function readSentruxGate(r: ReturnType<typeof readSentruxReport>) {
   const flags = [r.gate?.passed, r.passed, r.ok].filter((value) => value !== undefined);
   const passed = flags.find((value) => typeof value === "boolean");
+  return {
+    passed,
+    failed: flags.includes(false),
+    conflicting: flags.some((value) => value !== passed),
+  };
+}
+
+export function parseSentruxJson(text: string): SentruxResult {
+  const r = readSentruxReport(text);
+  const gate = readSentruxGate(r);
   const raw = r.violations === undefined ? r.issues : r.violations;
   const violations = Array.isArray(raw) ? raw.flatMap(readViolation) : [];
-  const partial =
-    !Array.isArray(raw) ||
-    raw.length !== violations.length ||
-    flags.some((value) => value !== passed);
-  if (partial && violations.length === 0 && !flags.includes(false)) {
+  const partial = !Array.isArray(raw) || raw.length !== violations.length || gate.conflicting;
+  if (partial && violations.length === 0 && !gate.failed) {
     throw new Error("Invalid Sentrux report: no complete violation list or failing gate verdict");
   }
 
   return {
     score: r.score ?? r.architecture_score ?? r.total,
-    gatePassed: !flags.includes(false) && (passed ?? violations.length === 0),
+    gatePassed: !gate.failed && (gate.passed ?? violations.length === 0),
     metrics: r.metrics ?? {},
     violations,
     ...(partial ? { coverage: "partial" as const } : {}),

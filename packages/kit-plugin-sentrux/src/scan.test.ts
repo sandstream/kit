@@ -57,7 +57,9 @@ describe("sentrux plugin", () => {
       assert.throws(() => parseSentruxJson(report), /Invalid Sentrux report/);
     }
   });
+});
 
+describe("Sentrux finding output", () => {
   it("records valid violations from a partial report and returns its coverage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-sentrux-"));
     try {

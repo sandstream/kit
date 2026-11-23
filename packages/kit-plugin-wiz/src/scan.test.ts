@@ -139,7 +139,9 @@ describe("fetchIssues", () => {
     response = { data: { issues: { nodes: [] } } };
     await assert.rejects(() => fetchIssues(client), /Invalid Wiz GraphQL issue response/);
   });
+});
 
+describe("Wiz issue API errors", () => {
   for (const status of [403, 200]) {
     it(`masks the minted access token in a ${status} issue response`, async (t) => {
       const accessToken = "access:v42";

@@ -134,7 +134,9 @@ describe("fetchSnykIssues", () => {
     );
     assert.equal(fetchMock.mock.callCount(), 1);
   });
+});
 
+describe("Snyk API errors", () => {
   for (const source of ["explicit", "env"]) {
     it(`masks a known ${source} token in an HTTP error`, async (t) => {
       const token = "snyk:v42";

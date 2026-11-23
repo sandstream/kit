@@ -101,7 +101,9 @@ describe("aisle nano-analyzer plugin", () => {
       /Invalid AISLE nano-analyzer summary JSON/,
     );
   });
+});
 
+describe("AISLE finding output", () => {
   it("records normalized findings to .kit-scan-results.jsonl", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-aisle-"));
     try {
@@ -145,7 +147,9 @@ describe("aisle nano-analyzer plugin", () => {
       /expected a findings array/,
     );
   });
+});
 
+describe("AISLE directory coverage", () => {
   it("accepts a clean upstream summary when the producer omits triage.json", async () => {
     const outDir = mkdtempSync(join(tmpdir(), "aisle-output-"));
     try {

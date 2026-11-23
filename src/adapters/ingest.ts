@@ -496,24 +496,32 @@ function kitScanCoverage(runs: SarifRun[]) {
       continue;
     }
     const { scannerCoverage, scopeGaps } = run.properties;
-    if (scopeGaps !== undefined) {
-      if (!Array.isArray(scopeGaps) || !scopeGaps.every(isRecord)) malformed = true;
-      else if (scopeGaps.length > 0) partial = true;
-    }
-    if (scannerCoverage === undefined) continue;
-    if (!Array.isArray(scannerCoverage)) {
-      malformed = true;
-      continue;
-    }
-    const records = scannerCoverage.filter(scannerCoverageEntry);
-    if (records.length !== scannerCoverage.length) malformed = true;
-    if (!records.some((scanner) => scanner.status === "ran")) partial = true;
-    for (const { id, status, findings, reportGap } of records) {
-      if (reportGap || (status !== "ran" && status !== "not-applicable")) partial = true;
-      scanners.push({ id, status, findings, reportGap });
-    }
+    const scope = kitScopeCoverage(scopeGaps);
+    const declared = kitDelegateCoverage(scannerCoverage);
+    malformed ||= scope === "malformed" || declared.malformed;
+    partial ||= scope === "partial" || declared.partial;
+    for (const scanner of declared.scanners) scanners.push(scanner);
   }
   return { scanners, malformed, partial };
+}
+
+function kitScopeCoverage(scopeGaps: unknown): "complete" | "malformed" | "partial" {
+  if (scopeGaps === undefined) return "complete";
+  if (!Array.isArray(scopeGaps) || !scopeGaps.every(isRecord)) return "malformed";
+  return scopeGaps.length ? "partial" : "complete";
+}
+
+function kitDelegateCoverage(scannerCoverage: unknown) {
+  const scanners: DeclaredScannerCoverage[] = [];
+  if (scannerCoverage === undefined) return { scanners, malformed: false, partial: false };
+  if (!Array.isArray(scannerCoverage)) return { scanners, malformed: true, partial: false };
+  const records = scannerCoverage.filter(scannerCoverageEntry);
+  let partial = !records.some(({ status }) => status === "ran");
+  for (const { id, status, findings, reportGap } of records) {
+    if (reportGap || (status !== "ran" && status !== "not-applicable")) partial = true;
+    scanners.push({ id, status, findings, reportGap });
+  }
+  return { scanners, malformed: records.length !== scannerCoverage.length, partial };
 }
 
 /** Read findings and declared coverage from a SARIF 2.1.0 report. */
@@ -549,16 +557,13 @@ function sarifCoverage(
   const stopped = coverage.some((run) => run.stopped);
   const errors = coverage.some((run) => run.errors);
   const missingResults = coverage.some((run) => !run.hasResults);
-  if (!stopped && !errors && !missingResults && !malformed && !declaredPartial) {
-    return { ok: true, findings };
-  }
-
   const notes: string[] = [];
   if (stopped) notes.push("The SARIF report contains a stopped run (executionSuccessful: false).");
   if (errors) notes.push("The SARIF report contains an execution or configuration error.");
   if (missingResults) notes.push("At least one SARIF run has no results array.");
   if (declaredPartial) notes.push("The Kit SARIF report declares incomplete scan coverage.");
   if (malformed) notes.push("The SARIF report contains invalid records.");
+  if (notes.length === 0) return { ok: true, findings };
   const missing =
     !stopped && !errors && !declaredPartial && coverage.every((run) => !run.hasResults);
   return incompleteReport(

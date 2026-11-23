@@ -91,12 +91,11 @@ function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledSc
     return { run: { id: scanner.id, status: "ran", findings: 0 } };
   const finding = !process.ok || healthy === false ? exitGateFinding(scanner, process) : undefined;
   const findings = finding ? [finding] : [];
-  if (complete && !process.ok && process.exitCode === 1 && healthy === false) {
+  if (complete && socketReportedPolicyFailure(process, healthy)) {
     return { run: { id: scanner.id, status: "ran", findings: 1 }, findings };
   }
   const reason = finding?.detail ?? "scanner did not return a valid Socket policy verdict";
-  const reportGap =
-    stopped || healthy !== undefined ? "partial" : process.stdout.trim() ? "malformed" : "missing";
+  const reportGap = socketReportGap(process.stdout, healthy, Boolean(stopped));
   return {
     run: {
       ...(stopped ?? { id: scanner.id, status: "error" }),
@@ -106,6 +105,22 @@ function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledSc
     },
     findings,
   };
+}
+
+function socketReportedPolicyFailure(
+  process: ScannerProcess,
+  healthy: boolean | undefined,
+): boolean {
+  return !process.ok && process.exitCode === 1 && healthy === false;
+}
+
+function socketReportGap(
+  stdout: string,
+  healthy: boolean | undefined,
+  stopped: boolean,
+): "partial" | "malformed" | "missing" {
+  if (stopped || healthy !== undefined) return "partial";
+  return stdout.trim() ? "malformed" : "missing";
 }
 
 /** Keep validated findings even when the delegate or its report has incomplete coverage. */

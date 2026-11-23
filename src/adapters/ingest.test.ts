@@ -282,7 +282,9 @@ describe("ingestStrict: OSV records and report extensions", () => {
     const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
     assert.deepEqual(outcome, { ok: true, findings: [] });
   });
+});
 
+describe("OSV advisory retention and report extensions", () => {
   it("keeps reported advisories when an OSV group names an omitted advisory", () => {
     const packages = [
       {

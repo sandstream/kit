@@ -129,7 +129,18 @@ function readTriageReport(text: string) {
   return { findings, partial: findings.length !== raw.length };
 }
 
-export function parseAisleNanoSummaryJson(text: string): AisleNanoSummary {
+interface AisleSummaryRecord {
+  timestamp?: string;
+  target?: string;
+  model?: string;
+  per_file: unknown[];
+  files_scanned?: unknown;
+  error_files?: unknown;
+  files_skipped?: unknown;
+  clean_files?: unknown;
+}
+
+function readAisleSummary(text: string): AisleSummaryRecord {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -145,25 +156,24 @@ export function parseAisleNanoSummaryJson(text: string): AisleNanoSummary {
     throw new Error("Invalid AISLE summary: expected a JSON object");
   }
 
-  const r = parsed as {
-    timestamp?: string;
-    target?: string;
-    model?: string;
-    per_file?: unknown[];
-    files_scanned?: unknown;
-    error_files?: unknown;
-    files_skipped?: unknown;
-    clean_files?: unknown;
-  };
-  if (!Array.isArray(r.per_file)) throw new Error("Invalid AISLE summary: expected per_file array");
-  const perFile = r.per_file.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-    const value = entry as { file?: unknown; severities?: unknown; status?: unknown };
-    const file = str(value.file);
-    const severities = objectRecord(value.severities);
-    return file ? [{ file, severities, status: value.status }] : [];
-  });
-  const partial =
+  if (!("per_file" in parsed) || !Array.isArray(parsed.per_file)) {
+    throw new Error("Invalid AISLE summary: expected per_file array");
+  }
+  return parsed as AisleSummaryRecord;
+}
+
+function readAisleSummaryRow(entry: unknown) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+  const value = entry as { file?: unknown; severities?: unknown; status?: unknown };
+  const file = str(value.file);
+  const severities = objectRecord(value.severities);
+  return file ? [{ file, severities, status: value.status }] : [];
+}
+
+type AisleSummaryRow = ReturnType<typeof readAisleSummaryRow>[number];
+
+function summaryIsPartial(r: AisleSummaryRecord, perFile: readonly AisleSummaryRow[]): boolean {
+  return (
     perFile.length === 0 ||
     perFile.length !== r.per_file.length ||
     (r.files_scanned !== undefined && r.files_scanned !== r.per_file.length) ||
@@ -171,9 +181,12 @@ export function parseAisleNanoSummaryJson(text: string): AisleNanoSummary {
     (r.files_skipped !== undefined && r.files_skipped !== 0) ||
     perFile.some(
       (entry) => !entry.severities || (entry.status !== undefined && entry.status !== "ok"),
-    );
-  const completeEmpty =
-    !partial &&
+    )
+  );
+}
+
+function summaryProvesEmpty(r: AisleSummaryRecord, perFile: readonly AisleSummaryRow[]): boolean {
+  return (
     r.files_scanned === perFile.length &&
     r.clean_files === perFile.length &&
     r.error_files === 0 &&
@@ -184,7 +197,15 @@ export function parseAisleNanoSummaryJson(text: string): AisleNanoSummary {
         severities &&
         Object.keys(severities).length > 0 &&
         Object.values(severities).every((count) => count === 0),
-    );
+    )
+  );
+}
+
+export function parseAisleNanoSummaryJson(text: string): AisleNanoSummary {
+  const r = readAisleSummary(text);
+  const perFile = r.per_file.flatMap(readAisleSummaryRow);
+  const partial = summaryIsPartial(r, perFile);
+  const completeEmpty = !partial && summaryProvesEmpty(r, perFile);
 
   return {
     timestamp: str(r.timestamp),

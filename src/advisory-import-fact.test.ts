@@ -392,18 +392,18 @@ describe("withImportFacts", () => {
 const FACT_LINE =
   /^ +(?:imported by project source: |not imported by project source; |not imported by anything kit read |import use not checked: ).*\n/gm;
 
-describe("kit ingest osv: the fact rides beside the finding", () => {
-  function run(files: Record<string, string>, args: string[], report: unknown = REPORT): string {
-    const fixture = createCliContractFixture();
-    roots.push(fixture.root);
-    write(fixture.cwd, { ...files, "report.json": JSON.stringify(report) });
-    const result = fixture.run(["ingest", "osv", "report.json", ...args]);
-    assert.equal(result.status, 0, result.stderr);
-    return result.stdout;
-  }
-  const findingsOf = (stdout: string) =>
-    (JSON.parse(stdout) as { count: number; findings: Record<string, unknown>[] }).findings;
+function run(files: Record<string, string>, args: string[], report: unknown = REPORT): string {
+  const fixture = createCliContractFixture();
+  roots.push(fixture.root);
+  write(fixture.cwd, { ...files, "report.json": JSON.stringify(report) });
+  const result = fixture.run(["ingest", "osv", "report.json", ...args]);
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
+}
+const findingsOf = (stdout: string) =>
+  (JSON.parse(stdout) as { count: number; findings: Record<string, unknown>[] }).findings;
 
+describe("kit ingest osv: the fact rides beside the finding", () => {
   it("keeps import facts and marks partial coverage when an OSV result is unreadable", () => {
     const stdout = run(NPM_PROJECT, ["--json"], {
       results: [...REPORT.results, { packages: null }],
@@ -448,7 +448,9 @@ describe("kit ingest osv: the fact rides beside the finding", () => {
     assert.notEqual(full, empty);
     assert.equal(withoutFact(findingsOf(full)), withoutFact(findingsOf(empty)));
   });
+});
 
+describe("kit ingest: text output and findings without a package", () => {
   it("text: one extra line per finding, and every other byte is unchanged", () => {
     const full = run(NPM_PROJECT, []);
     const empty = run({}, []);
