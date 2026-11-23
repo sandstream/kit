@@ -48,11 +48,12 @@ describe("downloaded provider binaries stay out of the scan", () => {
 });
 
 describe("trivy config mode for infrastructure code", () => {
-  it("runs trivy in config mode with sarif output", () => {
+  it("runs Trivy config in native JSON mode and ingests SARIF", () => {
     const d = def("trivy-config");
     assert.equal(d.bin, "trivy");
     assert.equal(d.args[0], "config");
-    assert.ok(d.args.includes("sarif"));
+    assert.deepEqual(d.args.slice(-4), ["--format", "json", "--quiet", "."]);
+    assert.equal(d.format, "sarif");
   });
 
   it("applies when a .tf file or a Dockerfile exists", () => {

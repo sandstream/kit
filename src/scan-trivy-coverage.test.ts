@@ -27,7 +27,7 @@ const native = JSON.stringify({
 });
 
 it("redacts secret matches before conversion and preserves downgraded and dropped findings", async () => {
-  const args = ["image", "--format", "sarif", "--quiet", ref];
+  const args = ["image", "--format", "json", "--list-all-pkgs", "--quiet", ref];
   const calls: string[] = [];
   let inputPath = "";
   const processResult = await runTrivyWithCoverage(
@@ -38,7 +38,7 @@ it("redacts secret matches before conversion and preserves downgraded and droppe
       calls.push(actual[0]!);
       assert.equal(root, realpathSync(process.cwd()));
       if (actual[0] === "image") {
-        assert.deepEqual(actual, ["image", "--format", "json", "--quiet", ref, "--list-all-pkgs"]);
+        assert.deepEqual(actual, ["image", "--format", "json", "--list-all-pkgs", "--quiet", ref]);
         return { ok: true, stdout: native };
       }
       assert.deepEqual(actual.slice(0, -1), ["convert", "--ignorefile", "", "--format", "sarif"]);
@@ -89,7 +89,7 @@ it("redacts secret matches before conversion and preserves downgraded and droppe
 });
 
 it("requires a structured match for the native target and preserves complete evidence after redaction", async () => {
-  const args = ["image", "--format", "sarif", ref];
+  const args = ["image", "--format", "json", "--list-all-pkgs", ref];
   for (const uri of ["other-image", "image"]) {
     const value = await runTrivyWithCoverage(process.cwd(), args, "trivy-image", async (actual) => {
       if (actual[0] === "image") return { ok: true, stdout: native };
@@ -125,7 +125,7 @@ it("does not let duplicates at one line replace a native finding at another", as
     { ...finding, StartLine: 7 },
   ];
   delete report.Results[0].Secrets;
-  const args = ["image", "--format", "sarif", ref];
+  const args = ["image", "--format", "json", "--list-all-pkgs", ref];
   const value = await runTrivyWithCoverage(
     process.cwd(),
     args,

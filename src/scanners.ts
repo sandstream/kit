@@ -102,7 +102,7 @@ export interface ScannerDef {
   bin: string;
   /** args that emit SARIF/OSV on stdout */
   args: string[];
-  format: IngestFormat;
+  format: IngestFormat; // Format Kit ingests after any native evidence processing.
   evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image";
   /** env var that must be set (e.g. SNYK_TOKEN) */
   needsToken?: string;
@@ -140,7 +140,16 @@ export const SCANNERS: ScannerDef[] = [
     id: "trivy",
     bin: "trivy",
     evidence: "trivy-fs",
-    args: ["fs", "--skip-dirs", PROVIDER_GLOB, "--format", "sarif", "--quiet", "."],
+    args: [
+      "fs",
+      "--skip-dirs",
+      PROVIDER_GLOB,
+      "--format",
+      "json",
+      "--list-all-pkgs",
+      "--quiet",
+      ".",
+    ],
     format: "sarif",
     // run against the pre-synced local DB; never reach out to update it
     offline: { args: ["--offline-scan", "--skip-db-update"] },
@@ -151,7 +160,7 @@ export const SCANNERS: ScannerDef[] = [
     id: "trivy-config",
     bin: "trivy",
     evidence: "trivy-config",
-    args: ["config", "--skip-dirs", PROVIDER_GLOB, "--format", "sarif", "--quiet", "."],
+    args: ["config", "--skip-dirs", PROVIDER_GLOB, "--format", "json", "--quiet", "."],
     format: "sarif",
     detect: ["*.tf", "Dockerfile"],
     // the check bundle is fetched from a registry unless told not to

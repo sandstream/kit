@@ -203,19 +203,8 @@ export async function runTrivyWithCoverage(
     };
   }
   const target = mode === "trivy-image" ? (args.at(-1) ?? "") : ".";
-  const index = args.indexOf("--format");
-  if (index < 0 || args[index + 1] !== "sarif")
-    return {
-      ok: false,
-      stdout: "",
-      stderr: "Invalid Trivy scanner arguments",
-      noNumericExitStatus: true,
-    };
-  const nativeArgs = [...args];
-  nativeArgs[index + 1] = "json";
-  if (mode !== "trivy-config") nativeArgs.push("--list-all-pkgs");
   const expectedConfig = mode === "trivy-config" ? await findIacFiles(root) : [];
-  const process = await run(nativeArgs, root);
+  const process = await run(args, root);
   const report = readTrivyReport(process.stdout, mode, target, root, expectedConfig);
   const converted = report.convertible ? await convertReport(process.stdout, root, run) : {};
   return { ...process, ...recoverSarif(converted, report) };

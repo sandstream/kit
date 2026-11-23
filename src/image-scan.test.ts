@@ -310,7 +310,7 @@ describe("imageScanners", () => {
         [
           "trivy:image:ghcr.io/org/app:1.2",
           "trivy",
-          ["image", "--format", "sarif", "--quiet", "ghcr.io/org/app:1.2"],
+          ["image", "--format", "json", "--list-all-pkgs", "--quiet", "ghcr.io/org/app:1.2"],
           "sarif",
         ],
       ],

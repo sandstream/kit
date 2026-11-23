@@ -303,7 +303,7 @@ export function imageScanners(
         id: `trivy:image:${ref}`,
         bin: "trivy",
         evidence: "trivy-image",
-        args: ["image", "--format", "sarif", "--quiet", ref],
+        args: ["image", "--format", "json", "--list-all-pkgs", "--quiet", ref],
         format: "sarif",
         cloudOnly: true,
         timeoutMs: IMAGE_TIMEOUT_MS,
