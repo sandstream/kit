@@ -43,7 +43,7 @@ const write = (tool_input: Record<string, unknown>) =>
     reader({ [SETTINGS]: CURRENT }),
   );
 
-describe("gateSettingsWriteRefusal", () => {
+describe("gateSettingsWriteRefusal: a new hook", () => {
   it("refuses a write that adds a hook next to kit's, on any event", () => {
     const next = settings([GATE, ENV, "bash .claude/hooks/guard.sh"]);
     const r = write({ file_path: ".claude/settings.json", content: next });
@@ -88,7 +88,9 @@ describe("gateSettingsWriteRefusal", () => {
       /Stop: \{"type":"prompt"/,
     );
   });
+});
 
+describe("gateSettingsWriteRefusal: kit's own gate entries", () => {
   it("refuses a write that drops gate-bash", () => {
     const r = write({ file_path: ".claude/settings.json", content: settings([ENV]) });
     assert.match(r ?? "", /remove or change kit's gate hooks/);
