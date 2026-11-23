@@ -1,6 +1,7 @@
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 /**
  * Put a recording stand-in for `gh` first on PATH so a test that exercises the GitHub target of
@@ -34,7 +35,7 @@ export function installFakeGh(): { calls: () => string[]; restore: () => void } 
     restore: () => {
       if (priorPath === undefined) delete process.env.PATH;
       else process.env.PATH = priorPath;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     },
   };
 }
