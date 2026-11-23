@@ -8,7 +8,9 @@ import {
   EMPTY_SARIF,
   makeFixture,
   scan,
+  SOCKET_FAIL,
   SOCKET_PASS,
+  socketReport,
   toml,
   tool,
   type Fixture,
@@ -164,6 +166,50 @@ describe("kit scan: Socket policy coverage", { skip }, () => {
     assert.equal(report.runs[0].reportGap, "missing");
   });
 
+  it("requires a full Socket CI report for strict coverage", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n');
+    tool(f, "socket", `echo '{"ok":true,"data":{"healthy":true}}'; exit 0`);
+    const r = await scan(f, ["--strict", "--json"], { SOCKET_SECURITY_API_TOKEN: "fixture" });
+    assert.equal(r.exitCode, 1, r.stdout);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].status, "error");
+  });
+
+  it("keeps a contradictory Socket policy finding with partial coverage", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n');
+    const native = socketReport(false);
+    const contradictory = { ...native, data: { ...native.data, healthy: true } };
+    tool(f, "socket", `echo '${JSON.stringify(contradictory)}'; exit 0`);
+    const r = await scan(f, ["--strict", "--json"], { SOCKET_SECURITY_API_TOKEN: "fixture" });
+    assert.equal(r.exitCode, 1, r.stdout);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].reportGap, "partial");
+    assert.equal(report.findings[0].severity, "high");
+    assert.match(report.findings[0].detail, /policy violation/);
+  });
+
+  it("distinguishes missing Socket policy reports from malformed evidence", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n');
+    const env = { SOCKET_SECURITY_API_TOKEN: "fixture" };
+    const cases = [
+      [{ ok: false, message: "Socket API error", data: { code: 403 } }, "missing"],
+      [{ ok: false, message: "Input error" }, "missing"],
+      [{ ok: false, message: "Invalid Socket API response" }, "malformed"],
+      [{ ok: false, message: 1 }, "malformed"],
+    ] as const;
+    for (const [response, gap] of cases) {
+      tool(f, "socket", `echo '${JSON.stringify(response)}'; exit 1`);
+      const result = await scan(f, ["--strict", "--json"], env);
+      assert.equal(result.exitCode, 1, result.stdout);
+      const report = JSON.parse(result.stdout);
+      assert.equal(report.coverage, "partial");
+      assert.equal(report.runs[0].reportGap, gap, JSON.stringify(response));
+      assert.equal(report.findings[0].didNotRun, true);
+    }
+  });
+
   it("does not admit a failed Socket invocation into the baseline", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\n');
     tool(f, "socket", `echo '{"ok":false,"message":"no manifests"}'; exit 1`);
@@ -182,5 +228,72 @@ describe("kit scan: Socket policy coverage", { skip }, () => {
     assert.equal(report.findings[0].didNotRun, true);
     assert.equal((await scan(f, ["--update-baseline"], env)).exitCode, 1);
     assert.equal(readFileSync(baseline, "utf8"), original);
+  });
+});
+
+describe("kit scan: Socket policy evidence", { skip }, () => {
+  useFixture();
+
+  it("does not count a Socket CI verdict as proof of policy coverage", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n[governance.scan]\nrequired_scanners = ["socket"]\n');
+    tool(f, "socket", SOCKET_PASS);
+    const env = { SOCKET_SECURITY_API_TOKEN: "fixture" };
+    const result = await scan(f, ["--json"], env);
+    assert.equal(result.exitCode, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].status, "partial");
+    assert.equal(report.runs[0].reportGap, "partial");
+    assert.match(report.runs[0].reason, /policy coverage/i);
+    assert.deepEqual(report.findings, []);
+    const strict = await scan(f, ["--strict"], env);
+    assert.equal(strict.exitCode, 1, strict.stdout);
+    const baseline = join(f.dir, ".kit-baseline.json");
+    const original = JSON.stringify({
+      version: 1,
+      generated: new Date(0).toISOString(),
+      categories: { scan: { findings: ["kept"] } },
+    });
+    writeFileSync(baseline, original);
+    for (const reply of [SOCKET_PASS, SOCKET_FAIL]) {
+      tool(f, "socket", reply);
+      assert.equal((await scan(f, ["--update-baseline"], env)).exitCode, 1);
+      assert.equal(readFileSync(baseline, "utf8"), original);
+    }
+  });
+});
+
+describe("kit scan: Snyk coverage", { skip }, () => {
+  useFixture();
+
+  it("refuses a clean exit and empty SARIF without Snyk's native coverage report", async () => {
+    toml(f, '[scan]\ndelegates = ["snyk"]\n[governance.scan]\nrequired_scanners = ["snyk"]\n');
+    tool(f, "snyk", `echo '${EMPTY_SARIF}'`);
+    const result = await scan(f, ["--json"], { SNYK_TOKEN: "fixture" });
+    assert.equal(result.exitCode, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].reportGap, "missing");
+  });
+
+  it("keeps reported Snyk findings when the scope report is missing", async () => {
+    toml(f, '[scan]\ndelegates = ["snyk"]\n');
+    const sarif = JSON.stringify({
+      version: "2.1.0",
+      runs: [
+        {
+          tool: { driver: { name: "Snyk Open Source", properties: { artifactsScanned: 1 } } },
+          results: [
+            { ruleId: "SNYK-JS-FIXTURE-1", level: "error", message: { text: "Fixture issue" } },
+          ],
+        },
+      ],
+    });
+    tool(f, "snyk", `echo '${sarif}'; exit 1`);
+    const result = await scan(f, ["--strict", "--json"], { SNYK_TOKEN: "fixture" });
+    assert.equal(result.exitCode, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.runs[0].reportGap, "missing");
+    assert.match(report.findings[0].name, /SNYK-JS-FIXTURE-1/);
   });
 });

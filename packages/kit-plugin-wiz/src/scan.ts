@@ -109,6 +109,7 @@ export async function makeClient(opts: MakeClientOptions = {}): Promise<WizClien
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
+    redirect: "error",
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
@@ -177,27 +178,41 @@ export async function fetchIssues(
   if (!Number.isInteger(limit) || limit <= 0)
     throw new Error("Wiz issue limit must be a positive integer");
   const variables = issueVariables(limit, opts);
-  const findings: WizIssue[] = [];
+  const findings = new Map<string, WizIssue>();
   const cursors = new Set<string>();
   try {
     for (;;) {
       const page = await readWizPage(client, variables);
-      findings.push(...page.findings.slice(0, limit - findings.length));
+      const repeated = appendWizFindings(findings, page.findings, limit);
       if (page.error) throw page.error;
-      if (!page.hasNextPage) return findings;
-      if (findings.length >= limit) throw new Error("Wiz issue limit reached before the last page");
+      if (repeated) throw new Error("Wiz API returned a repeated issue ID");
+      if (!page.hasNextPage) return [...findings.values()];
+      if (findings.size >= limit) throw new Error("Wiz issue limit reached before the last page");
       const cursor = page.endCursor;
       if (!cursor || cursors.has(cursor) || !page.findings.length) {
         throw new Error("Invalid Wiz API pagination cursor");
       }
       cursors.add(cursor);
       variables.after = cursor;
-      variables.first = limit - findings.length;
+      variables.first = limit - findings.size;
     }
   } catch (error) {
-    if (findings.length) throw new IncompleteWizIssuesError(findings, error);
+    if (findings.size) throw new IncompleteWizIssuesError([...findings.values()], error);
     throw error;
   }
+}
+
+function appendWizFindings(
+  findings: Map<string, WizIssue>,
+  page: readonly WizIssue[],
+  limit: number,
+): boolean {
+  let repeated = false;
+  for (const issue of page) {
+    if (findings.has(issue.id)) repeated = true;
+    else if (findings.size < limit) findings.set(issue.id, issue);
+  }
+  return repeated;
 }
 
 async function readWizPage(client: WizClient, variables: IssueVariables) {
@@ -208,6 +223,7 @@ async function readWizPage(client: WizClient, variables: IssueVariables) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query: ISSUES_QUERY, variables }),
+    redirect: "error",
     signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {

@@ -8,10 +8,11 @@ import { runtimeProfile, RUN_ENV, SEATBELT } from "./launch-profile.js";
 import type { BootstrapRequest } from "./launch-bootstrap.js";
 import type { SupervisorReceipt, SupervisorRequest } from "./launch-supervisor.js";
 import type { PreparedLaunchPolicy } from "./launch-policy.js";
+import type { ImageCleanupStep } from "./sealed-image-owner.js";
 import { containsSnapshotPath } from "./snapshot-storage.js";
 
 type Refusal = { ran: false | null; reason: string };
-export type IncomingRun =
+export type IncomingRun = (
   | Refusal
   | {
       ran: true;
@@ -22,7 +23,8 @@ export type IncomingRun =
       boundaryReason?: string;
       stdout: string;
       stderr: string;
-    };
+    }
+) & { cleanupStep?: ImageCleanupStep };
 
 interface LaunchContext {
   runtime: string;

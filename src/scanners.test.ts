@@ -1,3 +1,4 @@
+import { socketReport } from "./commands/scan.test-support.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -142,34 +143,36 @@ describe("runScanners (injected deps)", () => {
 });
 
 describe("runScanners with an exit-code delegate", () => {
-  it("Socket policy report and a clean exit support complete coverage", async () => {
+  it("keeps policy coverage partial when Socket reports a clean verdict", async () => {
     const only: ScannerDef[] = [
       { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },
     ];
     const deps: ScanDeps = {
       resolve: async (bin) => `/usr/bin/${bin}`,
-      run: async () => ({ ok: true, exitCode: 0, stdout: '{"ok":true,"data":{"healthy":true}}' }),
+      run: async () => ({ ok: true, exitCode: 0, stdout: JSON.stringify(socketReport(true)) }),
       hasEnv: () => true,
       detect: () => true,
     };
     const { merged, runs } = await runScanners(deps, only);
-    assert.equal(runs[0].status, "ran");
+    assert.equal(runs[0].status, "partial");
+    assert.equal(runs[0].reportGap, "partial");
     assert.equal(runs[0].findings, 0);
     assert.equal(merged.length, 0);
   });
 
-  it("Socket policy violation and exit 1 support complete coverage with a finding", async () => {
+  it("retains a Socket policy violation with partial coverage", async () => {
     const only: ScannerDef[] = [
       { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },
     ];
     const deps: ScanDeps = {
       resolve: async (bin) => `/usr/bin/${bin}`,
-      run: async () => ({ ok: false, exitCode: 1, stdout: '{"ok":true,"data":{"healthy":false}}' }),
+      run: async () => ({ ok: false, exitCode: 1, stdout: JSON.stringify(socketReport(false)) }),
       hasEnv: () => true,
       detect: () => true,
     };
     const { merged, runs } = await runScanners(deps, only);
-    assert.equal(runs[0].status, "ran");
+    assert.equal(runs[0].status, "partial");
+    assert.equal(runs[0].reportGap, "partial");
     assert.equal(runs[0].findings, 1);
     assert.equal(merged.length, 1);
     assert.equal(merged[0].severity, "high");

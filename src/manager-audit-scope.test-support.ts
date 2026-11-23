@@ -27,6 +27,10 @@ const locks = {
 
 export function managerFixture(t: TestContext, manager: Manager) {
   const fixture = auditFixture(t);
+  // npm test can export its own config paths, which lie outside the fixture's scope.
+  for (const name of Object.keys(fixture.env)) {
+    if (/^(?:BUN_|PNPM_|YARN_|NPM_CONFIG_)/i.test(name)) delete fixture.env[name];
+  }
   const { file, text } = locks[manager];
   const lockfile = join(fixture.project, file);
   writeFileSync(lockfile, text);

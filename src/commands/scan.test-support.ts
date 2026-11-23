@@ -8,8 +8,35 @@ export const EMPTY_SARIF = JSON.stringify({
   runs: [{ tool: { driver: { name: "grype", rules: [] } }, results: [] }],
 });
 
-export const SOCKET_PASS = `echo '{"ok":true,"data":{"healthy":true,"alerts":{}}}'; exit 0`;
-export const SOCKET_FAIL = `echo '{"ok":true,"data":{"healthy":false,"alerts":{}}}'; exit 1`;
+export function socketReport(healthy: boolean) {
+  return {
+    ok: true,
+    data: {
+      includeLicensePolicy: true,
+      healthy,
+      orgSlug: "fixture",
+      scanId: "fixture-scan",
+      options: { fold: "version", reportLevel: "error" },
+      alerts: healthy
+        ? {}
+        : {
+            npm: {
+              "fixture-dependency": {
+                "1.0.0": {
+                  type: "fixturePolicy",
+                  policy: "error",
+                  url: "https://example.invalid/alert",
+                  manifest: [],
+                },
+              },
+            },
+          },
+    },
+  };
+}
+
+export const SOCKET_PASS = `echo '${JSON.stringify(socketReport(true))}'; exit 0`;
+export const SOCKET_FAIL = `echo '${JSON.stringify(socketReport(false))}'; exit 1`;
 
 export interface Fixture {
   dir: string;

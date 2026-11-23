@@ -113,7 +113,7 @@ function startSignedCli(f: Fixture, scratch: string) {
     {
       cwd: f.repository,
       env: { ...process.env, TMPDIR: scratch, KIT_READ_ONLY: "0", KIT_AUDIT_ANCHOR: "0" },
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
     },
   );
 }
@@ -124,6 +124,10 @@ function killTestWorkload(pid: number): void {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
   }
+}
+
+function hasTemporaryRuntime(scratch: string): boolean {
+  return readdirSync(scratch).some((name) => /^kit-incoming-(sealed|runtime)-/.test(name));
 }
 
 it(
@@ -144,15 +148,31 @@ it(
     mkdirSync(scratch, { mode: 0o700 });
     const kit = startSignedCli(f, scratch);
     const stopped = once(kit, "exit");
+    const closed = once(kit, "close");
+    let diagnostic = "";
+    for (const stream of [kit.stdout, kit.stderr]) {
+      stream.setEncoding("utf8").on("data", (chunk: string) => {
+        diagnostic = (diagnostic + chunk).slice(-4096);
+      });
+    }
     let pid: number | undefined;
     try {
       const marker = join(f.policy.outputDirectory, "pid");
       const startup = AbortSignal.timeout(NATIVE_RUN_TEST_WINDOW_MS);
       while (!existsSync(marker) && kit.exitCode === null && kit.signalCode === null)
         await pause(50, undefined, { signal: startup });
-      assert.ok(existsSync(marker), "Kit stopped before the signed workload started");
+      if (!existsSync(marker)) {
+        const [code, signal] = await closed;
+        assert.fail(
+          `Kit stopped before the signed workload started (${code}, ${signal}): ${diagnostic}`,
+        );
+      }
       pid = Number(readFileSync(marker, "utf8"));
       assert.ok(Number.isInteger(pid) && pid > 0);
+      assert.equal(
+        readdirSync(scratch).filter((name) => name.startsWith("kit-incoming-runtime-")).length,
+        1,
+      );
       assert.equal(
         readdirSync(scratch).filter((name) => name.startsWith("kit-incoming-sealed-")).length,
         2,
@@ -161,8 +181,7 @@ it(
       assert.ok(kit.kill("SIGKILL"));
       assert.deepEqual(await stopped, [null, "SIGKILL"]);
       const teardown = AbortSignal.timeout(15_000);
-      while (readdirSync(scratch).some((name) => name.startsWith("kit-incoming-sealed-")))
-        await pause(50, undefined, { signal: teardown });
+      while (hasTemporaryRuntime(scratch)) await pause(50, undefined, { signal: teardown });
       assert.throws(() => process.kill(pid!, 0), { code: "ESRCH" });
       pid = undefined;
     } finally {
@@ -175,8 +194,7 @@ it(
       } finally {
         try {
           const teardown = AbortSignal.timeout(15_000);
-          while (readdirSync(scratch).some((name) => name.startsWith("kit-incoming-sealed-")))
-            await pause(50, undefined, { signal: teardown });
+          while (hasTemporaryRuntime(scratch)) await pause(50, undefined, { signal: teardown });
         } finally {
           await ejectFixtureImages(scratch);
           f.cleanup();

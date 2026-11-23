@@ -8,7 +8,7 @@ Ingests local AISLE nano-analyzer results into kit's scan-results log. This pack
 npm install sandstream-kit-plugin-aisle
 ```
 
-Run the nano-analyzer separately so its output directory contains `triage.json` (and optionally `summary.json`).
+Run the nano-analyzer separately and import its output directory. An empty result requires a complete `summary.json` with a declared target and distinct file paths under that target. Kit can retain readable findings from `triage.json` with partial coverage.
 
 ## Configuration
 

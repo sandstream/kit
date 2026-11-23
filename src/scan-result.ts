@@ -1,7 +1,7 @@
 import { ingestStrict, type IngestGap, type IngestOutcome } from "./adapters/ingest.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import { abortedRun } from "./scan-abort.js";
-import { exitGateFinding, socketPolicyVerdict } from "./scan-exit-gate.js";
+import { exitGateFinding, readSocketPolicy } from "./scan-exit-gate.js";
 import type { ScannerDef, ScannerRun } from "./scanners.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 
@@ -24,6 +24,7 @@ export type ScannerEvidence =
       packageCount?: number;
       checkCount?: number;
       fileCount?: number;
+      targetFiles?: string[];
       requiredFindings?: InventoryFinding[];
     }
   | { status: "not-applicable"; reason: string }
@@ -98,43 +99,40 @@ function processFailureReason(process: ScannerProcess): string {
 }
 
 function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledScan {
-  const healthy = socketPolicyVerdict(process.stdout);
+  const { verdict, reportedViolation, reportGap } = readSocketPolicy(process.stdout);
   const stopped = abortedRun(scanner, process);
-  const complete = !stopped && !process.noNumericExitStatus;
-  if (complete && process.ok && healthy === true)
-    return { run: { id: scanner.id, status: "ran", findings: 0 } };
-  const finding = !process.ok || healthy === false ? exitGateFinding(scanner, process) : undefined;
+  const finding =
+    !process.ok || reportedViolation
+      ? exitGateFinding(scanner, process, reportedViolation)
+      : undefined;
   const findings = finding ? [finding] : [];
-  if (complete && socketReportedPolicyFailure(process, healthy)) {
-    return { run: { id: scanner.id, status: "ran", findings: 1 }, findings };
+  if (!stopped && socketVerdictMatchesExit(process, verdict)) {
+    return {
+      run: {
+        id: scanner.id,
+        status: "partial",
+        findings: findings.length,
+        reportGap: "partial",
+        reason: "Socket CI did not provide policy coverage evidence for this scan",
+      },
+      findings,
+    };
   }
   const reason = finding?.detail ?? "scanner did not return a valid Socket policy verdict";
-  const reportGap = socketReportGap(process.stdout, healthy, Boolean(stopped));
   return {
     run: {
       ...(stopped ?? { id: scanner.id, status: "error" }),
       findings: findings.length,
       reason: stopped?.reason ?? reason,
-      reportGap,
+      reportGap: stopped ? "partial" : (reportGap ?? "partial"),
     },
     findings,
   };
 }
 
-function socketReportedPolicyFailure(
-  process: ScannerProcess,
-  healthy: boolean | undefined,
-): boolean {
-  return !process.ok && process.exitCode === 1 && healthy === false;
-}
-
-function socketReportGap(
-  stdout: string,
-  healthy: boolean | undefined,
-  stopped: boolean,
-): "partial" | "malformed" | "missing" {
-  if (stopped || healthy !== undefined) return "partial";
-  return stdout.trim() ? "malformed" : "missing";
+function socketVerdictMatchesExit(process: ScannerProcess, verdict: boolean | undefined): boolean {
+  if (process.noNumericExitStatus) return false;
+  return process.ok ? verdict === true : process.exitCode === 1 && verdict === false;
 }
 
 /** Keep validated findings even when the delegate or its report has incomplete coverage. */
@@ -207,6 +205,7 @@ function applyScannerEvidence(settled: SettledScan, evidence?: ScannerEvidence):
       ...(evidence.packageCount === undefined ? {} : { packageCount: evidence.packageCount }),
       ...(evidence.checkCount === undefined ? {} : { checkCount: evidence.checkCount }),
       ...(evidence.fileCount === undefined ? {} : { fileCount: evidence.fileCount }),
+      ...(evidence.targetFiles === undefined ? {} : { targetFiles: evidence.targetFiles }),
     };
     if (run.status === "ran" && missingInventoryFindings(settled, evidence.requiredFindings))
       return {

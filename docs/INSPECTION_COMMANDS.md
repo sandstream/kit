@@ -145,6 +145,9 @@ A required delegate must complete its scan before the scanner gate can pass.
 A baseline update also needs a completed scan and an approved scanner gate.
 The SARIF export records each delegate's status and keeps coverage gaps visible on import.
 The Socket delegate checks the reported policy verdict and the process exit status.
+The Socket report does not identify the policy data used for that scan.
+Kit records Socket coverage as partial and retains reported policy violations.
+A Socket result cannot satisfy a required delegate, strict mode or a baseline update.
 An error without a policy verdict indicates that the scan did not complete.
 For a directory scan, Grype reports the scoped package inventory alongside its findings.
 If Grype reports no packages, a required Grype delegate cannot pass.
@@ -156,6 +159,9 @@ For configuration scans, Kit requires checked Dockerfile and Compose targets and
 Kit retains the location and severity of secret findings and removes the matched secret text.
 Semgrep provides its scanned file count and SARIF findings from the same execution.
 A required Semgrep scan needs verified file coverage.
+Snyk reports the target files and dependency count from the same run.
+Kit compares that count and the issue IDs with the SARIF report.
+A scoped Snyk run can report zero dependencies.
 
 An OSV finding names a package, so it carries one more fact: whether the source of the project in
 the current directory imports that package. The line is one of:

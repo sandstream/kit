@@ -5,6 +5,7 @@ import { incomingVerification } from "./decision-schema.js";
 import { prepareLaunchPolicy } from "./launch-policy.js";
 import { launchNodeOnMac, type IncomingRun } from "./launch-node-macos.js";
 import { withSealedCandidate, withSealedRuntime, withSealedRunTree } from "./sealed-candidate.js";
+import type { ImageCleanupStep } from "./sealed-image-owner.js";
 import { readApprovedRunTree } from "./runtime-tree.js";
 
 interface LaunchRequest {
@@ -81,15 +82,25 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
       },
       assertStableBuild,
     );
-    return "ran" in result ? result : boundaryFailure(observation.result, result.reason);
+    if ("ran" in result) return result;
+    return boundaryFailure(
+      observation.result,
+      result.reason,
+      "cleanupStep" in result ? result.cleanupStep : undefined,
+    );
   } catch {
     return boundaryFailure(observation.result, "run-state-unavailable");
   }
 }
 
-function boundaryFailure(observed: IncomingRun | undefined, reason: string): IncomingRun {
-  if (observed?.ran === null) return observed;
+function boundaryFailure(
+  observed: IncomingRun | undefined,
+  reason: string,
+  cleanupStep?: ImageCleanupStep,
+): IncomingRun {
+  const cleanup = cleanupStep ? { cleanupStep } : {};
+  if (observed?.ran === null) return { ...observed, ...cleanup };
   return observed?.ran
-    ? { ...observed, outcome: "boundary-failed", boundaryReason: reason }
-    : { ran: false, reason };
+    ? { ...observed, ...cleanup, outcome: "boundary-failed", boundaryReason: reason }
+    : { ran: false, reason, ...cleanup };
 }

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { lstatSync } from "node:fs";
 
 const DISKUTIL = "/usr/sbin/diskutil";
 const HDIUTIL = "/usr/bin/hdiutil";
@@ -39,6 +40,33 @@ function apfsVolume(rows: Record<string, unknown>[]): string {
   return id;
 }
 
+function isImageCreationDissent(error: unknown): boolean {
+  if (!(error instanceof Error) || !("status" in error) || typeof error.status !== "number")
+    return false;
+  const { stderr, stdout } = error as Error & { stderr?: Buffer; stdout?: Buffer };
+  const output = `${stderr ?? ""}\n${stdout ?? ""}`;
+  return /com\.apple\.DiskImages2\.ErrorDomain (?:error |Code=)156\b|Dissented with status 0xC010\b/i.test(
+    output,
+  );
+}
+
+function createDataImage(image: string, source: string, cwd: string): void {
+  const args = ["image", "create", "from", "--format", "UDRO", source, image];
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  // DiskImages can briefly fail to unmount its own temporary volume during creation.
+  for (const delay of [100, 300]) {
+    try {
+      run(DISKUTIL, args, cwd);
+      return;
+    } catch (error) {
+      if (!isImageCreationDissent(error)) throw error;
+      Atomics.wait(wait, 0, 0, delay);
+      if (lstatSync(image, { throwIfNoEntry: false })) throw error;
+    }
+  }
+  run(DISKUTIL, args, cwd);
+}
+
 export function mountReadOnlyImage(
   image: string,
   source: string,
@@ -54,7 +82,7 @@ export function mountReadOnlyImage(
       cwd,
     );
   } else {
-    run(DISKUTIL, ["image", "create", "from", "--format", "UDRO", source, image], cwd);
+    createDataImage(image, source, cwd);
   }
   const attached = run(
     DISKUTIL,

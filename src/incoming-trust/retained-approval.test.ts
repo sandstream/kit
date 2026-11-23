@@ -144,6 +144,8 @@ for (const { name, change, reason } of mutations) {
     const db = new DatabaseSync(join(f.directory, "authority.sqlite"));
     let child: ReturnType<typeof fork> | undefined;
     try {
+      // Use the same bounded wait as the authority store while the other connection opens.
+      db.exec("PRAGMA busy_timeout = 5000");
       db.exec("BEGIN IMMEDIATE");
       child = startWaitingPreflight(f);
       const exit = once(child, "exit");

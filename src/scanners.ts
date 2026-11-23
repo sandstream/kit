@@ -100,7 +100,7 @@ export interface ScannerDef {
   /** args that emit SARIF/OSV on stdout */
   args: string[];
   format: IngestFormat; // Format Kit ingests after any native evidence processing.
-  evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image" | "semgrep";
+  evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image" | "semgrep" | "snyk";
   /** env var that must be set (e.g. SNYK_TOKEN) */
   needsToken?: string;
   /** marker files that make the scanner applicable; undefined = always */
@@ -111,8 +111,8 @@ export interface ScannerDef {
   /** Extra args/env applied in air-gap mode so the scanner runs against a local DB. */
   offline?: { args?: string[]; env?: Record<string, string> };
   /**
-   * Socket policy gate: read the policy verdict from `socket ci` JSON and confirm
-   * it matches the process exit status. This path does not use `format`.
+   * Read the Socket policy verdict and retain reported violations.
+   * Socket CI supplies no proof of policy coverage. This path does not use `format`.
    */
   exitGate?: boolean;
   /** Exit code that means "nothing here to scan" (osv-scanner: 128), not a failure. */
@@ -127,6 +127,7 @@ export const SCANNERS: ScannerDef[] = [
   {
     id: "snyk",
     bin: "snyk",
+    evidence: "snyk",
     args: ["test", "--sarif"],
     format: "sarif",
     needsToken: "SNYK_TOKEN",
@@ -422,6 +423,7 @@ export interface ScannerRun {
   packageCount?: number;
   checkCount?: number;
   fileCount?: number;
+  targetFiles?: string[];
 }
 
 /** Environment for a scanner child. PWD is reset because Go tools trust it over the real directory. */

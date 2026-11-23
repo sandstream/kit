@@ -15,7 +15,7 @@
  */
 
 import { appendFile, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
 
 const SCAN_RESULTS_FILE = ".kit-scan-results.jsonl";
 
@@ -172,10 +172,35 @@ function readAisleSummaryRow(entry: unknown) {
 
 type AisleSummaryRow = ReturnType<typeof readAisleSummaryRow>[number];
 
+function hasDistinctAislePaths(
+  target: string | undefined,
+  perFile: readonly AisleSummaryRow[],
+): boolean {
+  if (!target) return false;
+  const paths = posix.isAbsolute(target) ? posix : win32.isAbsolute(target) ? win32 : undefined;
+  if (!paths) return false;
+  const checked = new Set<string>();
+  for (const { file } of perFile) {
+    const normalized = paths.normalize(file);
+    if (
+      paths.parse(normalized).root ||
+      normalized === "." ||
+      normalized === ".." ||
+      normalized.startsWith(`..${paths.sep}`) ||
+      normalized.endsWith(paths.sep) ||
+      checked.has(normalized)
+    )
+      return false;
+    checked.add(normalized);
+  }
+  return true;
+}
+
 function summaryIsPartial(r: AisleSummaryRecord, perFile: readonly AisleSummaryRow[]): boolean {
   return (
     perFile.length === 0 ||
     perFile.length !== r.per_file.length ||
+    !hasDistinctAislePaths(str(r.target), perFile) ||
     (r.files_scanned !== undefined && r.files_scanned !== r.per_file.length) ||
     (r.error_files !== undefined && r.error_files !== 0) ||
     (r.files_skipped !== undefined && r.files_skipped !== 0) ||

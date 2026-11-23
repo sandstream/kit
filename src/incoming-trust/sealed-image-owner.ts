@@ -14,6 +14,26 @@ export interface ImageOwnerRequest {
 
 export type ImageMountRequest = { source: string; executable: boolean };
 
+const cleanupSteps = [
+  "verify-workspace",
+  "detach-image",
+  "inspect-mount",
+  "remove-workspace",
+] as const;
+export type ImageCleanupStep = (typeof cleanupSteps)[number];
+
+export class ImageCleanupFailure extends Error {
+  constructor(readonly cleanupStep: ImageCleanupStep) {
+    super(`Disk image cleanup failed (${cleanupStep})`);
+  }
+}
+
+function assertCleanupStatus(status: string | undefined): void {
+  const step = cleanupSteps.find((value) => status === `cleanup-failed:${value}`);
+  if (step) throw new ImageCleanupFailure(step);
+  if (status?.startsWith("cleanup-failed")) throw new Error("Disk image cleanup failed");
+}
+
 export function imageOwnerPaths(workspace: string) {
   return {
     claim: join(workspace, "image-claim"),
@@ -22,7 +42,6 @@ export function imageOwnerPaths(workspace: string) {
     ownerPid: join(workspace, "image-owner-pid"),
     status: join(workspace, "image-status"),
     request: join(workspace, "image-request"),
-    release: join(workspace, "image-release"),
   };
 }
 
@@ -99,13 +118,17 @@ export function startImageOwner(workspace: string, identity: BigIntStats, hostEx
   const worker = fileURLToPath(new URL("./sealed-image-owner-worker.js", import.meta.url));
   const child = spawn(hostExecutable, [worker, JSON.stringify(request)], {
     env: { PATH: "/usr/bin:/bin", LANG: "C" },
-    stdio: "ignore",
+    stdio: ["pipe", "ignore", "ignore"],
     detached: true,
   });
   child.on("error", () => {});
+  child.stdin.on("error", () => {});
   child.unref();
   const pid = child.pid;
-  if (pid === undefined) throw new Error("Could not start disk image owner");
+  if (pid === undefined) {
+    child.stdin.destroy();
+    throw new Error("Could not start disk image owner");
+  }
   return {
     awaitReady: () =>
       waitForOwner(pid, () => {
@@ -128,17 +151,11 @@ export function startImageOwner(workspace: string, identity: BigIntStats, hostEx
       if (!childRunning(pid)) throw new Error("Disk image owner stopped");
     },
     release: () => {
-      if (!ownedWorkspace(request)) return;
-      try {
-        writeFileSync(paths.release, "", { flag: "wx", mode: 0o600 });
-      } catch (error) {
-        if (ownedWorkspace(request)) throw error;
-        return;
-      }
+      // Closing the pipe signals release without writing into a workspace the child may be removing.
+      child.stdin.destroy();
       waitForOwner(pid, () => {
         if (!ownedWorkspace(request)) return true;
-        if (readImageMessage(paths.status) === "cleanup-failed")
-          throw new Error("Disk image cleanup failed");
+        assertCleanupStatus(readImageMessage(paths.status));
         return undefined;
       });
     },

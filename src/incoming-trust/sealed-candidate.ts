@@ -2,6 +2,7 @@ import {
   closeSync,
   constants,
   fstatSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -10,13 +11,19 @@ import {
   type BigIntStats,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { isReadOnlyMode } from "../read-only-mode.js";
 import { sameIdentity } from "../utils/same-file.js";
 import { secureDirStrict } from "../utils/secure-perms.js";
 import type { IncomingPreflight } from "./retained-approval.js";
+import { startRuntimeStage } from "./runtime-stage-macos.js";
 import { checkReadOnlyImage } from "./sealed-image-macos.js";
-import { imageOwnerPaths, startImageOwner } from "./sealed-image-owner.js";
+import {
+  ImageCleanupFailure,
+  imageOwnerPaths,
+  startImageOwner,
+  type ImageCleanupStep,
+} from "./sealed-image-owner.js";
 import { captureIncomingSnapshot } from "./snapshot.js";
 import { snapshotLimits } from "./snapshot-limits.js";
 import { copySnapshotFile, readSnapshotFile } from "./snapshot-io.js";
@@ -31,6 +38,7 @@ import {
 
 type SealedFailure = {
   verified: false;
+  cleanupStep?: ImageCleanupStep;
   reason:
     | "read-only"
     | "sealed-platform-unsupported"
@@ -53,7 +61,6 @@ interface ImageOwnerHost {
 interface ImageOptions {
   executable?: boolean;
   host?: ImageOwnerHost;
-  assertStableBuild?: () => void;
 }
 
 function copyRetainedCandidate(source: string, workspace: string): string {
@@ -152,24 +159,60 @@ export function withSealedRuntime<T>(
   use: (mount: string, assertPinned: () => void, ownerExecutable: string) => T,
   assertStableBuild?: () => void,
 ): T | SealedFailure {
+  if (isReadOnlyMode()) return { verified: false, reason: "read-only" };
+  if (process.platform !== "darwin")
+    return { verified: false, reason: "sealed-platform-unsupported" };
+  let stage: ReturnType<typeof startRuntimeStage>;
+  try {
+    assertStableBuild?.();
+    stage = startRuntimeStage();
+  } catch {
+    return { verified: false, reason: "sealed-input-unavailable" };
+  }
+  let result: T | SealedFailure;
+  try {
+    result = mountStagedRuntime(stage, runtime, digest, use, assertStableBuild);
+  } catch {
+    result = { verified: false, reason: "sealed-input-unavailable" };
+  }
+  try {
+    stage.release();
+    return result;
+  } catch {
+    return { verified: false, reason: "sealed-teardown-failed" };
+  }
+}
+
+function mountStagedRuntime<T>(
+  stage: ReturnType<typeof startRuntimeStage>,
+  runtime: string,
+  digest: string,
+  use: (mount: string, assertPinned: () => void, ownerExecutable: string) => T,
+  assertStableBuild?: () => void,
+): T | SealedFailure {
   const limit = 192 * 1024 * 1024;
+  const { executable } = stage;
+  const original = lstatSync(runtime, { bigint: true });
+  if (copySnapshotFile(runtime, executable, original, limit).sha256 !== digest)
+    throw new Error("Runtime digest changed");
+  const assertHost = () => {
+    stage.assertCurrent();
+    assertStableBuild?.();
+  };
   return withPinnedImage(
     (workspace) => {
       const source = join(workspace, "runtime");
       mkdirSync(source, { mode: 0o700 });
-      const copy = join(source, "node");
-      const original = lstatSync(runtime, { bigint: true });
-      if (copySnapshotFile(runtime, copy, original, limit).sha256 !== digest)
-        throw new Error("Runtime digest changed");
+      linkSync(executable, join(source, "node"));
       return source;
     },
     (mount, assertPinned) => {
       const entry = join(mount, "node");
       if (readSnapshotFile(entry, lstatSync(entry, { bigint: true }), limit).sha256 !== digest)
         throw new Error("Mounted runtime digest changed");
-      return use(entry, assertPinned, join(dirname(mount), "runtime", "node"));
+      return use(entry, assertPinned, executable);
     },
-    { executable: true, assertStableBuild },
+    { executable: true, host: { executable, assertStableBuild: assertHost } },
   );
 }
 
@@ -200,15 +243,11 @@ function verifyInWorkspace<T>(
   let result: T | SealedFailure;
   try {
     secureDirStrict(work);
-    const runtimeSource = options.executable ? materialize(work) : undefined;
     options.host?.assertStableBuild();
-    options.assertStableBuild?.();
-    const hostExecutable = runtimeSource
-      ? join(runtimeSource, "node")
-      : (options.host?.executable ?? process.execPath);
+    const hostExecutable = options.host?.executable ?? process.execPath;
     owner = startImageOwner(work, identity, hostExecutable);
     owner.awaitReady();
-    const source = runtimeSource ?? materialize(work);
+    const source = materialize(work);
     const { mount } = imageOwnerPaths(work);
     mkdirSync(mount, { mode: 0o700 });
     const unmounted = lstatSync(mount, { bigint: true });
@@ -228,7 +267,11 @@ function verifyInWorkspace<T>(
     else removeOwnedSnapshot(work, identity);
     if (lstatSync(work, { throwIfNoEntry: false })) throw new Error("Disk image workspace remains");
     return result;
-  } catch {
-    return { verified: false, reason: "sealed-teardown-failed" };
+  } catch (error) {
+    return {
+      verified: false,
+      reason: "sealed-teardown-failed",
+      ...(error instanceof ImageCleanupFailure ? { cleanupStep: error.cleanupStep } : {}),
+    };
   }
 }
