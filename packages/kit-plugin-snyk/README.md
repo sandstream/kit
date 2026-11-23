@@ -27,6 +27,10 @@ Save `snyk test --json` output to `snyk-results.json` first. The parser also acc
 
 ## Read-only API fetch
 
+The fetch function follows pagination links on the same issue endpoint.
+If a page fails after Kit reads some issues, `IncompleteSnykIssuesError.findings` contains those issues.
+The CLI parser marks an incomplete project with `coverage: "partial"` when it retains findings.
+
 `fetchSnykIssues({ orgSlug, projectId? })` fetches issues with GET requests. Set `SNYK_TOKEN` in the environment, or pass `token` explicitly; `orgSlug` is required. `apiBase` can select a regional endpoint. Call `recordSnykFindings` with parsed CLI results when you want local log rows; the fetch function returns issue objects for your own handling.
 
 ## API

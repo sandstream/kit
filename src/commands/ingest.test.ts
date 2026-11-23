@@ -432,6 +432,10 @@ for (const failure of ["missing", "directory", "permissions"] as const) {
       const result = fixture.run(["ingest", "osv", file, "--json"]);
       assert.equal(result.status, 1, result.stderr);
       assert.match(result.stderr, /could not read/i);
+      assert.equal(
+        JSON.parse(result.stdout).reportGap,
+        failure === "missing" ? "missing" : "unavailable",
+      );
       assert.doesNotMatch(result.stdout + result.stderr, /public-fixture-secret/);
     } finally {
       if (failure === "permissions") chmodSync(file, 0o600);
@@ -496,6 +500,55 @@ it("cloudflare-audit: refuses a report kit cannot read instead of reporting it c
     "--json",
   ]);
   assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(JSON.parse(result.stdout).reportGap, "malformed");
   assert.match(JSON.parse(result.stdout).error, /invalid Cloudflare audit report/);
   assert.doesNotMatch(result.stdout + result.stderr, /public-fixture-secret/);
+});
+
+it("cloudflare-audit: retains an independent finding when a peer record is invalid", () => {
+  const result = fixture.run([
+    "ingest",
+    "cloudflare-audit",
+    report([null, cloudflareAudit[0]]),
+    "--json",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.coverage, "partial");
+  assert.equal(output.reportGap, "malformed");
+  assert.deepEqual(
+    output.findings.map((finding: { name: string }) => finding.name),
+    ["cloudflare-audit: public-confirmed"],
+  );
+});
+
+it("SARIF: treats an unavailable Kit delegate as incomplete and retains valid findings", () => {
+  const run = {
+    ...EMPTY_SARIF.runs[0],
+    tool: { driver: { name: "kit" } },
+    invocations: [{ executionSuccessful: true }],
+    properties: {
+      scannerCoverage: [
+        { id: "a", status: "ran", findings: 0 },
+        { id: "b", status: "error", findings: 0, reportGap: "missing" },
+      ],
+    },
+  };
+  const output = fixture.run(["ingest", "sarif", report({ runs: [run] }), "--json"]);
+  assert.equal(output.status, 1, output.stdout + output.stderr);
+  const refused = JSON.parse(output.stdout);
+  assert.equal(refused.reportGap, "partial");
+  assert.deepEqual(refused.scannerCoverage, run.properties.scannerCoverage);
+
+  const retained = fixture.run([
+    "ingest",
+    "sarif",
+    report({ runs: [{ ...run, results: [{ ruleId: "retained" }] }] }),
+    "--json",
+  ]);
+  assert.equal(retained.status, 0, retained.stderr);
+  const value = JSON.parse(retained.stdout);
+  assert.equal(value.coverage, "partial");
+  assert.equal(value.count, 1);
+  assert.deepEqual(value.scannerCoverage, run.properties.scannerCoverage);
 });

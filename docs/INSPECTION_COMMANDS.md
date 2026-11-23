@@ -139,6 +139,8 @@ A partial report without findings exits 1. Kit reads SARIF 2.1.0.
 A required delegate must complete its scan before the scanner gate can pass.
 A baseline update also needs a completed scan and an approved scanner gate.
 The SARIF export records each delegate's status and keeps coverage gaps visible on import.
+The Socket delegate checks the reported policy verdict and the process exit status.
+An error without a policy verdict indicates that the scan did not complete.
 
 `cloudflare-audit` reads the `findings.json` that Cloudflare's security-audit skill writes and
 validates. kit checks only the fields it reads: the verdict, a unique fingerprint, the title, a source
@@ -147,8 +149,10 @@ record becomes a failure at its own overall severity (`informational` becomes `l
 `needs_validation` record becomes a `low` warning whose detail starts with "unverified". A `rejected`
 record is counted in a note on stderr and not imported. The model judged these records; kit maps them
 and does not judge them again.
-Invalid JSON, invalid report structure, and read errors produce exit 1.
-JSON errors contain `ok: false` and `error`, not a successful empty finding list.
+A damaged Cloudflare report retains readable findings with unique fingerprints.
+A report without readable findings exits 1 if its coverage is incomplete.
+JSON errors include `ok: false`, `error` and an evidence status in `reportGap`.
+A missing report file has status `missing`. A file Kit cannot read has status `unavailable`.
 
 The output states that an external report does not verify the current account state.
 Displayed findings mask recognized credentials and remove terminal controls.

@@ -1,13 +1,18 @@
 /**
- * The finding for a scanner whose own exit status is its verdict (Socket's `ci`). Any non-zero exit
- * stays a high finding, so a broken run is never green. What the finding SAYS depends on the cause:
- * a refused token is a setup problem, not a policy result, and sending the reader to a dashboard
- * for policy issues would send them looking for vulnerable packages when the fix is a token.
+ * Read the policy verdict and distinguish it from a failed Socket invocation.
  */
 import type { SecurityCheckResult } from "./check-security.js";
+import { scannerObject, scannerRecord } from "./check-scanner-evidence.js";
 
 const AUTH_CODES = new Set([401, 403]);
 const AUTH_TEXT = /request failed \((401|403)\)/;
+
+export function socketPolicyVerdict(stdout: string): boolean | undefined {
+  const report = scannerObject(stdout);
+  const data = report?.data;
+  if (report?.ok !== true || !scannerRecord(data)) return undefined;
+  return typeof data.healthy === "boolean" ? data.healthy : undefined;
+}
 
 function jsonCode(stdout: string): number | undefined {
   try {
@@ -31,6 +36,15 @@ export function exitGateFinding(
   out: { stdout: string; stderr?: string },
 ): SecurityCheckResult {
   const id = scanner.id;
+  if (socketPolicyVerdict(out.stdout) === false) {
+    return {
+      category: "supply-chain",
+      name: `${id}: ci exited non-zero`,
+      status: "fail",
+      detail: `${id} ci reported a dependency policy violation (see the ${id} dashboard)`,
+      severity: "high",
+    };
+  }
   const refused = refusedWith(out);
   if (refused !== undefined) {
     return {
@@ -44,9 +58,10 @@ export function exitGateFinding(
   }
   return {
     category: "supply-chain",
-    name: `${id}: ci exited non-zero`,
+    name: `${id}: scan did not finish`,
     status: "fail",
-    detail: `${id} ci exited non-zero: dependency policy issues were found, or the scan did not finish (see the ${id} dashboard)`,
+    detail: `${id} ci exited non-zero and did not finish with a valid policy report`,
     severity: "high",
+    didNotRun: true,
   };
 }

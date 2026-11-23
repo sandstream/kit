@@ -11,13 +11,14 @@
  *
  * kit owns this ingest schema and the mapping, never the judgement (ADR-0007). `confirmed` is a
  * failing finding at its own overall severity, `needs_validation` a low warning marked
- * unverified, and `rejected` is counted in a note, never ingested. A repeated fingerprint is
- * refused: it is the stable key. kit-research
+ * unverified, and `rejected` is counted in a note, never ingested. Repeated fingerprints
+ * are invalid because the fingerprint is the stable key. kit-research
  * `twelve-security-repos-list-vs-kit` chose this adapter.
  *
  * Pure: a string in, findings out. No file, network or model access.
  */
 import type { SecurityCheckResult } from "../check-security.js";
+import type { IngestOutcome } from "./ingest.js";
 
 type Severity = NonNullable<SecurityCheckResult["severity"]>;
 
@@ -94,33 +95,49 @@ function toFinding(record: AuditRecord): SecurityCheckResult {
   };
 }
 
-export type CloudflareAuditOutcome =
-  { ok: true; findings: SecurityCheckResult[]; notes: string[] } | { ok: false; reason: string };
-
 /**
- * Validate a parsed `findings.json` and map it. An empty array is a valid report that found
- * nothing. Any record kit cannot read fails the whole report, so a broken run never reads as
- * clean.
+ * Map the valid records in a parsed `findings.json`. A damaged report can retain
+ * findings with unique fingerprints and has partial coverage.
  */
-export function ingestCloudflareAudit(parsed: unknown): CloudflareAuditOutcome {
-  if (!Array.isArray(parsed))
-    return { ok: false, reason: "not a Cloudflare audit findings.json (not an array)" };
-  const seen = new Set<string>();
-  for (let i = 0; i < parsed.length; i++) {
-    const problem = recordProblem(parsed[i], i);
-    if (problem) return { ok: false, reason: `invalid Cloudflare audit report: ${problem}` };
-    const { fingerprint } = parsed[i] as AuditRecord;
-    if (seen.has(fingerprint))
-      return {
-        ok: false,
-        reason: `invalid Cloudflare audit report: record ${i} repeats a fingerprint`,
-      };
-    seen.add(fingerprint);
+export function ingestCloudflareAudit(parsed: unknown): IngestOutcome {
+  if (!Array.isArray(parsed)) {
+    return {
+      ok: false,
+      reportGap: "malformed",
+      reason: "not a Cloudflare audit findings.json (not an array)",
+    };
   }
-  const records = parsed as AuditRecord[];
-  const findings = records.filter((r) => r.verdict !== "rejected").map(toFinding);
-  const rejected = records.length - findings.length;
+  const seen = new Set<string>();
+  const records = new Map<string, AuditRecord>();
+  let problem: string | null = null;
+  for (let i = 0; i < parsed.length; i++) {
+    const value: unknown = parsed[i];
+    const invalid = recordProblem(value, i);
+    problem ??= invalid;
+    if (!isRecord(value) || !nonEmpty(value.fingerprint)) continue;
+    const { fingerprint } = value;
+    if (seen.has(fingerprint)) {
+      records.delete(fingerprint);
+      problem ??= `record ${i} repeats a fingerprint`;
+      continue;
+    }
+    seen.add(fingerprint);
+    if (!invalid) records.set(fingerprint, value as unknown as AuditRecord);
+  }
+  const findings = [...records.values()].filter((r) => r.verdict !== "rejected").map(toFinding);
+  const rejected = records.size - findings.length;
   const notes =
     rejected > 0 ? [`${rejected} candidate(s) the audit rejected were counted, not ingested.`] : [];
+  if (problem) {
+    const reason = `invalid Cloudflare audit report: ${problem}`;
+    if (findings.length === 0) return { ok: false, reportGap: "malformed", reason };
+    return {
+      ok: true,
+      findings,
+      coverage: "partial",
+      reportGap: "malformed",
+      notes: [reason, ...notes],
+    };
+  }
   return { ok: true, findings, notes };
 }

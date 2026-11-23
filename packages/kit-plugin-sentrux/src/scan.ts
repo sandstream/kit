@@ -38,6 +38,7 @@ export interface SentruxResult {
   /** Per-metric breakdown: modularity, acyclicity, depth, equality, redundancy. */
   metrics: Record<string, number>;
   violations: SentruxViolation[];
+  coverage?: "partial";
 }
 
 /** Coerce an arbitrary severity string to kit's 4-level scale (default medium). */
@@ -50,11 +51,10 @@ function normalizeSeverity(raw: unknown): Severity {
 }
 
 /**
- * Parse the JSON produced by `sentrux check --json` / `sentrux gate --json`.
+ * Parse a saved Sentrux JSON report.
  * Tolerant of field-name variation across versions: score may be `score`,
  * `architecture_score`, or `total`; the gate flag may be `gate.passed`,
- * `passed`, or `ok`; violations may be `violations` or `issues`. Missing fields
- * degrade gracefully rather than throwing.
+ * `passed`, or `ok`; violations may be `violations` or `issues`.
  */
 export function parseSentruxJson(text: string): SentruxResult {
   let parsed: unknown;
@@ -67,9 +67,8 @@ export function parseSentruxJson(text: string): SentruxResult {
       cause: err,
     });
   }
-  if (!parsed || typeof parsed !== "object") {
-    return { gatePassed: true, metrics: {}, violations: [] };
-  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error("Invalid Sentrux report: expected a JSON object");
   const r = parsed as {
     score?: number;
     architecture_score?: number;
@@ -82,46 +81,42 @@ export function parseSentruxJson(text: string): SentruxResult {
     issues?: unknown[];
   };
 
-  const violationsRaw = Array.isArray(r.violations)
-    ? r.violations
-    : Array.isArray(r.issues)
-      ? r.issues
-      : [];
-  const violations: SentruxViolation[] = violationsRaw.map((v) => {
-    const o = (v ?? {}) as {
-      rule?: string;
-      id?: string;
-      name?: string;
-      severity?: string;
-      level?: string;
-      message?: string;
-      description?: string;
-      file?: string;
-      path?: string;
-    };
-    return {
-      rule: o.rule ?? o.id ?? o.name ?? "sentrux-rule",
-      severity: normalizeSeverity(o.severity ?? o.level),
-      message: o.message ?? o.description ?? "(no message)",
-      file: o.file ?? o.path,
-    };
-  });
-
-  const passed =
-    typeof r.gate?.passed === "boolean"
-      ? r.gate.passed
-      : typeof r.passed === "boolean"
-        ? r.passed
-        : typeof r.ok === "boolean"
-          ? r.ok
-          : violations.length === 0; // no explicit flag → infer from violations
+  const flags = [r.gate?.passed, r.passed, r.ok].filter((value) => value !== undefined);
+  const passed = flags.find((value) => typeof value === "boolean");
+  const raw = r.violations === undefined ? r.issues : r.violations;
+  const violations = Array.isArray(raw) ? raw.flatMap(readViolation) : [];
+  const partial =
+    !Array.isArray(raw) ||
+    raw.length !== violations.length ||
+    flags.some((value) => value !== passed);
+  if (partial && violations.length === 0 && !flags.includes(false)) {
+    throw new Error("Invalid Sentrux report: no complete violation list or failing gate verdict");
+  }
 
   return {
     score: r.score ?? r.architecture_score ?? r.total,
-    gatePassed: passed,
+    gatePassed: !flags.includes(false) && (passed ?? violations.length === 0),
     metrics: r.metrics ?? {},
     violations,
+    ...(partial ? { coverage: "partial" as const } : {}),
   };
+}
+
+function readViolation(raw: unknown): SentruxViolation[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const value = raw as Record<string, unknown>;
+  const rule = value.rule ?? value.id ?? value.name;
+  const message = value.message ?? value.description;
+  if (typeof rule !== "string" && typeof message !== "string") return [];
+  const file = value.file ?? value.path;
+  return [
+    {
+      rule: typeof rule === "string" ? rule : "sentrux-rule",
+      severity: normalizeSeverity(value.severity ?? value.level),
+      message: typeof message === "string" ? message : "(no message)",
+      file: typeof file === "string" ? file : undefined,
+    },
+  ];
 }
 
 /**
@@ -133,7 +128,7 @@ export function parseSentruxJson(text: string): SentruxResult {
 export async function recordSentruxFindings(
   result: SentruxResult,
   cwd: string = process.cwd(),
-): Promise<{ written: number }> {
+): Promise<{ written: number; coverage?: "partial" }> {
   const path = resolve(cwd, SCAN_RESULTS_FILE);
   const now = new Date().toISOString();
   const lines: string[] = [];
@@ -167,5 +162,5 @@ export async function recordSentruxFindings(
 
   if (lines.length === 0) return { written: 0 };
   await appendFile(path, lines.join("\n") + "\n", "utf-8");
-  return { written: lines.length };
+  return { written: lines.length, ...(result.coverage ? { coverage: result.coverage } : {}) };
 }

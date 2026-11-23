@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   ingestStrict,
   type IngestFormat,
+  type IngestGap,
   type DeclaredScannerCoverage,
 } from "../adapters/ingest.js";
 import { sanitizeDisplayText } from "../display-text.js";
@@ -42,7 +43,7 @@ export async function cmdIngest(): Promise<boolean> {
   const { jsonMode, positional } = ingestArguments(process.argv.slice(3));
   const fail = (
     error: string,
-    reportGap?: string,
+    reportGap?: IngestGap | "unavailable",
     scannerCoverage?: DeclaredScannerCoverage[],
   ): false => {
     if (jsonMode) console.log(JSON.stringify({ ok: false, error, reportGap, scannerCoverage }));
@@ -56,8 +57,10 @@ export async function cmdIngest(): Promise<boolean> {
   let json: string;
   try {
     json = readFileSync(resolve(process.cwd(), file), "utf8");
-  } catch {
-    return fail("could not read report file; check its path and read permissions");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    const reportGap = code === "ENOENT" || code === "ENOTDIR" ? "missing" : "unavailable";
+    return fail("could not read report file; check its path and read permissions", reportGap);
   }
   const outcome = ingestStrict(format, json);
   const scannerCoverage = outcome.scannerCoverage?.map((scanner) => ({

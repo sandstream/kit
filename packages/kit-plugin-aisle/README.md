@@ -27,6 +27,10 @@ The function appends normalized findings to `.kit-scan-results.jsonl` in the cho
 
 ## API
 
+Directory import reports `coverage: "partial"` when it retains findings from an incomplete scan.
+If the scan is incomplete and no findings can be retained, import returns an error.
+A complete summary with zero findings can verify an empty result when the producer omits `triage.json`.
+
 `parseAisleNanoTriageJson` and `parseAisleNanoSummaryJson` parse source JSON. `normalizeAisleNanoFindings` produces kit findings without writing. `recordAisleNanoFindings` writes already parsed triage findings; `ingestAisleNanoOutputDir` reads an output directory and writes them. `normalizeSeverity` maps source severity labels to kit's four levels.
 
 ## Testing

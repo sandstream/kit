@@ -4,7 +4,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runCli } from "../cli-run.test-support.js";
 import { rmTemp } from "../temp-cleanup.test-support.js";
-import { EMPTY_SARIF, makeFixture, scan, toml, tool, type Fixture } from "./scan.test-support.js";
+import {
+  EMPTY_SARIF,
+  makeFixture,
+  scan,
+  SOCKET_PASS,
+  toml,
+  tool,
+  type Fixture,
+} from "./scan.test-support.js";
 
 const skip = process.platform === "win32" ? "fake tools are POSIX shell scripts" : false;
 let f: Fixture;
@@ -110,7 +118,7 @@ describe("kit scan: baseline evidence", { skip }, () => {
       f,
       '[scan]\ndelegates = ["grype", "socket"]\n[governance.scan]\nrequired_scanners = ["grype"]\n',
     );
-    tool(f, "socket", "exit 0");
+    tool(f, "socket", SOCKET_PASS);
     tool(f, "grype", "exit 0");
     const baseline = join(f.dir, ".kit-baseline.json");
     const original = JSON.stringify({ scan: { findings: ["kept"] } }) + "\n";
@@ -121,6 +129,40 @@ describe("kit scan: baseline evidence", { skip }, () => {
     });
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /coverage cannot support a baseline update/i);
+    assert.equal(readFileSync(baseline, "utf8"), original);
+  });
+});
+
+describe("kit scan: Socket policy coverage", { skip }, () => {
+  useFixture();
+
+  it("does not let exit 0 alone support strict scan coverage", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n');
+    tool(f, "socket", "exit 0");
+    const r = await scan(f, ["--strict", "--json"], { SOCKET_SECURITY_API_TOKEN: "fixture" });
+    assert.equal(r.exitCode, 1, r.stderr);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].reportGap, "missing");
+  });
+
+  it("does not admit a failed Socket invocation into the baseline", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n');
+    tool(f, "socket", `echo '{"ok":false,"message":"no manifests"}'; exit 1`);
+    const baseline = join(f.dir, ".kit-baseline.json");
+    const original = JSON.stringify({
+      version: 1,
+      generated: new Date(0).toISOString(),
+      categories: { scan: { findings: ["kept"] } },
+    });
+    writeFileSync(baseline, original);
+    const env = { SOCKET_SECURITY_API_TOKEN: "fixture" };
+    const scanned = await scan(f, ["--json"], env);
+    assert.equal(scanned.exitCode, 1, scanned.stdout + scanned.stderr);
+    const report = JSON.parse(scanned.stdout);
+    assert.equal(report.runs[0].status, "error");
+    assert.equal(report.findings[0].didNotRun, true);
+    assert.equal((await scan(f, ["--update-baseline"], env)).exitCode, 1);
     assert.equal(readFileSync(baseline, "utf8"), original);
   });
 });

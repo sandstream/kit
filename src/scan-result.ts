@@ -1,7 +1,7 @@
 import { ingestStrict, type IngestOutcome } from "./adapters/ingest.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import { abortedRun } from "./scan-abort.js";
-import { exitGateFinding } from "./scan-exit-gate.js";
+import { exitGateFinding, socketPolicyVerdict } from "./scan-exit-gate.js";
 import type { ScannerDef, ScannerRun } from "./scanners.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 
@@ -84,25 +84,28 @@ function processFailureReason(process: ScannerProcess): string {
 }
 
 function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledScan {
+  const healthy = socketPolicyVerdict(process.stdout);
   const stopped = abortedRun(scanner, process);
-  if (process.ok && !stopped && !process.noNumericExitStatus)
+  const complete = !stopped && !process.noNumericExitStatus;
+  if (complete && process.ok && healthy === true)
     return { run: { id: scanner.id, status: "ran", findings: 0 } };
-  const finding = exitGateFinding(scanner, process);
-  const failed = stopped ?? exitGateFailure(scanner, process, finding);
-  const run = failed
-    ? { ...failed, findings: 1 }
-    : { id: scanner.id, status: "ran" as const, findings: 1 };
-  return { run, findings: [finding] };
-}
-
-function exitGateFailure(
-  scanner: ScannerDef,
-  process: ScannerProcess,
-  finding: SecurityCheckResult,
-): ScannerRun | undefined {
-  if (process.noNumericExitStatus) return processProblem(scanner, process);
-  if (!finding.didNotRun) return undefined;
-  return { id: scanner.id, status: "error", findings: 0, reason: finding.detail };
+  const finding = !process.ok || healthy === false ? exitGateFinding(scanner, process) : undefined;
+  const findings = finding ? [finding] : [];
+  if (complete && !process.ok && process.exitCode === 1 && healthy === false) {
+    return { run: { id: scanner.id, status: "ran", findings: 1 }, findings };
+  }
+  const reason = finding?.detail ?? "scanner did not return a valid Socket policy verdict";
+  const reportGap =
+    stopped || healthy !== undefined ? "partial" : process.stdout.trim() ? "malformed" : "missing";
+  return {
+    run: {
+      ...(stopped ?? { id: scanner.id, status: "error" }),
+      findings: findings.length,
+      reason: stopped?.reason ?? reason,
+      reportGap,
+    },
+    findings,
+  };
 }
 
 /** Keep validated findings even when the delegate or its report has incomplete coverage. */

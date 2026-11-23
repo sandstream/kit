@@ -51,9 +51,29 @@ describe("sentrux plugin", () => {
     );
   });
 
-  it("throws on invalid JSON; tolerates a non-object payload", () => {
+  it("rejects malformed reports without classifying them as clean", () => {
     assert.throws(() => parseSentruxJson("not json"), /Invalid Sentrux JSON/);
-    assert.deepEqual(parseSentruxJson("42"), { gatePassed: true, metrics: {}, violations: [] });
+    for (const report of ["42", "{}", '{"passed":true,"violations":[{}]}']) {
+      assert.throws(() => parseSentruxJson(report), /Invalid Sentrux report/);
+    }
+  });
+
+  it("records valid violations from a partial report and returns its coverage", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-sentrux-"));
+    try {
+      const raw = JSON.parse(GATE_FAIL);
+      const parsed = parseSentruxJson(
+        JSON.stringify({ ...raw, violations: [null, raw.violations[0]] }),
+      );
+      assert.deepEqual(await recordSentruxFindings(parsed, dir), {
+        written: 1,
+        coverage: "partial",
+      });
+      const entry = JSON.parse(readFileSync(join(dir, ".kit-scan-results.jsonl"), "utf8"));
+      assert.equal(entry.id, "no-cycles");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("records one finding per violation to .kit-scan-results.jsonl", async () => {

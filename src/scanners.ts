@@ -113,9 +113,8 @@ export interface ScannerDef {
   /** Extra args/env applied in air-gap mode so the scanner runs against a local DB. */
   offline?: { args?: string[]; env?: Record<string, string> };
   /**
-   * Exit-code gate: the tool has no stable findings-JSON to parse, so its own exit status IS the
-   * verdict: 0 = clean, non-zero = one high-severity policy violation. (Socket: `socket ci`
-   * uploads manifests and fails on policy; `format` is unused, the branch skips ingest.)
+   * Socket policy gate: read the policy verdict from `socket ci` JSON and confirm
+   * it matches the process exit status. This path does not use `format`.
    */
   exitGate?: boolean;
   /** Exit code that means "nothing here to scan" (osv-scanner: 128), not a failure. */
@@ -189,10 +188,7 @@ export const SCANNERS: ScannerDef[] = [
     findingsExit: 1,
   },
   {
-    // Socket uploads manifests to socket.dev (cloud) → not air-gappable. The CLI
-    // has no stable findings-JSON, so kit gates on `socket ci`'s exit code rather
-    // than parsing output. Opt-in: needs SOCKET_SECURITY_API_TOKEN (wired by
-    // `kit setup` in connected/non-air-gap posture).
+    // Socket uploads manifests to socket.dev. The delegate needs a token and network access.
     id: "socket",
     bin: "socket",
     args: ["ci"],

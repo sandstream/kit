@@ -14,7 +14,7 @@ import {
 } from "./scanners.js";
 
 export interface ScanScopeGap {
-  kind: "project" | "image" | "maven";
+  kind: "project" | "image" | "maven" | "threat-data";
   target: string;
   reason: string;
   evidenceStatus: ScannerReportGap | "stale";
@@ -116,6 +116,7 @@ const scopeNoun: Record<ScanScopeGap["kind"], string> = {
   project: "[projects] path",
   image: "image",
   maven: "Maven SBOM",
+  "threat-data": "threat-data bundle",
 };
 
 export function scanScopeMessage(gap: ScanScopeGap): string {
@@ -123,6 +124,7 @@ export function scanScopeMessage(gap: ScanScopeGap): string {
 }
 
 function requiredScope(gap: ScanScopeGap, required: readonly string[]): boolean {
+  if (gap.kind === "threat-data") return true;
   if (gap.kind === "project") return required.length > 0;
   if (gap.kind === "image") {
     return required.some((id) =>

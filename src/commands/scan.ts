@@ -7,6 +7,8 @@ import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { hasMarker, scanProvidersTracked } from "../scan-detect.js";
 import { DEFAULT_SCAN_TIMEOUT_MS, isFailedRun } from "../scan-abort.js";
+import { sanitizeDisplayText } from "../display-text.js";
+import type { VerifyResult } from "../airgap/threat-data.js";
 import {
   applyScopeGate,
   plannedScopeGaps,
@@ -66,13 +68,14 @@ export async function cmdScan(): Promise<boolean> {
   }
 
   const plan = planScans(cwd, config);
-  const airgap = await applyAirGap(plan.scanners, config);
-  if (!airgap) return false;
+  const { airgap, threatDataGap } = await applyAirGap(plan.scanners, config);
   const scopeGaps = plannedScopeGaps(plan, airgap.scanners);
   for (const gap of scopeGaps) console.error(`${c.yellow}! ${scanScopeMessage(gap)}${c.reset}`);
+  if (threatDataGap) scopeGaps.unshift(threatDataGap);
   const policy = scanPolicy(config, plan.scanners);
-  const toolingTokens = await fetchToolingTokens(config, plan.scanners);
-  const { merged, runs } = await executeScanners(cwd, airgap, toolingTokens);
+  const { merged, runs } = threatDataGap
+    ? { merged: [], runs: [] }
+    : await executeScanners(cwd, airgap, await fetchToolingTokens(config, plan.scanners));
 
   if (hasFlag(process.argv, "--update-baseline")) {
     const gate = assessScanHealth(runs, scopeGaps, { ...policy, strict: true });
@@ -104,14 +107,17 @@ async function printDelegates(delegates: readonly string[] | undefined): Promise
 /**
  * Air-gap posture from `.kit.toml [air_gap]` + env (env overrides). When enabled, drop cloud-only
  * scanners and run the rest against local DBs with no network. See docs/AIR_GAP.md.
- * Returns null when a threat-data bundle cannot be verified (fail-closed).
+ * A threat-data gap prevents scanner and baseline execution.
  */
-async function applyAirGap(selected: ScannerDef[], config: kitConfig): Promise<AirGapPlan | null> {
+async function applyAirGap(
+  selected: ScannerDef[],
+  config: kitConfig,
+): Promise<{ airgap: AirGapPlan; threatDataGap?: ScanScopeGap }> {
   const { airGapScanners } = await import("../scanners.js");
   const { resolveAirGap } = await import("../airgap/config.js");
   const ag = resolveAirGap(config.air_gap, process.env);
   const airgap = airGapScanners(selected, ag.enabled);
-  if (!ag.enabled) return airgap;
+  if (!ag.enabled) return { airgap };
   const info =
     hasFlag(process.argv, "--json") || hasFlag(process.argv, "--sarif")
       ? console.error
@@ -120,11 +126,27 @@ async function applyAirGap(selected: ScannerDef[], config: kitConfig): Promise<A
     `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
   );
   await warnRegistrySemgrep();
-  if (!ag.threatDataDir) return airgap;
-  const env = await verifiedThreatDataEnv(ag.threatDataDir, ag.threatDataPubkey ?? "");
-  if (!env) return null;
-  Object.assign(airgap.env, env);
-  return airgap;
+  const maxAgeDays = config.air_gap?.threat_data_max_age_days;
+  if (!ag.threatDataDir && maxAgeDays === undefined) return { airgap };
+  const result = await verifyScanThreatData(ag.threatDataDir, ag.threatDataPubkey, maxAgeDays);
+  if (!result.ok) {
+    const reason = sanitizeDisplayText(result.reason);
+    console.error(`${c.red}✗ ${reason} (fail-closed)${c.reset}`);
+    return {
+      airgap,
+      threatDataGap: {
+        kind: "threat-data",
+        target: sanitizeDisplayText(ag.threatDataDir ?? "offline bundle"),
+        reason,
+        evidenceStatus: result.status,
+      },
+    };
+  }
+  info(
+    `${c.dim}verified threat-data bundle: ${result.artifacts} artifact(s) signed + checksummed${c.reset}`,
+  );
+  Object.assign(airgap.env, result.env);
+  return { airgap };
 }
 
 /**
@@ -144,35 +166,47 @@ async function warnRegistrySemgrep(): Promise<void> {
 
 /**
  * Verified offline threat-data bundle (optional): point scanners at a signed, integrity-checked
- * local DB set. Fail-closed — never scan against unverified threat data. Returns the env the
- * bundle sets, or null when it cannot be verified.
+ * local DB set. Return the evidence status when verification fails.
  */
-async function verifiedThreatDataEnv(
-  tdDir: string,
-  pubRef: string,
-): Promise<Record<string, string> | null> {
+async function verifyScanThreatData(
+  tdDir: string | undefined,
+  pubRef: string | undefined,
+  maxAgeDays: number | undefined,
+): Promise<VerifyResult> {
+  if (!tdDir) {
+    return {
+      ok: false,
+      status: "missing",
+      reason: "threat-data freshness policy requires a bundle",
+    };
+  }
+  if (!pubRef) {
+    return {
+      ok: false,
+      status: "missing",
+      reason:
+        "air-gap threat-data dir set but no public key (threat_data_pubkey / KIT_THREAT_DATA_PUBKEY)",
+    };
+  }
   const { verifyThreatData } = await import("../airgap/threat-data.js");
-  const pubPem = pubRef && existsSync(pubRef) ? readFileSync(pubRef, "utf8") : pubRef;
-  if (!pubPem) {
-    console.error(
-      `${c.red}✗ air-gap threat-data dir set but no public key (threat_data_pubkey / KIT_THREAT_DATA_PUBKEY) — cannot verify (fail-closed)${c.reset}`,
-    );
-    return null;
+  let publicKeyPem: string;
+  try {
+    publicKeyPem = pubRef.startsWith("-----BEGIN ") ? pubRef : readFileSync(pubRef, "utf8");
+  } catch {
+    return {
+      ok: false,
+      status: "missing",
+      reason: "threat-data bundle rejected: public key cannot be read",
+    };
   }
   const res = verifyThreatData({
     dir: tdDir,
-    publicKeyPem: pubPem,
+    publicKeyPem,
+    maxAgeDays,
     readFile: (rel) => readFileSync(resolve(tdDir, rel)),
     resolvePath: (rel) => resolve(tdDir, rel),
   });
-  if (!res.ok) {
-    console.error(`${c.red}✗ threat-data bundle rejected: ${res.reason} (fail-closed)${c.reset}`);
-    return null;
-  }
-  console.log(
-    `${c.dim}verified threat-data bundle: ${res.artifacts} artifact(s) signed + checksummed${c.reset}`,
-  );
-  return res.env;
+  return res.ok ? res : { ...res, reason: `threat-data bundle rejected: ${res.reason}` };
 }
 
 /**

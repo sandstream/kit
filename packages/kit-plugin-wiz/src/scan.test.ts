@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeClient, recordWizIssues, fetchIssues, type WizIssue } from "./scan.js";
+import {
+  makeClient,
+  recordWizIssues,
+  fetchIssues,
+  IncompleteWizIssuesError,
+  type WizIssue,
+} from "./scan.js";
 
 const SAMPLE_ISSUE: WizIssue = {
   id: "wiz-issue-1",
@@ -93,6 +99,47 @@ describe("makeClient", () => {
 });
 
 describe("fetchIssues", () => {
+  const client = { apiUrl: "https://api.example.test/graphql", accessToken: "fixture" };
+
+  it("follows cursors within the limit and exposes findings if the limit cuts off coverage", async (t) => {
+    t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+      const { query, variables } = JSON.parse(String(init.body));
+      assert.match(query, /^\s*query Issues\b/);
+      const second = variables.after === "first";
+      return Response.json({
+        data: {
+          issues: {
+            nodes: [{ id: second ? "second" : "first", severity: "HIGH", status: "OPEN" }],
+            pageInfo: { hasNextPage: !second, endCursor: second ? null : "first" },
+          },
+        },
+      });
+    });
+    assert.deepEqual(
+      (await fetchIssues(client, { limit: 2 })).map((issue) => issue.id),
+      ["first", "second"],
+    );
+    await assert.rejects(
+      () => fetchIssues(client, { limit: 1 }),
+      (error: unknown) => {
+        assert.ok(error instanceof IncompleteWizIssuesError);
+        assert.deepEqual(
+          error.findings.map((issue) => issue.id),
+          ["first"],
+        );
+        return true;
+      },
+    );
+  });
+
+  it("rejects a missing issue connection or pagination metadata", async (t) => {
+    let response: unknown = { data: {} };
+    t.mock.method(globalThis, "fetch", async () => Response.json(response));
+    await assert.rejects(() => fetchIssues(client), /Invalid Wiz GraphQL issue response/);
+    response = { data: { issues: { nodes: [] } } };
+    await assert.rejects(() => fetchIssues(client), /Invalid Wiz GraphQL issue response/);
+  });
+
   for (const status of [403, 200]) {
     it(`masks the minted access token in a ${status} issue response`, async (t) => {
       const accessToken = "access:v42";

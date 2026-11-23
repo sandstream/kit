@@ -8,6 +8,9 @@ export const EMPTY_SARIF = JSON.stringify({
   runs: [{ tool: { driver: { name: "grype", rules: [] } }, results: [] }],
 });
 
+export const SOCKET_PASS = `echo '{"ok":true,"data":{"healthy":true,"alerts":{}}}'; exit 0`;
+export const SOCKET_FAIL = `echo '{"ok":true,"data":{"healthy":false,"alerts":{}}}'; exit 1`;
+
 export interface Fixture {
   dir: string;
   bin: string;
