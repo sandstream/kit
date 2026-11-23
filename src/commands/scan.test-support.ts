@@ -30,9 +30,19 @@ export function makeFixture(): Fixture {
   return { dir, bin };
 }
 
-export function tool(f: Fixture, name: string, body: string): void {
+export function tool(f: Fixture, name: string, body: string, withInventory = true): void {
   const p = join(f.bin, name);
-  writeFileSync(p, `#!/bin/sh\n${body}\n`);
+  const witness =
+    name === "grype" && withInventory
+      ? `
+for arg in "$@"; do
+  case "$arg" in
+    cyclonedx-json=*) printf '{"bomFormat":"CycloneDX","specVersion":"1.6","metadata":{"component":{"name":"%s","type":"file"},"tools":{"components":[{"name":"grype"}]}},"components":[{"type":"library","name":"fixture","version":"1","bom-ref":"fixture","purl":"pkg:npm/fixture@1","properties":[{"name":"syft:location:0:path","value":"/package.json"}]}]}' "$PWD" > "\${arg#*=}" ;;
+  esac
+done
+`
+      : "";
+  writeFileSync(p, `#!/bin/sh\n${witness}${body}\n`);
   chmodSync(p, 0o755);
 }
 

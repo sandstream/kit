@@ -146,6 +146,9 @@ A baseline update also needs a completed scan and an approved scanner gate.
 The SARIF export records each delegate's status and keeps coverage gaps visible on import.
 The Socket delegate checks the reported policy verdict and the process exit status.
 An error without a policy verdict indicates that the scan did not complete.
+For a directory scan, Grype reports the scoped package inventory alongside its findings.
+If Grype reports no packages, a required Grype delegate cannot pass.
+An unreadable inventory or one that does not match the project makes coverage incomplete.
 
 An OSV finding names a package, so it carries one more fact: whether the source of the project in
 the current directory imports that package. The line is one of:

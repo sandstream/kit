@@ -242,6 +242,7 @@ async function executeScanners(
   const { runScanners, scannerEnv, dropProviderExclusion } = await import("../scanners.js");
   const { resolveToolBin } = await import("../utils/resolveTool.js");
   const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
+  const { runGrypeDirectory } = await import("../scan-grype-coverage.js");
 
   // A tracked file under .terraform/providers is not downloaded output: scan it like any other.
   const scanProviders = await scanProvidersTracked(cwd);
@@ -255,24 +256,19 @@ async function executeScanners(
   return runScanners(
     {
       resolve: (bin) => resolveToolBin(bin),
-      run: async (bin, args, timeoutMs, projectDir) => {
+      run: async (bin, args, timeoutMs, projectDir, evidence) => {
         const scannerCwd = projectDir ? resolve(cwd, projectDir) : cwd;
-        const r = await execFileNoThrow(bin, args, {
-          timeout: timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
-          cwd: scannerCwd,
-          // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
-          maxBuffer: 64 * 1024 * 1024,
-          env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, scannerCwd),
-        });
-        return {
-          ok: r.ok,
-          stdout: r.stdout,
-          stderr: r.stderr,
-          exitCode: r.exitCode,
-          truncated: r.truncated,
-          timedOut: r.timedOut,
-          noNumericExitStatus: r.noNumericExitStatus,
-        };
+        const run = (argv: string[], directory: string) =>
+          execFileNoThrow(bin, argv, {
+            timeout: timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
+            cwd: directory,
+            // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
+            maxBuffer: 64 * 1024 * 1024,
+            env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, directory),
+          });
+        return evidence === "grype-directory"
+          ? runGrypeDirectory(scannerCwd, args, run)
+          : run(args, scannerCwd);
       },
       hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
       detect: (markers) => hasMarker(cwd, markers),

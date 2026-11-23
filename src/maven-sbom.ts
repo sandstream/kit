@@ -443,6 +443,7 @@ function sbomScanners(
       result.push({
         ...grype,
         id: `grype-sbom:${project.dir}`,
+        evidence: undefined,
         args: [`sbom:${project.bom}`, "-o", "sarif", "-q"],
       });
     }

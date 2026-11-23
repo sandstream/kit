@@ -1,4 +1,4 @@
-import { ingestStrict, type IngestOutcome } from "./adapters/ingest.js";
+import { ingestStrict, type IngestGap, type IngestOutcome } from "./adapters/ingest.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import { abortedRun } from "./scan-abort.js";
 import { exitGateFinding, socketPolicyVerdict } from "./scan-exit-gate.js";
@@ -13,7 +13,15 @@ export type ScannerProcess = {
   truncated?: boolean;
   timedOut?: boolean;
   noNumericExitStatus?: true;
+  evidence?: ScannerEvidence;
 };
+
+export type InventoryFinding = { name: string; version: string };
+
+export type ScannerEvidence =
+  | { status: "complete"; packageCount: number; requiredFindings?: InventoryFinding[] }
+  | { status: "not-applicable"; reason: string }
+  | { status: "partial"; reportGap: IngestGap; reason: string };
 
 type SettledScan = { run: ScannerRun; findings?: SecurityCheckResult[] };
 
@@ -147,7 +155,68 @@ export function settleScanner(scanner: ScannerDef, process: ScannerProcess): Set
       },
     };
   }
-  return settleReport(scanner.id, outcome, problems);
+  const settled = settleReport(scanner.id, outcome, problems);
+  return applyScannerEvidence(settled, declaredEvidence(scanner, process));
+}
+
+function declaredEvidence(
+  scanner: ScannerDef,
+  process: ScannerProcess,
+): ScannerEvidence | undefined {
+  if (process.evidence || !scanner.evidence) return process.evidence;
+  return {
+    status: "partial",
+    reportGap: "missing",
+    reason: "The scanner did not supply its required inventory",
+  };
+}
+
+function missingInventoryFindings(
+  settled: SettledScan,
+  required: InventoryFinding[] = [],
+): boolean {
+  if (required.length === 0) return false;
+  const reported = new Map<string, Set<string>>();
+  for (const { name, detail } of settled.findings ?? []) {
+    const group = reported.get(name) ?? new Set<string>();
+    group.add(detail);
+    reported.set(name, group);
+  }
+  for (const { name, version } of required) {
+    const group = reported.get(name);
+    const match =
+      group && [...group].find((detail) => detail.includes(`version ${version} was found at:`));
+    if (!group || !match) return true;
+    group.delete(match);
+  }
+  return false;
+}
+
+function applyScannerEvidence(settled: SettledScan, evidence?: ScannerEvidence): SettledScan {
+  if (!evidence) return settled;
+  const run = settled.run;
+  if (evidence.status === "complete") {
+    const scoped = { ...run, packageCount: evidence.packageCount };
+    if (run.status === "ran" && missingInventoryFindings(settled, evidence.requiredFindings))
+      return {
+        ...settled,
+        run: {
+          ...scoped,
+          status: "partial",
+          reportGap: "partial",
+          reason: "The inventory reports findings missing from the scanner report",
+        },
+      };
+    return { ...settled, run: scoped };
+  }
+  if (run.status !== "ran") return settled;
+  if (evidence.status === "not-applicable" && run.findings === 0)
+    return {
+      ...settled,
+      run: { ...run, status: "not-applicable", noTarget: true, reason: evidence.reason },
+    };
+  const reportGap = evidence.status === "partial" ? evidence.reportGap : "partial";
+  return { ...settled, run: { ...run, status: "partial", reportGap, reason: evidence.reason } };
 }
 
 function settleReport(

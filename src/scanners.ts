@@ -103,6 +103,7 @@ export interface ScannerDef {
   /** args that emit SARIF/OSV on stdout */
   args: string[];
   format: IngestFormat;
+  evidence?: "grype-directory";
   /** env var that must be set (e.g. SNYK_TOKEN) */
   needsToken?: string;
   /** marker files that make the scanner applicable; undefined = always */
@@ -158,6 +159,7 @@ export const SCANNERS: ScannerDef[] = [
     id: "grype",
     bin: "grype",
     args: ["dir:.", "--exclude", PROVIDER_GLOB_ALL, "-o", "sarif", "-q"],
+    evidence: "grype-directory",
     format: "sarif",
     offline: { env: { GRYPE_DB_AUTO_UPDATE: "false" } },
   },
@@ -408,6 +410,7 @@ export interface ScannerRun {
   /** The scanner found nothing to scan (not-applicable). A required scanner does not accept this. */
   noTarget?: boolean;
   reportGap?: IngestGap;
+  packageCount?: number;
 }
 
 /** Environment for a scanner child. PWD is reset because Go tools trust it over the real directory. */
@@ -485,7 +488,13 @@ export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): 
 
 export interface ScanDeps {
   resolve(bin: string): Promise<string | null>;
-  run(bin: string, args: string[], timeoutMs?: number, cwd?: string): Promise<ScannerProcess>;
+  run(
+    bin: string,
+    args: string[],
+    timeoutMs?: number,
+    cwd?: string,
+    evidence?: ScannerDef["evidence"],
+  ): Promise<ScannerProcess>;
   hasEnv(name: string): boolean;
   detect(markers: string[]): boolean;
 }
@@ -511,7 +520,7 @@ export async function runScanners(
       runs.push({ id: s.id, status: "no-token", findings: 0 });
       continue;
     }
-    const res = await deps.run(bin, s.args, s.timeoutMs, s.cwd);
+    const res = await deps.run(bin, s.args, s.timeoutMs, s.cwd, s.evidence);
     const settled = settleScanner(s, res);
     runs.push(settled.run);
     if (settled.findings) perScanner.push({ id: s.id, findings: settled.findings });
