@@ -88,6 +88,7 @@ verification report. Kit exits nonzero for refusal, timeout or a nonzero workloa
 exit. The native tests exercise a bounded set of filesystem, credential, network
 and process restrictions. A separate trusted supervisor stops the Node process at its time limit or when
 Kit dies, including while the workload process is suspended. A separate host
+process owns the temporary Node copy from its first write. Another host
 process owns each temporary image. It ejects the image after normal completion
 or if Kit exits abruptly while macOS keeps running.
 An unavailable supervisor report yields `ran: null` and a nonzero exit.
