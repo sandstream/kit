@@ -1,7 +1,7 @@
 import { ingestStrict, type IngestGap, type IngestOutcome } from "./adapters/ingest.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import { abortedRun } from "./scan-abort.js";
-import { exitGateFinding, socketPolicyVerdict } from "./scan-exit-gate.js";
+import { exitGateFinding, readSocketPolicy } from "./scan-exit-gate.js";
 import type { ScannerDef, ScannerRun } from "./scanners.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 
@@ -98,18 +98,19 @@ function processFailureReason(process: ScannerProcess): string {
 }
 
 function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledScan {
-  const healthy = socketPolicyVerdict(process.stdout);
+  const policy = readSocketPolicy(process.stdout);
   const stopped = abortedRun(scanner, process);
-  const complete = !stopped && !process.noNumericExitStatus;
-  if (complete && process.ok && healthy === true)
-    return { run: { id: scanner.id, status: "ran", findings: 0 } };
-  const finding = !process.ok || healthy === false ? exitGateFinding(scanner, process) : undefined;
+  const reportedViolation = policy?.reportedViolation === true;
+  const finding =
+    !process.ok || reportedViolation
+      ? exitGateFinding(scanner, process, reportedViolation)
+      : undefined;
   const findings = finding ? [finding] : [];
-  if (complete && socketReportedPolicyFailure(process, healthy)) {
-    return { run: { id: scanner.id, status: "ran", findings: 1 }, findings };
+  if (socketCompleted(process, policy?.verdict, Boolean(stopped))) {
+    return { run: { id: scanner.id, status: "ran", findings: findings.length }, findings };
   }
   const reason = finding?.detail ?? "scanner did not return a valid Socket policy verdict";
-  const reportGap = socketReportGap(process.stdout, healthy, Boolean(stopped));
+  const reportGap = socketReportGap(process.stdout, policy !== undefined, Boolean(stopped));
   return {
     run: {
       ...(stopped ?? { id: scanner.id, status: "error" }),
@@ -121,19 +122,21 @@ function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledSc
   };
 }
 
-function socketReportedPolicyFailure(
+function socketCompleted(
   process: ScannerProcess,
-  healthy: boolean | undefined,
+  verdict: boolean | undefined,
+  stopped: boolean,
 ): boolean {
-  return !process.ok && process.exitCode === 1 && healthy === false;
+  if (stopped || process.noNumericExitStatus) return false;
+  return process.ok ? verdict === true : process.exitCode === 1 && verdict === false;
 }
 
 function socketReportGap(
   stdout: string,
-  healthy: boolean | undefined,
+  hasReport: boolean,
   stopped: boolean,
 ): "partial" | "malformed" | "missing" {
-  if (stopped || healthy !== undefined) return "partial";
+  if (stopped || hasReport) return "partial";
   return stdout.trim() ? "malformed" : "missing";
 }
 

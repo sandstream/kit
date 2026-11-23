@@ -9,6 +9,7 @@ import {
   makeFixture,
   scan,
   SOCKET_PASS,
+  socketReport,
   toml,
   tool,
   type Fixture,
@@ -162,6 +163,30 @@ describe("kit scan: Socket policy coverage", { skip }, () => {
     const report = JSON.parse(r.stdout);
     assert.equal(report.coverage, "partial");
     assert.equal(report.runs[0].reportGap, "missing");
+  });
+
+  it("requires a full Socket CI report for strict coverage", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n');
+    tool(f, "socket", `echo '{"ok":true,"data":{"healthy":true}}'; exit 0`);
+    const r = await scan(f, ["--strict", "--json"], { SOCKET_SECURITY_API_TOKEN: "fixture" });
+    assert.equal(r.exitCode, 1, r.stdout);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].status, "error");
+  });
+
+  it("keeps a contradictory Socket policy finding with partial coverage", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n');
+    const native = socketReport(false);
+    const contradictory = { ...native, data: { ...native.data, healthy: true } };
+    tool(f, "socket", `echo '${JSON.stringify(contradictory)}'; exit 0`);
+    const r = await scan(f, ["--strict", "--json"], { SOCKET_SECURITY_API_TOKEN: "fixture" });
+    assert.equal(r.exitCode, 1, r.stdout);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].reportGap, "partial");
+    assert.equal(report.findings[0].severity, "high");
+    assert.match(report.findings[0].detail, /policy violation/);
   });
 
   it("does not admit a failed Socket invocation into the baseline", async () => {

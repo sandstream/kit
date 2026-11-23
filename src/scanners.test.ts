@@ -1,3 +1,4 @@
+import { socketReport } from "./commands/scan.test-support.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -148,7 +149,7 @@ describe("runScanners with an exit-code delegate", () => {
     ];
     const deps: ScanDeps = {
       resolve: async (bin) => `/usr/bin/${bin}`,
-      run: async () => ({ ok: true, exitCode: 0, stdout: '{"ok":true,"data":{"healthy":true}}' }),
+      run: async () => ({ ok: true, exitCode: 0, stdout: JSON.stringify(socketReport(true)) }),
       hasEnv: () => true,
       detect: () => true,
     };
@@ -164,7 +165,7 @@ describe("runScanners with an exit-code delegate", () => {
     ];
     const deps: ScanDeps = {
       resolve: async (bin) => `/usr/bin/${bin}`,
-      run: async () => ({ ok: false, exitCode: 1, stdout: '{"ok":true,"data":{"healthy":false}}' }),
+      run: async () => ({ ok: false, exitCode: 1, stdout: JSON.stringify(socketReport(false)) }),
       hasEnv: () => true,
       detect: () => true,
     };

@@ -2,16 +2,54 @@
  * Read the policy verdict and distinguish it from a failed Socket invocation.
  */
 import type { SecurityCheckResult } from "./check-security.js";
-import { scannerObject, scannerRecord } from "./check-scanner-evidence.js";
+import { reportText, scannerObject, scannerRecord } from "./check-scanner-evidence.js";
 
 const AUTH_CODES = new Set([401, 403]);
 const AUTH_TEXT = /request failed \((401|403)\)/;
 
-export function socketPolicyVerdict(stdout: string): boolean | undefined {
+interface SocketPolicy {
+  verdict?: boolean;
+  reportedViolation: boolean;
+}
+
+// The CI report groups alerts by ecosystem, package and version.
+function readAlerts(value: unknown, depth: number): { valid: boolean; hasViolation: boolean } {
+  if (!scannerRecord(value)) return { valid: false, hasViolation: false };
+  if (depth === 0) {
+    const isViolation = value.policy === "error" && reportText(value.type);
+    return { valid: isViolation, hasViolation: isViolation };
+  }
+  const entries = Object.values(value);
+  let valid = depth === 3 || entries.length > 0;
+  let hasViolation = false;
+  for (const entry of entries) {
+    const child = readAlerts(entry, depth - 1);
+    valid &&= child.valid;
+    hasViolation ||= child.hasViolation;
+  }
+  return { valid, hasViolation };
+}
+
+export function readSocketPolicy(stdout: string): SocketPolicy | undefined {
   const report = scannerObject(stdout);
   const data = report?.data;
   if (report?.ok !== true || !scannerRecord(data)) return undefined;
-  return typeof data.healthy === "boolean" ? data.healthy : undefined;
+  const alerts = readAlerts(data.alerts, 3);
+  const { healthy, options } = data;
+  const reportedViolation = healthy === false || alerts.hasViolation;
+  if (
+    !alerts.valid ||
+    healthy !== !alerts.hasViolation ||
+    data.includeLicensePolicy !== true ||
+    !reportText(data.orgSlug) ||
+    !reportText(data.scanId) ||
+    !scannerRecord(options) ||
+    options.fold !== "version" ||
+    options.reportLevel !== "error"
+  ) {
+    return { reportedViolation };
+  }
+  return { verdict: healthy, reportedViolation };
 }
 
 function jsonCode(stdout: string): number | undefined {
@@ -33,13 +71,14 @@ function refusedWith(out: { stdout: string; stderr?: string }): number | undefin
 
 export function exitGateFinding(
   scanner: { id: string; needsToken?: string },
-  out: { stdout: string; stderr?: string },
+  out: { ok: boolean; stdout: string; stderr?: string },
+  reportedViolation: boolean,
 ): SecurityCheckResult {
   const id = scanner.id;
-  if (socketPolicyVerdict(out.stdout) === false) {
+  if (reportedViolation) {
     return {
       category: "supply-chain",
-      name: `${id}: ci exited non-zero`,
+      name: out.ok ? `${id}: inconsistent policy report` : `${id}: ci exited non-zero`,
       status: "fail",
       detail: `${id} ci reported a dependency policy violation (see the ${id} dashboard)`,
       severity: "high",
