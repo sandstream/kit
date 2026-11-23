@@ -91,6 +91,8 @@ Kit dies, including while the workload process is suspended. A separate host
 process owns the temporary Node copy from its first write. Another host
 process owns each temporary image. It ejects the image after normal completion
 or if Kit exits abruptly while macOS keeps running.
+If an image owner reports a cleanup failure, the command names the failed step.
+JSON output uses the optional `cleanupStep` field.
 An unavailable supervisor report yields `ran: null` and a nonzero exit.
 
 Design and limits: [src/incoming-trust/README.md](../src/incoming-trust/README.md).

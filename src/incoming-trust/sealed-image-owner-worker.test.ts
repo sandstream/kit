@@ -8,6 +8,17 @@ import { fileURLToPath } from "node:url";
 import { startImageOwner, type ImageOwnerRequest } from "./sealed-image-owner.js";
 import { snapshotFixture } from "./snapshot.test-support.js";
 
+function ownerHost(root: string, preloadPath: string): string {
+  const host = join(root, "owner-node");
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  writeFileSync(
+    host,
+    `#!/bin/sh\nexec ${quote(process.execPath)} --import ${quote(preloadPath)} "$@"\n`,
+    { mode: 0o700 },
+  );
+  return host;
+}
+
 it("does not remove a workspace without its exact claim", () => {
   const f = snapshotFixture();
   try {
@@ -72,15 +83,7 @@ fs.rmSync = (path, options) => {
 syncBuiltinESMExports();
 `,
       );
-      const host = join(root, "owner-node");
-      const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-      writeFileSync(
-        host,
-        `#!/bin/sh\nexec ${quote(process.execPath)} --import ${quote(preload)} "$@"\n`,
-        {
-          mode: 0o700,
-        },
-      );
+      const host = ownerHost(root, preload);
       const owner = startImageOwner(workspace, lstatSync(workspace, { bigint: true }), host);
       owner.awaitReady();
       assert.throws(
@@ -96,3 +99,58 @@ syncBuiltinESMExports();
     }
   },
 );
+
+for (const [step, fixtureSource] of [
+  ["detach-image", 'replace(cp, "execFileSync", (command) => command === "/usr/bin/hdiutil");'],
+  ["inspect-mount", 'replace(fs, "lstatSync", (path) => path === workspace + "/mounted");'],
+  ["remove-workspace", 'replace(fs, "rmSync", (path) => path === workspace);'],
+]) {
+  it(
+    `reports ${step} without forwarding the internal error`,
+    {
+      skip: process.platform === "win32",
+      timeout: 10_000,
+    },
+    () => {
+      const f = snapshotFixture();
+      try {
+        const root = realpathSync(f.root);
+        const workspace = join(root, "kit-incoming-sealed-test");
+        mkdirSync(workspace, { mode: 0o700 });
+        if (step === "detach-image") writeFileSync(join(workspace, "candidate.dmg"), "fixture");
+        const preload = join(root, "refuse-cleanup.mjs");
+        writeFileSync(
+          preload,
+          `
+import fs from "node:fs";
+import cp from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+const workspace = ${JSON.stringify(workspace)};
+function replace(module, method, matches) {
+  const original = module[method];
+  module[method] = (target, ...args) => {
+    if (matches(target)) throw new Error("private fixture path and diagnostic");
+    return original(target, ...args);
+  };
+}
+${fixtureSource}
+syncBuiltinESMExports();
+`,
+        );
+        const owner = startImageOwner(
+          workspace,
+          lstatSync(workspace, { bigint: true }),
+          ownerHost(root, preload),
+        );
+        owner.awaitReady();
+        assert.throws(() => owner.release(), {
+          message: `Disk image cleanup failed (${step})`,
+          cleanupStep: step,
+        });
+        assert.ok(existsSync(workspace));
+      } finally {
+        f.cleanup();
+      }
+    },
+  );
+}

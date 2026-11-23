@@ -7,6 +7,7 @@ import {
   ownedWorkspace,
   publishImageMessage,
   readImageMessage,
+  type ImageCleanupStep,
   type ImageMountRequest,
   type ImageOwnerRequest,
 } from "./sealed-image-owner.js";
@@ -72,17 +73,25 @@ async function mountAndHold(workspace: string, paths: ImagePaths, finished: () =
   while (!finished()) await pause(50);
 }
 
-async function cleanOwnedImage(
+async function cleanupFailureAt(
   request: ImageOwnerRequest,
   identity: BigIntStats,
   paths: ImagePaths,
-) {
-  if (!ownedWorkspace(request)) return;
-  if (existsSync(paths.image)) await releaseImage(paths.image, request.workspace);
-  const mount = lstatSync(paths.mount, { bigint: true, throwIfNoEntry: false });
-  if (mount && mount.dev !== identity.dev) throw new Error("Disk image mount remains");
-  removeOwnedSnapshot(request.workspace, identity);
-  if (ownedWorkspace(request)) throw new Error("Disk image workspace remains");
+): Promise<ImageCleanupStep | undefined> {
+  let step: ImageCleanupStep = "verify-workspace";
+  try {
+    if (!ownedWorkspace(request)) return;
+    step = "detach-image";
+    if (existsSync(paths.image)) await releaseImage(paths.image, request.workspace);
+    step = "inspect-mount";
+    const mount = lstatSync(paths.mount, { bigint: true, throwIfNoEntry: false });
+    if (mount && mount.dev !== identity.dev) return step;
+    step = "remove-workspace";
+    removeOwnedSnapshot(request.workspace, identity);
+    if (ownedWorkspace(request)) return step;
+  } catch {
+    return step;
+  }
 }
 
 async function ownImage(request: ImageOwnerRequest): Promise<void> {
@@ -104,10 +113,11 @@ async function ownImage(request: ImageOwnerRequest): Promise<void> {
     if (ownedWorkspace(request) && !finished()) publishImageMessage(paths.status, "mount-failed");
   } finally {
     try {
-      await cleanOwnedImage(request, identity, paths);
-    } catch {
-      if (ownedWorkspace(request)) publishImageMessage(paths.status, "cleanup-failed");
-      process.exitCode = 1;
+      const failure = await cleanupFailureAt(request, identity, paths);
+      if (failure) {
+        process.exitCode = 1;
+        if (ownedWorkspace(request)) publishImageMessage(paths.status, `cleanup-failed:${failure}`);
+      }
     } finally {
       process.stdin.destroy();
     }

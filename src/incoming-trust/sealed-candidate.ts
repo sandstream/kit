@@ -18,7 +18,12 @@ import { secureDirStrict } from "../utils/secure-perms.js";
 import type { IncomingPreflight } from "./retained-approval.js";
 import { startRuntimeStage } from "./runtime-stage-macos.js";
 import { checkReadOnlyImage } from "./sealed-image-macos.js";
-import { imageOwnerPaths, startImageOwner } from "./sealed-image-owner.js";
+import {
+  ImageCleanupFailure,
+  imageOwnerPaths,
+  startImageOwner,
+  type ImageCleanupStep,
+} from "./sealed-image-owner.js";
 import { captureIncomingSnapshot } from "./snapshot.js";
 import { snapshotLimits } from "./snapshot-limits.js";
 import { copySnapshotFile, readSnapshotFile } from "./snapshot-io.js";
@@ -33,6 +38,7 @@ import {
 
 type SealedFailure = {
   verified: false;
+  cleanupStep?: ImageCleanupStep;
   reason:
     | "read-only"
     | "sealed-platform-unsupported"
@@ -261,7 +267,11 @@ function verifyInWorkspace<T>(
     else removeOwnedSnapshot(work, identity);
     if (lstatSync(work, { throwIfNoEntry: false })) throw new Error("Disk image workspace remains");
     return result;
-  } catch {
-    return { verified: false, reason: "sealed-teardown-failed" };
+  } catch (error) {
+    return {
+      verified: false,
+      reason: "sealed-teardown-failed",
+      ...(error instanceof ImageCleanupFailure ? { cleanupStep: error.cleanupStep } : {}),
+    };
   }
 }

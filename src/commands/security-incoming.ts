@@ -204,7 +204,11 @@ function preflight(inv: Invocation): boolean {
     : verify(resolve(destination));
   if (!result.verified) {
     if (inv.json) console.log(JSON.stringify(result));
-    else console.error(`Incoming trust preflight refused: ${result.reason}`);
+    else {
+      console.error(`Incoming trust preflight refused: ${result.reason}`);
+      if ("cleanupStep" in result && result.cleanupStep)
+        console.error(`Incoming trust cleanup step: ${result.cleanupStep}`);
+    }
     return false;
   }
   return show(
@@ -239,6 +243,8 @@ function run(inv: Invocation): boolean {
   else if (result.ran === null)
     console.error(`Incoming trust run status unavailable: ${result.reason}`);
   else console.error(`Incoming trust run refused: ${result.reason}`);
+  if (!inv.json && result.cleanupStep)
+    console.error(`Incoming trust cleanup step: ${result.cleanupStep}`);
   return result.ran === true && result.outcome === "exited" && result.code === 0;
 }
 

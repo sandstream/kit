@@ -14,6 +14,26 @@ export interface ImageOwnerRequest {
 
 export type ImageMountRequest = { source: string; executable: boolean };
 
+const cleanupSteps = [
+  "verify-workspace",
+  "detach-image",
+  "inspect-mount",
+  "remove-workspace",
+] as const;
+export type ImageCleanupStep = (typeof cleanupSteps)[number];
+
+export class ImageCleanupFailure extends Error {
+  constructor(readonly cleanupStep: ImageCleanupStep) {
+    super(`Disk image cleanup failed (${cleanupStep})`);
+  }
+}
+
+function assertCleanupStatus(status: string | undefined): void {
+  const step = cleanupSteps.find((value) => status === `cleanup-failed:${value}`);
+  if (step) throw new ImageCleanupFailure(step);
+  if (status?.startsWith("cleanup-failed")) throw new Error("Disk image cleanup failed");
+}
+
 export function imageOwnerPaths(workspace: string) {
   return {
     claim: join(workspace, "image-claim"),
@@ -135,8 +155,7 @@ export function startImageOwner(workspace: string, identity: BigIntStats, hostEx
       child.stdin.destroy();
       waitForOwner(pid, () => {
         if (!ownedWorkspace(request)) return true;
-        if (readImageMessage(paths.status) === "cleanup-failed")
-          throw new Error("Disk image cleanup failed");
+        assertCleanupStatus(readImageMessage(paths.status));
         return undefined;
       });
     },
