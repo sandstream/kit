@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
+import { secureDirStrict } from "../utils/secure-perms.js";
 import { captureIncomingCandidate } from "./candidate-flow.js";
 import { launchIncomingCandidate } from "./launch-candidate.js";
 import { launchFixture, NATIVE_RUN_TEST_WINDOW_MS } from "./launch-candidate.test-support.js";
@@ -199,6 +200,7 @@ it("detects a change to a derived package file even when its package version mat
     assert.ok(approved.ok, JSON.stringify(approved));
     const workspace = join(f.root, "runtime");
     mkdirSync(workspace, { mode: 0o700 });
+    secureDirStrict(workspace);
     const built = materializeRunTree(approved.tree, workspace);
     assert.equal(verifyMaterializedRunTree(built.tree, built.manifest), true);
     writeFileSync(
@@ -224,6 +226,7 @@ it("refuses colliding implicit package directories while deriving the run tree",
     assert.ok(approved.ok, JSON.stringify(approved));
     const workspace = join(f.root, "runtime");
     mkdirSync(workspace, { mode: 0o700 });
+    secureDirStrict(workspace);
     assert.throws(() => materializeRunTree(approved.tree, workspace), /path collides/);
   } finally {
     f.cleanup();
