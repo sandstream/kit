@@ -52,9 +52,10 @@ async function retainedFixture() {
   }
 }
 
-it("checks retained files against exactly the approved repository, generation and policy", async () => {
+it("checks retained files against exactly the approved repository, generation and policy", async (t) => {
   const f = await retainedFixture();
   try {
+    t.mock.method(Date, "now", () => f.proof.now);
     const verify = (report = f.verification) =>
       f.store.preflight(f.repository, f.destination, report);
     assert.deepEqual(verify(), { verified: true });
