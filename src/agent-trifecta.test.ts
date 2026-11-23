@@ -219,22 +219,6 @@ describe("runAgentTrifecta", () => {
     }
   });
 
-  it("warns for a main session that may run any Python and fetch the web", () => {
-    const root = project({
-      ".claude/settings.json": JSON.stringify({
-        permissions: { allow: ["Bash(python3:*)", "WebFetch"] },
-      }),
-    });
-    try {
-      const rows = runAgentTrifecta(root, home);
-      const row = rows.find((r) => r.name === "lethal trifecta: main session");
-      assert.equal(row?.status, "warn");
-      assert.match(row?.detail ?? "", /private data: Bash\(python3:\*\)/);
-    } finally {
-      rmTemp(root);
-    }
-  });
-
   it("warns for a subagent that reads the web, reads files and can send", () => {
     const root = project({
       ".claude/agents/triage.md": "---\nname: triage\ntools: WebFetch, Read, Grep\n---\n",
@@ -401,6 +385,24 @@ describe("text from config files is shown safely", () => {
     } finally {
       rmTemp(root);
       rmTemp(home);
+    }
+  });
+});
+
+describe("runAgentTrifecta with an interpreter grant", () => {
+  it("warns for a main session that may run any Python and fetch the web", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({
+        permissions: { allow: ["Bash(python3:*)", "WebFetch"] },
+      }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      const row = rows.find((r) => r.name === "lethal trifecta: main session");
+      assert.equal(row?.status, "warn");
+      assert.match(row?.detail ?? "", /private data: Bash\(python3:\*\)/);
+    } finally {
+      rmTemp(root);
     }
   });
 });
