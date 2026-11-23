@@ -15,6 +15,11 @@ import {
   reviewRequirement,
   withCallerBypass,
 } from "./branch-review-rules.js";
+import {
+  requiredCheckSources,
+  requiredChecksFromClassic,
+  requiredChecksFromRules,
+} from "./required-check-source.js";
 
 export interface GitRemote {
   host: "github.com" | "gitlab.com";
@@ -175,6 +180,57 @@ export async function auditRemoteRequiredReviews(
   }
 }
 
+function checksUnverified(detail: string): SecurityCheckResult {
+  return {
+    category: "exposure",
+    name: "default branch required check sources",
+    status: "warn",
+    detail: `unverified: ${detail}`,
+    didNotRun: true,
+  };
+}
+
+/**
+ * GitHub only: whether the default branch's required checks are pinned to the app that reports
+ * them. Rulesets are readable with read access; classic protection needs admin, and is then
+ * reported as not read rather than as absent.
+ */
+export async function auditRemoteRequiredChecks(
+  remoteUrl: string,
+  token: string | null,
+  fetcher: Fetcher = fetch,
+): Promise<SecurityCheckResult> {
+  const remote = parseGitRemote(remoteUrl);
+  if (!remote) return checksUnverified("origin is not a supported GitHub or GitLab remote");
+  if (remote.host !== "github.com")
+    return checksUnverified("required checks are read for GitHub only");
+  if (!token) return checksUnverified(`no ${TOKEN_KEYS[remote.host]} in kit secrets`);
+  const base = `https://api.github.com/repos/${remote.path.split("/").map(encodeURIComponent).join("/")}`;
+  try {
+    const project = await jsonGet(base, token, remote.host, fetcher);
+    if (!project || typeof project.default_branch !== "string" || !project.default_branch)
+      return checksUnverified("repository metadata unavailable or incomplete");
+    const branch = encodeURIComponent(project.default_branch);
+    const rules = await jsonValue(`${base}/rules/branches/${branch}`, token, remote.host, fetcher);
+    if (rules === null) return checksUnverified("branch rules unavailable");
+    let classic: unknown = null;
+    try {
+      classic = await jsonValue(
+        `${base}/branches/${branch}/protection/required_status_checks`,
+        token,
+        remote.host,
+        fetcher,
+      );
+    } catch {
+      classic = null;
+    }
+    const checks = [...requiredChecksFromRules(rules), ...requiredChecksFromClassic(classic)];
+    return requiredCheckSources(project.default_branch, checks, classic !== null);
+  } catch {
+    return checksUnverified("API request failed");
+  }
+}
+
 /** Query only fixed API hosts. No token or incomplete API response stays unverified. */
 export async function auditRemoteBranchProtection(
   remoteUrl: string,
@@ -251,6 +307,7 @@ export async function runBranchProtectionAudit(root: string): Promise<SecurityCh
     return [
       await auditRemoteBranchProtection(origin, resolved.value),
       await auditRemoteRequiredReviews(origin, resolved.value, fetch, agentApprovers(root)),
+      await auditRemoteRequiredChecks(origin, resolved.value),
     ];
   } catch {
     return [unverified(`configured ${name} unavailable`)];
