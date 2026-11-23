@@ -79,7 +79,9 @@ the staged repository and its lockfile. Kit refuses packages whose retained arch
 differ from these expectations.
 
 Generate the policy digest on the same runtime and Kit build that will launch the workload.
-The digest binds the compiled Kit modules and the npm archive expectations. Put
+The digest binds the compiled Kit modules on disk and the npm archive expectations.
+Keep the installed Kit build stable while generating the policy digest and launching
+the workload. Put
 it in the authority file's `policyDigest` field. Enroll the authority, stage the
 input, request and record the external approval, then call `run` with that
 verification report. Kit exits nonzero for refusal, timeout or a nonzero workload
