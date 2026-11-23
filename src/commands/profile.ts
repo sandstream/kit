@@ -184,11 +184,13 @@ function freezeProfile(
   return next;
 }
 
+const n = (list: unknown[] | undefined): number => list?.length ?? 0;
+
 function printFrozen(next: KitProfile, existing: KitProfile | null): void {
   console.log(`${c.bold}kit profile freeze${c.reset} → ${c.bold}${PROFILE_FILE}${c.reset}`);
   const vault = next.vault?.store ? `, vault store=${next.vault.store}` : "";
   console.log(
-    `  ${c.green}✓${c.reset} ${next.skills?.length ?? 0} skill(s), ${next.mcp?.length ?? 0} mcp server(s), ${next.plugins?.length ?? 0} plugin(s), ${next.hooks?.length ?? 0} hook(s)${vault}`,
+    `  ${c.green}✓${c.reset} ${n(next.skills)} skill(s), ${n(next.mcp)} mcp server(s), ${n(next.plugins)} plugin(s), ${n(next.hooks)} hook(s)${vault}`,
   );
   if (existing?.workflows || existing?.scope || existing?.gates) {
     console.log(

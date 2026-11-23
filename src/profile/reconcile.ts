@@ -141,6 +141,18 @@ function driftForKind(
 }
 
 /**
+ * Hook drift. A profile frozen before hooks were recorded has no list: comparing it against the
+ * hooks found would call every one of them "added", so it is not judged.
+ */
+function hookDrift(declared: KitProfile, actual: DiscoveredState): DriftEntry[] {
+  return declared.hooks ? driftForKind("hook", declared.hooks, actual.hooks) : [];
+}
+
+function hooksNotRecorded(declared: KitProfile, actual: DiscoveredState): ComponentKind[] {
+  return !declared.hooks && actual.hooks.length > 0 ? ["hook"] : [];
+}
+
+/**
  * Pure declared-vs-discovered drift. Same inputs → same output (no clock, no randomness), so
  * it is safe to diff in CI.
  */
@@ -150,9 +162,7 @@ export function computeProfileDrift(declared: KitProfile, actual: DiscoveredStat
     ...driftForKind("mcp", declared.mcp, actual.mcp),
     ...driftForKind("workflow", declared.workflows, actual.workflows),
     ...driftForKind("plugin", declared.plugins, actual.plugins),
-    // A profile frozen before hooks were recorded has no list: comparing it against the hooks
-    // found would call every one of them "added".
-    ...(declared.hooks ? driftForKind("hook", declared.hooks, actual.hooks) : []),
+    ...hookDrift(declared, actual),
   ];
 
   entries.sort(
@@ -180,7 +190,7 @@ export function computeProfileDrift(declared: KitProfile, actual: DiscoveredStat
   const driftCount =
     entries.filter((e) => e.status !== "in-sync").length + (vault?.status === "drift" ? 1 : 0);
 
-  const notRecorded: ComponentKind[] = !declared.hooks && actual.hooks.length > 0 ? ["hook"] : [];
+  const notRecorded = hooksNotRecorded(declared, actual);
   return { entries, vault, unaudited, notRecorded, driftCount, clean: driftCount === 0 };
 }
 
