@@ -229,12 +229,15 @@ describe("ingestStrict: OSV records and report extensions", () => {
       { packages: {} },
       { packages: [null] },
       { packages: [[]] },
+      { packages: [{}] },
+      { packages: [{ package: {} }] },
       { packages: [{ package: [] }] },
       { packages: [{ package: { name: 1 } }] },
       { packages: [{ package: { version: {} } }] },
       { packages: [{ package: { ecosystem: false } }] },
       { packages: [{ vulnerabilities: {} }] },
       { packages: [{ vulnerabilities: [null] }] },
+      { packages: [{ vulnerabilities: [{ summary: "missing id" }] }] },
       { packages: [{ vulnerabilities: [{ id: [] }] }] },
       { packages: [{ vulnerabilities: [{ summary: {} }] }] },
       { packages: [{ vulnerabilities: [{ database_specific: [] }] }] },
@@ -252,6 +255,60 @@ describe("ingestStrict: OSV records and report extensions", () => {
       assert.equal(outcome.reportGap, "malformed");
       assert.equal(outcome.findings.length, 1);
     }
+  });
+
+  it("requires an identified package or an advisory to support an OSV package record", () => {
+    for (const record of [
+      {},
+      { package: {} },
+      { vulnerabilities: [] },
+      { package: { name: "fixture" } },
+      {
+        package: { name: "fixture", version: "1", ecosystem: "npm" },
+        groups: [{ ids: ["OSV-A"] }],
+      },
+    ]) {
+      const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages: [record] }] }));
+      assert.equal(outcome.ok, false, JSON.stringify(record));
+      assert.equal(outcome.reportGap, "malformed");
+    }
+  });
+
+  it("accepts package-only records in OSV-Scanner all-packages output", () => {
+    const packages = [
+      { package: { name: "fixture", version: "1", ecosystem: "npm" } },
+      { package: { name: "", version: "", ecosystem: "", commit: "1234ab" } },
+    ];
+    const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
+    assert.deepEqual(outcome, { ok: true, findings: [] });
+  });
+
+  it("keeps reported advisories when an OSV group names an omitted advisory", () => {
+    const packages = [
+      {
+        package: { name: "fixture", version: "1", ecosystem: "npm" },
+        vulnerabilities: [{ id: "OSV-A" }],
+        groups: [{ ids: ["OSV-A", "OSV-B"] }],
+      },
+    ];
+    const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
+    assert.ok(outcome.ok);
+    assert.equal(outcome.coverage, "partial");
+    assert.deepEqual(
+      outcome.findings.map(({ name }) => name),
+      ["fixture@1: OSV-A"],
+    );
+  });
+
+  it("keeps an advisory whose package metadata is malformed", () => {
+    const packages = [{ package: { name: 42 }, vulnerabilities: [{ id: "OSV-A" }] }];
+    const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
+    assert.ok(outcome.ok);
+    assert.equal(outcome.coverage, "partial");
+    assert.deepEqual(
+      outcome.findings.map(({ name }) => name),
+      ["(package): OSV-A"],
+    );
   });
 
   it("retains optional fields and unknown extensions on valid reports", () => {

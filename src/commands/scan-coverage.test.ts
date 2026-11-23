@@ -56,6 +56,24 @@ describe("kit scan: report coverage", { skip }, () => {
 describe("kit scan: missing evidence and SARIF export", { skip }, () => {
   useFixture();
 
+  it("keeps the baseline when OSV returns an unidentified package with no findings", async () => {
+    toml(f, '[scan]\ndelegates = ["osv-scanner"]\n');
+    tool(f, "osv-scanner", `echo '{"results":[{"packages":[{}]}]}'`);
+    const baseline = join(f.dir, ".kit-baseline.json");
+    const original = JSON.stringify({
+      version: 1,
+      generated: new Date(0).toISOString(),
+      categories: { scan: { findings: ["kept"] } },
+    });
+    writeFileSync(baseline, original);
+    const env = { KIT_EXPLOIT_INTEL: "0" };
+    const result = await scan(f, ["--strict", "--json"], env);
+    assert.equal(result.exitCode, 1, result.stdout + result.stderr);
+    assert.equal(JSON.parse(result.stdout).runs[0].reportGap, "malformed");
+    assert.equal((await scan(f, ["--update-baseline"], env)).exitCode, 1);
+    assert.equal(readFileSync(baseline, "utf8"), original);
+  });
+
   it("distinguishes missing output and a supported empty scan", async () => {
     toml(f, '[scan]\ndelegates = ["grype"]\n');
     tool(f, "grype", "exit 0");

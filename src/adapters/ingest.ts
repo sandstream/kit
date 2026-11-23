@@ -335,27 +335,76 @@ function readableSarifRun(value: unknown): Record<string, unknown> | undefined {
   return sarifRun(recovered) ? recovered : undefined;
 }
 
-const osvVulnerability = fields({
+const osvVulnerabilityFields = fields({
   id: isString,
   summary: isString,
   database_specific: fields({ severity: isString }),
 });
-const osvPackage = fields({
-  package: fields({ name: isString, ecosystem: isString, version: isString }),
+const osvPackageIdentity = fields({
+  name: isString,
+  ecosystem: isString,
+  version: isString,
+  commit: isString,
+});
+const osvPackageFields = fields({
+  package: osvPackageIdentity,
   vulnerabilities: arrayOf(osvVulnerability),
 });
+
+function nonBlank(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function osvVulnerability(value: unknown): value is OsvVuln & { id: string } {
+  return isRecord(value) && nonBlank(value.id) && osvVulnerabilityFields(value);
+}
+
+function identifiedOsvPackage(value: unknown, declaresVulnerabilities: boolean): boolean {
+  if (!isRecord(value)) return false;
+  if (nonBlank(value.commit)) return true;
+  return (
+    nonBlank(value.name) &&
+    (declaresVulnerabilities || (nonBlank(value.version) && nonBlank(value.ecosystem)))
+  );
+}
+
+function completeOsvGroups(groups: unknown, ids: ReadonlySet<string>): boolean {
+  if (groups === undefined) return true;
+  if (!Array.isArray(groups)) return false;
+  return groups.every(
+    (group: unknown) =>
+      isRecord(group) &&
+      Array.isArray(group.ids) &&
+      group.ids.length > 0 &&
+      group.ids.every((id: unknown) => nonBlank(id) && ids.has(id)),
+  );
+}
+
+function osvPackage(value: unknown): value is OsvPackage {
+  if (!isRecord(value) || !osvPackageFields(value)) return false;
+  const vulnerabilities = Array.isArray(value.vulnerabilities) ? value.vulnerabilities : [];
+  const ids = new Set(vulnerabilities.map((vulnerability: { id: string }) => vulnerability.id));
+  return (
+    completeOsvGroups(value.groups, ids) &&
+    (ids.size > 0 || identifiedOsvPackage(value.package, Array.isArray(value.vulnerabilities)))
+  );
+}
+
 function osvResult(value: unknown): value is OsvResult {
   return isRecord(value) && Array.isArray(value.packages) && value.packages.every(osvPackage);
 }
 
 function readableOsvPackage(value: unknown): OsvPackage | undefined {
-  if (osvPackage(value)) return value as OsvPackage;
+  if (osvPackage(value)) return value;
   if (!isRecord(value)) return undefined;
   const vulnerabilities = Array.isArray(value.vulnerabilities)
     ? value.vulnerabilities.filter(osvVulnerability)
     : [];
-  const recovered = { ...value, vulnerabilities };
-  return osvPackage(recovered) ? (recovered as OsvPackage) : undefined;
+  const recovered = {
+    package: osvPackageIdentity(value.package) ? value.package : undefined,
+    vulnerabilities,
+  };
+  return osvPackage(recovered) ? recovered : undefined;
 }
 
 function readableOsvResult(value: unknown): OsvResult | undefined {
