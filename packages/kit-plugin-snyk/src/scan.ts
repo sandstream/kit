@@ -257,10 +257,13 @@ export async function fetchSnykIssues(opts: FetchSnykIssuesOptions): Promise<Sny
   return findings;
 }
 
+const SNYK_PAGING_PARAMETERS = new Set(["starting_after", "ending_before", "limit"]);
+
 function nextSnykPage(current: URL, next: unknown, first: URL): URL | undefined {
   if (next === undefined || next === null) return undefined;
-  if (typeof next !== "string" || !next.trim()) throw new Error("Invalid Snyk API pagination link");
-  const url = URL.parse(next, current);
+  const href = textField(typeof next === "string" ? next : record(next)?.href);
+  if (!href) throw new Error("Invalid Snyk API pagination link");
+  const url = URL.parse(href, current);
   if (
     !url ||
     url.origin !== first.origin ||
@@ -270,16 +273,19 @@ function nextSnykPage(current: URL, next: unknown, first: URL): URL | undefined 
   ) {
     throw new Error("Snyk API pagination link changes the issue endpoint");
   }
-  for (const key of ["version", "scan_item.id"]) {
-    const expected = first.searchParams.get(key);
-    const supplied = url.searchParams.getAll(key);
-    if (supplied.some((value) => value !== expected)) {
-      throw new Error("Snyk API pagination link changes the issue scope");
-    }
-    if (expected !== null && supplied.length === 0) url.searchParams.set(key, expected);
-  }
+  preserveSnykPageScope(url, first);
   url.hash = "";
   return url;
+}
+
+function preserveSnykPageScope(url: URL, first: URL): void {
+  for (const [key, value] of url.searchParams) {
+    if (!SNYK_PAGING_PARAMETERS.has(key) && first.searchParams.get(key) !== value)
+      throw new Error("Snyk API pagination link changes the issue scope");
+  }
+  for (const [key, value] of first.searchParams) {
+    if (!url.searchParams.has(key)) url.searchParams.set(key, value);
+  }
 }
 
 async function readSnykIssuePage(url: URL, token: string) {
@@ -299,7 +305,10 @@ async function readSnykIssuePage(url: URL, token: string) {
     throw new Error("Invalid Snyk API response: expected a data array");
   const findings = body.data.flatMap(readSnykIssue);
   const links = record(body.links);
+  const version = record(body.jsonapi)?.version;
   const malformed =
+    typeof version !== "string" ||
+    !/^1\.(0|[1-9]\d*)$/.test(version) ||
     body.data.length !== findings.length ||
     (body.errors !== undefined && (!Array.isArray(body.errors) || body.errors.length > 0)) ||
     (body.links !== undefined && !links);

@@ -93,14 +93,16 @@ describe("recordSnykFindings", () => {
   });
 });
 
-describe("fetchSnykIssues", () => {
-  const options = { token: "fixture", orgSlug: "org", apiBase: "https://api.example.test" };
+const jsonapi = { version: "1.0" };
+const options = { token: "fixture", orgSlug: "org", apiBase: "https://api.example.test" };
 
+describe("fetchSnykIssues", () => {
   it("reads the next issue page and rejects an absent data array", async (t) => {
-    let second: unknown = { data: [{ id: "second", attributes: { title: "Second" } }] };
+    let second: unknown = { jsonapi, data: [{ id: "second", attributes: { title: "Second" } }] };
     t.mock.method(globalThis, "fetch", async (url: URL) => {
       if (url.searchParams.has("starting_after")) return Response.json(second);
       return Response.json({
+        jsonapi,
         data: [{ id: "first", attributes: { title: "First" } }],
         links: { next: "?starting_after=fixture&version=2024-10-15" },
       });
@@ -124,13 +126,81 @@ describe("fetchSnykIssues", () => {
     );
   });
 
+  it("follows the JSON API link object and preserves the requested project", async (t) => {
+    const fetchMock = t.mock.method(globalThis, "fetch", async (url: URL) => {
+      if (url.searchParams.has("starting_after")) {
+        assert.equal(url.searchParams.get("scan_item.id"), "fixture-project");
+        assert.equal(url.searchParams.get("version"), "2024-10-15");
+        return Response.json({ jsonapi, data: [{ id: "last", attributes: { title: "Last" } }] });
+      }
+      return Response.json({
+        jsonapi,
+        data: [{ id: "first", attributes: { title: "First" } }],
+        links: { next: { href: "?starting_after=fixture", meta: {} } },
+      });
+    });
+    const issues = await fetchSnykIssues({ ...options, projectId: "fixture-project" });
+    assert.deepEqual(
+      issues.map((issue) => issue.id),
+      ["first", "last"],
+    );
+    assert.equal(fetchMock.mock.callCount(), 2);
+  });
+
   it("refuses a pagination link to another origin before requesting it", async (t) => {
     const fetchMock = t.mock.method(globalThis, "fetch", async () =>
-      Response.json({ data: [], links: { next: "https://other.example.test/page" } }),
+      Response.json({ jsonapi, data: [], links: { next: "https://other.example.test/page" } }),
     );
     await assert.rejects(
       () => fetchSnykIssues(options),
       /pagination link changes the issue endpoint/,
+    );
+    assert.equal(fetchMock.mock.callCount(), 1);
+  });
+});
+
+describe("Snyk issue coverage", () => {
+  it("requires a supported JSON API envelope before accepting an empty result", async (t) => {
+    let page: unknown = { data: [] };
+    t.mock.method(globalThis, "fetch", async () => Response.json(page));
+    await assert.rejects(() => fetchSnykIssues(options), /Invalid Snyk API issue response/);
+    page = { jsonapi: { version: "2.0" }, data: [] };
+    await assert.rejects(() => fetchSnykIssues(options), /Invalid Snyk API issue response/);
+    page = { jsonapi, data: [] };
+    assert.deepEqual(await fetchSnykIssues(options), []);
+    page = { data: [{ id: "readable", attributes: { title: "Readable finding" } }] };
+    await assert.rejects(
+      () => fetchSnykIssues(options),
+      (error: unknown) => {
+        assert.ok(error instanceof IncompleteSnykIssuesError);
+        assert.deepEqual(
+          error.findings.map((issue) => issue.id),
+          ["readable"],
+        );
+        return true;
+      },
+    );
+  });
+
+  it("keeps findings when a pagination link adds a filter outside the requested scope", async (t) => {
+    const fetchMock = t.mock.method(globalThis, "fetch", async () =>
+      Response.json({
+        jsonapi,
+        data: [{ id: "first", attributes: { title: "First" } }],
+        links: { next: "?starting_after=fixture&ignored=true" },
+      }),
+    );
+    await assert.rejects(
+      () => fetchSnykIssues(options),
+      (error: unknown) => {
+        assert.ok(error instanceof IncompleteSnykIssuesError);
+        assert.deepEqual(
+          error.findings.map((issue) => issue.id),
+          ["first"],
+        );
+        assert.match(String(error.cause), /pagination link changes the issue scope/);
+        return true;
+      },
     );
     assert.equal(fetchMock.mock.callCount(), 1);
   });

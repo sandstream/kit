@@ -27,7 +27,7 @@ Save `snyk test --json` output to `snyk-results.json` first. The parser also acc
 
 ## Read-only API fetch
 
-The fetch function follows pagination links on the same issue endpoint.
+The fetch function follows JSON:API pagination links on the same issue endpoint and preserves the requested filters. An empty issue list requires a JSON:API 1.x response.
 If a page fails after Kit reads some issues, `IncompleteSnykIssuesError.findings` contains those issues.
 The CLI parser marks an incomplete project with `coverage: "partial"` when it retains findings.
 
