@@ -12,6 +12,7 @@ import { flagValue, hasFlag } from "../utils/flags.js";
 import { IncomingTrustStore, type IncomingTrustState } from "../incoming-trust/authority-store.js";
 import { QUARANTINE_ACKNOWLEDGEMENT } from "../incoming-trust/authority-files.js";
 import { captureIncomingCandidate } from "../incoming-trust/candidate-flow.js";
+import { preflightSealedCandidate } from "../incoming-trust/sealed-candidate.js";
 import {
   acceptCandidate,
   rejectCandidate,
@@ -42,7 +43,7 @@ const SUBCOMMANDS = [
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 export const SECURITY_INCOMING_USAGE =
-  "kit security incoming enroll --authority <file> | status | stage --source <dir> --snapshot-dir <new dir> --origin <https url> | request --checks <file> [--out <file>] | approve --verification <file> --approval <file> | preflight --snapshot-dir <dir> --verification <file> | reject | retry | rotate --signers <file> | recover --acknowledge <text>   (all accept --repo <dir>, --store <dir>, --json)";
+  "kit security incoming enroll --authority <file> | status | stage --source <dir> --snapshot-dir <new dir> --origin <https url> | request --checks <file> [--out <file>] | approve --verification <file> --approval <file> | preflight --snapshot-dir <dir> --verification <file> [--sealed] | reject | retry | rotate --signers <file> | recover --acknowledge <text>   (all accept --repo <dir>, --store <dir>, --json)";
 
 interface Invocation {
   argv: readonly string[];
@@ -193,13 +194,22 @@ function preflight(inv: Invocation): boolean {
   const destination = flagValue(inv.argv, "--snapshot-dir");
   if (!destination) throw new Error("Incoming trust: --snapshot-dir is required");
   const report = readJsonFile(flagValue(inv.argv, "--verification"), "--verification");
-  const result = inv.store.preflight(inv.repository, resolve(destination), report);
+  const verify = (path: string) => inv.store.preflight(inv.repository, path, report);
+  const result = hasFlag(inv.argv, "--sealed")
+    ? preflightSealedCandidate(resolve(destination), verify)
+    : verify(resolve(destination));
   if (!result.verified) {
     if (inv.json) console.log(JSON.stringify(result));
     else console.error(`Incoming trust preflight refused: ${result.reason}`);
     return false;
   }
-  return show(inv, result, "Verified retained inputs under the current approval. Preflight only.");
+  return show(
+    inv,
+    result,
+    "inputs" in result
+      ? "Verified retained inputs on a read-only image under the current approval. Preflight only."
+      : "Verified retained inputs under the current approval. Preflight only.",
+  );
 }
 
 function simple(

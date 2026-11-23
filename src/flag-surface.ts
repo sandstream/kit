@@ -535,6 +535,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--out",
     "--recursive",
     "--repo",
+    "--sealed",
     "--signers",
     "--skip",
     "--snapshot-dir",

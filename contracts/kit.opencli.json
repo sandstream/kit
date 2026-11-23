@@ -2854,6 +2854,7 @@
         "--readonly",
         "--recursive",
         "--repo",
+        "--sealed",
         "--signers",
         "--skip",
         "--snapshot-dir",

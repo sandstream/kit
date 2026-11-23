@@ -8,7 +8,7 @@ kit security incoming status
 kit security incoming stage --source <dir> --snapshot-dir <new dir> --origin <https url>
 kit security incoming request --checks <file> [--out <file>]
 kit security incoming approve --verification <file> --approval <file>
-kit security incoming preflight --snapshot-dir <dir> --verification <file>
+kit security incoming preflight --snapshot-dir <dir> --verification <file> [--sealed]
 kit security incoming reject
 kit security incoming retry
 kit security incoming rotate --signers <file>
@@ -31,6 +31,10 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
   `stage`. The command exits with a nonzero status if the approval or retained files fail a check.
   A successful check describes the inputs checked during that call. Start still requires a
   containment delegate and its own checks.
+- `preflight --sealed` checks a bounded copy of the retained inputs on a read-only APFS image.
+  It checks the signed candidate again from the mounted image under the generation lock.
+  Kit ejects the temporary image before reporting success. This option requires the macOS
+  `diskutil image` commands. Kit reports failure when the platform, image or cleanup is unavailable.
 - `rotate` replaces the signers and returns the store to pending, so no old approval survives.
 - `recover` moves a damaged store aside. It never deletes it. Every repository that shares the
   store directory needs a new enrollment afterwards.
@@ -41,6 +45,6 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
 - The commands do not run the candidate. Workload isolation and an atomic handoff to an
   execution delegate are still pending.
 - `stage` reads registry-tarball and remote-tarball sources only. Git and local sources are refused.
-- Native Windows and macOS are unverified.
+- The sealed preflight has been exercised on macOS 27.2.1. Native Windows remains unverified.
 
 Design and limits: [src/incoming-trust/README.md](../src/incoming-trust/README.md).
