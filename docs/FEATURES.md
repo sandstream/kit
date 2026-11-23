@@ -180,7 +180,13 @@ in to any vault is always your own account action; kit never does it for you.
 
 - `kit security scan-staged`: Pre-commit: scan staged blobs for known credential patterns; only findings the commit introduces block it
 - `kit security scan-build`: Walk `.next/`, `dist/`, `build/` for credentials inlined into artifacts (`NEXT_PUBLIC_` typos), Electron `app.asar` archives included (read as bytes, up to 1 GiB). Files of other types are not read, and the output counts them by extension
-- `kit security scan-transcripts`: Walk `.claude/`, `~/.claude/projects/`, `.opencode/` for replayed-secret leaks
+- `kit security scan-transcripts`: Scan supported text files in project agent directories and matching Claude, OpenCode, and Codex project caches.
+  Kit reports unreadable files, size limits, and other gaps. The command succeeds only after a complete scan with no findings.
+  The scan excludes the machine-wide Codex sessions store and agent worktree copies.
+- `kit check` row `local docker image IOCs`: Compare image names and registry digests in the selected Docker context with published indicators.
+  Kit checks the list against the daemon image count. The check does not scan image content.
+- `kit check` reads findings from `.kit-scan-results.jsonl` when the file exists. Kit reports unreadable or invalid reports and keeps usable findings.
+  The file cannot prove that the external scanner completed its scan or that the records are recent.
 - `kit security check-gitignore [--fix]`: Verify `.env*`, `*.pem`, `id_rsa`, `.kit/elevation.json` are ignored
 - `kit security verify-pull [--base <ref>]`: After `git pull`: audit new deps, gitignore drops, introduced secrets, policy changes
 - `kit security policy [init|add <pkg>|check]`: Dependency allowlist enforcement + per-key spend caps/TTL/scope
@@ -267,6 +273,9 @@ Context pointers are non-secret and live in config; the credentials they authent
 - `kit check` row `runtime installs: node`: lists the Node installs of mise, Homebrew, nvm, fnm, Volta and `/usr/local`, names the one PATH runs, judges each with the release data of the runtime row and proposes (never runs) removing unused installs that are end of life or lack a security release
 - `kit scan`: Run the installed external scanners (Snyk, Trivy, Grype, Semgrep, osv-scanner, Socket) and merge them into one local, air-gap-aware verdict. **GuardDog** (opt-in via `KIT_GUARDDOG=1` or `[scan] guarddog`) adds local malware detection. The **cloud** scanners (Snyk, Socket) run when their token is set (`SNYK_TOKEN` / `SOCKET_SECURITY_API_TOKEN`, resolved from `[scan.tooling]` vault or env — kit never stores them) and are **dropped in air-gap** mode; `kit setup` asks the network posture (connected vs enclave) and writes `[air_gap]`. Socket has no stable findings-JSON, so kit gates on `socket ci`'s exit code (never false-green). Token absent → the scanner is skipped, not failed
 - **Scanner-health gate.** The exit verdict accounts for scanner _health_, not just findings: a scanner that errored, isn't installed, or lacked its token can no longer exit 0 (a false green). Default is a loud warn (no existing green CI breaks); opt in to a hard fail via `[governance.scan].required_scanners` (a listed scanner that didn't run fails) or `kit ci --strict` / `KIT_CI_STRICT=1` (any non-running scanner fails)
+- `kit scan` reports uncovered project paths, requested images, and Maven SBOM inputs in text, JSON, and SARIF.
+  Strict mode fails when the scope is incomplete. A required scanner must complete all its scheduled runs.
+  `kit scan --update-baseline` requires complete coverage of the selected scan. It preserves the prior baseline when coverage is incomplete.
 - `kit airgap verify`: assert every scanner that would run in air-gap mode resolves to a local artifact (no cloud-only scanner, no registry config) and print a pass/fail table. In air-gap mode a registry (`p/…`) `KIT_SEMGREP_CONFIG` is refused in both scan paths (it would egress to the semgrep registry), while a **local** ruleset path is kept so semgrep can still run fully offline
 - Supply-chain findings auto-append to `.kit-findings.jsonl` (one JSON line per finding). They stay separate from the hash-chained `.kit-audit.jsonl`, whose integrity would be broken by raw finding rows
 - Releases ship with SLSA provenance (`npm publish --provenance`), CycloneDX + SPDX SBOMs on every GitHub release, cosign-signed Docker images, and weekly OpenSSF Scorecard From 7.2.1 the publish job scans the installed package and fails when an SBOM lists fewer than 10 dependencies.

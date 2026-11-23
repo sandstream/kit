@@ -19,6 +19,7 @@ const CLI = fileURLToPath(new URL("./cli.js", import.meta.url));
 const posix = process.platform !== "win32";
 
 const AUDIT = JSON.stringify({
+  auditReportVersion: 2,
   vulnerabilities: {
     "axe-core": {
       name: "axe-core",
@@ -33,6 +34,17 @@ const AUDIT = JSON.stringify({
         },
       ],
     },
+  },
+  metadata: {
+    vulnerabilities: { info: 0, low: 0, moderate: 0, high: 1, critical: 0, total: 1 },
+    dependencies: { total: 1 },
+  },
+});
+const LOCKFILE = JSON.stringify({
+  lockfileVersion: 3,
+  packages: {
+    "": { dependencies: { "axe-core": "4.10.3" } },
+    "node_modules/axe-core": { version: "4.10.3" },
   },
 });
 const OUTDATED = JSON.stringify({
@@ -52,7 +64,7 @@ function fixture() {
   const scripts = join(home, ".claude", "skills", "tillganglighet", "scripts");
   mkdirSync(join(scripts, "node_modules"), { recursive: true });
   writeFileSync(join(scripts, "package.json"), '{"dependencies":{"axe-core":"4.10.3"}}');
-  writeFileSync(join(scripts, "package-lock.json"), '{"lockfileVersion":3}');
+  writeFileSync(join(scripts, "package-lock.json"), LOCKFILE);
   const run = (extra: Record<string, string> = {}, cwd: string = home) =>
     spawnSync(process.execPath, [CLI, "hooks", "context"], {
       cwd,
@@ -167,8 +179,8 @@ declare("kit hooks context with a broken or untrusted setup", (f) => {
     const project = join(f().home, "project");
     const scripts = join(project, ".claude", "skills", "projskill", "scripts");
     mkdirSync(join(scripts, "node_modules"), { recursive: true });
-    writeFileSync(join(scripts, "package.json"), "{}");
-    writeFileSync(join(scripts, "package-lock.json"), "{}");
+    writeFileSync(join(scripts, "package.json"), '{"dependencies":{"axe-core":"4.10.3"}}');
+    writeFileSync(join(scripts, "package-lock.json"), LOCKFILE);
     writeFileSync(f().calls, "");
     const r = spawnSync(process.execPath, [CLI, "hooks", "context"], {
       cwd: project,

@@ -122,8 +122,8 @@ export async function makeClient(opts: MakeClientOptions = {}): Promise<WizClien
 }
 
 const ISSUES_QUERY = `
-  query Issues($first: Int!, $filterBy: IssueFilters) {
-    issues(first: $first, filterBy: $filterBy) {
+  query Issues($first: Int!, $after: String, $filterBy: IssueFilters) {
+    issues(first: $first, after: $after, filterBy: $filterBy) {
       nodes {
         id
         severity
@@ -134,6 +134,7 @@ const ISSUES_QUERY = `
         control { id name }
         createdAt
       }
+      pageInfo { hasNextPage endCursor }
     }
   }
 `;
@@ -144,21 +145,62 @@ export interface FetchIssuesOptions {
   statusIn?: string[];
 }
 
+export class IncompleteWizIssuesError extends Error {
+  constructor(
+    readonly findings: WizIssue[],
+    cause: unknown,
+  ) {
+    super("Wiz issue coverage is incomplete", { cause });
+    this.name = "IncompleteWizIssuesError";
+  }
+}
+
+interface IssueVariables {
+  first: number;
+  after?: string;
+  filterBy?: { severity?: string[]; status?: string[] };
+}
+
+function issueVariables(limit: number, opts: FetchIssuesOptions): IssueVariables {
+  if (!opts.minSeverity && !opts.statusIn) return { first: limit };
+  const filterBy: IssueVariables["filterBy"] = {};
+  if (opts.minSeverity) filterBy.severity = expandSeverityFloor(opts.minSeverity);
+  if (opts.statusIn) filterBy.status = opts.statusIn;
+  return { first: limit, filterBy };
+}
+
 export async function fetchIssues(
   client: WizClient,
   opts: FetchIssuesOptions = {},
 ): Promise<WizIssue[]> {
-  const variables: {
-    first: number;
-    filterBy?: { severity?: string[]; status?: string[] };
-  } = { first: Math.min(opts.limit ?? 100, 500) };
-  if (opts.minSeverity || opts.statusIn) {
-    variables.filterBy = {};
-    if (opts.minSeverity) {
-      variables.filterBy.severity = expandSeverityFloor(opts.minSeverity);
+  const limit = Math.min(opts.limit ?? 100, 500);
+  if (!Number.isInteger(limit) || limit <= 0)
+    throw new Error("Wiz issue limit must be a positive integer");
+  const variables = issueVariables(limit, opts);
+  const findings: WizIssue[] = [];
+  const cursors = new Set<string>();
+  try {
+    for (;;) {
+      const page = await readWizPage(client, variables);
+      findings.push(...page.findings.slice(0, limit - findings.length));
+      if (page.error) throw page.error;
+      if (!page.hasNextPage) return findings;
+      if (findings.length >= limit) throw new Error("Wiz issue limit reached before the last page");
+      const cursor = page.endCursor;
+      if (!cursor || cursors.has(cursor) || !page.findings.length) {
+        throw new Error("Invalid Wiz API pagination cursor");
+      }
+      cursors.add(cursor);
+      variables.after = cursor;
+      variables.first = limit - findings.length;
     }
-    if (opts.statusIn) variables.filterBy.status = opts.statusIn;
+  } catch (error) {
+    if (findings.length) throw new IncompleteWizIssuesError(findings, error);
+    throw error;
   }
+}
+
+async function readWizPage(client: WizClient, variables: IssueVariables) {
   const res = await fetch(client.apiUrl, {
     method: "POST",
     headers: {
@@ -171,7 +213,11 @@ export async function fetchIssues(
   if (!res.ok) {
     throw new Error(`Wiz GraphQL ${res.status}: ${await safeText(res, [client.accessToken])}`);
   }
-  const body = (await res.json()) as {
+  return decodeWizPage(await res.json(), variables.first, client.accessToken);
+}
+
+function decodeWizPage(raw: unknown, limit: number, accessToken: string) {
+  const body = raw as {
     data?: {
       issues?: {
         nodes?: Array<{
@@ -184,26 +230,60 @@ export async function fetchIssues(
           control?: { id?: string; name?: string };
           createdAt?: string;
         }>;
+        pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
       };
     };
     errors?: Array<{ message?: string }>;
   };
-  if (body.errors && body.errors.length) {
-    throw new Error(
-      `Wiz GraphQL errors: ${redactErrorText(body.errors.map((e) => e.message).join("; "), [client.accessToken])}`,
+  const { nodes, pageInfo } = body?.data?.issues ?? {};
+  const knownSeverities: string[] = ["INFORMATIONAL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
+  const findings = (Array.isArray(nodes) ? nodes : []).flatMap((node): WizIssue[] => {
+    if (
+      !node ||
+      typeof node.id !== "string" ||
+      !node.id.trim() ||
+      !node.severity ||
+      !knownSeverities.includes(node.severity) ||
+      typeof node.status !== "string" ||
+      !node.status.trim()
+    )
+      return [];
+    return [
+      {
+        id: node.id,
+        severity: node.severity,
+        status: node.status,
+        resolutionReason: node.resolutionReason,
+        type: node.type,
+        entitySnapshot: node.entitySnapshot,
+        controlId: node.control?.id,
+        controlName: node.control?.name,
+        createdAt: node.createdAt,
+      },
+    ];
+  });
+  const invalid =
+    !Array.isArray(nodes) ||
+    findings.length !== nodes.length ||
+    nodes.length > limit ||
+    typeof pageInfo?.hasNextPage !== "boolean";
+  return {
+    findings,
+    hasNextPage: pageInfo?.hasNextPage,
+    endCursor: typeof pageInfo?.endCursor === "string" ? pageInfo.endCursor : undefined,
+    error: wizPageError(body?.errors, invalid, accessToken),
+  };
+}
+
+function wizPageError(errors: unknown, invalid: boolean, accessToken: string): Error | undefined {
+  if (Array.isArray(errors) && errors.length) {
+    return new Error(
+      `Wiz GraphQL errors: ${redactErrorText(errors.map((e) => e?.message).join("; "), [accessToken])}`,
     );
   }
-  return (body.data?.issues?.nodes ?? []).map((n) => ({
-    id: n.id ?? "",
-    severity: n.severity ?? "LOW",
-    status: n.status ?? "OPEN",
-    resolutionReason: n.resolutionReason,
-    type: n.type,
-    entitySnapshot: n.entitySnapshot,
-    controlId: n.control?.id,
-    controlName: n.control?.name,
-    createdAt: n.createdAt,
-  }));
+  if (invalid || (errors !== undefined && !Array.isArray(errors))) {
+    return new Error("Invalid Wiz GraphQL issue response");
+  }
 }
 
 function expandSeverityFloor(min: WizIssue["severity"]): string[] {

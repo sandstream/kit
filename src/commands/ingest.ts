@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ingestStrict, type IngestFormat } from "../adapters/ingest.js";
+import {
+  ingestStrict,
+  type DeclaredScannerCoverage,
+  type IngestFormat,
+  type IngestGap,
+} from "../adapters/ingest.js";
 import { withImportFacts, type AdvisoryPackage } from "../advisory-import-fact.js";
 import type { SecurityCheckResult } from "../check-security.js";
 import { sanitizeDisplayText } from "../display-text.js";
@@ -54,8 +59,12 @@ function displayFinding<T extends { name: string; detail: string; package?: Advi
 /** Read a scanner report without storage, scanner execution, or network access. */
 export async function cmdIngest(): Promise<boolean> {
   const { jsonMode, positional } = ingestArguments(process.argv.slice(3));
-  const fail = (error: string): false => {
-    if (jsonMode) console.log(JSON.stringify({ ok: false, error }));
+  const fail = (
+    error: string,
+    reportGap?: IngestGap | "unavailable",
+    scannerCoverage?: DeclaredScannerCoverage[],
+  ): false => {
+    if (jsonMode) console.log(JSON.stringify({ ok: false, error, reportGap, scannerCoverage }));
     console.error(`${c.red}${error}${c.reset}`);
     return false;
   };
@@ -66,11 +75,18 @@ export async function cmdIngest(): Promise<boolean> {
   let json: string;
   try {
     json = readFileSync(resolve(process.cwd(), file), "utf8");
-  } catch {
-    return fail("could not read report file; check its path and read permissions");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    const reportGap = code === "ENOENT" || code === "ENOTDIR" ? "missing" : "unavailable";
+    return fail("could not read report file; check its path and read permissions", reportGap);
   }
   const outcome = ingestStrict(format, json);
-  if (!outcome.ok) return fail(outcome.reason);
+  const scannerCoverage = outcome.scannerCoverage?.map((scanner) => ({
+    ...scanner,
+    id: sanitizeDisplayText(scanner.id),
+    status: sanitizeDisplayText(scanner.status),
+  }));
+  if (!outcome.ok) return fail(outcome.reason, outcome.reportGap, scannerCoverage);
   // Report identities stay raw in the parsers. Only the CLI display is sanitized.
   const named = outcome.findings.map(displayFinding);
   // One added fact beside a dependency finding: does this project's source import the package?
@@ -80,7 +96,19 @@ export async function cmdIngest(): Promise<boolean> {
   for (const note of outcome.notes ?? []) console.error(note);
 
   if (jsonMode) {
-    console.log(JSON.stringify({ count: findings.length, findings }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          count: findings.length,
+          findings,
+          coverage: outcome.coverage,
+          reportGap: outcome.reportGap,
+          scannerCoverage,
+        },
+        null,
+        2,
+      ),
+    );
     return true;
   }
   console.log(

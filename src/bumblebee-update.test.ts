@@ -173,6 +173,7 @@ describe("bumblebeeStaleCatalogVerdict", () => {
   it("opens no action item when no newer release exists: the age is upstream's own", () => {
     const result = bumblebeeStaleCatalogVerdict(outcome, 111, null);
     assert.equal(result.status, "pass");
+    assert.equal(result.evidenceStatus, "stale");
     assert.equal(result.advisory, undefined);
     assert.match(result.detail, /111 days old/);
   });

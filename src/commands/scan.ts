@@ -6,17 +6,35 @@ import { c } from "../utils/colors.js";
 import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { hasMarker, scanProvidersTracked } from "../scan-detect.js";
-import { mavenSbomScanners } from "../maven-sbom.js";
 import { DEFAULT_SCAN_TIMEOUT_MS, isFailedRun } from "../scan-abort.js";
-import { resolveProjectPaths } from "../projects-config.js";
-import { expandPerProject } from "../scan-projects.js";
-import type { AirGapPlan, MergedFinding, ScanGate, ScannerDef, ScannerRun } from "../scanners.js";
+import { sanitizeDisplayText } from "../display-text.js";
+import type { VerifyResult } from "../airgap/threat-data.js";
+import {
+  applyScopeGate,
+  plannedScopeGaps,
+  planScans,
+  requiredScanIds,
+  scanScopeMessage,
+  type ScanScopeGap,
+} from "../scan-plan.js";
+import type { IntelStatus } from "../exploit-intel.js";
+import {
+  scanHealthGate,
+  type AirGapPlan,
+  type MergedFinding,
+  type ScanGate,
+  type ScanGateOptions,
+  type ScannerDef,
+  type ScannerRun,
+} from "../scanners.js";
 
 /** Whether CISA KEV and FIRST EPSS answered this run, and why not. */
 interface IntelSummary {
   enabled: boolean;
   kevChecked: boolean;
   epssChecked: boolean;
+  kevStatus?: IntelStatus;
+  epssStatus?: IntelStatus;
   notes: string[];
 }
 
@@ -28,6 +46,7 @@ interface ScanVerdict {
   suppressed: number;
   bad: number;
   gate: ScanGate;
+  scopeGaps: ScanScopeGap[];
   strict: boolean;
   ok: boolean;
 }
@@ -48,17 +67,27 @@ export async function cmdScan(): Promise<boolean> {
     return true;
   }
 
-  const selected = await selectScanners(cwd, config);
-  const airgap = await applyAirGap(selected, config);
-  if (!airgap) return false;
-  const toolingTokens = await fetchToolingTokens(config, selected);
-  const { merged, runs } = await executeScanners(cwd, airgap, toolingTokens);
+  const plan = planScans(cwd, config);
+  const { airgap, threatDataGap } = await applyAirGap(plan.scanners, config);
+  const scopeGaps = plannedScopeGaps(plan, airgap.scanners);
+  for (const gap of scopeGaps) console.error(`${c.yellow}! ${scanScopeMessage(gap)}${c.reset}`);
+  if (threatDataGap) scopeGaps.unshift(threatDataGap);
+  const policy = scanPolicy(config, plan.scanners);
+  const { merged, runs } = threatDataGap
+    ? { merged: [], runs: [] }
+    : await executeScanners(cwd, airgap, await fetchToolingTokens(config, plan.scanners));
 
   if (hasFlag(process.argv, "--update-baseline")) {
+    const gate = assessScanHealth(runs, scopeGaps, { ...policy, strict: true });
+    printGate(gate);
+    if (!gate.ok || !hasCompletedScan(runs)) {
+      console.error("Scan coverage cannot support a baseline update.");
+      return false;
+    }
     await updateScanBaseline(cwd, merged);
     return true;
   }
-  const verdict = await judgeScan(cwd, config, merged, runs);
+  const verdict = await judgeScan(cwd, config, { merged, runs, scopeGaps }, policy);
   await printVerdict(verdict);
   return verdict.ok;
 }
@@ -75,52 +104,49 @@ async function printDelegates(delegates: readonly string[] | undefined): Promise
   }
 }
 
-/** The enabled scanners, per declared project, plus the Maven SBOM and container-image scanners. */
-async function selectScanners(cwd: string, config: kitConfig): Promise<ScannerDef[]> {
-  const { SCANNERS, enabledScanners } = await import("../scanners.js");
-  const delegates = config.scan?.delegates;
-  // `[projects] paths`: a scanner that does not recurse runs once per project directory.
-  const declared = resolveProjectPaths(cwd, config.projects?.paths);
-  for (const r of declared.refused) {
-    console.error(`${c.yellow}! [projects] path not scanned: ${r.path} (${r.reason})${c.reset}`);
-  }
-  const selected = expandPerProject(enabledScanners(SCANNERS, delegates), declared.projects);
-  selected.push(...mavenSbomScanners(cwd, delegates));
-
-  // Container images (L1): `[scan].images` and, when asked, the Dockerfiles' FROM lines. Each image
-  // adds an osv-scanner and a trivy run that pull the image, so air-gap mode drops them below.
-  const { collectImages, configuredImages, imageScanners } = await import("../image-scan.js");
-  const imagePlan = collectImages(cwd, {
-    configured: configuredImages(config.scan?.images),
-    fromDockerfiles: config.scan?.images_from_dockerfiles === true,
-  });
-  for (const s of imagePlan.skipped) {
-    console.error(`${c.yellow}! image not scanned: ${s.ref} (${s.reason})${c.reset}`);
-  }
-  selected.push(...imageScanners(imagePlan.images, delegates));
-  return selected;
-}
-
 /**
  * Air-gap posture from `.kit.toml [air_gap]` + env (env overrides). When enabled, drop cloud-only
  * scanners and run the rest against local DBs with no network. See docs/AIR_GAP.md.
- * Returns null when a threat-data bundle cannot be verified (fail-closed).
+ * A threat-data gap prevents scanner and baseline execution.
  */
-async function applyAirGap(selected: ScannerDef[], config: kitConfig): Promise<AirGapPlan | null> {
+async function applyAirGap(
+  selected: ScannerDef[],
+  config: kitConfig,
+): Promise<{ airgap: AirGapPlan; threatDataGap?: ScanScopeGap }> {
   const { airGapScanners } = await import("../scanners.js");
   const { resolveAirGap } = await import("../airgap/config.js");
   const ag = resolveAirGap(config.air_gap, process.env);
   const airgap = airGapScanners(selected, ag.enabled);
-  if (!ag.enabled) return airgap;
-  console.log(
+  if (!ag.enabled) return { airgap };
+  const info =
+    hasFlag(process.argv, "--json") || hasFlag(process.argv, "--sarif")
+      ? console.error
+      : console.log;
+  info(
     `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
   );
   await warnRegistrySemgrep();
-  if (!ag.threatDataDir) return airgap;
-  const env = await verifiedThreatDataEnv(ag.threatDataDir, ag.threatDataPubkey ?? "");
-  if (!env) return null;
-  Object.assign(airgap.env, env);
-  return airgap;
+  const maxAgeDays = config.air_gap?.threat_data_max_age_days;
+  if (!ag.threatDataDir && maxAgeDays === undefined) return { airgap };
+  const result = await verifyScanThreatData(ag.threatDataDir, ag.threatDataPubkey, maxAgeDays);
+  if (!result.ok) {
+    const reason = sanitizeDisplayText(result.reason);
+    console.error(`${c.red}✗ ${reason} (fail-closed)${c.reset}`);
+    return {
+      airgap,
+      threatDataGap: {
+        kind: "threat-data",
+        target: sanitizeDisplayText(ag.threatDataDir ?? "offline bundle"),
+        reason,
+        evidenceStatus: result.status,
+      },
+    };
+  }
+  info(
+    `${c.dim}verified threat-data bundle: ${result.artifacts} artifact(s) signed + checksummed${c.reset}`,
+  );
+  Object.assign(airgap.env, result.env);
+  return { airgap };
 }
 
 /**
@@ -140,35 +166,47 @@ async function warnRegistrySemgrep(): Promise<void> {
 
 /**
  * Verified offline threat-data bundle (optional): point scanners at a signed, integrity-checked
- * local DB set. Fail-closed — never scan against unverified threat data. Returns the env the
- * bundle sets, or null when it cannot be verified.
+ * local DB set. Return the evidence status when verification fails.
  */
-async function verifiedThreatDataEnv(
-  tdDir: string,
-  pubRef: string,
-): Promise<Record<string, string> | null> {
+async function verifyScanThreatData(
+  tdDir: string | undefined,
+  pubRef: string | undefined,
+  maxAgeDays: number | undefined,
+): Promise<VerifyResult> {
+  if (!tdDir) {
+    return {
+      ok: false,
+      status: "missing",
+      reason: "threat-data freshness policy requires a bundle",
+    };
+  }
+  if (!pubRef) {
+    return {
+      ok: false,
+      status: "missing",
+      reason:
+        "air-gap threat-data dir set but no public key (threat_data_pubkey / KIT_THREAT_DATA_PUBKEY)",
+    };
+  }
   const { verifyThreatData } = await import("../airgap/threat-data.js");
-  const pubPem = pubRef && existsSync(pubRef) ? readFileSync(pubRef, "utf8") : pubRef;
-  if (!pubPem) {
-    console.error(
-      `${c.red}✗ air-gap threat-data dir set but no public key (threat_data_pubkey / KIT_THREAT_DATA_PUBKEY) — cannot verify (fail-closed)${c.reset}`,
-    );
-    return null;
+  let publicKeyPem: string;
+  try {
+    publicKeyPem = pubRef.startsWith("-----BEGIN ") ? pubRef : readFileSync(pubRef, "utf8");
+  } catch {
+    return {
+      ok: false,
+      status: "missing",
+      reason: "threat-data bundle rejected: public key cannot be read",
+    };
   }
   const res = verifyThreatData({
     dir: tdDir,
-    publicKeyPem: pubPem,
+    publicKeyPem,
+    maxAgeDays,
     readFile: (rel) => readFileSync(resolve(tdDir, rel)),
     resolvePath: (rel) => resolve(tdDir, rel),
   });
-  if (!res.ok) {
-    console.error(`${c.red}✗ threat-data bundle rejected: ${res.reason} (fail-closed)${c.reset}`);
-    return null;
-  }
-  console.log(
-    `${c.dim}verified threat-data bundle: ${res.artifacts} artifact(s) signed + checksummed${c.reset}`,
-  );
-  return res.env;
+  return res.ok ? res : { ...res, reason: `threat-data bundle rejected: ${res.reason}` };
 }
 
 /**
@@ -204,6 +242,10 @@ async function executeScanners(
   const { runScanners, scannerEnv, dropProviderExclusion } = await import("../scanners.js");
   const { resolveToolBin } = await import("../utils/resolveTool.js");
   const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
+  const { runGrypeDirectory } = await import("../scan-grype-coverage.js");
+  const { runSemgrepWithCoverage } = await import("../scan-semgrep-coverage.js");
+  const { findIacFiles } = await import("../check-iac-detect.js");
+  const { runTrivyWithCoverage } = await import("../scan-trivy-coverage.js");
 
   // A tracked file under .terraform/providers is not downloaded output: scan it like any other.
   const scanProviders = await scanProvidersTracked(cwd);
@@ -217,25 +259,27 @@ async function executeScanners(
   return runScanners(
     {
       resolve: (bin) => resolveToolBin(bin),
-      run: async (bin, args, timeoutMs, projectDir) => {
-        const r = await execFileNoThrow(bin, args, {
-          timeout: timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
-          cwd: projectDir ? resolve(cwd, projectDir) : undefined,
-          // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
-          maxBuffer: 64 * 1024 * 1024,
-          env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, process.cwd()),
-        });
-        return {
-          ok: r.ok,
-          stdout: r.stdout,
-          stderr: r.stderr,
-          exitCode: r.exitCode,
-          truncated: r.truncated,
-          timedOut: r.timedOut,
-        };
+      run: async (bin, args, timeoutMs, projectDir, evidence) => {
+        const scannerCwd = projectDir ? resolve(cwd, projectDir) : cwd;
+        const run = (argv: string[], directory: string, limitMs?: number) =>
+          execFileNoThrow(bin, argv, {
+            timeout: limitMs ?? timeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
+            cwd: directory,
+            // A scanner's report grows with what it finds (Semgrep SARIF was 2 MiB on one repo).
+            maxBuffer: 64 * 1024 * 1024,
+            env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, directory),
+          });
+        if (evidence === "grype-directory") return runGrypeDirectory(scannerCwd, args, run);
+        if (evidence === "semgrep") return runSemgrepWithCoverage(scannerCwd, args, run);
+        if (evidence) return runTrivyWithCoverage(scannerCwd, args, evidence, run);
+        return run(args, scannerCwd);
       },
       hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
-      detect: (markers) => hasMarker(cwd, markers),
+      detect: async (markers, projectDir, evidence) => {
+        if (evidence === "trivy-config")
+          return (await findIacFiles(projectDir ? resolve(cwd, projectDir) : cwd)).length > 0;
+        return hasMarker(cwd, markers);
+      },
     },
     planned,
   );
@@ -256,15 +300,33 @@ async function updateScanBaseline(cwd: string, merged: MergedFinding[]): Promise
   );
 }
 
+function scanPolicy(config: kitConfig, planned: readonly ScannerDef[]) {
+  return {
+    strict: hasFlag(process.argv, "--strict") || envTruthy(process.env.KIT_CI_STRICT),
+    requiredScanners: requiredScanIds(config.governance?.scan?.required_scanners ?? [], planned),
+  };
+}
+
+function assessScanHealth(
+  runs: ScannerRun[],
+  scopeGaps: ScanScopeGap[],
+  policy: ScanGateOptions,
+): ScanGate {
+  const gate = scanHealthGate(runs, policy);
+  applyScopeGate(gate, scopeGaps, policy);
+  return gate;
+}
+
 async function judgeScan(
   cwd: string,
   config: kitConfig,
-  merged: MergedFinding[],
-  runs: ScannerRun[],
+  evidence: { merged: MergedFinding[]; runs: ScannerRun[]; scopeGaps: ScanScopeGap[] },
+  policy: ReturnType<typeof scanPolicy>,
 ): Promise<ScanVerdict> {
-  const { suppressBaselined, scanHealthGate } = await import("../scanners.js");
+  const { suppressBaselined } = await import("../scanners.js");
   const { loadBaseline, baselineGet } = await import("../baseline.js");
   const accepted = new Set(baselineGet(await loadBaseline(cwd), "scan", "findings"));
+  const { merged, runs, scopeGaps } = evidence;
   const { kept, suppressed } = suppressBaselined(merged, accepted);
   const { findings, intel } = await withExploitIntel(kept, config);
   // A CVE in CISA KEV is exploited in the wild: it fails the scan whatever its severity label says.
@@ -276,16 +338,27 @@ async function judgeScan(
   // run (crashed/absent/no-token) must be able to force a non-zero exit so a green
   // verdict never hides a broken scanner. Backward-compatible — a non-running
   // scanner stays a loud WARN unless strict or a required scanner missed.
-  const strict = hasFlag(process.argv, "--strict") || envTruthy(process.env.KIT_CI_STRICT);
-  const requiredScanners = config.governance?.scan?.required_scanners ?? [];
-  const gate = scanHealthGate(runs, { strict, requiredScanners });
+  const { strict } = policy;
+  const gate = assessScanHealth(runs, scopeGaps, policy);
+  if (strict && gate.ok && !hasCompletedScan(runs))
+    gate.failures.push("No scanner completed. Scan coverage is unverified [strict].");
   // A feed that did not answer is a scanner that did not run: a warning, and a failure in strict.
   for (const note of intel.notes) {
     if (strict && !(intel.kevChecked && intel.epssChecked)) gate.failures.push(note);
     else gate.warnings.push(note);
   }
   if (gate.failures.length > 0) gate.ok = false;
-  return { intel, runs, findings, suppressed, bad, gate, strict, ok: bad === 0 && gate.ok };
+  return {
+    intel,
+    runs,
+    findings,
+    suppressed,
+    bad,
+    gate,
+    scopeGaps,
+    strict,
+    ok: bad === 0 && gate.ok,
+  };
 }
 
 /**
@@ -314,22 +387,47 @@ async function withExploitIntel(
       enabled: true,
       kevChecked: intel.kevChecked,
       epssChecked: intel.epssChecked,
+      kevStatus: intel.kevStatus,
+      epssStatus: intel.epssStatus,
       notes: intel.notes,
     },
   };
 }
 
 async function printVerdict(v: ScanVerdict): Promise<void> {
+  const completed = hasCompletedScan(v.runs);
+  const coverage =
+    completed && v.gate.failures.length === 0 && v.gate.warnings.length === 0
+      ? undefined
+      : "partial";
   if (hasFlag(process.argv, "--sarif")) {
     const { toSarif } = await import("../sbom.js");
-    console.log(JSON.stringify(toSarif(v.findings), null, 2));
+    const scanners = v.runs.map(({ id, status, findings, reportGap }) => ({
+      id,
+      status,
+      findings,
+      reportGap,
+    }));
+    console.log(
+      JSON.stringify(toSarif(v.findings, coverage === undefined, scanners, v.scopeGaps), null, 2),
+    );
     return;
   }
   if (hasFlag(process.argv, "--json")) {
     const { runs, findings, suppressed, ok, gate, strict, intel } = v;
     console.log(
       JSON.stringify(
-        { runs, findings, suppressed, ok, scannerGate: gate, strict, exploitIntel: intel },
+        {
+          runs,
+          findings,
+          suppressed,
+          ok,
+          scannerGate: gate,
+          strict,
+          exploitIntel: intel,
+          coverage,
+          ...(v.scopeGaps.length ? { scopeGaps: v.scopeGaps } : {}),
+        },
         null,
         2,
       ),
@@ -342,7 +440,7 @@ async function printVerdict(v: ScanVerdict): Promise<void> {
   );
   printRuns(v.runs);
   console.log("");
-  printFindings(v.findings, v.suppressed);
+  printFindings(v.findings, v.suppressed, completed, v.scopeGaps.length > 0);
   const kev = v.findings.filter((f) => f.kev).length;
   if (v.bad > 0) {
     console.log(
@@ -370,8 +468,27 @@ function printRuns(runs: ScannerRun[]): void {
   }
 }
 
-function printFindings(findings: MergedFinding[], suppressed: number): void {
+function hasCompletedScan(runs: ScannerRun[]): boolean {
+  return runs.some((run) => run.status === "ran");
+}
+
+function printFindings(
+  findings: MergedFinding[],
+  suppressed: number,
+  completed: boolean,
+  scopeIncomplete: boolean,
+): void {
   if (findings.length === 0) {
+    if (!completed) {
+      console.log("  No scanner completed. Scan coverage is unverified.");
+      return;
+    }
+    if (scopeIncomplete) {
+      console.log(
+        `  ${c.yellow}Scan coverage is incomplete. No findings from the completed scans.${c.reset}`,
+      );
+      return;
+    }
     console.log(
       `  ${c.green}no findings${suppressed > 0 ? " (after baseline)" : " from the scanners that ran"}${c.reset}`,
     );

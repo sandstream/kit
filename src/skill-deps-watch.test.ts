@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,6 +47,20 @@ function deps(
     },
   };
 }
+
+it("rechecks a matching legacy cache entry that predates the npm evidence checks", () => {
+  const skills = root();
+  const dir = skill(skills, "s");
+  const cache = join(root(), "c.json");
+  const checkedAt = Date.parse("2026-11-15T12:00:00Z");
+  const lockHash = createHash("sha256")
+    .update(readFileSync(join(dir, "package-lock.json")))
+    .digest("hex");
+  writeFileSync(cache, JSON.stringify({ [dir]: { checkedAt, lockHash, result: clean } }));
+  const calls: string[] = [];
+  watchSkillDeps({ roots: [skills], cache }, deps(clean, calls, checkedAt));
+  assert.deepEqual(calls, [dir]);
+});
 
 describe("findSkillProjects", () => {
   it("finds package.json files in a skill or its scripts folder, not inside node_modules", () => {

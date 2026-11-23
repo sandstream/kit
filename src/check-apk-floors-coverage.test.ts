@@ -3,10 +3,13 @@ import { it } from "node:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
-import { checkApkFloors } from "./check-apk-floors.js";
 import { gateStatus } from "./check-security.js";
-import { tarOf } from "./apk-index.test-support.js";
+import {
+  alpineFixtureFetcher,
+  apkIndexFixture,
+  checkApkFloorsFixture,
+  secdbFixture,
+} from "./apk-index.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const ORIGIN = "P:codec-lib\nV:2-r0\no:codec\n\n";
@@ -28,20 +31,19 @@ async function inspect(
       join(root, "Dockerfile"),
       `FROM alpine:3.24\nRUN apk add ${options.floors ?? "'codec-lib>=1-r0'"}\n`,
     );
-    const result = await checkApkFloors(
+    const result = await checkApkFloorsFixture(
       root,
-      async (url) => {
+      alpineFixtureFetcher(async (url) => {
         seen.push(url);
-        if (url.endsWith("/main.json"))
-          return Buffer.from(JSON.stringify({ packages: options.mainPackages ?? [] }));
+        if (url.endsWith("/main.json")) return secdbFixture("v3.24", "main", options.mainPackages);
         if (url.endsWith("/community.json"))
-          return Buffer.from(JSON.stringify({ packages: options.communityPackages ?? FIXES }));
+          return secdbFixture("v3.24", "community", options.communityPackages ?? FIXES);
         if (url.endsWith("/main/x86_64/APKINDEX.tar.gz"))
-          return gzipSync(tarOf({ APKINDEX: options.mainIndex ?? "" }));
+          return apkIndexFixture("v3.24", options.mainIndex ?? "");
         if (url.endsWith("/community/x86_64/APKINDEX.tar.gz"))
-          return gzipSync(tarOf({ APKINDEX: options.communityIndex ?? ORIGIN }));
+          return apkIndexFixture("v3.24", options.communityIndex ?? ORIGIN);
         throw new Error(`Unexpected URL: ${url}`);
-      },
+      }),
       {},
     );
     return { result, seen };

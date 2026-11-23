@@ -162,7 +162,10 @@ describe("ingestStrict", () => {
   });
 
   it("accepts a valid but EMPTY report as ok:true with no findings", () => {
-    const a = ingestStrict("sarif", JSON.stringify({ runs: [] }));
+    const a = ingestStrict(
+      "sarif",
+      JSON.stringify({ runs: [{ tool: { driver: { name: "fixture" } }, results: [] }] }),
+    );
     assert.ok(a.ok && a.findings.length === 0);
     const b = ingestStrict("osv", JSON.stringify({ results: [] }));
     assert.ok(b.ok && b.findings.length === 0);
@@ -181,7 +184,7 @@ describe("ingestStrict", () => {
 });
 
 describe("ingestStrict: nested report fields", () => {
-  it("rejects malformed nested SARIF fields without throwing or returning partial findings", () => {
+  it("keeps valid findings and marks malformed SARIF records", () => {
     const invalidRuns = [
       null,
       [],
@@ -206,27 +209,35 @@ describe("ingestStrict: nested report fields", () => {
       { results: [{ locations: [{ physicalLocation: { region: { startLine: -1 } } }] }] },
     ];
     for (const run of invalidRuns) {
-      const result = ingestStrict(
-        "sarif",
-        JSON.stringify({ runs: [{ results: [{ ruleId: "valid" }] }, run] }),
-      );
-      assert.equal(result.ok, false, JSON.stringify(run));
+      const valid = { tool: { driver: { name: "valid" } }, results: [{ ruleId: "valid" }] };
+      const suspect = run && !Array.isArray(run) ? { tool: valid.tool, ...run } : run;
+      const result = ingestStrict("sarif", JSON.stringify({ runs: [valid, suspect] }));
+      assert.ok(result.ok, JSON.stringify(run));
+      assert.equal(result.coverage, "partial");
+      assert.equal(result.reportGap, "malformed");
+      assert.equal(result.findings.length, 1);
     }
   });
+});
 
-  it("rejects malformed nested OSV fields without throwing or returning partial findings", () => {
+describe("ingestStrict: OSV records and report extensions", () => {
+  it("keeps verified OSV findings while flagging malformed records", () => {
     const invalidResults = [
+      {},
       null,
       [],
       { packages: {} },
       { packages: [null] },
       { packages: [[]] },
+      { packages: [{}] },
+      { packages: [{ package: {} }] },
       { packages: [{ package: [] }] },
       { packages: [{ package: { name: 1 } }] },
       { packages: [{ package: { version: {} } }] },
       { packages: [{ package: { ecosystem: false } }] },
       { packages: [{ vulnerabilities: {} }] },
       { packages: [{ vulnerabilities: [null] }] },
+      { packages: [{ vulnerabilities: [{ summary: "missing id" }] }] },
       { packages: [{ vulnerabilities: [{ id: [] }] }] },
       { packages: [{ vulnerabilities: [{ summary: {} }] }] },
       { packages: [{ vulnerabilities: [{ database_specific: [] }] }] },
@@ -239,13 +250,93 @@ describe("ingestStrict: nested report fields", () => {
           results: [{ packages: [{ vulnerabilities: [{ id: "valid" }] }] }, result],
         }),
       );
-      assert.equal(outcome.ok, false, JSON.stringify(result));
+      assert.ok(outcome.ok, JSON.stringify(result));
+      assert.equal(outcome.coverage, "partial");
+      assert.equal(outcome.reportGap, "malformed");
+      assert.equal(outcome.findings.length, 1);
     }
+  });
+
+  it("requires an identified package or an advisory to support an OSV package record", () => {
+    for (const record of [
+      {},
+      { package: {} },
+      { vulnerabilities: [] },
+      { package: { name: "fixture" } },
+      { package: { name: "fixture" }, vulnerabilities: [] },
+      { package: { commit: "unknown" }, vulnerabilities: [] },
+      {
+        package: { name: "fixture", version: "1", ecosystem: "npm" },
+        groups: [{ ids: ["OSV-A"] }],
+      },
+    ]) {
+      const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages: [record] }] }));
+      assert.equal(outcome.ok, false, JSON.stringify(record));
+      assert.equal(outcome.reportGap, "malformed");
+    }
+  });
+
+  it("accepts package-only records in OSV-Scanner all-packages output", () => {
+    const packages = [
+      { package: { name: "fixture", version: "1", ecosystem: "npm" } },
+      { package: { name: "", version: "", ecosystem: "", commit: "ab".repeat(20) } },
+    ];
+    const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
+    assert.deepEqual(outcome, { ok: true, findings: [] });
+  });
+});
+
+describe("OSV advisory retention and report extensions", () => {
+  it("keeps reported advisories when an OSV group names an omitted advisory", () => {
+    const packages = [
+      {
+        package: { name: "fixture", version: "1", ecosystem: "npm" },
+        vulnerabilities: [{ id: "OSV-A" }],
+        groups: [{ ids: ["OSV-A", "OSV-B"] }],
+      },
+    ];
+    const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
+    assert.ok(outcome.ok);
+    assert.equal(outcome.coverage, "partial");
+    assert.deepEqual(
+      outcome.findings.map(({ name }) => name),
+      ["fixture@1: OSV-A"],
+    );
+  });
+
+  it("keeps an advisory whose package metadata is malformed", () => {
+    const packages = [{ package: { name: 42 }, vulnerabilities: [{ id: "OSV-A" }] }];
+    const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
+    assert.ok(outcome.ok);
+    assert.equal(outcome.coverage, "partial");
+    assert.deepEqual(
+      outcome.findings.map(({ name }) => name),
+      ["(package): OSV-A"],
+    );
+  });
+
+  it("keeps a readable package name and ecosystem when the version is malformed", () => {
+    const packages = [
+      {
+        package: { name: "fixture", ecosystem: "npm", version: 42 },
+        vulnerabilities: [{ id: "OSV-A" }],
+      },
+    ];
+    const outcome = ingestStrict("osv", JSON.stringify({ results: [{ packages }] }));
+    assert.ok(outcome.ok);
+    assert.equal(outcome.coverage, "partial");
+    const finding = outcome.findings[0];
+    assert.ok(finding && "package" in finding);
+    assert.equal(finding.name, "fixture: OSV-A");
+    assert.deepEqual(finding.package, { name: "fixture", ecosystem: "npm" });
   });
 
   it("retains optional fields and unknown extensions on valid reports", () => {
     assert.deepEqual(
-      ingestStrict("sarif", '{"runs":[{"tool":{"driver":{"name":"scanner"}}}],"extension":true}'),
+      ingestStrict(
+        "sarif",
+        '{"runs":[{"tool":{"driver":{"name":"scanner"}},"results":[]}],"extension":true}',
+      ),
       { ok: true, findings: [] },
     );
     assert.deepEqual(ingestStrict("osv", '{"results":[{"packages":[]}],"extension":true}'), {
@@ -280,16 +371,18 @@ describe("ingestStrict: a SARIF scan that did not finish", () => {
       JSON.stringify({ version: "2.1.0", runs: [run(false, [])] }),
     );
     assert.equal(outcome.ok, false);
-    if (!outcome.ok) assert.match(outcome.reason, /did not finish .* not a clean scan/);
+    if (!outcome.ok) {
+      assert.equal(outcome.reportGap, "partial");
+      assert.match(outcome.reason, /stopped run/);
+    }
   });
 
   it("keeps the findings of a stopped run, with a note that they are partial", () => {
     const outcome = ingestStrict("sarif", JSON.stringify({ runs: [run(false, [result])] }));
     assert.ok(outcome.ok);
     assert.equal(outcome.findings.length, 1);
-    assert.deepEqual(outcome.notes, [
-      "1 SARIF run(s) did not finish (executionSuccessful: false); these findings are partial.",
-    ]);
+    assert.equal(outcome.coverage, "partial");
+    assert.match(outcome.notes?.[0] ?? "", /stopped run/);
   });
 
   it("reads a finished empty run as clean, as before", () => {
@@ -300,6 +393,64 @@ describe("ingestStrict: a SARIF scan that did not finish", () => {
   it("refuses a SARIF version kit does not read", () => {
     const outcome = ingestStrict("sarif", JSON.stringify({ version: "9.9.9", runs: [] }));
     assert.equal(outcome.ok, false);
+  });
+});
+
+describe("SARIF coverage evidence", () => {
+  const tool = { driver: { name: "fixture" } };
+  const finding = { ruleId: "sample", message: { text: "Example finding" } };
+
+  it("distinguishes absent runs, absent results, and an unsupported version", () => {
+    for (const [data, reason] of [
+      [{ runs: [] }, "missing"],
+      [{ runs: [{ tool }] }, "missing"],
+      [{ runs: [{ tool, results: null }] }, "missing"],
+      [{ runs: [{ tool: {} }] }, "malformed"],
+      [{ version: "9.9.9", runs: [] }, "unsupported"],
+    ] as const) {
+      const outcome = ingestStrict("sarif", JSON.stringify(data));
+      assert.equal(outcome.ok, false);
+      if (!outcome.ok) assert.equal(outcome.reportGap, reason);
+    }
+  });
+
+  it("retains known findings when another run has no results", () => {
+    const outcome = ingestStrict(
+      "sarif",
+      JSON.stringify({
+        runs: [
+          { tool, results: [finding] },
+          { tool, results: null },
+        ],
+      }),
+    );
+    assert.ok(outcome.ok);
+    assert.equal(outcome.coverage, "partial");
+    assert.equal(outcome.findings.length, 1);
+  });
+
+  it("keeps findings when a peer record and invocation details are invalid", () => {
+    const runs = [{ tool, results: [finding, null], invocations: [{}] }];
+    const outcome = ingestStrict("sarif", JSON.stringify({ runs }));
+    assert.ok(outcome.ok);
+    assert.equal(outcome.coverage, "partial");
+    assert.equal(outcome.reportGap, "malformed");
+    assert.equal(outcome.findings.length, 1);
+  });
+
+  it("treats an error-level notification as incomplete", () => {
+    const invocations = [
+      {
+        executionSuccessful: true,
+        toolExecutionNotifications: [{ level: "error", message: { text: "Analysis incomplete" } }],
+      },
+    ];
+    const outcome = ingestStrict(
+      "sarif",
+      JSON.stringify({ runs: [{ tool, results: [], invocations }] }),
+    );
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) assert.equal(outcome.reportGap, "partial");
   });
 });
 

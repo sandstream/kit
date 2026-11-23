@@ -110,16 +110,16 @@ async function closeFixture(server: Server | undefined, sockets: Set<Duplex>): P
   assert.equal(sockets.size, 0, "All fixture sockets must close");
 }
 
-export async function withHttps(
+export async function withHttps<T>(
   handle: (req: IncomingMessage, res: ServerResponse) => void,
   run: (fixture: {
     origin: string;
     caPem: string;
     server: Server;
     sockets: Set<Duplex>;
-  }) => Promise<void>,
+  }) => Promise<T>,
   hostMatches = true,
-): Promise<void> {
+): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "kit-npm-transport-test-"));
   const sockets = new Set<Duplex>();
   let server: Server | undefined;
@@ -141,7 +141,7 @@ export async function withHttps(
     });
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    await run({ origin: `https://127.0.0.1:${address.port}`, caPem, server, sockets });
+    return await run({ origin: `https://127.0.0.1:${address.port}`, caPem, server, sockets });
   } finally {
     try {
       await closeFixture(server, sockets);

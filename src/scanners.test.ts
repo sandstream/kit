@@ -98,7 +98,7 @@ describe("runScanners (injected deps)", () => {
   it("skips not-installed + no-token, runs the rest, merges", async () => {
     const deps: ScanDeps = {
       resolve: async (bin) => (bin === "grype" ? null : `/usr/bin/${bin}`), // grype absent
-      run: async () => ({ ok: false, stdout: SARIF }), // non-zero exit + SARIF (findings present)
+      run: async () => ({ ok: true, stdout: SARIF }),
       hasEnv: () => false, // no SNYK_TOKEN
       detect: () => true,
     };
@@ -128,7 +128,10 @@ describe("runScanners (injected deps)", () => {
     const only: ScannerDef[] = [{ id: "trivy", bin: "trivy", args: [], format: "sarif" }];
     const deps: ScanDeps = {
       resolve: async (bin) => `/usr/bin/${bin}`,
-      run: async () => ({ ok: true, stdout: JSON.stringify({ runs: [] }) }),
+      run: async () => ({
+        ok: true,
+        stdout: JSON.stringify({ runs: [{ tool: { driver: { name: "trivy" } }, results: [] }] }),
+      }),
       hasEnv: () => true,
       detect: () => true,
     };
@@ -136,14 +139,16 @@ describe("runScanners (injected deps)", () => {
     assert.equal(runs[0].status, "ran");
     assert.equal(runs[0].findings, 0);
   });
+});
 
-  it("exitGate scanner: clean exit → ran/0, no finding (stdout ignored)", async () => {
+describe("runScanners with an exit-code delegate", () => {
+  it("Socket policy report and a clean exit support complete coverage", async () => {
     const only: ScannerDef[] = [
       { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },
     ];
     const deps: ScanDeps = {
       resolve: async (bin) => `/usr/bin/${bin}`,
-      run: async () => ({ ok: true, stdout: "ok\n" }),
+      run: async () => ({ ok: true, exitCode: 0, stdout: '{"ok":true,"data":{"healthy":true}}' }),
       hasEnv: () => true,
       detect: () => true,
     };
@@ -153,13 +158,13 @@ describe("runScanners (injected deps)", () => {
     assert.equal(merged.length, 0);
   });
 
-  it("exitGate scanner: non-zero exit → one high-severity policy violation (never false-green)", async () => {
+  it("Socket policy violation and exit 1 support complete coverage with a finding", async () => {
     const only: ScannerDef[] = [
       { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },
     ];
     const deps: ScanDeps = {
       resolve: async (bin) => `/usr/bin/${bin}`,
-      run: async () => ({ ok: false, stdout: "" }),
+      run: async () => ({ ok: false, exitCode: 1, stdout: '{"ok":true,"data":{"healthy":false}}' }),
       hasEnv: () => true,
       detect: () => true,
     };
@@ -241,7 +246,7 @@ describe("semgrep invocation (privacy + config, no `--config auto`)", () => {
   });
 
   it("buildSemgrepArgs never uses telemetry-forcing `auto` and always sets metrics off", () => {
-    for (const mode of ["sarif", "json"] as const) {
+    for (const mode of ["delegate", "json"] as const) {
       const args = buildSemgrepArgs({ mode, config: "p/default" });
       assert.ok(!args.includes("auto"), `${mode}: must not contain 'auto'`);
       const m = args.indexOf("--metrics");
@@ -254,15 +259,16 @@ describe("semgrep invocation (privacy + config, no `--config auto`)", () => {
     }
   });
 
-  it("sarif mode emits --sarif and scans '.'; json mode emits --json without a positional target", () => {
-    const sarif = buildSemgrepArgs({ mode: "sarif", config: "p/default" });
-    assert.ok(sarif.includes("--sarif"));
-    assert.equal(sarif[sarif.length - 1], ".");
+  it("delegate mode scans the current project and check mode keeps rule ids", () => {
+    const delegate = buildSemgrepArgs({ mode: "delegate", config: "p/default" });
+    assert.ok(delegate.includes("--json"));
+    assert.ok(!delegate.includes("--no-rewrite-rule-ids"));
+    assert.equal(delegate.at(-1), ".");
 
     const json = buildSemgrepArgs({ mode: "json", config: "p/default" });
     assert.ok(json.includes("--json"));
     assert.ok(json.includes("--no-rewrite-rule-ids"));
-    assert.ok(!json.includes("--sarif"));
+    assert.ok(!json.includes("."));
   });
 
   it("the registered semgrep scanner uses the built args (no `auto`) and is opt-in", () => {

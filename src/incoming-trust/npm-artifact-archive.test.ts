@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { inspectNpmTarball } from "./npm-artifact-archive.js";
 import { artifactVectors } from "./npm-artifact.test-support.js";
+import { archive } from "./npm-artifact-archive.test-support.js";
 
 const valid = Buffer.from(artifactVectors.valid.base64, "base64");
 
@@ -29,6 +30,14 @@ describe("inspectNpmTarball", () => {
 
   it("refuses a truncated archive", () => {
     assert.notEqual(inspectNpmTarball(valid.subarray(0, 100)).status, "verified");
+  });
+
+  it("exposes no entry bytes when validation fails after reading a file", () => {
+    const incomplete = archive([{ path: "package/index.js", body: "module.exports = 1;" }]);
+    const result = inspectNpmTarball(incomplete, {}, () =>
+      assert.fail("incomplete archive exposed bytes"),
+    );
+    assert.deepEqual(result, { status: "rejected", reason: "manifest-missing" });
   });
 
   it("lets a caller lower a limit, so the same archive is then refused", () => {

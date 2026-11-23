@@ -1,39 +1,19 @@
-/**
- * `kit triage skill` — SkillSpector (NVIDIA) delegate, Stage-1 ONLY: deterministic, NO LLM, NO egress.
- * kit does NOT reimplement NVIDIA's 68-pattern agent-skill scanner — it ORCHESTRATES it, the same way
- * `kit check` orchestrates bumblebee/trivy/semgrep. We run SkillSpector's STATIC Stage 1 (regex + AST
- * + offline OSV) and normalize its SARIF into kit's `SecurityCheckResult`, ATTRIBUTED to the source.
- * kit's own value is the governance layer (deterministic, no-egress, one unified verdict, audit) — not
- * the detection rules; borrowing an authoritative source's rules strengthens trust rather than diluting
- * it, provided the provenance stays visible.
- *
- * ZERO-LLM / NO-EGRESS INVARIANT — why this file is safe to ship in kit:
- *   SkillSpector's Stage 2 is an LLM pass that sends file contents to a provider; invoking it would
- *   break kit's no-egress charter. kit NEVER invokes Stage 2. This is enforced two ways, both testable:
- *     1. SCRUBBED ENV — every SKILLSPECTOR_ (and provider-API-key) var is stripped from the child env, so
- *        Stage 2 cannot silently activate from ambient config (`scrubbedEnv`).
- *     2. STATIC INVOCATION — we run `scan … --format sarif --no-llm` (Stage 2 disabled in the
- *        argv itself, not just the env) and read only Stage-1 SARIF.
- *   Fail-CLOSED: a missing binary or a scan error is a DEGRADED result (never a silent pass); the
- *   caller must not report "deep-clean" when the delegate did not actually run.
- *
- * Deterministic given (binary, target, env). Offline (Stage 1 uses OSV's offline fallback).
- */
+/** Run SkillSpector with its static analysis option and assess the returned SARIF. */
 import { resolveToolBin } from "./utils/resolveTool.js";
-import { execFileNoThrow } from "./utils/execFileNoThrow.js";
-import { parseSarif } from "./adapters/ingest.js";
+import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
+import { readSkillspectorReport, type SkillspectorReport } from "./skillspector-report.js";
+import { sanitizeDisplayText } from "./display-text.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 /** The delegate binary name (resolved mise-first, then PATH). */
 export const SKILLSPECTOR_BIN = "skillspector";
 
 /** Attribution stamped on every normalized finding so borrowed authority stays visible. */
-export const SKILLSPECTOR_SOURCE = "SkillSpector (NVIDIA) Stage 1";
+export { SKILLSPECTOR_SOURCE } from "./skillspector-report.js";
 
 /**
  * Env vars that could switch SkillSpector's optional Stage-2 LLM on (or hand it a provider key). We
- * strip ALL of these from the child env so the delegate can only ever run its deterministic Stage 1 —
- * regardless of what the surrounding shell has exported.
+ * strip these from the child environment before we run the delegate.
  */
 export const LLM_ENV_VARS = [
   "OPENAI_API_KEY",
@@ -54,31 +34,14 @@ export function scrubbedEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proce
     if (LLM_ENV_VARS.includes(k)) continue; // provider API keys
     out[k] = v;
   }
-  // Belt-and-suspenders: pin the provider to empty so an internal default can't reach the network.
+  // Clear the inherited provider setting.
   out.SKILLSPECTOR_PROVIDER = "";
   return out;
 }
 
-/**
- * Argv for a static, SARIF-emitting Stage-1 scan. `--no-llm` explicitly disables the
- * optional Stage-2 semantic pass in the argv itself — belt-and-suspenders over the env
- * scrub (`scrubbedEnv`), so a future SkillSpector default or ambient config can never
- * silently re-enable the LLM stage. No `--llm`/provider flag is ever added.
- */
+/** Arguments for SARIF output with static analysis. */
 export function stage1Args(target: string): string[] {
   return ["scan", target, "--format", "sarif", "--no-llm"];
-}
-
-/**
- * Normalize SkillSpector SARIF into kit findings, tagged supply-chain and attributed to the source.
- * Pure — reuses the shared `parseSarif`. An empty/invalid SARIF yields `[]` (parseSarif never throws).
- */
-export function normalizeSkillspectorSarif(sarifJson: string): SecurityCheckResult[] {
-  return parseSarif(sarifJson).map((f) => ({
-    ...f,
-    category: "supply-chain",
-    name: `${SKILLSPECTOR_SOURCE}: ${f.name.replace(/^[^:]+:\s*/, "")}`,
-  }));
 }
 
 export interface SkillspectorStatus {
@@ -89,26 +52,33 @@ export interface SkillspectorStatus {
 
 /**
  * Detect whether the SkillSpector delegate is installed (mise-first, then PATH) and its version.
- * Runs `--version` with the SAME scrubbed env as a scan, so probing can never touch a provider.
- * Never throws.
+ * Run the version probe with the same environment filtering as the scan.
  */
 export async function skillspectorStatus(): Promise<SkillspectorStatus> {
   const bin = await resolveToolBin(SKILLSPECTOR_BIN);
   if (!bin) {
     return {
       available: false,
-      detail: `${SKILLSPECTOR_BIN} not installed — 'kit triage skill --deep' uses kit's built-in checks only`,
+      detail: `${SKILLSPECTOR_BIN} not installed. Install it for deep skill triage.`,
     };
   }
   const res = await execFileNoThrow(bin, ["--version"], { timeout: 10_000, env: scrubbedEnv() });
-  const version = (res.stdout.trim() || res.stderr.trim()).split("\n")[0] || undefined;
+  if (!res.ok) {
+    return { available: false, detail: failedDetail("SkillSpector version check failed", res) };
+  }
+  const line = (res.stdout.trim() || res.stderr.trim()).split("\n")[0] ?? "";
+  const version = sanitizeDisplayText(line) || undefined;
   return { available: true, version, detail: version ? `available (${version})` : "available" };
 }
 
 export type SkillspectorResult =
-  | { status: "ok"; findings: SecurityCheckResult[]; worst: SecurityCheckResult["severity"] }
-  | { status: "unavailable"; detail: string }
-  | { status: "error"; detail: string };
+  | (Extract<SkillspectorReport, { status: "ok" }> & { worst: SecurityCheckResult["severity"] })
+  | Exclude<SkillspectorReport, { status: "ok" }>
+  | {
+      status: "unavailable" | "error" | "blocked";
+      detail: string;
+      findings: SecurityCheckResult[];
+    };
 
 const SEVERITY_RANK: Record<NonNullable<SecurityCheckResult["severity"]>, number> = {
   low: 1,
@@ -126,13 +96,7 @@ function worstSeverity(findings: SecurityCheckResult[]): SecurityCheckResult["se
   return worst;
 }
 
-/**
- * Run SkillSpector's Stage 1 on `target` and return normalized findings. Fail-CLOSED and never throws:
- *   - binary not installed        → { status: "unavailable" }  (caller must not claim deep-clean)
- *   - scan crashed (exit 2)       → { status: "error" }
- *   - scanned (exit 0 = clean, 1 = findings) → { status: "ok", findings }
- * Always runs with `scrubbedEnv` so Stage 2 can never activate.
- */
+/** Accept results only after the delegate reports complete static coverage. */
 export async function runSkillspectorStage1(
   target: string,
   opts: { cwd?: string; timeout?: number; env?: NodeJS.ProcessEnv } = {},
@@ -141,7 +105,8 @@ export async function runSkillspectorStage1(
   if (!bin) {
     return {
       status: "unavailable",
-      detail: `${SKILLSPECTOR_BIN} not installed — deep skill triage skipped (install to enable; kit never runs its LLM stage)`,
+      detail: `${SKILLSPECTOR_BIN} not installed. Install it for deep skill triage.`,
+      findings: [],
     };
   }
   const res = await execFileNoThrow(bin, stage1Args(target), {
@@ -150,10 +115,30 @@ export async function runSkillspectorStage1(
     env: scrubbedEnv(opts.env),
     maxBuffer: 8 * 1024 * 1024,
   });
-  // SkillSpector exit codes: 0 = risk ≤ 50, 1 = risk > 50 (findings), 2 = error.
-  if (res.exitCode === 2) {
-    return { status: "error", detail: res.stderr.trim() || "skillspector scan errored" };
+  const report = readSkillspectorReport(res.stdout);
+  const { findings } = report;
+  if (res.truncated || res.timedOut) {
+    return {
+      status: "partial",
+      detail: failedDetail("SkillSpector did not complete", res),
+      findings,
+    };
   }
-  const findings = normalizeSkillspectorSarif(res.stdout);
-  return { status: "ok", findings, worst: worstSeverity(findings) };
+  if (res.noNumericExitStatus || (res.exitCode !== 0 && res.exitCode !== 1)) {
+    const detail = res.noNumericExitStatus
+      ? "SkillSpector stopped without returning an exit code."
+      : `SkillSpector failed with exit code ${res.exitCode}.`;
+    return { status: "error", detail, findings };
+  }
+  if (report.status !== "ok") return report;
+  if (res.exitCode === 1) {
+    return findings.length === 0
+      ? {
+          status: "malformed",
+          detail: "SkillSpector blocked the scan without reporting findings.",
+          findings,
+        }
+      : { status: "blocked", detail: "SkillSpector returned a blocking risk verdict.", findings };
+  }
+  return { ...report, worst: worstSeverity(findings) };
 }

@@ -1,4 +1,5 @@
 import { describe, it } from "node:test";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { execFileNoThrow, failedDetail } from "./execFileNoThrow.js";
 
@@ -31,6 +32,16 @@ describe("execFileNoThrow default limit", () => {
     assert.equal(r.ok, true);
     assert.equal(r.stdout.length, 2 * 1024 * 1024);
   });
+});
+
+it("distinguishes a missing executable from a child that exits", async () => {
+  const unavailable = await execFileNoThrow(join(process.execPath, "nonexistent-child"), []);
+  assert.equal(unavailable.ok, false);
+  assert.equal(unavailable.didNotStart, true);
+  assert.match(unavailable.spawnErrorCode ?? "", /^(ENOENT|ENOTDIR)$/);
+  const exited = await execFileNoThrow(process.execPath, ["-e", "process.exit(2)"]);
+  assert.equal(exited.didNotStart, undefined);
+  assert.equal(exited.exitCode, 2);
 });
 
 describe("failedDetail", () => {

@@ -379,13 +379,7 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   };
 }
 
-/**
- * Deep skill-scanner delegate posture. The optional SkillSpector (NVIDIA) delegate deepens
- * `kit triage skill --deep` (static Stage 1 only — kit never runs its LLM stage). Optional, so its
- * absence is a `skip`, not a failure:
- *   pass  installed — deep static skill triage is available
- *   skip  not installed — --deep falls back to kit's built-in checks
- */
+/** Report the SkillSpector version probe. A scan verifies report compatibility. */
 async function checkDeepSkillScanner(): Promise<DoctorCheck> {
   const name = "deep skill scanner";
   const category = "security";
@@ -395,7 +389,7 @@ async function checkDeepSkillScanner(): Promise<DoctorCheck> {
     ? {
         name,
         status: "pass",
-        detail: `SkillSpector ${s.version ? `${s.version} ` : ""}— deep skill triage available (static Stage 1 only; kit never runs its LLM stage)`,
+        detail: `SkillSpector version probe passed${s.version ? ` (${s.version})` : ""}. Coverage requires a deep scan.`,
         category,
       }
     : { name, status: "skip", detail: s.detail, category };

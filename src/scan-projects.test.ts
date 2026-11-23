@@ -49,7 +49,13 @@ describe("runScanners with a scanner directory", () => {
       resolve: async (bin) => `/usr/bin/${bin}`,
       run: async (_bin, _args, _timeout, cwd) => {
         seen.push(cwd);
-        return { ok: true, stdout: JSON.stringify({ runs: [] }) };
+        return {
+          ok: true,
+          stdout: JSON.stringify({
+            version: "2.1.0",
+            runs: [{ tool: { driver: { name: "snyk" } }, results: [] }],
+          }),
+        };
       },
       hasEnv: () => true,
       detect: () => true,

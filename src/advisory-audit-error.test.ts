@@ -1,23 +1,27 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { auditJsonError } from "./advisory-baseline.js";
+import { it } from "node:test";
+import { runAudit } from "./advisory-baseline.js";
+import { managerFixture } from "./manager-audit-scope.test-support.js";
 
-describe("auditJsonError", () => {
-  it("reads the error object npm prints when the registry cannot be reached", () => {
-    const text = JSON.stringify({ error: { code: "ENOTFOUND", summary: "request failed" } });
-    assert.match(auditJsonError(text) ?? "", /ENOTFOUND/);
+for (const manager of ["bun", "pnpm", "yarn"] as const) {
+  it(`does not accept a missing ${manager} audit as an empty baseline report`, (t) => {
+    const { project, env } = managerFixture(t, manager);
+    const run = runAudit(
+      project,
+      {
+        manager,
+        command: [
+          process.execPath,
+          "-e",
+          'process.stdout.write(JSON.stringify({message:"audit report missing"}))',
+        ],
+        versionCommand: [process.execPath, "-e", 'process.stdout.write("4.17.0")'],
+      },
+      5_000,
+      env,
+    );
+    assert.ok(run.error, "incomplete evidence must block a baseline update");
+    assert.equal(run.evidenceStatus, "malformed");
+    assert.deepEqual(run.advisories, []);
   });
-
-  it("reads an error given as a string", () => {
-    assert.match(auditJsonError('{"error":"boom"}') ?? "", /boom/);
-  });
-
-  it("returns nothing for a normal audit report", () => {
-    assert.equal(auditJsonError('{"vulnerabilities":{},"metadata":{}}'), undefined);
-  });
-
-  it("returns nothing for text that is not a JSON object", () => {
-    assert.equal(auditJsonError("not json"), undefined);
-    assert.equal(auditJsonError("[1]"), undefined);
-  });
-});
+}

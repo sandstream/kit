@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProjectsSchema, resolveProjectPaths } from "./projects-config.js";
@@ -40,6 +40,7 @@ describe("resolveProjectPaths", () => {
       const r = resolveProjectPaths(root, ["a", "missing"]);
       assert.deepEqual(r.projects, ["a"]);
       assert.equal(r.refused[0].path, "missing");
+      assert.equal(r.refused[0].evidenceStatus, "missing");
       assert.match(r.refused[0].reason, /does not exist/);
     } finally {
       rmTemp(root);
@@ -81,6 +82,31 @@ describe("resolveProjectPaths", () => {
     }
   });
 });
+
+it(
+  "reports a declared directory that is present but inaccessible",
+  {
+    skip: process.platform === "win32" || process.getuid?.() === 0,
+  },
+  () => {
+    const root = repo(["denied"]);
+    const denied = join(root, "denied");
+    try {
+      chmodSync(denied, 0);
+      const result = resolveProjectPaths(root, ["denied"]);
+      assert.deepEqual(result.refused, [
+        {
+          path: "denied",
+          reason: "could not read the project directory",
+          evidenceStatus: "unavailable",
+        },
+      ]);
+    } finally {
+      chmodSync(denied, 0o700);
+      rmTemp(root);
+    }
+  },
+);
 
 describe("[projects] in .kit.toml", () => {
   it("the schema takes a list of strings and nothing else", () => {
