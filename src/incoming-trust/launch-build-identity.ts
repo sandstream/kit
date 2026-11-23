@@ -57,14 +57,28 @@ function stillPresent(item: BuildFile): boolean {
   return current !== undefined && unchanged(item.info, current);
 }
 
-export function fingerprintKitBuild(root: string) {
-  const path = realpathSync(root);
+function captureBuild(path: string) {
   const build: BuildContents = { entries: 0, bytes: 0, observations: [], modules: [] };
   inventoryBuild(path, "", lstatSync(path, { bigint: true }), build, 0);
-  const check = () => build.observations.every(stillPresent);
-  if (!build.modules.some(([name]) => name === "cli.js") || !check())
+  if (!build.modules.some(([name]) => name === "cli.js") || !build.observations.every(stillPresent))
     throw new Error("Incomplete or changed Kit build");
   build.modules.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const digest = createHash("sha256").update(JSON.stringify(build.modules)).digest("hex");
-  return { digest, check };
+  return { digest, observations: build.observations };
+}
+
+export function fingerprintKitBuild(root: string) {
+  const path = realpathSync(root);
+  const { digest, observations } = captureBuild(path);
+  return {
+    digest,
+    check: () => {
+      try {
+        // A directory or file can change within one filesystem timestamp tick.
+        return observations.every(stillPresent) && captureBuild(path).digest === digest;
+      } catch {
+        return false;
+      }
+    },
+  };
 }
