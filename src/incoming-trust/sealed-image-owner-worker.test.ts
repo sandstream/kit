@@ -3,8 +3,9 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
+import { setTimeout as pause } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import type { ImageOwnerRequest } from "./sealed-image-owner.js";
+import { startImageOwner, type ImageOwnerRequest } from "./sealed-image-owner.js";
 import { snapshotFixture } from "./snapshot.test-support.js";
 
 it("does not remove a workspace without its exact claim", () => {
@@ -33,3 +34,65 @@ it("does not remove a workspace without its exact claim", () => {
     f.cleanup();
   }
 });
+
+it(
+  "does not add files after the image owner starts removing its workspace",
+  {
+    skip: process.platform === "win32",
+    timeout: 10_000,
+  },
+  async () => {
+    const f = snapshotFixture();
+    try {
+      const root = realpathSync(f.root);
+      const workspace = join(root, "kit-incoming-sealed-test");
+      mkdirSync(workspace, { mode: 0o700 });
+      const cleaning = join(root, "cleaning");
+      const preload = join(root, "cleanup-fixture.mjs");
+      writeFileSync(
+        preload,
+        `
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { join } from "node:path";
+const workspace = ${JSON.stringify(workspace)};
+const remove = fs.rmSync;
+fs.rmSync = (path, options) => {
+  if (path !== workspace) return remove(path, options);
+  // Freeze the directory listing before the parent reacts to the failed mount.
+  const entries = fs.readdirSync(path);
+  const marker = join(path, "image-release");
+  fs.writeFileSync(${JSON.stringify(cleaning)}, "");
+  const deadline = Date.now() + 1000;
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  while (!fs.existsSync(marker) && Date.now() < deadline) Atomics.wait(wait, 0, 0, 10);
+  for (const entry of entries) remove(join(path, entry), options);
+  fs.rmdirSync(path);
+};
+syncBuiltinESMExports();
+`,
+      );
+      const host = join(root, "owner-node");
+      const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+      writeFileSync(
+        host,
+        `#!/bin/sh\nexec ${quote(process.execPath)} --import ${quote(preload)} "$@"\n`,
+        {
+          mode: 0o700,
+        },
+      );
+      const owner = startImageOwner(workspace, lstatSync(workspace, { bigint: true }), host);
+      owner.awaitReady();
+      assert.throws(
+        () => owner.mount({ source: f.source, executable: false }),
+        /Disk image owner refused mount/,
+      );
+      const limit = AbortSignal.timeout(5000);
+      while (!existsSync(cleaning)) await pause(10, undefined, { signal: limit });
+      owner.release();
+      assert.equal(existsSync(workspace), false);
+    } finally {
+      f.cleanup();
+    }
+  },
+);

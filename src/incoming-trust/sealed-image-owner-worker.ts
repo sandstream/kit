@@ -90,7 +90,13 @@ async function ownImage(request: ImageOwnerRequest): Promise<void> {
   if (!identity) return;
   const paths = imageOwnerPaths(request.workspace);
   assertClaim(request, paths);
-  const finished = () => process.ppid !== request.parent || existsSync(paths.release);
+  let released = false;
+  const closeControl = () => {
+    released = true;
+  };
+  process.stdin.once("end", closeControl).once("error", closeControl);
+  process.stdin.resume();
+  const finished = () => released || process.ppid !== request.parent;
   try {
     publishImageMessage(paths.ownerPid, String(process.pid));
     await mountAndHold(request.workspace, paths, finished);
@@ -102,6 +108,8 @@ async function ownImage(request: ImageOwnerRequest): Promise<void> {
     } catch {
       if (ownedWorkspace(request)) publishImageMessage(paths.status, "cleanup-failed");
       process.exitCode = 1;
+    } finally {
+      process.stdin.destroy();
     }
   }
 }
