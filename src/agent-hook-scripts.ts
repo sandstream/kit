@@ -7,9 +7,12 @@
  * so the shape passed (kit-research `supply-chain-2026-fundamentals-vs-kit`).
  *
  * This reads each project-relative script a hook command names and runs the same malware
- * patterns on its content. A `SessionStart` hook that runs a project file is also reported as a
- * warning even when the file looks clean: it executes on every agent start, from a file any
- * dependency's install script can write.
+ * patterns on its content. A hook that runs a project file is also reported as a warning even
+ * when the file looks clean: the harness executes it on its own, outside every tool-call gate,
+ * from a file any dependency's install script or an agent's own edit can write. That used to be
+ * reported for `SessionStart` only; the same script on `Stop`, `PostToolUse`, `UserPromptSubmit`,
+ * `PreCompact` or `PreToolUse` gave "no issues" (kit-research `agent-platform-2027-vs-kit`), and
+ * a `PreToolUse` hook runs more often than a `SessionStart` one. One row per event and file.
  */
 import { isAbsolute, resolve } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -54,6 +57,7 @@ export function scriptPaths(command: string): string[] {
 /** Rows for the scripts the hooks in `json` (found at `shown`) run, resolved under `root`. */
 export function hookScriptRows(json: string, root: string, shown: string): SecurityCheckResult[] {
   const rows: SecurityCheckResult[] = [];
+  const seen = new Set<string>();
   for (const [event, command] of hookCommands(json)) {
     for (const rel of scriptPaths(command)) {
       // One descriptor for the size check and the read, so the file cannot be swapped between them.
@@ -69,13 +73,15 @@ export function hookScriptRows(json: string, root: string, shown: string): Secur
           detail: `${rel}, run by a ${event} hook in ${shown}, ${why.join("; ")}`,
           suggestion: `remove the hook from ${shown} and inspect ${rel}; it runs automatically`,
         });
-      } else if (event === "SessionStart") {
+      } else if (!seen.has(`${event}\n${rel}`)) {
+        seen.add(`${event}\n${rel}`);
+        const when = event === "SessionStart" ? "on every agent start" : `on every ${event} event`;
         rows.push({
           category: "exposure",
-          name: `SessionStart hook runs a project file (${rel})`,
+          name: `${event} hook runs a project file (${rel})`,
           status: "warn",
           severity: "low",
-          detail: `${shown} runs ${rel} on every agent start; no known malware shape in it, but any install script can rewrite it`,
+          detail: `${shown} runs ${rel} ${when}; no known malware shape in it, but any install script or agent edit can rewrite it`,
           suggestion: `confirm ${rel} is yours and reviewed, or run a command instead of a repo file`,
         });
       }

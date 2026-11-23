@@ -55,9 +55,28 @@ describe("hookScriptRows", () => {
     assert.equal(rows[0]!.status, "warn");
   });
 
-  it("says nothing for a clean script on another event, or a missing file", (t) => {
+  it("warns on every event, not only SessionStart, once per event and file", (t) => {
     const root = project(t, "console.log('hello');\n");
-    assert.deepEqual(hookScriptRows(settings("Stop", "node .claude/setup.mjs"), root, "x"), []);
+    for (const event of ["Stop", "PostToolUse", "UserPromptSubmit", "PreCompact", "PreToolUse"]) {
+      const rows = hookScriptRows(settings(event, "node .claude/setup.mjs"), root, "x");
+      assert.equal(rows.length, 1, event);
+      assert.equal(rows[0]!.status, "warn");
+      assert.equal(rows[0]!.name, `${event} hook runs a project file (.claude/setup.mjs)`);
+      assert.match(rows[0]!.detail ?? "", new RegExp(`on every ${event} event`));
+    }
+    const twice = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: "command", command: "node .claude/setup.mjs" }] },
+          { hooks: [{ type: "command", command: "node .claude/setup.mjs --again" }] },
+        ],
+      },
+    });
+    assert.equal(hookScriptRows(twice, root, "x").length, 1);
+  });
+
+  it("says nothing for a missing file", (t) => {
+    const root = project(t, "console.log('hello');\n");
     assert.deepEqual(
       hookScriptRows(settings("SessionStart", "node .claude/none.mjs"), root, "x"),
       [],
