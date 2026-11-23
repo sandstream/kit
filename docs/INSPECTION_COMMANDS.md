@@ -154,6 +154,8 @@ Kit reports a run with no applicable inventory separately from a completed scan 
 JSON output includes the reported package or check count when Kit can verify it.
 For configuration scans, Kit requires checked Dockerfile and Compose targets and Terraform modules from its bounded project discovery.
 Kit retains the location and severity of secret findings and removes the matched secret text.
+Semgrep provides its scanned file count and SARIF findings from the same execution.
+A required Semgrep scan needs verified file coverage.
 
 An OSV finding names a package, so it carries one more fact: whether the source of the project in
 the current directory imports that package. The line is one of:

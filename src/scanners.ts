@@ -77,20 +77,17 @@ export function isLocalSemgrepConfig(config: string): boolean {
  *   - explicit `--config <config>` (never `auto`, which forces telemetry on),
  *   - `--metrics off` so nothing is reported to the registry,
  *   - `--exclude` of common vendored/build/test noise.
- * sarif mode emits SARIF and scans `.`; json mode emits JSON without rewriting
- * rule ids and relies on the caller's positional target.
+ * Delegate mode emits native report data, uses normal rule ids and scans `.`.
+ * Check mode keeps original rule ids and relies on the caller's positional target.
  */
-export function buildSemgrepArgs(opts: { mode: "sarif" | "json"; config: string }): string[] {
+export function buildSemgrepArgs(opts: { mode: "delegate" | "json"; config: string }): string[] {
   const args = ["scan", "--config", opts.config, "--metrics", "off", "--quiet"];
-  if (opts.mode === "sarif") {
-    args.push("--sarif");
-  } else {
-    args.push("--json", "--no-rewrite-rule-ids");
-  }
+  args.push("--json");
+  if (opts.mode === "json") args.push("--no-rewrite-rule-ids");
   for (const glob of SEMGREP_EXCLUDES) {
     args.push("--exclude", glob);
   }
-  if (opts.mode === "sarif") {
+  if (opts.mode === "delegate") {
     args.push(".");
   }
   return args;
@@ -103,7 +100,7 @@ export interface ScannerDef {
   /** args that emit SARIF/OSV on stdout */
   args: string[];
   format: IngestFormat; // Format Kit ingests after any native evidence processing.
-  evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image";
+  evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image" | "semgrep";
   /** env var that must be set (e.g. SNYK_TOKEN) */
   needsToken?: string;
   /** marker files that make the scanner applicable; undefined = always */
@@ -185,7 +182,8 @@ export const SCANNERS: ScannerDef[] = [
     // is the only way to run semgrep air-gapped.
     id: "semgrep",
     bin: "semgrep",
-    args: buildSemgrepArgs({ mode: "sarif", config: semgrepConfig(process.env) }),
+    evidence: "semgrep",
+    args: buildSemgrepArgs({ mode: "delegate", config: semgrepConfig(process.env) }),
     format: "sarif",
     cloudOnly: true,
     needsToken: "KIT_SEMGREP_CONFIG",
@@ -291,7 +289,7 @@ export function airGapScanners(
       const cfg = semgrepConfig(env);
       if (isLocalSemgrepConfig(cfg)) {
         // Local ruleset → safe to run air-gapped; rebuild args against that config.
-        scanners.push({ ...d, args: buildSemgrepArgs({ mode: "sarif", config: cfg }) });
+        scanners.push({ ...d, args: buildSemgrepArgs({ mode: "delegate", config: cfg }) });
       } else {
         dropped.push(d.id);
       }
@@ -423,6 +421,7 @@ export interface ScannerRun {
   reportGap?: IngestGap;
   packageCount?: number;
   checkCount?: number;
+  fileCount?: number;
 }
 
 /** Environment for a scanner child. PWD is reset because Go tools trust it over the real directory. */

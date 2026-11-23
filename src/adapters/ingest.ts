@@ -58,6 +58,7 @@ function cweRuleFromTags(tags: string[] | undefined): RuleRef | undefined {
 // ---- SARIF (minimal shape — only the fields we read) ----
 interface SarifRule {
   id?: string;
+  defaultConfiguration?: { level?: string };
   properties?: { tags?: string[]; "security-severity"?: string };
 }
 interface SarifLocation {
@@ -79,22 +80,10 @@ interface SarifLog {
   runs?: SarifRun[];
 }
 
-function readSarifLog(json: string): SarifLog | undefined {
-  try {
-    const parsed: unknown = JSON.parse(json);
-    // JSON.parse("null")/"42" is valid JSON but not an object; `log.runs` would then throw a
-    // TypeError, breaking the documented "malformed input → []" contract. Guard it.
-    return parsed === null || typeof parsed !== "object" ? undefined : (parsed as SarifLog);
-  } catch {
-    return undefined;
-  }
-}
-
 function sarifLocation(res: SarifResult): string {
-  const loc = res.locations?.[0]?.physicalLocation;
-  const uri = loc?.artifactLocation?.uri;
-  const line = loc?.region?.startLine;
-  return uri ? ` (${uri}${line ? `:${line}` : ""})` : "";
+  const { artifactLocation, region } = res.locations?.[0]?.physicalLocation ?? {};
+  const uri = artifactLocation?.uri;
+  return uri ? ` (${uri}${region?.startLine ? `:${region.startLine}` : ""})` : "";
 }
 
 function sarifFinding(
@@ -107,7 +96,7 @@ function sarifFinding(
   const severity =
     cvssToSeverity(
       res.properties?.["security-severity"] ?? rule?.properties?.["security-severity"],
-    ) ?? levelToSeverity(res.level);
+    ) ?? levelToSeverity(res.level ?? rule?.defaultConfiguration?.level);
   return {
     category: "exposure",
     name: `${tool}: ${ruleId}`,
@@ -119,8 +108,13 @@ function sarifFinding(
 }
 
 export function parseSarif(json: string): SecurityCheckResult[] {
-  const log = readSarifLog(json);
-  return log ? sarifFindings(log) : [];
+  let log: unknown;
+  try {
+    log = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  return isRecord(log) ? sarifFindings(log as SarifLog) : [];
 }
 
 function sarifFindings(log: SarifLog): SecurityCheckResult[] {
@@ -311,7 +305,13 @@ const sarifRunFields = fields({
   tool: fields({
     driver: fields({
       name: isString,
-      rules: arrayOf(fields({ id: isString, properties: sarifProperties })),
+      rules: arrayOf(
+        fields({
+          id: isString,
+          properties: sarifProperties,
+          defaultConfiguration: fields({ level: isString }),
+        }),
+      ),
     }),
   }),
   invocations: arrayOf(sarifInvocation),

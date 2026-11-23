@@ -243,6 +243,7 @@ async function executeScanners(
   const { resolveToolBin } = await import("../utils/resolveTool.js");
   const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
   const { runGrypeDirectory } = await import("../scan-grype-coverage.js");
+  const { runSemgrepWithCoverage } = await import("../scan-semgrep-coverage.js");
   const { findIacFiles } = await import("../check-iac-detect.js");
   const { runTrivyWithCoverage } = await import("../scan-trivy-coverage.js");
 
@@ -269,6 +270,7 @@ async function executeScanners(
             env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, directory),
           });
         if (evidence === "grype-directory") return runGrypeDirectory(scannerCwd, args, run);
+        if (evidence === "semgrep") return runSemgrepWithCoverage(scannerCwd, args, run);
         if (evidence) return runTrivyWithCoverage(scannerCwd, args, evidence, run);
         return run(args, scannerCwd);
       },

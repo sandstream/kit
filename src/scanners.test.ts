@@ -246,7 +246,7 @@ describe("semgrep invocation (privacy + config, no `--config auto`)", () => {
   });
 
   it("buildSemgrepArgs never uses telemetry-forcing `auto` and always sets metrics off", () => {
-    for (const mode of ["sarif", "json"] as const) {
+    for (const mode of ["delegate", "json"] as const) {
       const args = buildSemgrepArgs({ mode, config: "p/default" });
       assert.ok(!args.includes("auto"), `${mode}: must not contain 'auto'`);
       const m = args.indexOf("--metrics");
@@ -259,15 +259,16 @@ describe("semgrep invocation (privacy + config, no `--config auto`)", () => {
     }
   });
 
-  it("sarif mode emits --sarif and scans '.'; json mode emits --json without a positional target", () => {
-    const sarif = buildSemgrepArgs({ mode: "sarif", config: "p/default" });
-    assert.ok(sarif.includes("--sarif"));
-    assert.equal(sarif[sarif.length - 1], ".");
+  it("delegate mode scans the current project and check mode keeps rule ids", () => {
+    const delegate = buildSemgrepArgs({ mode: "delegate", config: "p/default" });
+    assert.ok(delegate.includes("--json"));
+    assert.ok(!delegate.includes("--no-rewrite-rule-ids"));
+    assert.equal(delegate.at(-1), ".");
 
     const json = buildSemgrepArgs({ mode: "json", config: "p/default" });
     assert.ok(json.includes("--json"));
     assert.ok(json.includes("--no-rewrite-rule-ids"));
-    assert.ok(!json.includes("--sarif"));
+    assert.ok(!json.includes("."));
   });
 
   it("the registered semgrep scanner uses the built args (no `auto`) and is opt-in", () => {

@@ -13,7 +13,9 @@ interface SemgrepReport extends ScannerReport {
   scanned: number;
 }
 
-function findingLevel(value: unknown): "blocking" | "warning" | "ignored" | undefined {
+export function semgrepFindingLevel(
+  value: unknown,
+): "blocking" | "warning" | "ignored" | undefined {
   if (
     !scannerRecord(value) ||
     !reportText(value.check_id) ||
@@ -39,22 +41,31 @@ function findingLevel(value: unknown): "blocking" | "warning" | "ignored" | unde
   }
 }
 
+type SemgrepDocument = { coverage: SemgrepReport; document?: Record<string, unknown> };
+
 export function readSemgrepReport(raw: string): SemgrepReport {
+  return readSemgrepDocument(raw).coverage;
+}
+
+export function readSemgrepDocument(raw: string): SemgrepDocument {
   const report: SemgrepReport = { count: 0, blocking: false, scanned: 0 };
-  if (!raw.trim()) return { ...report, gap: "missing" };
+  if (!raw.trim()) return { coverage: { ...report, gap: "missing" } };
   const parsed = parseJsonObject(Buffer.from(raw), MAX_SEMGREP_REPORT_BYTES);
-  if ("issues" in parsed) return { ...report, gap: "malformed", note: parsed.issues[0].message };
+  if ("issues" in parsed)
+    return { coverage: { ...report, gap: "malformed", note: parsed.issues[0].message } };
   const doc = parsed.value;
   if (!Array.isArray(doc.results))
-    return { ...report, gap: isOtherScannerFormat(doc) ? "unsupported" : "malformed" };
+    return {
+      coverage: { ...report, gap: isOtherScannerFormat(doc) ? "unsupported" : "malformed" },
+    };
 
   for (const entry of doc.results) {
-    const level = findingLevel(entry);
+    const level = semgrepFindingLevel(entry);
     if (level === undefined) report.gap = "partial";
     if (level === "blocking" || level === "warning") report.count++;
     if (level === "blocking") report.blocking = true;
   }
-  return assessCoverage(report, doc);
+  return { coverage: assessCoverage(report, doc), document: doc };
 }
 
 function assessCoverage(report: SemgrepReport, doc: Record<string, unknown>): SemgrepReport {

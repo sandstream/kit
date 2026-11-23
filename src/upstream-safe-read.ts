@@ -25,7 +25,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
  * them. Where it has no `O_NOFOLLOW` (Windows) the opened file is compared with the path's own
  * entry afterwards, and the read still goes through the descriptor.
  */
-export function readRegularFileBytesIfPresent(path: string): Buffer | null {
+export function readRegularFileBytesIfPresent(path: string, maxBytes = MAX_BYTES): Buffer | null {
   let fd: number;
   try {
     fd = openSync(
@@ -41,7 +41,7 @@ export function readRegularFileBytesIfPresent(path: string): Buffer | null {
   try {
     const stat = fstatSync(fd, { bigint: true });
     if (!stat.isFile()) throw new Error("is not a regular file");
-    if (stat.size > BigInt(MAX_BYTES)) throw new Error("is too large to read");
+    if (stat.size > BigInt(maxBytes)) throw new Error("is too large to read");
     if (constants.O_NOFOLLOW === undefined) rejectLink(path, stat);
     return readFileBytes(fd, Number(stat.size));
   } finally {
