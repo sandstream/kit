@@ -4,7 +4,6 @@
  * cached segment. Reads GitHub through `gh`; opens PAL items locally, never writes to
  * GitHub.
  */
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -23,6 +22,7 @@ import {
   readWatchCache,
   writeWatchCache,
   watchSegment,
+  watchLaunchdLabel,
   watchWorkflow,
 } from "../watch.js";
 
@@ -159,7 +159,7 @@ async function cmdWatchInstall(): Promise<boolean> {
     );
     return true;
   }
-  const label = `com.sandstream.kit-watch.${createHash("sha256").update(cwd).digest("hex").slice(0, 8)}`;
+  const label = watchLaunchdLabel(cwd);
   const dest = resolve(homedir(), "Library/LaunchAgents", `${label}.plist`);
   const logPath = resolve(cwd, ".kit/watch.log");
   if (!writeEntry(dest, launchdPlist({ label, command, cwd, hour, minute, logPath }))) return false;

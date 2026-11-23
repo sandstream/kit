@@ -4,6 +4,7 @@
  * GitHub (ADR-0009: kit reads cloud reports and holds no cloud credential of its own).
  * A missing source gives `unverified`, never an empty green list.
  */
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { kitConfig } from "./config.js";
@@ -17,7 +18,8 @@ import {
 } from "./security-prs.js";
 
 const WATCH_CACHE = ".kit/watch.json";
-const WATCH_STALE_MS = 48 * 3_600_000;
+/** A daily watch whose cache is older than this has stopped running. */
+export const WATCH_STALE_MS = 48 * 3_600_000;
 
 export interface WatchCache {
   at: string;
@@ -261,6 +263,11 @@ export interface ScheduleOptions {
 const xml = (s: string): string =>
   s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const sh = (s: string): string => `'${s.replaceAll("'", "'\\''")}'`;
+
+/** The launchd label `kit watch install` uses for one project directory. */
+export function watchLaunchdLabel(cwd: string): string {
+  return `com.sandstream.kit-watch.${createHash("sha256").update(cwd).digest("hex").slice(0, 8)}`;
+}
 
 export function launchdPlist(o: ScheduleOptions & { label: string; logPath: string }): string {
   return `<?xml version="1.0" encoding="UTF-8"?>

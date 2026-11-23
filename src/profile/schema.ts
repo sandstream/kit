@@ -103,6 +103,13 @@ export interface KitProfile {
   plugins?: ProfileComponent[];
   /** Hooks of `.claude/settings.json` (src/profile/hooks.ts). Absent in a profile frozen before kit recorded them. */
   hooks?: ProfileComponent[];
+  /**
+   * Globs of files an agent runs as its tools (MCP code mode), set by the operator; freeze keeps
+   * them. src/profile/code-tools.ts.
+   */
+  code_tool_paths?: string[];
+  /** The files `code_tool_paths` matched at the last freeze, each with a content hash. */
+  code_tools?: ProfileComponent[];
   vault?: ProfileVault;
   gates?: ProfileGates;
   scope?: ProfileScope;
@@ -139,6 +146,8 @@ const kitProfileSchema = z
     workflows: z.array(componentSchema).optional(),
     plugins: z.array(componentSchema).optional(),
     hooks: z.array(componentSchema).optional(),
+    code_tool_paths: z.array(z.string().min(1)).optional(),
+    code_tools: z.array(componentSchema).optional(),
     vault: z
       .object({
         store: z.string().optional(),

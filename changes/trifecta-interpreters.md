@@ -1,0 +1,3 @@
+### Fixed
+
+- The lethal-trifecta audit counts a grant to run an interpreter with a wildcard (`Bash(python3:*)`, `Bash(node:*)`, `Bash(npx tsx ./servers/*)`, `Bash(bun run *)` and the like) as holding all three legs, as it does an unrestricted `Bash`. It counted as none, so a session allowed `Bash(python3:*)` and `WebFetch` passed with "no agent holds untrusted input, private data and a way out together", although the interpreter can read any file and open any connection. Agents that call MCP servers through generated code hold exactly this grant. An exact command without a wildcard (`node --version`) is still narrow.
