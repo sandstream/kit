@@ -8,7 +8,12 @@
  * Rules, for a settings file that wires a kit gate now:
  *   - **Write / Edit / MultiEdit:** the resulting file is computed from the current one and the
  *     tool input. Refused when it no longer parses, or when any kit gate command in it now is
- *     missing from the result. Adding other hooks (another tool's installer) stays allowed.
+ *     missing from the result.
+ *   - **A new hook:** where any of the three settings files wires a kit gate, a write that adds a
+ *     hook command the file does not hold now is refused, in any of the three, on any event. The
+ *     harness runs a hook command itself, so no gate sees it: an agent that may add one can run
+ *     anything outside the gates (kit-research `agent-platform-2027-vs-kit`; adding other hooks
+ *     used to stay allowed). A person adds the hook, or an installer run as a process does.
  *   - **Shell:** a segment that names the settings file and starts with a command that changes
  *     files (`sed`, `mv`, `rm`, `tee`, …) or redirects into it is refused, because its effect
  *     cannot be computed here.
@@ -123,7 +128,44 @@ function readOrNull(path: string): string | null {
   }
 }
 
-/** Why a file write is refused, or null when it leaves kit's gate entries in place. */
+/** `event: command` for every hook entry of a settings text; empty when it does not parse. */
+function hookEntries(text: string): string[] {
+  let settings: unknown;
+  try {
+    settings = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const hooks = (settings as { hooks?: unknown } | null)?.hooks;
+  if (!hooks || typeof hooks !== "object") return [];
+  const out: string[] = [];
+  for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
+    for (const group of Array.isArray(groups) ? groups : []) {
+      const entries = (group as { hooks?: unknown } | null)?.hooks;
+      for (const h of Array.isArray(entries) ? entries : []) {
+        const cmd = (h as { command?: unknown } | null)?.command;
+        out.push(`${event}: ${typeof cmd === "string" ? cmd : JSON.stringify(h)}`);
+      }
+    }
+  }
+  return out;
+}
+
+/** Why the write is refused for the kit gates this file wires now, or null. */
+function removalRefusal(wired: string[], next: string | null, name: string): string | null {
+  if (wired.length === 0) return null;
+  if (next === null)
+    return `the edit to ${name} cannot be checked against kit's gate hooks it holds`;
+  const after = kitGateCommands(next);
+  if (after === null)
+    return `the write would leave ${name} unparseable, which turns kit's gates off`;
+  if (wired.some((cmd) => !after.includes(cmd))) {
+    return `the write would remove or change kit's gate hooks in ${name}`;
+  }
+  return null;
+}
+
+/** Why a file write is refused, or null: it removes a kit gate, or adds a hook next to one. */
 export function gateSettingsWriteRefusal(
   payload: unknown,
   cwd: string,
@@ -134,23 +176,30 @@ export function gateSettingsWriteRefusal(
   const filePath = typeof input.file_path === "string" ? input.file_path : "";
   if (!filePath) return null;
   const abs = resolve(cwd, filePath);
-  const target = settingsTargets(cwd, home).find((t) => sameTarget(t, abs));
+  const targets = settingsTargets(cwd, home);
+  const target = targets.find((t) => sameTarget(t, abs));
   if (!target) return null;
   const current = read(target);
   const wired = current === null ? [] : (kitGateCommands(current) ?? []);
-  if (wired.length === 0) return null;
-  const next = resultingText(current as string, input);
-  if (next === null) {
-    return `the edit to ${basename(target)} cannot be checked against kit's gate hooks it holds`;
-  }
-  const after = kitGateCommands(next);
-  if (after === null) {
-    return `the write would leave ${basename(target)} unparseable, which turns kit's gates off`;
-  }
-  if (wired.some((cmd) => !after.includes(cmd))) {
-    return `the write would remove or change kit's gate hooks in ${basename(target)}`;
-  }
-  return null;
+  const next = resultingText(current ?? "", input);
+  const removal = removalRefusal(wired, next, basename(target));
+  if (removal) return removal;
+  const gated = wired.length > 0 || targets.some((t) => wiresGate(read(t)));
+  if (!gated || next === null) return null;
+  return addedHookRefusal(current ?? "", next, basename(target));
+}
+
+function wiresGate(text: string | null): boolean {
+  return text !== null && (kitGateCommands(text) ?? []).length > 0;
+}
+
+/** Why the write is refused for a hook entry the file does not hold now, or null. */
+function addedHookRefusal(current: string, next: string, name: string): string | null {
+  const before = new Set(hookEntries(current));
+  const added = hookEntries(next).find((entry) => !before.has(entry));
+  if (!added) return null;
+  const shown = added.length > 120 ? `${added.slice(0, 117)}...` : added;
+  return `the write would add a hook to ${name} (${shown}); a hook runs outside kit's gates, so a person adds it, not the agent`;
 }
 
 function commandWord(segment: string): string {
