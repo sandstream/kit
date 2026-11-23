@@ -2850,6 +2850,7 @@
         "--only",
         "--origin",
         "--out",
+        "--policy",
         "--read-only",
         "--readonly",
         "--recursive",

@@ -9,6 +9,8 @@ kit security incoming stage --source <dir> --snapshot-dir <new dir> --origin <ht
 kit security incoming request --checks <file> [--out <file>]
 kit security incoming approve --verification <file> --approval <file>
 kit security incoming preflight --snapshot-dir <dir> --verification <file> [--sealed]
+kit security incoming run-policy --policy <file>
+kit security incoming run --snapshot-dir <dir> --verification <file> --policy <file> --json
 kit security incoming reject
 kit security incoming retry
 kit security incoming rotate --signers <file>
@@ -35,6 +37,11 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
   It checks the signed candidate again from the mounted image under the generation lock.
   Kit ejects the temporary image before reporting success. This option requires the macOS
   `diskutil image` commands. Kit reports failure when the platform, image or cleanup is unavailable.
+- `run-policy` prints the digest to put in the external authority file before enrollment.
+  The digest binds the launch recipe, runtime, OS build and explicit output directory.
+- `run` starts an approved Node entry from the read-only tree through the macOS sandbox.
+  It holds the generation lock through the bounded run. The delegate checks its permissions
+  before it loads the entry. JSON output contains the run ID, outcome and bounded process output.
 - `rotate` replaces the signers and returns the store to pending, so no old approval survives.
 - `recover` moves a damaged store aside. It never deletes it. Every repository that shares the
   store directory needs a new enrollment afterwards.
@@ -42,9 +49,26 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
 ## What it does not do
 
 - Signing happens outside kit.
-- The commands do not run the candidate. Workload isolation and an atomic handoff to an
-  execution delegate are still pending.
+- The supported run policy denies network access, credentials from the host and child processes.
+  It accepts a captured JavaScript entry and an empty, newly created output directory.
+  The command expects dependencies in the captured tree.
 - `stage` reads registry-tarball and remote-tarball sources only. Git and local sources are refused.
 - The sealed preflight has been exercised on macOS 27.2.1. Native Windows remains unverified.
+
+## Node run policy
+
+Use a JSON object with schema `1`, a canonical relative `entry` ending in `.js`, `.mjs`
+or `.cjs`, an absolute `outputDirectory`, and `timeoutMs` from 1000 through 30000.
+Use a new output directory under a host-controlled parent outside the repository,
+authority store and retained inputs. Run support requires macOS arm64, the native
+disk image tools and the external sandbox executable. Local controls used macOS
+27.2.1 and Node 22.
+
+Generate the policy digest on the same runtime that will launch the workload. Put
+it in the authority file's `policyDigest` field. Enroll the authority, stage the
+input, request and record the external approval, then call `run` with that
+verification report. Kit exits nonzero for refusal, timeout or a nonzero workload
+exit. The native tests exercise a bounded set of filesystem, credential, network
+and process restrictions.
 
 Design and limits: [src/incoming-trust/README.md](../src/incoming-trust/README.md).

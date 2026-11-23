@@ -145,8 +145,8 @@ or unsupported inventories. It caps inventories at 1,000 artifacts by default.
 `artifact-refused` includes the inspection or download cause. `artifact-storage` indicates
 missing, invalid or unwritable retained files. `snapshot-changed` and `candidate-changed`
 indicate a mismatch on verification. A refusal after capture returns the snapshot, and the
-caller owns that directory. The offline check authorizes no execution. A launch lock and
-independent workload isolation remain separate work.
+caller owns that directory. The offline check produces candidate evidence. The separate
+run operation checks that evidence against the signed approval inside the generation lock.
 
 ## Approval lifecycle
 
@@ -157,7 +157,8 @@ independent workload isolation remain separate work.
 - `acceptCandidate` hands a signed approval to the store. The store checks the signature, context, checks and expiry inside its transaction.
 - `rejectCandidate` and `retryCandidate` move the state. A retry needs fresh evidence and a fresh approval.
 
-These functions hold no launch lock and do not isolate a workload. The launch lock and workload isolation remain separate work.
+The lifecycle functions record decisions. The run operation holds the lock and manages the
+external delegate.
 
 ## Operator commands
 
@@ -169,6 +170,8 @@ These functions hold no launch lock and do not isolate a workload. The launch lo
 | `status`                                                             | Prints phase, generation, candidate digest, signer ids and approval expiry. Reads only.                                              |
 | `stage --source <dir> --snapshot-dir <new dir> --origin <https url>` | Captures the source once, fetches and checks every locked artifact against the given origins, and stages the bound candidate digest. |
 | `preflight --snapshot-dir <dir> --verification <file> [--sealed]` | Checks the retained files against the precise signed report under the generation lock. The sealed option also checks a temporary read-only APFS image of those files. |
+| `run-policy --policy <file>` | Computes the launch policy digest for independent enrollment. |
+| `run --snapshot-dir <dir> --verification <file> --policy <file>` | Runs the approved Node entry from the sealed image through the supported external macOS delegate. |
 | `request --checks <file> [--out <file>]`                             | Builds the verification report and prints the digest that the external signer signs.                                                 |
 | `approve --verification <file> --approval <file>`                    | Records an approval. The store verifies the signature, context, checks and expiry.                                                   |
 | `reject`, `retry`                                                    | Move the state. A retry needs fresh evidence and a fresh approval.                                                                   |
@@ -177,3 +180,11 @@ These functions hold no launch lock and do not isolate a workload. The launch lo
 
 kit never signs. The mutating subcommands are refused in read-only mode, and `request` is refused with `--out`. Input files must be regular files under 1 MiB. `--out` refuses to overwrite a file.
 `approve` does not start the candidate and does not hold a launch lock.
+
+The macOS arm64 Node delegate uses an external sandbox and a read-only APFS input image.
+The policy digest binds its runtime, system profile, host build, entry, private output
+directory, time limit and restriction rules. Kit holds the volume and the generation
+lock through startup and process completion. This delegate requires zero network
+destinations, zero host credentials and zero child processes. The approved entry uses
+dependencies already present in the retained tree. See the operator guide for the policy
+and output format.

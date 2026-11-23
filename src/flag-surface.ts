@@ -533,6 +533,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--only",
     "--origin",
     "--out",
+    "--policy",
     "--recursive",
     "--repo",
     "--sealed",

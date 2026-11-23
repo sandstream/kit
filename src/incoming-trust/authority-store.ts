@@ -139,14 +139,36 @@ export class IncomingTrustStore {
   }
 
   preflight(repository: string, destination: string, verification: unknown): IncomingPreflight {
+    return this.withApprovedInputs(repository, destination, verification, () => ({
+      verified: true,
+    }));
+  }
+
+  /** Only trusted host code supplies the operation. The mount and generation must remain pinned. */
+  withApprovedInputs<T>(
+    repository: string,
+    destination: string,
+    verification: unknown,
+    use: (deadline: number) => T,
+  ): T | Extract<IncomingPreflight, { verified: false }> {
     if (isReadOnlyMode()) return { verified: false, reason: "read-only" };
     if (!incomingVerification(verification))
       return { verified: false, reason: "invalid-verification" };
     try {
       return (
-        withIncomingDatabase(this.directory, repository, "lock", (db, binding) =>
-          verifyLockedApproval(readState(db, binding), verification, destination),
-        ) ?? { verified: false, reason: "not-enrolled" }
+        withIncomingDatabase(this.directory, repository, "lock", (db, binding, recheck) => {
+          const state = readState(db, binding);
+          const checked = verifyLockedApproval(state, verification, destination);
+          if (!checked.verified) return checked;
+          if (!state?.acceptance) return { verified: false, reason: "missing-approval" } as const;
+          recheck();
+          const { approval, verification: report } = state.acceptance;
+          const deadline = Math.min(
+            approval.expiresAt,
+            report.createdAt + state.authority.maxVerificationAgeMs,
+          );
+          return use(deadline);
+        }) ?? { verified: false, reason: "not-enrolled" }
       );
     } catch {
       return { verified: false, reason: "state-unavailable" };
