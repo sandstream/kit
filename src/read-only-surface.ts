@@ -279,7 +279,7 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   {
     command: "security",
     subcommand: "incoming",
-    arguments: ["enroll", "stage", "approve", "reject", "retry", "rotate", "recover"],
+    arguments: ["enroll", "stage", "approve", "preflight", "reject", "retry", "rotate", "recover"],
     operation: "security-incoming-write",
   },
   {

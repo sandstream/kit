@@ -1,12 +1,11 @@
 import { join } from "node:path";
 import { userInfo } from "node:os";
-import {
-  decideIncomingExecution,
-  type IncomingApproval,
-  type IncomingAuthority,
-  type IncomingCheck,
-  type IncomingVerification,
-  type IncomingDenial,
+import type {
+  IncomingApproval,
+  IncomingAuthority,
+  IncomingCheck,
+  IncomingVerification,
+  IncomingDenial,
 } from "./decision.js";
 import type { DatabaseSync } from "node:sqlite";
 import {
@@ -17,13 +16,18 @@ import {
 } from "./authority-files.js";
 import {
   decodeState,
-  stateContext,
   transition,
   validAuthority,
   validDigest,
   validateAction,
 } from "./authority-state.js";
 import { isReadOnlyMode } from "../read-only-mode.js";
+import { incomingVerification } from "./decision-schema.js";
+import {
+  decideStoredApproval,
+  verifyLockedApproval,
+  type IncomingPreflight,
+} from "./retained-approval.js";
 
 export interface IncomingTrustState {
   schema: 1;
@@ -128,20 +132,24 @@ export class IncomingTrustStore {
   decide(repository: string, candidateDigest: string, now: number): StoredIncomingDecision {
     if (!validDigest(candidateDigest)) return { allowed: false, reason: "invalid-context" };
     try {
-      const state = this.read(repository);
-      if (!state) return { allowed: false, reason: "not-enrolled" };
-      if (state.phase !== "accepted") return { allowed: false, reason: state.phase };
-      if (candidateDigest !== state.candidateDigest)
-        return { allowed: false, reason: "candidate-mismatch" };
-      return decideIncomingExecution(
-        stateContext(state),
-        state.acceptance?.verification,
-        state.acceptance?.approval,
-        state.authority,
-        now,
-      );
+      return decideStoredApproval(this.read(repository), candidateDigest, now);
     } catch {
       return { allowed: false, reason: "state-unavailable" };
+    }
+  }
+
+  preflight(repository: string, destination: string, verification: unknown): IncomingPreflight {
+    if (isReadOnlyMode()) return { verified: false, reason: "read-only" };
+    if (!incomingVerification(verification))
+      return { verified: false, reason: "invalid-verification" };
+    try {
+      return (
+        withIncomingDatabase(this.directory, repository, "lock", (db, binding) =>
+          verifyLockedApproval(readState(db, binding), verification, destination),
+        ) ?? { verified: false, reason: "not-enrolled" }
+      );
+    } catch {
+      return { verified: false, reason: "state-unavailable" };
     }
   }
 

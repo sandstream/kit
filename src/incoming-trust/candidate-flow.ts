@@ -93,7 +93,7 @@ function readInventory(
 /** Rebind the retained inputs with zero network access and compare to the expected candidate. */
 export function verifyRetainedIncomingCandidate(
   destination: string,
-  expected: { snapshotDigest: string; candidateDigest: string },
+  expected: { snapshotDigest: string; candidateDigest: string; artifactsDigest?: string },
   options?: Pick<IncomingCandidateRequest, "snapshotLimits" | "maxArtifacts">,
 ): { ok: true } | { ok: false; reason: IncomingCandidateFlowRefusal } {
   const verifySnapshot = () =>
@@ -116,9 +116,15 @@ export function verifyRetainedIncomingCandidate(
       artifacts: inspectCandidateArchives(destination, inventory.artifacts),
     });
     if (!verifySnapshot()) return { ok: false, reason: "snapshot-changed" };
-    return candidate.status === "bound" && candidate.candidateDigest === expected.candidateDigest
-      ? { ok: true }
-      : { ok: false, reason: "candidate-changed" };
+    if (candidate.status !== "bound" || candidate.candidateDigest !== expected.candidateDigest)
+      return { ok: false, reason: "candidate-changed" };
+    const artifacts = candidate.checks.find((check) => check.id === "npm-artifacts");
+    if (
+      expected.artifactsDigest !== undefined &&
+      expected.artifactsDigest !== artifacts?.evidenceDigest
+    )
+      return { ok: false, reason: "candidate-changed" };
+    return { ok: true };
   } catch {
     return { ok: false, reason: "artifact-storage" };
   }

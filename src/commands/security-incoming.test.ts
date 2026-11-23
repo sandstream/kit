@@ -119,6 +119,9 @@ it("drives enroll, stage, request, approve and status through the real CLI", () 
     const accepted = json(f, "approve", "--verification", out, "--approval", approval);
     assert.equal(accepted.phase, "accepted");
     assert.equal(json(f, "status").phase, "accepted");
+    assert.deepEqual(json(f, "preflight", "--snapshot-dir", snapshot, "--verification", out), {
+      verified: true,
+    });
   } finally {
     f.cleanup();
   }

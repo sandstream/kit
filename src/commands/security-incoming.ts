@@ -1,9 +1,9 @@
 /**
  * `kit security incoming <sub>`: operator commands over the incoming-trust authority store.
  *
- * Subcommands: enroll, status, stage, request, approve, reject, retry, rotate, recover.
+ * Subcommands: enroll, status, stage, request, approve, preflight, reject, retry, rotate, recover.
  * Signing happens outside kit. `approve` only verifies and records an approval that an external
- * signer produced. Nothing here runs the candidate, holds a launch lock or isolates a workload.
+ * signer produced. `preflight` checks the approval and the retained files under the generation lock.
  */
 import { closeSync, constants, fstatSync, openSync, readFileSync, writeSync } from "node:fs";
 import { resolve } from "node:path";
@@ -33,6 +33,7 @@ const SUBCOMMANDS = [
   "stage",
   "request",
   "approve",
+  "preflight",
   "reject",
   "retry",
   "rotate",
@@ -41,7 +42,7 @@ const SUBCOMMANDS = [
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 export const SECURITY_INCOMING_USAGE =
-  "kit security incoming enroll --authority <file> | status | stage --source <dir> --snapshot-dir <new dir> --origin <https url> | request --checks <file> [--out <file>] | approve --verification <file> --approval <file> | reject | retry | rotate --signers <file> | recover --acknowledge <text>   (all accept --repo <dir>, --store <dir>, --json)";
+  "kit security incoming enroll --authority <file> | status | stage --source <dir> --snapshot-dir <new dir> --origin <https url> | request --checks <file> [--out <file>] | approve --verification <file> --approval <file> | preflight --snapshot-dir <dir> --verification <file> | reject | retry | rotate --signers <file> | recover --acknowledge <text>   (all accept --repo <dir>, --store <dir>, --json)";
 
 interface Invocation {
   argv: readonly string[];
@@ -188,6 +189,19 @@ function approve(inv: Invocation): boolean {
   return show(inv, describeState(state), `Accepted: ${summary(state)}`);
 }
 
+function preflight(inv: Invocation): boolean {
+  const destination = flagValue(inv.argv, "--snapshot-dir");
+  if (!destination) throw new Error("Incoming trust: --snapshot-dir is required");
+  const report = readJsonFile(flagValue(inv.argv, "--verification"), "--verification");
+  const result = inv.store.preflight(inv.repository, resolve(destination), report);
+  if (!result.verified) {
+    if (inv.json) console.log(JSON.stringify(result));
+    else console.error(`Incoming trust preflight refused: ${result.reason}`);
+    return false;
+  }
+  return show(inv, result, "Verified retained inputs under the current approval. Preflight only.");
+}
+
 function simple(
   inv: Invocation,
   verb: string,
@@ -230,6 +244,7 @@ const HANDLERS: Record<Subcommand, (inv: Invocation) => boolean | Promise<boolea
   stage,
   request,
   approve,
+  preflight,
   reject: (inv) => simple(inv, "Rejected", rejectCandidate),
   retry: (inv) => simple(inv, "Retry started", retryCandidate),
   rotate,

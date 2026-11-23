@@ -72,26 +72,39 @@ function contains(parent: string, child: string): boolean {
   return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 
+function bindRepository(repository: string): RepositoryBinding {
+  const root = realpathSync(repository);
+  const info = entry(root);
+  if (!info?.isDirectory() || info.ino === 0n) fail();
+  return {
+    root,
+    device: String(info.dev),
+    inode: String(info.ino),
+    birthtime: String(info.birthtimeNs),
+  };
+}
+
+function assertRepository(repository: string, expected: RepositoryBinding): void {
+  const actual = bindRepository(repository);
+  if (
+    actual.root !== expected.root ||
+    actual.device !== expected.device ||
+    actual.inode !== expected.inode ||
+    actual.birthtime !== expected.birthtime
+  )
+    fail();
+}
+
 function location(directory: string, repository: string) {
   if (!isAbsolute(directory) || !isAbsolute(repository)) fail();
   const requestedParent = dirname(resolve(directory));
   if (entry(requestedParent)) controlledDirectory(requestedParent);
-  const root = realpathSync(repository);
-  const info = entry(root);
-  if (!info?.isDirectory() || info.ino === 0n) fail();
+  const binding = bindRepository(repository);
   const target = canonicalDirectory(resolve(directory));
-  if (contains(root, target) || contains(target, root)) {
+  if (contains(binding.root, target) || contains(target, binding.root)) {
     throw new Error("Incoming trust: authority store must be outside the repository");
   }
-  return {
-    directory: target,
-    binding: {
-      root,
-      device: String(info.dev),
-      inode: String(info.ino),
-      birthtime: String(info.birthtimeNs),
-    },
-  };
+  return { directory: target, binding };
 }
 
 function verifyRollbackHeader(path: string, info: BigIntStats): void {
@@ -168,7 +181,7 @@ function assertLocations(
 export function withIncomingDatabase<T>(
   directory: string,
   repository: string,
-  mode: "read" | "enroll" | "update",
+  mode: "read" | "enroll" | "update" | "lock",
   operation: (db: DatabaseSync, binding: RepositoryBinding) => T,
 ): T | null {
   const target = location(directory, repository);
@@ -191,10 +204,13 @@ export function withIncomingDatabase<T>(
     if (write) {
       db.exec("BEGIN IMMEDIATE");
       transaction = true;
+      assertLocations(path, file.info, dir, parent);
     }
+    if (mode === "lock") assertRepository(repository, target.binding);
     schema(db, file.created);
     const result = operation(db, target.binding);
     assertLocations(path, file.info, dir, parent);
+    if (mode === "lock") assertRepository(repository, target.binding);
     if (write) {
       db.exec("COMMIT");
       transaction = false;
