@@ -98,25 +98,23 @@ function processFailureReason(process: ScannerProcess): string {
 }
 
 function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledScan {
-  const policy = readSocketPolicy(process.stdout);
+  const { verdict, reportedViolation, reportGap } = readSocketPolicy(process.stdout);
   const stopped = abortedRun(scanner, process);
-  const reportedViolation = policy?.reportedViolation === true;
   const finding =
     !process.ok || reportedViolation
       ? exitGateFinding(scanner, process, reportedViolation)
       : undefined;
   const findings = finding ? [finding] : [];
-  if (socketCompleted(process, policy?.verdict, Boolean(stopped))) {
+  if (socketCompleted(process, verdict, Boolean(stopped))) {
     return { run: { id: scanner.id, status: "ran", findings: findings.length }, findings };
   }
   const reason = finding?.detail ?? "scanner did not return a valid Socket policy verdict";
-  const reportGap = socketReportGap(process.stdout, policy !== undefined, Boolean(stopped));
   return {
     run: {
       ...(stopped ?? { id: scanner.id, status: "error" }),
       findings: findings.length,
       reason: stopped?.reason ?? reason,
-      reportGap,
+      reportGap: stopped ? "partial" : (reportGap ?? "partial"),
     },
     findings,
   };
@@ -129,15 +127,6 @@ function socketCompleted(
 ): boolean {
   if (stopped || process.noNumericExitStatus) return false;
   return process.ok ? verdict === true : process.exitCode === 1 && verdict === false;
-}
-
-function socketReportGap(
-  stdout: string,
-  hasReport: boolean,
-  stopped: boolean,
-): "partial" | "malformed" | "missing" {
-  if (stopped || hasReport) return "partial";
-  return stdout.trim() ? "malformed" : "missing";
 }
 
 /** Keep validated findings even when the delegate or its report has incomplete coverage. */

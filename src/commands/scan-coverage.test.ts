@@ -189,6 +189,26 @@ describe("kit scan: Socket policy coverage", { skip }, () => {
     assert.match(report.findings[0].detail, /policy violation/);
   });
 
+  it("distinguishes missing Socket policy reports from malformed evidence", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n');
+    const env = { SOCKET_SECURITY_API_TOKEN: "fixture" };
+    const cases = [
+      [{ ok: false, message: "Socket API error", data: { code: 403 } }, "missing"],
+      [{ ok: false, message: "Input error" }, "missing"],
+      [{ ok: false, message: "Invalid Socket API response" }, "malformed"],
+      [{ ok: false, message: 1 }, "malformed"],
+    ] as const;
+    for (const [response, gap] of cases) {
+      tool(f, "socket", `echo '${JSON.stringify(response)}'; exit 1`);
+      const result = await scan(f, ["--strict", "--json"], env);
+      assert.equal(result.exitCode, 1, result.stdout);
+      const report = JSON.parse(result.stdout);
+      assert.equal(report.coverage, "partial");
+      assert.equal(report.runs[0].reportGap, gap, JSON.stringify(response));
+      assert.equal(report.findings[0].didNotRun, true);
+    }
+  });
+
   it("does not admit a failed Socket invocation into the baseline", async () => {
     toml(f, '[scan]\ndelegates = ["socket"]\n');
     tool(f, "socket", `echo '{"ok":false,"message":"no manifests"}'; exit 1`);

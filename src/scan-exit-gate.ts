@@ -10,6 +10,7 @@ const AUTH_TEXT = /request failed \((401|403)\)/;
 interface SocketPolicy {
   verdict?: boolean;
   reportedViolation: boolean;
+  reportGap?: "missing" | "malformed";
 }
 
 // The CI report groups alerts by ecosystem, package and version.
@@ -30,10 +31,12 @@ function readAlerts(value: unknown, depth: number): { valid: boolean; hasViolati
   return { valid, hasViolation };
 }
 
-export function readSocketPolicy(stdout: string): SocketPolicy | undefined {
+export function readSocketPolicy(stdout: string): SocketPolicy {
   const report = scannerObject(stdout);
   const data = report?.data;
-  if (report?.ok !== true || !scannerRecord(data)) return undefined;
+  if (report?.ok !== true || !scannerRecord(data)) {
+    return { reportedViolation: false, reportGap: socketFailureGap(stdout, report) };
+  }
   const alerts = readAlerts(data.alerts, 3);
   const { healthy, options } = data;
   const reportedViolation = healthy === false || alerts.hasViolation;
@@ -50,6 +53,16 @@ export function readSocketPolicy(stdout: string): SocketPolicy | undefined {
     return { reportedViolation };
   }
   return { verdict: healthy, reportedViolation };
+}
+
+function socketFailureGap(
+  stdout: string,
+  report: Record<string, unknown> | undefined,
+): "missing" | "malformed" {
+  if (!stdout.trim()) return "missing";
+  if (report?.ok !== false || !reportText(report.message)) return "malformed";
+  // Socket reports invalid upstream scan data in a valid error envelope.
+  return report.message === "Invalid Socket API response" ? "malformed" : "missing";
 }
 
 function jsonCode(stdout: string): number | undefined {
