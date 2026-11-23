@@ -184,7 +184,9 @@ kit never signs. The mutating subcommands are refused in read-only mode, and `re
 The macOS arm64 Node delegate uses an external sandbox and a read-only APFS input image.
 The policy digest binds its runtime, system profile, host build, entry, private output
 directory, time limit and restriction rules. Kit holds the volume and the generation
-lock through startup and process completion. This delegate requires zero network
-destinations, zero host credentials and zero child processes. The approved entry uses
-dependencies already present in the retained tree. See the operator guide for the policy
-and output format.
+lock through startup and process completion. The executable comes from a separate read-only
+image verified against the policy digest. This delegate requires zero network destinations,
+zero host credentials and zero child processes. It supports built-in modules and local
+JavaScript from the captured tree. It refuses retained package archives, preinstalled
+packages and native addons until the runtime can prove their provenance. The loader and its
+watchdog are TypeScript. See the operator guide for the policy and output format.

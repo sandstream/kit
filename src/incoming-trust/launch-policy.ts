@@ -3,11 +3,12 @@ import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize } from "node:path";
 import {
-  BOOTSTRAP,
   PROFILE_RULES,
   RUN_ENV,
   SEATBELT,
   SEATBELT_SYSTEM_PROFILE,
+  readLaunchScripts,
+  runtimeProfile,
 } from "./launch-profile.js";
 import { relativePath } from "./npm-lock-workspaces.js";
 import { readSnapshotFile, unchanged } from "./snapshot-io.js";
@@ -17,6 +18,16 @@ interface IncomingLaunchPolicy {
   entry: string;
   outputDirectory: string;
   timeoutMs: number;
+}
+
+function validOutputDirectory(path: unknown): path is string {
+  return (
+    typeof path === "string" &&
+    path.length <= 4096 &&
+    isAbsolute(path) &&
+    normalize(path) === path &&
+    !/[\x00-\x1f\x7f]/.test(path)
+  );
 }
 
 function launchPolicy(value: unknown): value is IncomingLaunchPolicy {
@@ -29,11 +40,7 @@ function launchPolicy(value: unknown): value is IncomingLaunchPolicy {
     typeof policy.entry === "string" &&
     relativePath(policy.entry) &&
     /\.(mjs|cjs|js)$/.test(policy.entry) &&
-    typeof policy.outputDirectory === "string" &&
-    isAbsolute(policy.outputDirectory) &&
-    normalize(policy.outputDirectory) === policy.outputDirectory &&
-    !/[\x00-\x1f\x7f]/.test(policy.outputDirectory) &&
-    policy.outputDirectory.length <= 4096 &&
+    validOutputDirectory(policy.outputDirectory) &&
     typeof policy.timeoutMs === "number" &&
     Number.isSafeInteger(policy.timeoutMs) &&
     policy.timeoutMs >= 1000 &&
@@ -56,6 +63,8 @@ export type PreparedLaunchPolicy = {
   policyDigest: string;
   policy: IncomingLaunchPolicy;
   runtime: string;
+  runtimeDigest: string;
+  scripts: ReturnType<typeof readLaunchScripts>;
   checkRuntime: () => boolean;
 };
 
@@ -75,6 +84,7 @@ export function prepareLaunchPolicy(value: unknown): PreparedLaunchPolicy | Refu
     const outputDirectory = join(parent, basename(value.outputDirectory));
     const policy: IncomingLaunchPolicy = { ...value, outputDirectory };
     const stamps = [runtime, SEATBELT, SEATBELT_SYSTEM_PROFILE].map(fingerprint);
+    const scripts = readLaunchScripts();
     const build = execFileSync("/usr/bin/sw_vers", ["-buildVersion"], {
       encoding: "utf8",
       env: RUN_ENV,
@@ -89,7 +99,8 @@ export function prepareLaunchPolicy(value: unknown): PreparedLaunchPolicy | Refu
       build,
       stamps.map(({ path, sha256 }) => [path, sha256]),
       PROFILE_RULES,
-      BOOTSTRAP,
+      runtimeProfile.toString(),
+      scripts,
       RUN_ENV,
       policy.entry,
       policy.outputDirectory,
@@ -99,6 +110,8 @@ export function prepareLaunchPolicy(value: unknown): PreparedLaunchPolicy | Refu
       ok: true,
       policy,
       runtime,
+      runtimeDigest: stamps[0]!.sha256,
+      scripts,
       policyDigest: createHash("sha256").update(JSON.stringify(identity)).digest("hex"),
       checkRuntime: () => stamps.every((stamp) => stamp.check()),
     };

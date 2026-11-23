@@ -8,6 +8,7 @@ import { prepareLaunchPolicy } from "./launch-policy.js";
 export async function launchFixture(
   script: (paths: { authority: string; sentinel: string }) => string,
   timeoutMs = 5000,
+  populate?: (repository: string) => void,
 ) {
   const fixture = storeFixture();
   try {
@@ -26,6 +27,7 @@ export async function launchFixture(
       }),
     );
     writeFileSync(join(repository, "main.mjs"), script({ authority, sentinel }));
+    populate?.(repository);
     const source = join(root, "sealed-source");
     const captured = await captureIncomingCandidate({
       source: repository,
@@ -42,6 +44,8 @@ export async function launchFixture(
     const prepared = prepareLaunchPolicy(policy);
     if (!prepared.ok) assert.fail(prepared.reason);
     proof.authority.policyDigest = prepared.policyDigest;
+    proof.authority.maxVerificationAgeMs = 60_000;
+    proof.authority.maxApprovalAgeMs = 60_000;
     store.update(repository, { type: "enroll", authority: proof.authority });
     const pending = store.update(repository, {
       type: "stage",
@@ -54,7 +58,7 @@ export async function launchFixture(
     proof.now = now;
     proof.verification.createdAt = now;
     proof.approval.issuedAt = now;
-    proof.approval.expiresAt = now + 30_000;
+    proof.approval.expiresAt = now + 60_000;
     proof.verification.checks.push(...captured.candidate.checks);
     const signed = signState(fixture, pending);
     store.update(repository, signed);

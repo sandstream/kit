@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { lstatSync, readdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, lstatSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { it } from "node:test";
 import { captureIncomingCandidate, verifyRetainedIncomingCandidate } from "./candidate-flow.js";
 import { hasNativeImageTool } from "./native-image.test-support.js";
-import { preflightSealedCandidate } from "./sealed-candidate.js";
+import { preflightSealedCandidate, withSealedRuntime } from "./sealed-candidate.js";
 import { ejectReadOnlyImage } from "./sealed-image-macos.js";
+import { readSnapshotFile } from "./snapshot-io.js";
 import { snapshotFixture } from "./snapshot.test-support.js";
 
 it("does not start materialization on an unsupported platform", () => {
@@ -25,6 +27,35 @@ const cases = [
   { timing: "before copy", expected: { verified: false, reason: "snapshot-changed" } },
   { timing: "while mounted", expected: { verified: true, inputs: "read-only-image" } },
 ];
+
+it(
+  "runs the pinned executable after its original pathname changes",
+  {
+    skip: !hasNativeImageTool || process.arch !== "arm64",
+  },
+  () => {
+    const f = snapshotFixture();
+    try {
+      const runtime = join(f.root, "node-copy");
+      copyFileSync(realpathSync(process.execPath), runtime);
+      const { sha256 } = readSnapshotFile(
+        runtime,
+        lstatSync(runtime, { bigint: true }),
+        192 * 1024 * 1024,
+      );
+      const result = withSealedRuntime(runtime, sha256, (sealed) => {
+        assert.notEqual(lstatSync(sealed).dev, lstatSync(runtime).dev);
+        writeFileSync(runtime, "changed");
+        const probe = spawnSync(sealed, ["--version"], { encoding: "utf8", timeout: 5000 });
+        assert.equal(probe.status, 0, String(probe.error) + probe.stderr);
+        return probe.stdout.trim();
+      });
+      assert.equal(result, process.version);
+    } finally {
+      f.cleanup();
+    }
+  },
+);
 
 for (const { timing, expected } of cases) {
   it(

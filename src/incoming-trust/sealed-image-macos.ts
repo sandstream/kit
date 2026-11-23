@@ -44,8 +44,18 @@ export function mountReadOnlyImage(
   source: string,
   mount: string,
   cwd: string,
+  executable = false,
 ): string {
-  run(DISKUTIL, ["image", "create", "from", "--format", "UDRO", source, image], cwd);
+  if (executable) {
+    // The folder-based diskutil command can undersize an image for the Node executable.
+    run(
+      HDIUTIL,
+      ["create", "-fs", "APFS", "-format", "UDRO", "-size", "256m", "-srcfolder", source, image],
+      cwd,
+    );
+  } else {
+    run(DISKUTIL, ["image", "create", "from", "--format", "UDRO", source, image], cwd);
+  }
   const attached = run(
     DISKUTIL,
     ["image", "attach", "--plist", "--readOnly", "--noMount", image],
@@ -59,7 +69,7 @@ export function mountReadOnlyImage(
       "readOnly",
       "nobrowse",
       "-mountOptions",
-      "noexec,nosuid,nodev",
+      executable ? "exec,nosuid,nodev" : "noexec,nosuid,nodev",
       "-mountPoint",
       mount,
       volume,

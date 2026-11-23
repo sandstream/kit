@@ -4,7 +4,7 @@ import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { sameIdentity } from "../utils/same-file.js";
 import { privateDirIsControlled } from "../utils/secure-perms.js";
-import { BOOTSTRAP, PROFILE_RULES, RUN_ENV, SEATBELT } from "./launch-profile.js";
+import { runtimeProfile, RUN_ENV, SEATBELT } from "./launch-profile.js";
 import type { PreparedLaunchPolicy } from "./launch-policy.js";
 import { containsSnapshotPath } from "./snapshot-storage.js";
 
@@ -22,6 +22,7 @@ export type IncomingRun =
     };
 
 interface LaunchContext {
+  runtime: string;
   prepared: PreparedLaunchPolicy;
   mounted: string;
   authority: string;
@@ -29,22 +30,6 @@ interface LaunchContext {
   source: string;
   verificationDigest: string;
   deadline: number;
-}
-
-function metadataParameters(paths: string[]): [string[], string] {
-  const parents = new Set<string>();
-  for (const path of paths) {
-    let parent = dirname(path);
-    for (;;) {
-      parents.add(parent);
-      if (parent === dirname(parent)) break;
-      parent = dirname(parent);
-    }
-  }
-  const params = [...parents].map((path, index) => ["KIT_META_" + index, path]);
-  const flags = params.flatMap(([key, value]) => ["-D", key + "=" + value]);
-  const matchers = params.map(([key]) => '(literal (param "' + key + '"))');
-  return [flags, "(allow file-read-metadata " + matchers.join(" ") + ")"];
 }
 
 function rootPaths(ctx: LaunchContext): { input: string; output: string; entry: string } {
@@ -65,7 +50,9 @@ function rootPaths(ctx: LaunchContext): { input: string; output: string; entry: 
 }
 
 function invoke(ctx: LaunchContext, input: string, output: string, entry: string): IncomingRun {
-  const { runtime, policyDigest, policy } = ctx.prepared;
+  const { policyDigest, policy, scripts } = ctx.prepared;
+  const { runtime } = ctx;
+  const deadline = Date.now() + policy.timeoutMs;
   const runId = createHash("sha256")
     .update(
       JSON.stringify([
@@ -77,8 +64,7 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
       ]),
     )
     .digest("hex");
-  const [metadata, rule] = metadataParameters([input, output]);
-  const profile = [...PROFILE_RULES, rule].join("\n");
+  const [metadata, profile] = runtimeProfile([input, output, runtime]);
   const result = spawnSync(
     SEATBELT,
     [
@@ -94,13 +80,17 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
       runtime,
       "--input-type=module",
       "-e",
-      BOOTSTRAP,
+      scripts.bootstrap,
       "--",
       entry,
       ctx.authority,
       output,
       runId,
       String(ctx.deadline),
+      String(deadline),
+      String(process.pid),
+      scripts.watchdog,
+      String(policy.timeoutMs),
     ],
     {
       cwd: output,
@@ -115,7 +105,7 @@ function invoke(ctx: LaunchContext, input: string, output: string, entry: string
   if (result.output?.[3] !== runId) return { ran: false, reason: "runtime-proof-missing" };
   const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
   const outcome =
-    code === "ETIMEDOUT"
+    code === "ETIMEDOUT" || (result.signal === "SIGKILL" && Date.now() >= deadline)
       ? "timed-out"
       : code === "ENOBUFS"
         ? "output-limit"

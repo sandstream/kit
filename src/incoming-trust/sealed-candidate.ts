@@ -21,6 +21,7 @@ import {
 } from "./sealed-image-macos.js";
 import { captureIncomingSnapshot } from "./snapshot.js";
 import { snapshotLimits } from "./snapshot-limits.js";
+import { copySnapshotFile, readSnapshotFile } from "./snapshot-io.js";
 import { removeOwnedSnapshot } from "./snapshot-storage.js";
 
 type SealedFailure = {
@@ -53,11 +54,12 @@ function checkMountedCandidate<T>(
   image: string,
   copy: string,
   use: MountedOperation<T>,
+  executable: boolean,
 ): T {
   const mount = join(work, "mounted");
   mkdirSync(mount, { mode: 0o700 });
   const unmounted = lstatSync(mount, { bigint: true });
-  const volume = mountReadOnlyImage(image, copy, mount, work);
+  const volume = mountReadOnlyImage(image, copy, mount, work, executable);
   const root = openSync(mount, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
     // On macOS the open directory keeps an ordinary eject from replacing the mounted path.
@@ -100,12 +102,47 @@ export function withSealedCandidate<T>(
   source: string,
   use: MountedOperation<T>,
 ): T | SealedFailure {
+  return withPinnedImage((work) => copyRetainedCandidate(source, work), use, false);
+}
+
+/** Execute the verified runtime from its own immutable volume. The candidate stays noexec. */
+export function withSealedRuntime<T>(
+  runtime: string,
+  digest: string,
+  use: MountedOperation<T>,
+): T | SealedFailure {
+  const limit = 192 * 1024 * 1024;
+  return withPinnedImage(
+    (workspace) => {
+      const source = join(workspace, "runtime");
+      mkdirSync(source, { mode: 0o700 });
+      const copy = join(source, "node");
+      const original = lstatSync(runtime, { bigint: true });
+      if (copySnapshotFile(runtime, copy, original, limit).sha256 !== digest)
+        throw new Error("Runtime digest changed");
+      return source;
+    },
+    (mount, assertPinned) => {
+      const entry = join(mount, "node");
+      if (readSnapshotFile(entry, lstatSync(entry, { bigint: true }), limit).sha256 !== digest)
+        throw new Error("Mounted runtime digest changed");
+      return use(entry, assertPinned);
+    },
+    true,
+  );
+}
+
+function withPinnedImage<T>(
+  materialize: (work: string) => string,
+  use: MountedOperation<T>,
+  executable: boolean,
+): T | SealedFailure {
   if (isReadOnlyMode()) return { verified: false, reason: "read-only" };
   if (process.platform !== "darwin")
     return { verified: false, reason: "sealed-platform-unsupported" };
   try {
     const work = mkdtempSync(join(realpathSync(tmpdir()), "kit-incoming-sealed-"));
-    return verifyInWorkspace(work, source, use);
+    return verifyInWorkspace(work, materialize, use, executable);
   } catch {
     return { verified: false, reason: "sealed-input-unavailable" };
   }
@@ -113,20 +150,21 @@ export function withSealedCandidate<T>(
 
 function verifyInWorkspace<T>(
   work: string,
-  source: string,
+  materialize: (work: string) => string,
   use: MountedOperation<T>,
+  executable: boolean,
 ): T | SealedFailure {
   const identity = lstatSync(work, { bigint: true });
   const image = join(work, "candidate.dmg");
   let result: T | SealedFailure;
   try {
     secureDirStrict(work);
-    result = checkMountedCandidate(work, image, copyRetainedCandidate(source, work), use);
+    result = checkMountedCandidate(work, image, materialize(work), use, executable);
   } catch {
     result = { verified: false, reason: "sealed-input-unavailable" };
   }
   try {
-    if (lstatSync(image, { throwIfNoEntry: false })) ejectReadOnlyImage(image, work);
+    if (lstatSync(image, { throwIfNoEntry: false })) releaseImage(image, work);
     const mount = lstatSync(join(work, "mounted"), { bigint: true, throwIfNoEntry: false });
     if (mount && mount.dev !== identity.dev) throw new Error("Disk image mount remains");
     removeOwnedSnapshot(work, identity);
@@ -135,4 +173,23 @@ function verifyInWorkspace<T>(
   } catch {
     return { verified: false, reason: "sealed-teardown-failed" };
   }
+}
+
+function busyImage(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("stderr" in error)) return false;
+  return /busy|dissented|could not be unmounted/i.test(String(error.stderr));
+}
+
+function releaseImage(image: string, workspace: string): void {
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  for (const delay of [100, 200, 400, 800, 1600]) {
+    try {
+      ejectReadOnlyImage(image, workspace);
+      return;
+    } catch (error) {
+      if (!busyImage(error)) throw error;
+      Atomics.wait(wait, 0, 0, delay);
+    }
+  }
+  ejectReadOnlyImage(image, workspace);
 }

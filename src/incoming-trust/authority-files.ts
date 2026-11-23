@@ -182,7 +182,12 @@ export function withIncomingDatabase<T>(
   directory: string,
   repository: string,
   mode: "read" | "enroll" | "update" | "lock",
-  operation: (db: DatabaseSync, binding: RepositoryBinding, recheck: () => void) => T,
+  operation: (
+    db: DatabaseSync,
+    binding: RepositoryBinding,
+    recheck: () => void,
+    databasePath: string,
+  ) => T,
 ): T | null {
   const target = location(directory, repository);
   const write = mode !== "read";
@@ -212,7 +217,7 @@ export function withIncomingDatabase<T>(
       assertLocations(path, file.info, dir, parent);
       if (mode === "lock") assertRepository(repository, target.binding);
     };
-    const result = operation(db, target.binding, recheck);
+    const result = operation(db, target.binding, recheck, path);
     recheck();
     if (write) {
       db.exec("COMMIT");

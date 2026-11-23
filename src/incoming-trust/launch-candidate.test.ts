@@ -1,37 +1,40 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
 import { launchFixture } from "./launch-candidate.test-support.js";
+import { launchIncomingCandidate } from "./launch-candidate.js";
 import { hasNativeImageTool } from "./native-image.test-support.js";
+
+function syntheticWorkload({ authority, sentinel }: { authority: string; sentinel: string }) {
+  return [
+    'import fs from "node:fs";',
+    'import {spawnSync} from "node:child_process";',
+    'import net from "node:net";',
+    'const attempt = (f) => { try { f(); return "allowed"; } catch (e) { return e.code; } };',
+    'fs.writeFileSync("answer", "retained input");',
+    "const network = await new Promise((resolve) => {",
+    '  const socket = net.connect({host:"127.0.0.1",port:1});',
+    '  socket.on("error", (e) => resolve(e.code));',
+    '  socket.on("connect", () => { socket.destroy(); resolve("allowed"); });',
+    "});",
+    "console.log(JSON.stringify({",
+    "  authority: attempt(() => fs.openSync(" + JSON.stringify(authority) + ', "r+")),',
+    "  sentinel: attempt(() => fs.readFileSync(" + JSON.stringify(sentinel) + ")),",
+    "  outside: attempt(() => fs.writeFileSync(" + JSON.stringify(sentinel) + ', "changed")),',
+    '  child: spawnSync(process.execPath, ["--version"]).error?.code ?? "allowed",',
+    "  credential: process.env.KIT_SYNTHETIC_SECRET ?? null, network,",
+    "}));",
+  ].join("\n");
+}
 
 it(
   "runs the signed retained program and rejects a different policy via the CLI",
   { skip: !hasNativeImageTool || process.arch !== "arm64" },
   async () => {
-    const f = await launchFixture(({ authority, sentinel }) =>
-      [
-        'import fs from "node:fs";',
-        'import {spawnSync} from "node:child_process";',
-        'import net from "node:net";',
-        'const attempt = (f) => { try { f(); return "allowed"; } catch (e) { return e.code; } };',
-        'fs.writeFileSync("answer", "retained input");',
-        "const network = await new Promise((resolve) => {",
-        '  const socket = net.connect({host:"127.0.0.1",port:1});',
-        '  socket.on("error", (e) => resolve(e.code));',
-        '  socket.on("connect", () => { socket.destroy(); resolve("allowed"); });',
-        "});",
-        "console.log(JSON.stringify({",
-        "  authority: attempt(() => fs.openSync(" + JSON.stringify(authority) + ', "r+")),',
-        "  sentinel: attempt(() => fs.readFileSync(" + JSON.stringify(sentinel) + ")),",
-        "  outside: attempt(() => fs.writeFileSync(" + JSON.stringify(sentinel) + ', "changed")),',
-        '  child: spawnSync(process.execPath, ["--version"]).error?.code ?? "allowed",',
-        "  credential: process.env.KIT_SYNTHETIC_SECRET ?? null, network,",
-        "}));",
-      ].join("\n"),
-    );
+    const f = await launchFixture(syntheticWorkload);
     try {
       const cli = fileURLToPath(new URL("../cli.js", import.meta.url));
       const report = join(f.root, "verification.json");
@@ -90,6 +93,33 @@ it(
         "retained input",
       );
       assert.equal(readFileSync(join(f.root, "secret"), "utf8"), "synthetic secret");
+    } finally {
+      f.cleanup();
+    }
+  },
+);
+
+it(
+  "refuses signed preinstalled packages until runtime package provenance is verified",
+  {
+    skip: !hasNativeImageTool || process.arch !== "arm64",
+  },
+  async () => {
+    const f = await launchFixture(
+      () => 'throw new Error("this entry is never loaded")',
+      5000,
+      (repo) => {
+        const installed = join(repo, "nested", "node_modules");
+        mkdirSync(installed, { recursive: true });
+        writeFileSync(join(installed, "extra.js"), "export default 1");
+      },
+    );
+    try {
+      assert.deepEqual(launchIncomingCandidate(f), {
+        ran: false,
+        reason: "run-dependencies-unproven",
+      });
+      assert.equal(existsSync(f.policy.outputDirectory), false);
     } finally {
       f.cleanup();
     }

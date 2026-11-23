@@ -1,47 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { it } from "node:test";
-import { BOOTSTRAP, RUN_ENV } from "./launch-profile.js";
-import { snapshotFixture } from "./snapshot.test-support.js";
+import { runtimeProfile } from "./launch-profile.js";
 
-it("does not load a program when the external profile is removed", () => {
-  const f = snapshotFixture();
-  try {
-    const entry = join(f.source, "main.mjs");
-    const authority = join(f.root, "authority.sqlite");
-    const marker = join(f.root, "entered");
-    writeFileSync(authority, "synthetic authority");
-    writeFileSync(
-      entry,
-      'import fs from "node:fs"; fs.writeFileSync(' + JSON.stringify(marker) + ', "entered");',
-    );
-    const child = spawnSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "-e",
-        BOOTSTRAP,
-        "--",
-        entry,
-        authority,
-        f.root,
-        "nonce",
-        String(Date.now() + 5000),
-      ],
-      {
-        cwd: f.root,
-        env: RUN_ENV,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe", "pipe"],
-        timeout: 5000,
-      },
-    );
-    assert.equal(child.status, 125, child.stderr);
-    assert.equal(child.output[3], "");
-    assert.equal(existsSync(marker), false);
-  } finally {
-    f.cleanup();
-  }
+it("passes literal metadata ancestors to the external sandbox without interpolating policy text", () => {
+  const directory = '/test/a folder with "quotes"';
+  const [flags, profile] = runtimeProfile([directory + "/tree", directory + "/destination"]);
+  assert.ok(flags.some((flag) => flag.endsWith("=" + directory)));
+  assert.equal(profile.includes(directory), false);
+  assert.match(profile, /\(allow file-read-metadata \(literal \(param "KIT_META_0"\)\)/);
 });

@@ -41,7 +41,8 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
   The digest binds the launch recipe, runtime, OS build and explicit output directory.
 - `run` starts an approved Node entry from the read-only tree through the macOS sandbox.
   It holds the generation lock through the bounded run. The delegate checks its permissions
-  before it loads the entry. JSON output contains the run ID, outcome and bounded process output.
+  before it loads the entry from the read-only image. A separate image holds the verified Node
+  executable. JSON output contains the run ID, outcome and bounded process output.
 - `rotate` replaces the signers and returns the store to pending, so no old approval survives.
 - `recover` moves a damaged store aside. It never deletes it. Every repository that shares the
   store directory needs a new enrollment afterwards.
@@ -51,7 +52,9 @@ All subcommands accept `--repo <dir>`, `--store <dir>` and `--json`.
 - Signing happens outside kit.
 - The supported run policy denies network access, credentials from the host and child processes.
   It accepts a captured JavaScript entry and an empty, newly created output directory.
-  The command expects dependencies in the captured tree.
+  The supported entries use built-in Node modules and approved local code. Kit refuses retained
+  package archives, preinstalled package directories and native addons until it can verify
+  their runtime inputs.
 - `stage` reads registry-tarball and remote-tarball sources only. Git and local sources are refused.
 - The sealed preflight has been exercised on macOS 27.2.1. Native Windows remains unverified.
 
@@ -69,6 +72,7 @@ it in the authority file's `policyDigest` field. Enroll the authority, stage the
 input, request and record the external approval, then call `run` with that
 verification report. Kit exits nonzero for refusal, timeout or a nonzero workload
 exit. The native tests exercise a bounded set of filesystem, credential, network
-and process restrictions.
+and process restrictions. A watchdog stops the Node process at its time limit or when
+its launcher dies. The launcher owns ejection of the temporary images after the run.
 
 Design and limits: [src/incoming-trust/README.md](../src/incoming-trust/README.md).

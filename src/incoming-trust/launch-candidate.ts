@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { opendirSync } from "node:fs";
 import { join } from "node:path";
 import { isReadOnlyMode } from "../read-only-mode.js";
 import type { IncomingTrustStore } from "./authority-store.js";
@@ -6,7 +6,9 @@ import { incomingVerificationDigest } from "./decision-protocol.js";
 import { incomingVerification } from "./decision-schema.js";
 import { prepareLaunchPolicy } from "./launch-policy.js";
 import { launchNodeOnMac, type IncomingRun } from "./launch-node-macos.js";
-import { withSealedCandidate } from "./sealed-candidate.js";
+import { withSealedCandidate, withSealedRuntime } from "./sealed-candidate.js";
+import { readSnapshotManifest } from "./snapshot-io.js";
+import { snapshotLimits } from "./snapshot-limits.js";
 
 interface LaunchRequest {
   store: IncomingTrustStore;
@@ -14,6 +16,26 @@ interface LaunchRequest {
   source: string;
   verification: unknown;
   policy: unknown;
+}
+
+/** The lock already verified this manifest and archive layout from the pinned image. */
+function hasUnprovenDependencies(mounted: string): boolean {
+  const archives = opendirSync(join(mounted, "artifacts"));
+  try {
+    if (archives.readSync()) return true;
+  } finally {
+    archives.closeSync();
+  }
+  const raw = readSnapshotManifest(
+    join(mounted, "manifest.json"),
+    snapshotLimits().maxManifestBytes,
+  );
+  const manifest = JSON.parse(raw) as { entries: { path: string }[] };
+  return manifest.entries.some(
+    ({ path }) =>
+      path.toLowerCase().split("/").includes("node_modules") ||
+      path.toLowerCase().endsWith(".node"),
+  );
 }
 
 export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
@@ -28,24 +50,37 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
   if (!original.verified) return { ran: false, reason: original.reason };
   const observation: { result?: IncomingRun } = {};
   try {
-    const authority = join(realpathSync(store.directory), "authority.sqlite");
     const verificationDigest = incomingVerificationDigest(verification);
-    const result = withSealedCandidate(source, (mounted, assertPinned) => {
-      assertPinned();
-      return store.withApprovedInputs(repository, mounted, verification, (deadline) => {
-        const run = launchNodeOnMac({
-          prepared,
-          mounted,
-          authority,
-          repository,
-          source,
-          verificationDigest,
-          deadline,
-        });
-        observation.result = run;
-        return run;
-      });
-    });
+    const result = withSealedRuntime(
+      prepared.runtime,
+      prepared.runtimeDigest,
+      (runtime, assertRuntime) =>
+        withSealedCandidate(source, (mounted, assertPinned) => {
+          assertRuntime();
+          assertPinned();
+          return store.withApprovedInputs(
+            repository,
+            mounted,
+            verification,
+            (deadline, authority) => {
+              if (hasUnprovenDependencies(mounted))
+                return { ran: false, reason: "run-dependencies-unproven" } as const;
+              const run = launchNodeOnMac({
+                prepared,
+                runtime,
+                mounted,
+                authority,
+                repository,
+                source,
+                verificationDigest,
+                deadline,
+              });
+              observation.result = run;
+              return run;
+            },
+          );
+        }),
+    );
     return "ran" in result ? result : boundaryFailure(observation.result, result.reason);
   } catch {
     return boundaryFailure(observation.result, "run-state-unavailable");
