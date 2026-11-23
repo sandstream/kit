@@ -2682,6 +2682,7 @@ async function appendProjectSecurityChecks(
   const { checkAgentConfig } = await import("./check-agent-config.js");
   results.push(...(await checkAgentConfig(root)));
   results.push(...(await (await import("./check-gha-audit.js")).checkGhaWorkflows(root)));
+  results.push(...(await import("./check-own-lifecycle-hook.js")).checkOwnLifecycleHook(root));
   return escalateManifestSkips(results, scope);
 }
 
