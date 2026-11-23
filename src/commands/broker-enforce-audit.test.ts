@@ -36,6 +36,11 @@ process.stdout.write(sign(null, input, ${JSON.stringify(key)}).toString("base64"
   fixture.env.KIT_KEYSTORE = "command";
   fixture.env.KIT_KEYSTORE_PUBKEY = publicKey.export({ type: "spki", format: "pem" }).toString();
   fixture.env.KIT_KEYSTORE_SIGN_CMD = `"${process.execPath}" "${signer}"`;
+  if (process.platform === "win32") {
+    assert.ok(fixture.env.SystemRoot, "The command signer needs the Windows system directory");
+    // The fixture PATH contains only Node. Give execSync the absolute shell path.
+    fixture.env.ComSpec = join(fixture.env.SystemRoot, "System32", "cmd.exe");
+  }
 }
 
 test("broker enforce --force leaves the signed profile intact if the audit log cannot accept a record", (t) => {
