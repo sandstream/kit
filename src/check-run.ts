@@ -173,7 +173,14 @@ async function securityRows(cwd: string, online: boolean | undefined, config: ki
   const tagged = await tagWithDeployed(rows, config, cwd, online);
   const runtimes = await checkRuntimes(cwd, { online });
   const installs = await checkRuntimeInstalls(cwd, { online });
-  return [...tagged, ...runtimes, ...installs, ...(await checkGlobalPackages(cwd))];
+  const { checkWatchFreshness } = await import("./check-watch-freshness.js");
+  return [
+    ...tagged,
+    ...runtimes,
+    ...installs,
+    ...(await checkGlobalPackages(cwd)),
+    ...checkWatchFreshness(cwd),
+  ];
 }
 
 export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRunResult> {
