@@ -128,6 +128,7 @@ describe("branch protection failures and project config", () => {
         [
           ["default branch protection", "pass"],
           ["default branch required reviews", "warn"],
+          ["default branch required check sources", "pass"],
         ],
       );
       const before = calls;
