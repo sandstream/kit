@@ -71,7 +71,15 @@ authority store and retained inputs. Run support requires macOS arm64, the nativ
 disk image tools and the external sandbox executable. Local controls used macOS
 27.2.1 and Node 22.
 
-Generate the policy digest on the same runtime and Kit build that will launch the workload. Put
+For a workload with npm dependencies, supply an `npmArtifacts` array in the policy.
+Include exactly one object per lockfile package slot with `packagePath`, `name`,
+`version` and `sha256`. Use the independently verified SHA-256 of the exact
+compressed npm archive. Obtain these expectations from a trusted source outside
+the staged repository and its lockfile. Kit refuses packages whose retained archives
+differ from these expectations.
+
+Generate the policy digest on the same runtime and Kit build that will launch the workload.
+The digest binds the compiled Kit modules and the npm archive expectations. Put
 it in the authority file's `policyDigest` field. Enroll the authority, stage the
 input, request and record the external approval, then call `run` with that
 verification report. Kit exits nonzero for refusal, timeout or a nonzero workload

@@ -26,6 +26,7 @@ import { removeOwnedSnapshot } from "./snapshot-storage.js";
 import { snapshotDigest } from "./snapshot-format.js";
 import {
   materializeRunTree,
+  NpmExpectationMismatch,
   verifyMaterializedRunTree,
   type ApprovedRunTree,
 } from "./runtime-tree.js";
@@ -37,6 +38,7 @@ type SealedFailure = {
     | "sealed-platform-unsupported"
     | "sealed-input-unavailable"
     | "sealed-run-tree-mismatch"
+    | "run-npm-expectations-mismatch"
     | "sealed-teardown-failed";
 };
 
@@ -190,8 +192,14 @@ function verifyInWorkspace<T>(
   try {
     secureDirStrict(work);
     result = checkMountedCandidate(work, image, materialize(work), use, executable);
-  } catch {
-    result = { verified: false, reason: "sealed-input-unavailable" };
+  } catch (error) {
+    result = {
+      verified: false,
+      reason:
+        error instanceof NpmExpectationMismatch
+          ? "run-npm-expectations-mismatch"
+          : "sealed-input-unavailable",
+    };
   }
   try {
     if (lstatSync(image, { throwIfNoEntry: false })) releaseImage(image, work);

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
 import { captureIncomingCandidate } from "./candidate-flow.js";
+import { launchIncomingCandidate } from "./launch-candidate.js";
 import { launchFixture, NATIVE_RUN_TEST_WINDOW_MS } from "./launch-candidate.test-support.js";
 import { withHttps } from "./npm-artifact-fetch.test-support.js";
 import { archive, type Entry } from "./npm-artifact-archive.test-support.js";
@@ -39,7 +40,9 @@ function pack(
   ]);
 }
 
-function capturePackages(source: string, destination: string, extra: Entry[] = []) {
+const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+function packageFixture(extra: Entry[] = []) {
   const dependencies = { leaf: "1.0.0" };
   const outer = pack(
     "@scope/real",
@@ -48,6 +51,25 @@ function capturePackages(source: string, destination: string, extra: Entry[] = [
     extra,
   );
   const leaf = pack("leaf", 'module.exports = "nested dependency";');
+  const expectations = [
+    {
+      packagePath: "node_modules/compat",
+      name: "@scope/real",
+      version: "1.0.0",
+      sha256: sha256(outer),
+    },
+    {
+      packagePath: "node_modules/compat/node_modules/leaf",
+      name: "leaf",
+      version: "1.0.0",
+      sha256: sha256(leaf),
+    },
+  ];
+  return { dependencies, outer, leaf, expectations };
+}
+
+function capturePackages(source: string, destination: string, fixture = packageFixture()) {
+  const { dependencies, outer, leaf } = fixture;
   const integrity = (bytes: Buffer) =>
     "sha512-" + createHash("sha512").update(bytes).digest("base64");
   return withHttps(
@@ -99,12 +121,14 @@ it(
     skip: !hasNativeImageTool || process.arch !== "arm64",
   },
   async () => {
+    const fixture = packageFixture();
     const f = await launchFixture(
       () =>
         'import fs from "node:fs"; import value from "compat"; fs.writeFileSync("answer",value);',
       5000,
       undefined,
-      capturePackages,
+      (source, destination) => capturePackages(source, destination, fixture),
+      fixture.expectations,
     );
     try {
       const cli = fileURLToPath(new URL("../cli.js", import.meta.url));
@@ -168,13 +192,14 @@ it(
 it("detects a change to a derived package file even when its package version matches", async () => {
   const f = snapshotFixture();
   try {
-    const staged = await capturePackages(f.source, f.destination);
+    const fixture = packageFixture();
+    const staged = await capturePackages(f.source, f.destination, fixture);
     assert.equal(staged.status, "bound", JSON.stringify(staged));
-    const approved = readApprovedRunTree(f.destination);
-    assert.ok(approved);
+    const approved = readApprovedRunTree(f.destination, fixture.expectations);
+    assert.ok(approved.ok, JSON.stringify(approved));
     const workspace = join(f.root, "runtime");
     mkdirSync(workspace, { mode: 0o700 });
-    const built = materializeRunTree(approved, workspace);
+    const built = materializeRunTree(approved.tree, workspace);
     assert.equal(verifyMaterializedRunTree(built.tree, built.manifest), true);
     writeFileSync(
       join(built.tree, "node_modules/compat/node_modules/leaf/index.js"),
@@ -189,17 +214,45 @@ it("detects a change to a derived package file even when its package version mat
 it("refuses colliding implicit package directories while deriving the run tree", async () => {
   const f = snapshotFixture();
   try {
-    const staged = await capturePackages(f.source, f.destination, [
+    const fixture = packageFixture([
       { path: "package/lib/one.js", body: "1" },
       { path: "package/Lib/two.js", body: "2" },
     ]);
+    const staged = await capturePackages(f.source, f.destination, fixture);
     assert.equal(staged.status, "bound", JSON.stringify(staged));
-    const approved = readApprovedRunTree(f.destination);
-    assert.ok(approved);
+    const approved = readApprovedRunTree(f.destination, fixture.expectations);
+    assert.ok(approved.ok, JSON.stringify(approved));
     const workspace = join(f.root, "runtime");
     mkdirSync(workspace, { mode: 0o700 });
-    assert.throws(() => materializeRunTree(approved, workspace), /path collides/);
+    assert.throws(() => materializeRunTree(approved.tree, workspace), /path collides/);
   } finally {
     f.cleanup();
   }
 });
+
+it(
+  "refuses a signed candidate whose lock and tarball agree but differ from the policy's independent bytes",
+  {
+    skip: !hasNativeImageTool || process.arch !== "arm64",
+  },
+  async () => {
+    const fixture = packageFixture();
+    const alternate = { ...fixture, leaf: pack("leaf", 'module.exports = "replacement bytes";') };
+    const f = await launchFixture(
+      () => 'throw new Error("this entry is never loaded");',
+      5000,
+      undefined,
+      (source, destination) => capturePackages(source, destination, alternate),
+      fixture.expectations,
+    );
+    try {
+      assert.deepEqual(launchIncomingCandidate(f), {
+        ran: false,
+        reason: "run-npm-expectations-mismatch",
+      });
+      assert.equal(existsSync(f.policy.outputDirectory), false);
+    } finally {
+      f.cleanup();
+    }
+  },
+);

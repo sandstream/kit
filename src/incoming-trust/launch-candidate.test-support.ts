@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { signState, storeFixture } from "./authority-store.test-support.js";
 import { captureIncomingCandidate, type IncomingCandidateFlow } from "./candidate-flow.js";
 import { prepareLaunchPolicy } from "./launch-policy.js";
+import type { ExpectedNpmArtifact } from "./runtime-npm-policy.js";
 
 /** Native disk setup is timed separately from the signed workload deadline. */
 export const NATIVE_RUN_TEST_WINDOW_MS = 120_000;
@@ -13,6 +14,7 @@ export async function launchFixture(
   timeoutMs = 5000,
   populate?: (repository: string) => void,
   capture?: (source: string, destination: string) => Promise<IncomingCandidateFlow>,
+  npmArtifacts?: ExpectedNpmArtifact[],
 ) {
   const fixture = storeFixture();
   try {
@@ -45,6 +47,7 @@ export async function launchFixture(
       entry: "main.mjs",
       outputDirectory: join(root, "results"),
       timeoutMs,
+      ...(npmArtifacts ? { npmArtifacts } : {}),
     };
     const prepared = prepareLaunchPolicy(policy);
     if (!prepared.ok) assert.fail(prepared.reason);

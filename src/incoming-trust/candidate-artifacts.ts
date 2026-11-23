@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, opendirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sameIdentity } from "../utils/same-file.js";
@@ -59,7 +60,12 @@ function validateLayout(path: string, count: number): void {
 export function inspectCandidateArchives(
   destination: string,
   selections: readonly NpmArtifact[],
-  use?: (selection: NpmArtifact, root: string, entries: readonly NpmArchiveEntry[]) => void,
+  use?: (
+    selection: NpmArtifact,
+    sha256: string,
+    root: string,
+    entries: readonly NpmArchiveEntry[],
+  ) => void,
 ): NpmArtifactResult[] {
   const path = join(destination, "artifacts");
   const directory = privateDirectory(path);
@@ -74,7 +80,9 @@ export function inspectCandidateArchives(
     return inspectNpmArtifact(
       bytes,
       selection,
-      use && ((root, entries) => use(selection, root, entries)),
+      use &&
+        ((root, entries) =>
+          use(selection, createHash("sha256").update(bytes).digest("hex"), root, entries)),
     );
   });
   if (!unchanged(directory, privateDirectory(path))) {

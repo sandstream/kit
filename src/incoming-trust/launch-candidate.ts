@@ -40,9 +40,9 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
             mounted,
             verification,
             (deadline, authority) => {
-              const approved = readApprovedRunTree(mounted);
-              if (!approved) return { ran: false, reason: "run-dependencies-unproven" } as const;
-              return withSealedRunTree(approved, (input, inputDigest) => {
+              const approved = readApprovedRunTree(mounted, prepared.policy.npmArtifacts);
+              if (!approved.ok) return { ran: false, reason: approved.reason } as const;
+              return withSealedRunTree(approved.tree, (input, inputDigest) => {
                 const run = launchNodeOnMac({
                   prepared,
                   runtime,

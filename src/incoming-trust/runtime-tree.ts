@@ -8,7 +8,13 @@ import { npmArchivePathKey, type NpmArchiveEntry } from "./npm-artifact-archive.
 import { packageName } from "./npm-lock-read.js";
 import { relativePath } from "./npm-lock-workspaces.js";
 import type { NpmLockInventory } from "./npm-lock.js";
-import { snapshotManifest, snapshotDigest, type IncomingSnapshotEntry } from "./snapshot-format.js";
+import type { ExpectedNpmArtifact } from "./runtime-npm-policy.js";
+import {
+  snapshotEntryBytes,
+  snapshotManifest,
+  snapshotDigest,
+  type IncomingSnapshotEntry,
+} from "./snapshot-format.js";
 import { readSnapshotManifest } from "./snapshot-io.js";
 import { snapshotLimits } from "./snapshot-limits.js";
 import { captureTree } from "./snapshot-tree.js";
@@ -21,6 +27,7 @@ export interface ApprovedRunTree {
   inventory: NpmLockInventory;
   manifest: string;
   entries: IncomingSnapshotEntry[];
+  expectations: ReadonlyMap<string, ExpectedNpmArtifact>;
 }
 
 export interface MaterializedRunTree {
@@ -34,17 +41,34 @@ function unsupportedRuntimePath(path: string): boolean {
 }
 
 /** The caller holds and has verified the signed retained image. */
-export function readApprovedRunTree(mounted: string): ApprovedRunTree | undefined {
+export function readApprovedRunTree(
+  mounted: string,
+  expected: readonly ExpectedNpmArtifact[],
+):
+  | { ok: true; tree: ApprovedRunTree }
+  | { ok: false; reason: "run-dependencies-unproven" | "run-npm-expectations-mismatch" } {
   const manifest = readSnapshotManifest(
     join(mounted, "manifest.json"),
     snapshotLimits().maxManifestBytes,
   );
   const { entries } = JSON.parse(manifest) as { entries: IncomingSnapshotEntry[] };
-  if (entries.some(({ path }) => unsupportedRuntimePath(path))) return undefined;
+  const unsupported = { ok: false, reason: "run-dependencies-unproven" } as const;
+  if (entries.some(({ path }) => unsupportedRuntimePath(path))) return unsupported;
   const inventory = readRetainedNpmInventory(join(mounted, "tree"));
-  if (typeof inventory === "string" || !supportedLayout(inventory)) return undefined;
-  return { mounted, inventory, manifest, entries };
+  if (typeof inventory === "string" || !supportedLayout(inventory)) return unsupported;
+  const expectations = new Map(expected.map((row) => [row.packagePath, row]));
+  if (
+    inventory.artifacts.length !== expectations.size ||
+    inventory.artifacts.some((row) => {
+      const match = expectations.get(row.packagePath);
+      return !match || row.name !== match.name || row.version !== match.version;
+    })
+  )
+    return { ok: false, reason: "run-npm-expectations-mismatch" };
+  return { ok: true, tree: { mounted, inventory, manifest, entries, expectations } };
 }
+
+export class NpmExpectationMismatch extends Error {}
 
 function slotParents(path: string): string[] | undefined {
   const parts = path.split("/");
@@ -88,8 +112,7 @@ class RuntimeTreeWriter {
     const key = npmArchivePathKey(item.path);
     const depth = item.path ? item.path.split("/").length : 0;
     const bytes = item.kind === "file" ? item.size : 0;
-    const manifestBytes =
-      Buffer.byteLength(JSON.stringify(item)) + (this.directoriesAndFiles.size ? 1 : 0);
+    const manifestBytes = snapshotEntryBytes(item, this.directoriesAndFiles.size > 0);
     if (
       depth > this.limits.maxDepth ||
       Buffer.byteLength(item.path) > this.limits.maxPathBytes ||
@@ -184,7 +207,11 @@ export function materializeRunTree(
   const results = inspectCandidateArchives(
     approved.mounted,
     approved.inventory.artifacts,
-    (selection, root, entries) => writer.placePackage(selection.packagePath, root, entries),
+    (selection, sha256, root, entries) => {
+      if (approved.expectations.get(selection.packagePath)?.sha256 !== sha256)
+        throw new NpmExpectationMismatch("Incoming archive does not match independent policy");
+      writer.placePackage(selection.packagePath, root, entries);
+    },
   );
   if (results.some((result) => result.status !== "verified"))
     throw new Error("Incoming archive changed");

@@ -189,6 +189,7 @@ image verified against the policy digest. This delegate requires zero network de
 zero host credentials and zero child processes. The runtime builds each supported locked npm
 package from the retained tarball. The verifier checks a read-only derived tree against the
 approved file manifest and the file digests produced by the archive parser. Kit binds its
-derivation recipe to the launch policy digest. Captured package directories, native addons and
+derivation recipe and independently provided SHA-256 expectations for every compressed
+npm archive to the launch policy digest. Captured package directories, native addons and
 workspace links are refused. The TypeScript supervisor runs outside the sandbox. It owns the workload deadline
 and stops the process if Kit exits. See the operator guide for the policy and output format.

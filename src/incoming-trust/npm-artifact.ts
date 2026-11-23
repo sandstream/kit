@@ -136,11 +136,11 @@ function selectedArtifact(value: unknown): value is SelectedArtifact {
     !/[*[\]{}!]/.test(record.packagePath) &&
     record.name.length <= 4096 &&
     packageName(record.name) &&
-    exactVersion(record.version)
+    exactNpmVersion(record.version)
   );
 }
 
-function exactVersion(version: string): boolean {
+export function exactNpmVersion(version: string): boolean {
   if (version.length > 256) return false;
   const match =
     /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
