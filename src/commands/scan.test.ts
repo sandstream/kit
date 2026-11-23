@@ -99,20 +99,20 @@ describe("kit scan: delegates and output modes", { skip }, () => {
     assert.equal(r.exitCode, 1, r.stdout + r.stderr);
     const out = plain(r.stdout);
     assert.match(out, /^kit scan {2}external scanners → one merged verdict\n/);
-    assert.match(out, /\n {2}✓ socket {2}1 finding\(s\)\n/);
+    assert.match(out, /\n {2}✗ socket {2}partial: .*policy coverage/);
     assert.match(out, /\n {2}HIGH {5}socket: [^\n]+ {2}\[socket\]\n/);
-    assert.match(out, /\n1 high\/critical\n$/);
+    assert.match(out, /\n1 high\/critical\n/);
   });
 
-  it("text mode: no findings and a not-installed scanner warn without failing", async () => {
+  it("text mode: incomplete Socket coverage and an absent scanner warn by default", async () => {
     toml(f, '[scan]\ndelegates = ["socket", "grype"]\n');
     tool(f, "socket", SOCKET_PASS);
     const r = await scan(f, [], { SOCKET_SECURITY_API_TOKEN: "t" });
     assert.equal(r.exitCode, 0, r.stdout + r.stderr);
     const out = plain(r.stdout);
     assert.match(out, /\n {2}− grype {2}not-installed[^\n]*\n/);
-    assert.match(out, /\n {2}✓ socket {2}0 finding\(s\)\n/);
-    assert.match(out, /\n {2}no findings from the scanners that ran\n/);
+    assert.match(out, /\n {2}✗ socket {2}partial: .*policy coverage/);
+    assert.match(out, /No scanner completed. Scan coverage is unverified/);
     assert.match(out, /\n {2}! [^\n]*grype[^\n]*\n/);
     assert.match(out, /use --strict or \[governance\.scan\] required_scanners to hard-fail/);
   });
@@ -157,8 +157,12 @@ describe("kit scan: scanner-health gate", { skip }, () => {
       "scannerGate",
       "strict",
       "exploitIntel",
+      "coverage",
     ]);
-    assert.deepEqual(j.runs, [{ id: "socket", status: "ran", findings: 1 }]);
+    assert.equal(j.runs[0].id, "socket");
+    assert.equal(j.runs[0].status, "partial");
+    assert.equal(j.runs[0].findings, 1);
+    assert.equal(j.coverage, "partial");
     assert.equal(j.findings.length, 1);
     assert.equal(j.findings[0].severity, "high");
     assert.equal(j.suppressed, 0);
@@ -182,8 +186,17 @@ describe("kit scan: baseline and tooling tokens", { skip }, () => {
   useFixture();
 
   it("--update-baseline accepts the findings; the next run suppresses them and passes", async () => {
-    toml(f, '[scan]\ndelegates = ["socket"]\n');
-    tool(f, "socket", SOCKET_FAIL);
+    toml(f, '[scan]\ndelegates = ["grype"]\n');
+    const sarif = JSON.stringify({
+      version: "2.1.0",
+      runs: [
+        {
+          tool: { driver: { name: "grype", rules: [] } },
+          results: [{ ruleId: "fixture", level: "error", message: { text: "fixture finding" } }],
+        },
+      ],
+    });
+    tool(f, "grype", `echo '${sarif}'`);
     const env = { SOCKET_SECURITY_API_TOKEN: "t" };
     const up = await scan(f, ["--update-baseline"], env);
     assert.equal(up.exitCode, 0, up.stderr);
@@ -192,7 +205,7 @@ describe("kit scan: baseline and tooling tokens", { skip }, () => {
       /^baseline updated {2}1 scan finding\(s\) accepted into \.kit-baseline\.json\n$/,
     );
     const bl = JSON.parse(readFileSync(join(f.dir, ".kit-baseline.json"), "utf8"));
-    assert.equal(JSON.stringify(bl).includes("socket"), true);
+    assert.equal(JSON.stringify(bl).includes("grype"), true);
 
     const r = await scan(f, [], env);
     assert.equal(r.exitCode, 0, r.stdout);
@@ -214,7 +227,10 @@ describe("kit scan: baseline and tooling tokens", { skip }, () => {
     tool(f, "socket", `[ "$SOCKET_SECURITY_API_TOKEN" = from-vault ] || exit 1\n${SOCKET_PASS}`);
     const r = await scan(f, ["--json"]);
     assert.equal(r.exitCode, 0, r.stdout + r.stderr);
-    assert.deepEqual(JSON.parse(r.stdout).runs, [{ id: "socket", status: "ran", findings: 0 }]);
+    const run = JSON.parse(r.stdout).runs[0];
+    assert.equal(run.id, "socket");
+    assert.equal(run.status, "partial");
+    assert.equal(run.findings, 0);
     assert.match(readFileSync(join(f.dir, "infisical-args"), "utf8"), /--env prod --projectId p1/);
     assert.equal(r.stdout.includes("from-vault"), false);
   });

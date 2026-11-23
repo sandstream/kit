@@ -111,8 +111,8 @@ export interface ScannerDef {
   /** Extra args/env applied in air-gap mode so the scanner runs against a local DB. */
   offline?: { args?: string[]; env?: Record<string, string> };
   /**
-   * Socket policy gate: read the policy verdict from `socket ci` JSON and confirm
-   * it matches the process exit status. This path does not use `format`.
+   * Read the Socket policy verdict and retain reported violations.
+   * Socket CI supplies no proof of policy coverage. This path does not use `format`.
    */
   exitGate?: boolean;
   /** Exit code that means "nothing here to scan" (osv-scanner: 128), not a failure. */

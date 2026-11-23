@@ -105,8 +105,17 @@ function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledSc
       ? exitGateFinding(scanner, process, reportedViolation)
       : undefined;
   const findings = finding ? [finding] : [];
-  if (socketCompleted(process, verdict, Boolean(stopped))) {
-    return { run: { id: scanner.id, status: "ran", findings: findings.length }, findings };
+  if (!stopped && socketVerdictMatchesExit(process, verdict)) {
+    return {
+      run: {
+        id: scanner.id,
+        status: "partial",
+        findings: findings.length,
+        reportGap: "partial",
+        reason: "Socket CI did not provide policy coverage evidence for this scan",
+      },
+      findings,
+    };
   }
   const reason = finding?.detail ?? "scanner did not return a valid Socket policy verdict";
   return {
@@ -120,12 +129,8 @@ function settleExitGate(scanner: ScannerDef, process: ScannerProcess): SettledSc
   };
 }
 
-function socketCompleted(
-  process: ScannerProcess,
-  verdict: boolean | undefined,
-  stopped: boolean,
-): boolean {
-  if (stopped || process.noNumericExitStatus) return false;
+function socketVerdictMatchesExit(process: ScannerProcess, verdict: boolean | undefined): boolean {
+  if (process.noNumericExitStatus) return false;
   return process.ok ? verdict === true : process.exitCode === 1 && verdict === false;
 }
 

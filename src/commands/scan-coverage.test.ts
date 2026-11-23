@@ -8,6 +8,7 @@ import {
   EMPTY_SARIF,
   makeFixture,
   scan,
+  SOCKET_FAIL,
   SOCKET_PASS,
   socketReport,
   toml,
@@ -227,5 +228,37 @@ describe("kit scan: Socket policy coverage", { skip }, () => {
     assert.equal(report.findings[0].didNotRun, true);
     assert.equal((await scan(f, ["--update-baseline"], env)).exitCode, 1);
     assert.equal(readFileSync(baseline, "utf8"), original);
+  });
+});
+
+describe("kit scan: Socket policy evidence", { skip }, () => {
+  useFixture();
+
+  it("does not count a Socket CI verdict as proof of policy coverage", async () => {
+    toml(f, '[scan]\ndelegates = ["socket"]\n[governance.scan]\nrequired_scanners = ["socket"]\n');
+    tool(f, "socket", SOCKET_PASS);
+    const env = { SOCKET_SECURITY_API_TOKEN: "fixture" };
+    const result = await scan(f, ["--json"], env);
+    assert.equal(result.exitCode, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.coverage, "partial");
+    assert.equal(report.runs[0].status, "partial");
+    assert.equal(report.runs[0].reportGap, "partial");
+    assert.match(report.runs[0].reason, /policy coverage/i);
+    assert.deepEqual(report.findings, []);
+    const strict = await scan(f, ["--strict"], env);
+    assert.equal(strict.exitCode, 1, strict.stdout);
+    const baseline = join(f.dir, ".kit-baseline.json");
+    const original = JSON.stringify({
+      version: 1,
+      generated: new Date(0).toISOString(),
+      categories: { scan: { findings: ["kept"] } },
+    });
+    writeFileSync(baseline, original);
+    for (const reply of [SOCKET_PASS, SOCKET_FAIL]) {
+      tool(f, "socket", reply);
+      assert.equal((await scan(f, ["--update-baseline"], env)).exitCode, 1);
+      assert.equal(readFileSync(baseline, "utf8"), original);
+    }
   });
 });

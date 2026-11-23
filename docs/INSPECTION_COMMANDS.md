@@ -145,6 +145,9 @@ A required delegate must complete its scan before the scanner gate can pass.
 A baseline update also needs a completed scan and an approved scanner gate.
 The SARIF export records each delegate's status and keeps coverage gaps visible on import.
 The Socket delegate checks the reported policy verdict and the process exit status.
+The Socket report does not identify the policy data used for that scan.
+Kit records Socket coverage as partial and retains reported policy violations.
+A Socket result cannot satisfy a required delegate, strict mode or a baseline update.
 An error without a policy verdict indicates that the scan did not complete.
 For a directory scan, Grype reports the scoped package inventory alongside its findings.
 If Grype reports no packages, a required Grype delegate cannot pass.

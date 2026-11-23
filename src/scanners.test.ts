@@ -143,7 +143,7 @@ describe("runScanners (injected deps)", () => {
 });
 
 describe("runScanners with an exit-code delegate", () => {
-  it("Socket policy report and a clean exit support complete coverage", async () => {
+  it("keeps policy coverage partial when Socket reports a clean verdict", async () => {
     const only: ScannerDef[] = [
       { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },
     ];
@@ -154,12 +154,13 @@ describe("runScanners with an exit-code delegate", () => {
       detect: () => true,
     };
     const { merged, runs } = await runScanners(deps, only);
-    assert.equal(runs[0].status, "ran");
+    assert.equal(runs[0].status, "partial");
+    assert.equal(runs[0].reportGap, "partial");
     assert.equal(runs[0].findings, 0);
     assert.equal(merged.length, 0);
   });
 
-  it("Socket policy violation and exit 1 support complete coverage with a finding", async () => {
+  it("retains a Socket policy violation with partial coverage", async () => {
     const only: ScannerDef[] = [
       { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },
     ];
@@ -170,7 +171,8 @@ describe("runScanners with an exit-code delegate", () => {
       detect: () => true,
     };
     const { merged, runs } = await runScanners(deps, only);
-    assert.equal(runs[0].status, "ran");
+    assert.equal(runs[0].status, "partial");
+    assert.equal(runs[0].reportGap, "partial");
     assert.equal(runs[0].findings, 1);
     assert.equal(merged.length, 1);
     assert.equal(merged[0].severity, "high");
