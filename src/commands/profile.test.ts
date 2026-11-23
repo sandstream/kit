@@ -133,7 +133,10 @@ describe("cmdProfile freeze output", () => {
     assert.equal(await cmdProfile(), true);
     const out = logs.join("\n");
     assert.match(out, /kit profile freeze/);
-    assert.match(out, /1 skill\(s\), 0 mcp server\(s\), 0 plugin\(s\), vault store=1password/);
+    assert.match(
+      out,
+      /1 skill\(s\), 0 mcp server\(s\), 0 plugin\(s\), 0 hook\(s\), vault store=1password/,
+    );
     assert.doesNotMatch(out, /preserved operator-authored/);
   });
 

@@ -85,8 +85,9 @@ function renderDrift(drift: ProfileDrift): void {
     mcp: "mcp servers",
     workflow: "workflows",
     plugin: "plugins",
+    hook: "hooks",
   };
-  for (const kind of ["skill", "mcp", "workflow", "plugin"]) {
+  for (const kind of ["skill", "mcp", "workflow", "plugin", "hook"]) {
     const list = byKind.get(kind);
     if (!list || list.length === 0) continue;
     console.log(`  ${c.bold}${labels[kind]}${c.reset}`);
@@ -103,6 +104,11 @@ function renderDrift(drift: ProfileDrift): void {
         : `${c.dim}declared ${drift.vault.declared}, found ${drift.vault.found ?? "none"}${c.reset}`;
     console.log(`  ${c.bold}vault${c.reset}`);
     console.log(`    ${mark} store  ${detail}`);
+  }
+  for (const kind of drift.notRecorded) {
+    console.log(
+      `  ${c.dim}? ${labels[kind]}: present, but this profile was frozen before kit recorded them; run kit profile freeze. Not judged.${c.reset}`,
+    );
   }
   for (const kind of drift.unaudited) {
     console.log(
@@ -161,7 +167,7 @@ function toComponents(items: { name: string; source?: string }[]): ProfileCompon
 /** Snapshot the discoverable dimensions and carry the operator-authored sections over verbatim. */
 function freezeProfile(
   existing: KitProfile | null,
-  discovered: Pick<KitProfile, "skills" | "mcp" | "plugins">,
+  discovered: Pick<KitProfile, "skills" | "mcp" | "plugins" | "hooks">,
   vaultStore: string | undefined,
 ): KitProfile {
   const next: KitProfile = {
@@ -178,11 +184,13 @@ function freezeProfile(
   return next;
 }
 
+const n = (list: unknown[] | undefined): number => list?.length ?? 0;
+
 function printFrozen(next: KitProfile, existing: KitProfile | null): void {
   console.log(`${c.bold}kit profile freeze${c.reset} → ${c.bold}${PROFILE_FILE}${c.reset}`);
   const vault = next.vault?.store ? `, vault store=${next.vault.store}` : "";
   console.log(
-    `  ${c.green}✓${c.reset} ${next.skills?.length ?? 0} skill(s), ${next.mcp?.length ?? 0} mcp server(s), ${next.plugins?.length ?? 0} plugin(s)${vault}`,
+    `  ${c.green}✓${c.reset} ${n(next.skills)} skill(s), ${n(next.mcp)} mcp server(s), ${n(next.plugins)} plugin(s), ${n(next.hooks)} hook(s)${vault}`,
   );
   if (existing?.workflows || existing?.scope || existing?.gates) {
     console.log(
@@ -203,6 +211,7 @@ async function profileFreeze(jsonMode: boolean): Promise<boolean> {
       skills: toComponents(skills),
       mcp: toComponents(mcpServers),
       plugins: toComponents(discoverPlugins(cwd)),
+      hooks: actual.hooks,
     },
     actual.vaultStore ?? existing?.vault?.store,
   );

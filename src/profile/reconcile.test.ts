@@ -12,7 +12,7 @@ function profile(over: Partial<KitProfile> = {}): KitProfile {
 }
 
 function actual(over: Partial<DiscoveredState> = {}): DiscoveredState {
-  return { skills: [], mcp: [], workflows: null, plugins: null, ...over };
+  return { skills: [], mcp: [], workflows: null, plugins: null, hooks: [], ...over };
 }
 
 describe("computeProfileDrift", () => {
