@@ -18,6 +18,8 @@ than shipping under a version whose changelog does not mention it.
 ```bash
 # 1. Prepare: bump package.json, then assemble the changelog fragments and name the section:
 node scripts/changelog-fragments.mjs assemble   # merges changes/*.md into [Unreleased]
+#    if a workspace package's version changed, run `node scripts/gen-plugin-registry.mjs`
+#    (src/plugin-registry.generated.ts carries each plugin's version; its test fails otherwise)
 #    rename `## [Unreleased]` to `## [X.Y.Z] - <date>`, add a fresh empty `## [Unreleased]`,
 #    on a minor or major release name the new X.Y line in SECURITY.md's Supported versions
 #    (src/security-supported-version.test.ts fails until it does), and merge that PR.
