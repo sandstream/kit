@@ -29,9 +29,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "profile import":
     "Import a portable bundle on a fresh host — integrity-verify offline, fail-closed on tamper/revoked (authoritative only once the signer is anchored)",
   "broker enforce-readiness":
-    "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested | unverifiable (the audit chain is broken) (--gate fails CI on any not-ready verdict)",
+    "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested | unverifiable (audit evidence cannot be verified) (--gate fails CI on any not-ready verdict)",
   "broker enforce":
-    "Guided observe→enforce flip: readiness pre-flight (refuses unless ready; --force overrides), set [scope].enforce_runtime = true, re-sign the profile scope, and audit the transition",
+    "Enable broker enforcement and verify the signed profile. --force overrides readiness. When audit logging is enabled, the command records the request before it updates the profile.",
   "browser doctor":
     "Diagnose browser-verification readiness from [browser], selecting Playwright, system Chrome, CDP, or a blocker (--json)",
   "browser status": "Print the selected browser strategy and top-level verdict (--json)",
@@ -110,7 +110,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "audit secrets":
     "Forensics: who/what touched each key + when (reads audit log); --target <platform> lists the keys kit pushed there",
   "audit verify":
-    "Verify the audit chain and HMAC seal. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
+    "Verify the audit chain and HMAC seal. --all --strict requires at least one verified log. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
   "audit anchor":
     "Seal the audit log with the machine-local HMAC key. --external requires KIT_EXTERNAL_ANCHOR_CMD and KIT_EXTERNAL_ANCHOR_VERIFY_CMD before publication.",
   "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",

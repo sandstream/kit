@@ -248,10 +248,13 @@ export async function loadProfile(cwd = process.cwd()): Promise<KitProfile | nul
  * surface is `canonicalProfileBytes`, not this text.
  */
 export async function saveProfile(profile: KitProfile, cwd = process.cwd()): Promise<void> {
-  profile.generated = new Date().toISOString();
-  const ordered = sortDeep(profile) as Record<string, unknown>;
   const path = resolve(cwd, PROFILE_FILE);
-  await writeFile(path, stringify(ordered) + "\n", "utf-8");
+  await writeFile(path, serializeProfile(profile), "utf-8");
+}
+
+export function serializeProfile(profile: KitProfile): string {
+  profile.generated = new Date().toISOString();
+  return stringify(sortDeep(profile) as Record<string, unknown>) + "\n";
 }
 
 /**
@@ -265,10 +268,11 @@ export function canonicalProfileBytes(profile: KitProfile): string {
   return JSON.stringify(sortDeep(rest));
 }
 
+export function profileDigest(profile: KitProfile): string {
+  return "sha256:" + createHash("sha256").update(canonicalProfileBytes(profile)).digest("hex");
+}
+
 /** Short content fingerprint of a profile (for display / pinning). */
 export function profileFingerprint(profile: KitProfile): string {
-  return (
-    "sha256:" +
-    createHash("sha256").update(canonicalProfileBytes(profile)).digest("hex").slice(0, 16)
-  );
+  return profileDigest(profile).slice(0, "sha256:".length + 16);
 }

@@ -3,9 +3,9 @@
 // here, collect the compiled test files ourselves (no shell-glob dependency, which
 // also differs across shells), and invoke `node --test`. No external dep.
 import { spawnSync } from "node:child_process";
-import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { availableParallelism } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { classifyTap, describeFailureKinds, failureReasons } from "./test-failure-kinds.mjs";
 import { parseShard, selectShard, weightFrom } from "./test-shard.mjs";
 
@@ -19,8 +19,7 @@ const env = {
   KIT_EXPLOIT_INTEL: "0",
   // `kit check` can ask OSV for advisories per dependency (opt in); tests that exercise it pass their own lookup.
   KIT_ADVISORIES: "0",
-  // Keep incidental audit appends from touching the real ~/.kit anchor. Tests
-  // that exercise anchoring opt back in with an explicit KIT_AUDIT_ANCHOR_DIR.
+  // Disable automatic seals for incidental appends.
   KIT_AUDIT_ANCHOR: "0",
 };
 
@@ -154,20 +153,27 @@ const TEST_CONCURRENCY = positiveIntEnv(
   3,
 );
 const stdoutReporter = process.stdout.isTTY ? "spec" : "tap";
-const result = spawnSync(
-  process.execPath,
-  [
-    "--test",
-    `--test-timeout=${TEST_TIMEOUT_MS}`,
-    `--test-concurrency=${TEST_CONCURRENCY}`,
-    `--test-reporter=${stdoutReporter}`,
-    "--test-reporter-destination=stdout",
-    "--test-reporter=tap",
-    `--test-reporter-destination=${TAP_LOG}`,
-    ...files,
-  ],
-  { stdio: "inherit", env },
-);
+// Audit commands can read existing seals when automatic updates are disabled.
+const anchorDir = mkdtempSync(join(tmpdir(), "kit-test-anchors-"));
+let result;
+try {
+  result = spawnSync(
+    process.execPath,
+    [
+      "--test",
+      `--test-timeout=${TEST_TIMEOUT_MS}`,
+      `--test-concurrency=${TEST_CONCURRENCY}`,
+      `--test-reporter=${stdoutReporter}`,
+      "--test-reporter-destination=stdout",
+      "--test-reporter=tap",
+      `--test-reporter-destination=${TAP_LOG}`,
+      ...files,
+    ],
+    { stdio: "inherit", env: { ...env, KIT_AUDIT_ANCHOR_DIR: anchorDir } },
+  );
+} finally {
+  rmSync(anchorDir, { recursive: true, force: true, maxRetries: 3 });
+}
 if (result.status !== 0) {
   console.error(
     `\n[kit] full TAP report written to ${TAP_LOG} - grep '^not ok' for the failing test names.`,

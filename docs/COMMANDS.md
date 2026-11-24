@@ -418,7 +418,7 @@ Leases for the local services agents start: who started which container, Supabas
 | `kit audit`                                                                                          | Print recent `.kit-audit.jsonl` entries.                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `kit audit secrets [--key <name>] [--target <name>] [--since-days <N>]`                              | Forensics: who/what touched each key + when. `--target railway` lists every key kit recorded writing to that platform, plus the `[deploy.<platform>]` required names with no recorded write: the rotation list after a provider breach. Names only, never values.                                                                                                                                                                                            |
 | `kit audit verify [--strict] [--require-external]`                                                   | Verify the chain and HMAC seal. Required external verification authenticates the receipt, its full statement, and an independent current checkpoint. Missing or unverifiable required evidence fails. See [the external protocol](AUDIT_ATTESTATION.md#4-external-receipt-verification).                                                                                                                                                                     |
-| `kit audit verify --all [--json] [--require-external]`                                               | Verify all machine-local anchored logs. The external requirement applies to every log and rejects an empty index or missing log. Without that requirement, missing temporary logs remain expected attrition. Stalled seals fail under strict mode.                                                                                                                                                                                                           |
+| `kit audit verify --all [--strict] [--json] [--require-external]`                                    | Verify all machine-local anchored logs. Strict mode needs at least one verified log and fails stalled seals. Required external verification also fails on any missing log.                                                                                                                                                                                                                                                                                   |
 | `kit audit anchor [--external] [--accept-rollback]`                                                  | Seal the log with the local HMAC key. External sealing requires both operator commands and verifies the receipt before publishing the anchor. Protected verifier configuration and independent authority policy remain necessary. It refuses to re-seal a log whose sealed prefix was truncated or rewritten, so the alarm `kit audit verify` raises is not erased; `--accept-rollback` accepts the log as the new baseline after a person has inspected it. |
 | `kit audit export [--format cef\|syslog\|json]`                                                      | Emit the audit log for a SIEM.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `kit audit transcripts --identity [--json] [--fail-on-network]`                                      | Experimental; output and network classification may change. Offline. Counts agent tool calls in `~/.claude/projects` transcripts whose input holds your git email or name or Claude account address: by kind, tool, and host for network-shaped calls (`curl`, a URL, `User-Agent`, `WebFetch`, `mcp__`). Never prints a value.                                                                                                                              |
@@ -435,20 +435,18 @@ Leases for the local services agents start: who started which container, Supabas
 
 ## Exec-broker runtime posture
 
-Graduating the exec-broker from observe to enforce is evidence-driven: the readiness verdict is
-computed from the recorded observe window, and the flip refuses unless that verdict says `ready`.
+The broker uses the recorded observe window to assess readiness.
+By default, the command requires a `ready` verdict before it enables enforcement.
 
 | Command                                 | Purpose                                                                                                                                                                                                           |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kit broker enforce-readiness [--gate]` | Read the recorded observe window (`.kit-audit.jsonl`) and report whether flipping to enforce is safe: `ready` \| `would-block` (+ exactly what breaks) \| `untested` \| `unverifiable` (the hash chain of the log is broken, so its events are not evidence). `--gate` fails CI on any not-ready verdict. |
-| `kit broker enforce [--force]`          | Guided observe→enforce flip: readiness pre-flight (refuses unless `ready`; `--force` overrides), sets `[scope].enforce_runtime = true`, re-signs the profile scope, and audits the transition.                    |
+| `kit broker enforce-readiness [--gate]` | Read the recorded observe window (`.kit-audit.jsonl`) and report whether flipping to enforce is safe: `ready` \| `would-block` (+ exactly what breaks) \| `untested` \| `unverifiable` (audit evidence cannot be verified). `--gate` fails CI on any not-ready verdict. |
+| `kit broker enforce [--force]`          | Enable enforcement with a verified signed profile. `--force` overrides readiness. If audit logging is enabled, record the request before the profile update. |
 
-Invalid observe evidence is not a successful observation. Readiness reads the entire
-audit file, so appending clean operations does not repair an older malformed record.
-Inspect and preserve that evidence; do not edit signed audit history to obtain a
-green result. After reviewing the intended scope and the malformed evidence, an
-operator can explicitly choose `kit broker enforce --force`. This records a forced
-transition, not a passing readiness check; it does not repair or discard the log.
+Inspect and preserve unverifiable observe evidence. With audit logging enabled, Kit requires a request
+record before the profile update. This also applies to `--force`.
+An incomplete transition exits 1 with `audit: "incomplete"`. A retry can finish a sealed request
+that matches the verified profile. See [Audit attestation](AUDIT_ATTESTATION.md).
 
 ## Traveling profile
 

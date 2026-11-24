@@ -2,6 +2,7 @@
 import { readSecretAuditEvents, groupBySecret, summarize, exposureAt } from "../audit-secrets.js";
 import { readAuditLog, type ChainVerifyResult, type SignatureVerifyResult } from "../audit.js";
 import type { AnchorVerifyResult, AnchorVerdict } from "../audit-anchor.js";
+import { canonicalAuditLogPath } from "../audit-log-path.js";
 import { resolve } from "node:path";
 import { printAuditTable } from "../output.js";
 import { loadConfig } from "../config.js";
@@ -147,9 +148,8 @@ async function resolveAuditLogPath(): Promise<string> {
  * log path across every tree; nothing enumerated it.
  *
  * `missing` (log path gone) and `stalled` (log there, entries past its seal) print as
- * distinct outcomes and only the second one counts toward the verdict: most anchored
- * paths on a dev machine are short-lived test temp dirs, and a report that alarms on
- * those is a report nobody reads.
+ * distinct outcomes. In strict mode, some logs may be missing if at least one
+ * log verifies. Required external verification checks every indexed log.
  */
 async function cmdAuditVerifyAll(
   strict: boolean,
@@ -176,19 +176,12 @@ async function cmdAuditVerifyAll(
   console.log(`${c.dim}${anchorRecordPath()}${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}`);
 
-  if (inputs.length === 0) {
-    if (requireExternal) {
-      console.error(
-        `${c.red}External verification REQUIRED but no anchored logs are available.${c.reset}`,
-      );
-      return false;
-    }
-    // Not a pass dressed up as one: an empty record means nothing has ever been
-    // sealed here, so there is no evidence either way.
-    console.warn(
-      `${c.yellow}! this machine has sealed no audit log yet — nothing to verify (run 'kit audit anchor' in a repo)${c.reset}`,
-    );
-    return true;
+  if (report.reason === "no-anchors") {
+    const message =
+      "This machine has sealed no audit log yet. Nothing to verify. Run 'kit audit anchor' in a repo with an audit log.";
+    if (report.ok) console.warn(`${c.yellow}! ${message}${c.reset}`);
+    else console.error(`${c.red}✗ ${message}${c.reset}`);
+    return report.ok;
   }
 
   // Findings first, attrition last: the ordering IS the readability fix.
@@ -212,20 +205,26 @@ async function cmdAuditVerifyAll(
 
   const k = report.counts;
   const summary = `${inputs.length} anchored log(s): ${k.verified} verified · ${k.stalled} stalled · ${k.missing} missing · ${k.failed} failed`;
+  const message =
+    report.reason === "all-logs-missing"
+      ? `${summary}. All anchored logs are missing. Nothing to verify.`
+      : summary;
   console.log();
   const unverifiedExternal = report.results.filter(
     (row) => row.externalVerification?.status === "unverified",
   ).length;
-  if (report.ok && k.stalled === 0 && unverifiedExternal === 0) {
+  if (!report.ok) {
+    console.error(`${c.red}✗ ${message}${c.reset}`);
+  } else if (report.reason === "all-logs-missing") {
+    console.warn(`${c.yellow}! ${message}${c.reset}`);
+  } else if (k.stalled === 0 && unverifiedExternal === 0) {
     console.log(`${c.green}✓ ${summary}${c.reset}`);
-  } else if (report.ok) {
+  } else {
     // Exits 0 by the same policy `decideAnchorVerdict` applies to one tree: an
     // unsealed tail warns, and fails under --strict / require_anchor.
     console.warn(
       `${c.yellow}! ${summary}${c.reset}  ${c.dim}(stalled seals: ${k.stalled}; unverified external receipts: ${unverifiedExternal})${c.reset}`,
     );
-  } else {
-    console.error(`${c.red}✗ ${summary}${c.reset}`);
   }
   return report.ok;
 }
@@ -351,9 +350,15 @@ async function cmdAuditVerify(): Promise<boolean> {
   const fail = { failClosed: strictFlag || requireAnchor || requireExternal, jsonMode };
   let content: string;
   try {
-    content = await readFile(logPath, "utf-8");
-  } catch {
-    return reportNothingVerified(report, "missing", fail);
+    content = await readFile(canonicalAuditLogPath(logPath), "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return reportNothingVerified(report, "missing", fail);
+    }
+    report.reason = "audit log could not be read; nothing verified";
+    if (jsonMode) return printAuditVerifyReport(report);
+    console.error(`${c.red}✗ Cannot read the audit log at ${logPath}.${c.reset}`);
+    return false;
   }
   // An empty log is its own outcome. "Chain intact, 0 entries" would report a log that
   // was emptied in the same words as a log that verifies.
