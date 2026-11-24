@@ -159,7 +159,9 @@ describe("Docker inventory scope and process status", () => {
     assert.equal(denied.status, "warn");
     assert.equal(denied.evidenceStatus, "unavailable");
   });
+});
 
+describe("Windows Docker pipe status", () => {
   it("recognizes a missing Windows Docker pipe without masking access errors", async () => {
     const diagnostics = [
       'error during connect: this error may indicate that the docker daemon is not running: Get "http://%2F%2F.%2Fpipe%2Fdocker_engine/v1.48/images/json": open //./pipe/docker_engine: ',
@@ -190,7 +192,9 @@ describe("Docker inventory scope and process status", () => {
     );
     assert.equal(partial.evidenceStatus, "partial");
   });
+});
 
+describe("Docker inventory failures", () => {
   it("reports generic errors instead of treating the Docker scope as absent", async () => {
     const r = await checkDockerIocs(
       lister({ stdout: "", stderr: "permission denied", exitCode: 1, ok: false }),

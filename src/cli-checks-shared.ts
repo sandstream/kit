@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { c } from "./utils/colors.js";
 import { hasFlag, envTruthy } from "./utils/flags.js";
 import { escapeWorkflowCmd, xmlEscape } from "./utils/ci-escape.js";
+import type { AlpineSourceEvidence } from "./check-apk-sources.js";
+import type { ScannerEvidenceStatus } from "./check-scanner-evidence.js";
 import type { kitConfig } from "./config.js";
 
 const __dirname = join(fileURLToPath(import.meta.url), "..");
@@ -74,8 +76,8 @@ export interface JsonCheck {
   /** True when the scan started but could not finish. */
   scanIncomplete?: boolean;
   /** Evidence state of a scanner-backed row, when the check reports one. */
-  evidenceStatus?: import("./check-scanner-evidence.js").ScannerEvidenceStatus;
-  evidenceSources?: import("./check-apk-sources.js").AlpineSourceEvidence[];
+  evidenceStatus?: ScannerEvidenceStatus;
+  evidenceSources?: AlpineSourceEvidence[];
 }
 
 /** The full `--json` document for check / ci. */
