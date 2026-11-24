@@ -28,3 +28,22 @@ it("refuses unknown lockfile versions and non-registry package links", () => {
     assert.equal(result.status, "unsupported");
   }
 });
+
+it("checks version suffixes without changing registry coverage", () => {
+  const scope = (version: string) =>
+    readBunAuditScope(
+      JSON.stringify({
+        lockfileVersion: 1,
+        workspaces: {},
+        packages: { example: [`example@${version}`, ""] },
+      }),
+    );
+  for (const version of ["1.2.3", "1.2.3-rc.1+build.2", "1.2.3--", "1.2.3+one+two"]) {
+    assert.deepEqual(scope(version), new Set(["example"]));
+  }
+  for (const version of ["1.2.3-", "1.2.3++build", "1.2.3-rc+"]) {
+    const result = scope(version);
+    assert.ok("status" in result);
+    assert.equal(result.status, "unsupported");
+  }
+});

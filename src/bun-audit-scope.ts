@@ -1,7 +1,7 @@
 import { scannerObject, scannerRecord, type ScannerGap } from "./check-scanner-evidence.js";
 
 const PACKAGE = /^(?:@[\w.~-]+\/)?[\w.~-]+$/;
-const VERSION = /^\d+\.\d+\.\d+(?:[-+][\dA-Za-z.-]+)*$/;
+const VERSION = /^\d+\.\d+\.\d+(?:[-+][\dA-Za-z.-]+(?:\+[\dA-Za-z.-]+)*)?$/;
 const JSON_STRING = /"(?:\\.|[^"\\])*"/;
 
 function decodeBunLock(text: string): Record<string, unknown> | undefined {

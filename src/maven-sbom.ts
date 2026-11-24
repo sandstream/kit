@@ -54,7 +54,13 @@ function readOpenedFile(fd: number, path: string, root: string, maxBytes: number
     return { evidenceStatus: "unsupported", reason: "must be a regular file." };
   }
   const resolved = realpathSync(path);
-  if (outsideRoot(relative(root, resolved)) || !sameIdentity(before, identityOf(resolved))) {
+  const entry = lstatSync(path, { bigint: true });
+  if (
+    !entry.isFile() ||
+    !sameIdentity(before, entry) ||
+    outsideRoot(relative(root, resolved)) ||
+    !sameIdentity(before, identityOf(resolved))
+  ) {
     return { evidenceStatus: "unsupported", reason: "could not be bound to the project." };
   }
   if (before.size > BigInt(maxBytes)) {
@@ -88,17 +94,17 @@ function readMavenFile(root: string, target: string, maxBytes: number): MavenRea
   const path = join(root, target);
   let fd: number | undefined;
   try {
-    if (!lstatSync(path).isFile() || outsideRoot(relative(root, realpathSync(path)))) {
+    const flags = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0);
+    fd = openSync(path, flags);
+    return readOpenedFile(fd, path, root, maxBytes);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ELOOP") {
       return {
         evidenceStatus: "unsupported",
         reason: "must be a regular file inside the project.",
       };
     }
-    const flags = constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0);
-    fd = openSync(path, flags);
-    return readOpenedFile(fd, path, root, maxBytes);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" && fd === undefined) {
       return { evidenceStatus: "missing", reason: "is missing." };
     }

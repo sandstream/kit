@@ -62,7 +62,7 @@ describe("check Docker image indicators against the selected inventory", () => {
   });
 
   it("matches an uppercase digest and Docker Hub repository alias", () => {
-    const row = makeRow("docker.io/TomicDD/Artex", "<none>", AMD64.toUpperCase()).replace(
+    const row = makeRow("docker.io/TomicDD/Artex", "<none>", AMD64.toUpperCase()).replaceAll(
       "\n",
       "\r\n",
     );
