@@ -128,10 +128,25 @@ Git, local and bundled sources have no byte verification yet. They refuse the wh
 The digest does not depend on the order of artifact results. It changes when the snapshot, an inventory field, the fetched bytes, the manifest scripts or the archive shape change.
 The returned checks (`snapshot`, `npm-artifacts`) match the `IncomingCheck` shape that `decide` expects. The digest does not authorize execution and does not isolate it.
 
-`captureIncomingCandidate` in `candidate-flow.ts` runs the whole flow. It captures the source once, reads `package.json` and the lockfile from the protected copy (never from the source again), fetches and inspects every locked artifact under the caller's host policy, verifies the snapshot again, and binds the candidate.
-It refuses with one of these reasons: `snapshot-failed`, `manifest-unreadable`, `lockfile-missing`, `lockfile-ambiguous` (both `package-lock.json` and `npm-shrinkwrap.json` exist), `lockfile-unreadable`, `artifact-limit` (default 1000), `artifact-refused` (the result names the artifact cause), `snapshot-changed` (the snapshot changed during the downloads), or any `bindIncomingCandidate` reason.
-A refusal after the capture returns the snapshot, and the caller owns that directory. The result does not authorize execution.
-The approval lifecycle, a launch lock and independent workload isolation remain separate work.
+`captureIncomingCandidate` in `candidate-flow.ts` captures the source once. It reads `package.json`
+and the lockfile from the protected copy. It fetches and inspects the locked artifacts under the
+caller's host policy. It retains their exact compressed bytes in `artifacts/` in inventory order.
+Kit limits each archive to 16 MiB and the combined compressed archives to 256 MiB.
+
+`verifyRetainedIncomingCandidate` verifies the captured tree and binds a fresh candidate from
+the retained artifacts without reading the source, a package cache or the network. It compares
+the result to the expected snapshot and candidate digests. Capture calls this check before it
+returns a bound candidate. Archive storage must contain exactly one regular private file for
+each artifact. A candidate staged before archive retention needs to be staged again to get
+the retained files.
+
+Capture refuses unreadable inputs, a missing lockfile, both lockfiles at once and incomplete
+or unsupported inventories. It caps inventories at 1,000 artifacts by default.
+`artifact-refused` includes the inspection or download cause. `artifact-storage` indicates
+missing, invalid or unwritable retained files. `snapshot-changed` and `candidate-changed`
+indicate a mismatch on verification. A refusal after capture returns the snapshot, and the
+caller owns that directory. The offline check produces candidate evidence. The separate
+run operation checks that evidence against the signed approval inside the generation lock.
 
 ## Approval lifecycle
 
@@ -142,7 +157,8 @@ The approval lifecycle, a launch lock and independent workload isolation remain 
 - `acceptCandidate` hands a signed approval to the store. The store checks the signature, context, checks and expiry inside its transaction.
 - `rejectCandidate` and `retryCandidate` move the state. A retry needs fresh evidence and a fresh approval.
 
-These functions hold no launch lock and do not isolate a workload. The launch lock and workload isolation remain separate work.
+The lifecycle functions record decisions. The run operation holds the lock and manages the
+external delegate.
 
 ## Operator commands
 
@@ -153,6 +169,9 @@ These functions hold no launch lock and do not isolate a workload. The launch lo
 | `enroll --authority <file>`                                          | Enrolls the repository with an authority file from the external signer.                                                              |
 | `status`                                                             | Prints phase, generation, candidate digest, signer ids and approval expiry. Reads only.                                              |
 | `stage --source <dir> --snapshot-dir <new dir> --origin <https url>` | Captures the source once, fetches and checks every locked artifact against the given origins, and stages the bound candidate digest. |
+| `preflight --snapshot-dir <dir> --verification <file> [--sealed]` | Checks the retained files against the precise signed report under the generation lock. The sealed option also checks a temporary read-only APFS image of those files. |
+| `run-policy --policy <file>` | Computes the launch policy digest for independent enrollment. |
+| `run --snapshot-dir <dir> --verification <file> --policy <file>` | Runs the approved Node entry from the sealed image through the supported external macOS delegate. |
 | `request --checks <file> [--out <file>]`                             | Builds the verification report and prints the digest that the external signer signs.                                                 |
 | `approve --verification <file> --approval <file>`                    | Records an approval. The store verifies the signature, context, checks and expiry.                                                   |
 | `reject`, `retry`                                                    | Move the state. A retry needs fresh evidence and a fresh approval.                                                                   |
@@ -161,3 +180,20 @@ These functions hold no launch lock and do not isolate a workload. The launch lo
 
 kit never signs. The mutating subcommands are refused in read-only mode, and `request` is refused with `--out`. Input files must be regular files under 1 MiB. `--out` refuses to overwrite a file.
 `approve` does not start the candidate and does not hold a launch lock.
+
+The macOS arm64 Node delegate uses an external sandbox and a read-only APFS input image.
+The policy digest binds its runtime, system profile, host build, entry, private output
+directory, time limit and restriction rules. Kit holds the volume and the generation
+lock through startup and process completion. The executable comes from a separate read-only
+image verified against the policy digest. This delegate requires zero network destinations,
+zero host credentials and zero child processes. The runtime builds each supported locked npm
+package from the retained tarball. The verifier checks a read-only derived tree against the
+approved file manifest and the file digests produced by the archive parser. Kit binds its
+derivation recipe and independently provided SHA-256 expectations for every compressed
+npm archive to the launch policy digest. Captured package directories, native addons and
+workspace links are refused. The TypeScript supervisor runs outside the sandbox. It owns the workload deadline
+and stops the process if Kit exits. A host process owns the temporary Node copy
+before Kit starts to copy it. Each disk image has a separate host process
+that performs attachment and ejection. It monitors Kit's lifetime and cleans up
+the private workspace after confirming that the owned image is detached. See
+the operator guide for the policy and output format.

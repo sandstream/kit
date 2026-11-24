@@ -259,7 +259,7 @@ function normalizePath(value: string, directory: boolean, limit: number): string
  * The key a case-insensitive or normalizing filesystem would give a path. Two entries that share a
  * key can overwrite each other on macOS or Windows, so they must not coexist in one archive.
  */
-function foldPath(path: string): string {
+export function npmArchivePathKey(path: string): string {
   // Lower, upper, lower again: one pass misses letters such as the long s, which lowers to itself but
   // uppers to "S". Decomposed forms on both sides keep a mark that lowering split off from its letter
   // equal to the composed spelling. Compatibility forms fold too, which only refuses more.
@@ -267,7 +267,9 @@ function foldPath(path: string): string {
 }
 
 function checkAncestors(exact: Map<string, string>): void {
-  const entries = new Map([...exact].map(([path, type]) => [foldPath(path), type] as const));
+  const entries = new Map(
+    [...exact].map(([path, type]) => [npmArchivePathKey(path), type] as const),
+  );
   const paths = [...entries.keys()].sort();
   for (const [path, type] of entries) {
     if (type !== "0") continue;
@@ -314,7 +316,7 @@ function registerEntry(
   if (entries.has(header.path)) {
     fail("rejected", entries.get(header.path) === header.type ? "path-duplicate" : "path-conflict");
   }
-  const key = foldPath(header.path);
+  const key = npmArchivePathKey(header.path);
   if (folded.has(key)) fail("rejected", "path-conflict");
   folded.set(key, header.path);
   entries.set(header.path, header.type);
@@ -333,7 +335,21 @@ function manifestFor(
   return ownedCopy(tar.subarray(offset, offset + header.size));
 }
 
-function inspectTar(tar: Buffer, limits: NpmArchiveLimits): NpmArchiveResult {
+export type NpmArchiveEntry =
+  { path: string; kind: "directory" } | { path: string; kind: "file"; bytes: Buffer };
+
+function archiveEntry(tar: Buffer, offset: number, header: Header): NpmArchiveEntry {
+  const path = header.path;
+  return header.type === "5"
+    ? { path, kind: "directory" }
+    : { path, kind: "file", bytes: tar.subarray(offset, offset + header.size) };
+}
+
+function inspectTar(
+  tar: Buffer,
+  limits: NpmArchiveLimits,
+  retained?: NpmArchiveEntry[],
+): NpmArchiveResult {
   if (tar.length % 512 !== 0) fail("rejected", "tar-block-alignment");
   let offset = 0;
   let entryCount = 0;
@@ -378,6 +394,7 @@ function inspectTar(tar: Buffer, limits: NpmArchiveLimits): NpmArchiveResult {
     root = entryRoot;
     registerEntry(entries, folded, header);
     manifestBytes = manifestFor(tar, offset, header, root, limits) ?? manifestBytes;
+    retained?.push(archiveEntry(tar, offset, header));
     offset = end;
   }
   if (!terminated) fail("rejected", "tar-terminator");
@@ -391,13 +408,18 @@ function inspectTar(tar: Buffer, limits: NpmArchiveLimits): NpmArchiveResult {
 export function inspectNpmTarball(
   bytes: Buffer,
   lowerLimits: Partial<NpmArchiveLimits> = {},
+  retain?: (entries: readonly NpmArchiveEntry[]) => void,
 ): NpmArchiveResult {
   if (!Buffer.isBuffer(bytes)) return { status: "rejected", reason: "invalid-bytes" };
+  const retained: NpmArchiveEntry[] | undefined = retain ? [] : undefined;
+  let result: NpmArchiveResult;
   try {
     const limits = readLimits(lowerLimits);
-    return inspectTar(inflate(bytes, limits), limits);
+    result = inspectTar(inflate(bytes, limits), limits, retained);
   } catch (error) {
     if (error instanceof ArchiveFailure) return error.result;
     return { status: "rejected", reason: "archive-invalid" };
   }
+  if (result.status === "verified" && retained) retain?.(retained);
+  return result;
 }

@@ -1,9 +1,9 @@
 /**
  * `kit security incoming <sub>`: operator commands over the incoming-trust authority store.
  *
- * Subcommands: enroll, status, stage, request, approve, reject, retry, rotate, recover.
+ * Subcommands: enroll, status, stage, request, approve, preflight, run-policy, run, reject, retry, rotate, recover.
  * Signing happens outside kit. `approve` only verifies and records an approval that an external
- * signer produced. Nothing here runs the candidate, holds a launch lock or isolates a workload.
+ * signer produced. `preflight` checks the approval and the retained files under the generation lock.
  */
 import { closeSync, constants, fstatSync, openSync, readFileSync, writeSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,6 +12,9 @@ import { flagValue, hasFlag } from "../utils/flags.js";
 import { IncomingTrustStore, type IncomingTrustState } from "../incoming-trust/authority-store.js";
 import { QUARANTINE_ACKNOWLEDGEMENT } from "../incoming-trust/authority-files.js";
 import { captureIncomingCandidate } from "../incoming-trust/candidate-flow.js";
+import { preflightSealedCandidate } from "../incoming-trust/sealed-candidate.js";
+import { launchIncomingCandidate } from "../incoming-trust/launch-candidate.js";
+import { prepareLaunchPolicy } from "../incoming-trust/launch-policy.js";
 import {
   acceptCandidate,
   rejectCandidate,
@@ -33,6 +36,9 @@ const SUBCOMMANDS = [
   "stage",
   "request",
   "approve",
+  "preflight",
+  "run-policy",
+  "run",
   "reject",
   "retry",
   "rotate",
@@ -41,7 +47,7 @@ const SUBCOMMANDS = [
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 export const SECURITY_INCOMING_USAGE =
-  "kit security incoming enroll --authority <file> | status | stage --source <dir> --snapshot-dir <new dir> --origin <https url> | request --checks <file> [--out <file>] | approve --verification <file> --approval <file> | reject | retry | rotate --signers <file> | recover --acknowledge <text>   (all accept --repo <dir>, --store <dir>, --json)";
+  "kit security incoming enroll --authority <file> | status | stage --source <dir> --snapshot-dir <new dir> --origin <https url> | request --checks <file> [--out <file>] | approve --verification <file> --approval <file> | preflight --snapshot-dir <dir> --verification <file> [--sealed] | run-policy --policy <file> | run --snapshot-dir <dir> --verification <file> --policy <file> | reject | retry | rotate --signers <file> | recover --acknowledge <text>   (all accept --repo <dir>, --store <dir>, --json)";
 
 interface Invocation {
   argv: readonly string[];
@@ -188,6 +194,60 @@ function approve(inv: Invocation): boolean {
   return show(inv, describeState(state), `Accepted: ${summary(state)}`);
 }
 
+function preflight(inv: Invocation): boolean {
+  const destination = flagValue(inv.argv, "--snapshot-dir");
+  if (!destination) throw new Error("Incoming trust: --snapshot-dir is required");
+  const report = readJsonFile(flagValue(inv.argv, "--verification"), "--verification");
+  const verify = (path: string) => inv.store.preflight(inv.repository, path, report);
+  const result = hasFlag(inv.argv, "--sealed")
+    ? preflightSealedCandidate(resolve(destination), verify)
+    : verify(resolve(destination));
+  if (!result.verified) {
+    if (inv.json) console.log(JSON.stringify(result));
+    else {
+      console.error(`Incoming trust preflight refused: ${result.reason}`);
+      if ("cleanupStep" in result && result.cleanupStep)
+        console.error(`Incoming trust cleanup step: ${result.cleanupStep}`);
+    }
+    return false;
+  }
+  return show(
+    inv,
+    result,
+    "inputs" in result
+      ? "Verified retained inputs on a read-only image under the current approval. Preflight only."
+      : "Verified retained inputs under the current approval. Preflight only.",
+  );
+}
+
+function runPolicy(inv: Invocation): boolean {
+  const input = readJsonFile(flagValue(inv.argv, "--policy"), "--policy");
+  const prepared = prepareLaunchPolicy(input);
+  if (!prepared.ok) throw new Error(`Incoming trust: ${prepared.reason}`);
+  return show(inv, { policyDigest: prepared.policyDigest }, prepared.policyDigest);
+}
+
+function run(inv: Invocation): boolean {
+  const source = flagValue(inv.argv, "--snapshot-dir");
+  if (!source) throw new Error("Incoming trust: --snapshot-dir is required");
+  const result = launchIncomingCandidate({
+    store: inv.store,
+    repository: inv.repository,
+    source: resolve(source),
+    verification: readJsonFile(flagValue(inv.argv, "--verification"), "--verification"),
+    policy: readJsonFile(flagValue(inv.argv, "--policy"), "--policy"),
+  });
+  if (inv.json) console.log(JSON.stringify(result));
+  else if (result.ran)
+    console.log(`Run ${result.runId} ${result.outcome} (exit ${result.code ?? "none"}).`);
+  else if (result.ran === null)
+    console.error(`Incoming trust run status unavailable: ${result.reason}`);
+  else console.error(`Incoming trust run refused: ${result.reason}`);
+  if (!inv.json && result.cleanupStep)
+    console.error(`Incoming trust cleanup step: ${result.cleanupStep}`);
+  return result.ran === true && result.outcome === "exited" && result.code === 0;
+}
+
 function simple(
   inv: Invocation,
   verb: string,
@@ -230,6 +290,9 @@ const HANDLERS: Record<Subcommand, (inv: Invocation) => boolean | Promise<boolea
   stage,
   request,
   approve,
+  preflight,
+  "run-policy": runPolicy,
+  run,
   reject: (inv) => simple(inv, "Rejected", rejectCandidate),
   retry: (inv) => simple(inv, "Retry started", retryCandidate),
   rotate,
