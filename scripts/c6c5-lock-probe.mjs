@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import cp from "node:child_process";
-import { once } from "node:events";
+import { once, setMaxListeners } from "node:events";
 import fs from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
@@ -90,7 +90,7 @@ if (mode === "worker") {
     await moduleAt("audit-anchor.js");
   const output = [];
   const savedEnvironment = { ...process.env };
-  for (const [delay, waitMs] of [[0, 5000], [700, 5000], [700, 30000]]) {
+  for (const [writers, delay, waitMs] of [[8, 0, 5000], [24, 400, 5000], [24, 400, 30000]]) {
     const workspace = await mkdtemp(join(tmpdir(), "kit-c6c5-probe-"));
     const children = [];
     try {
@@ -109,8 +109,9 @@ if (mode === "worker") {
       ), true);
       const reports = [];
       const deadline = AbortSignal.timeout(120_000);
+      setMaxListeners(0, deadline);
       const windowsDelays = process.platform === "win32" ? 0 : delay;
-      for (let index = 0; index < 8; index++) {
+      for (let index = 0; index < writers; index++) {
         const child = cp.fork(process.argv[1], [
           "worker", dist, workspace, String(index), String(windowsDelays),
         ], { env: childEnv, stdio: ["ignore", "ignore", "pipe", "ipc"] });
@@ -147,7 +148,7 @@ if (mode === "worker") {
         a[kind].maxMs = Math.max(a[kind].maxMs, Math.round(ms));
         return a;
       }, {});
-      output.push({ delayMs: windowsDelays, waitMs, success, locksTimedOut, chain, seal,
+      output.push({ writers, delayMs: windowsDelays, waitMs, success, locksTimedOut, chain, seal,
         maxAppendMs: Math.max(...events.map((entry) => entry.ms)),
         acl: summarize(results.flatMap((result) => result.acl)),
         locks: summarize(results.flatMap((result) => result.locks)) });

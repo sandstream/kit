@@ -7,17 +7,28 @@ import { promisify } from "node:util";
 const probe = fileURLToPath(new URL("../scripts/c6c5-lock-probe.mjs", import.meta.url));
 const dist = fileURLToPath(new URL("./", import.meta.url));
 
-test("reports audit-lock timing and preserves the recorded chain", { timeout: 170_000 }, async (t) => {
-  const { stdout } = await promisify(execFile)(process.execPath, [probe, "run", dist], {
-    timeout: 150_000,
-    maxBuffer: 256 * 1024,
-  });
-  const report = JSON.parse(stdout);
-  assert.equal(report.platform, process.platform);
-  assert.equal(report.output.length, 3);
-  assert.deepEqual(
-    report.output.map((round: { waitMs: number }) => round.waitMs),
-    [5000, 5000, 30_000],
-  );
-  t.diagnostic(stdout.trim());
-});
+test(
+  "reports audit-lock timing and preserves the recorded chain",
+  { timeout: 170_000 },
+  async (t) => {
+    const { stdout } = await promisify(execFile)(process.execPath, [probe, "run", dist], {
+      timeout: 150_000,
+      maxBuffer: 256 * 1024,
+    });
+    const report = JSON.parse(stdout);
+    assert.equal(report.platform, process.platform);
+    assert.equal(report.output.length, 3);
+    assert.deepEqual(
+      report.output.map((round: { writers: number; waitMs: number }) => [
+        round.writers,
+        round.waitMs,
+      ]),
+      [
+        [8, 5000],
+        [24, 5000],
+        [24, 30_000],
+      ],
+    );
+    t.diagnostic(stdout.trim());
+  },
+);
