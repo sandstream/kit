@@ -16,6 +16,68 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 
 <!-- END kit -->
 
+## You are on Linux; kit also runs on macOS and Windows
+
+Agent sessions on this repo usually run in a Linux container, so local tests prove Linux only.
+kit ships to macOS and Windows too. Before committing code that touches the filesystem, processes,
+paths, shells or permissions, check it against all three:
+
+- **Paths:** use `node:path` (`join`, `resolve`, `sep`); never build paths with `/` or compare
+  them as strings. Windows is case-insensitive and uses `\`; macOS is usually case-insensitive
+  and `/tmp` is a symlink to `/private/tmp`, so compare `realpath`s.
+- **Processes and shells:** no `bash`, `grep -P`, `sed -i` or POSIX-only signals in code that runs
+  on users' machines. On Windows, `spawn` needs `shell` or a `.cmd` shim for npm-style tools.
+  Process groups and `SIGKILL` behave differently there.
+- **Files:** Windows refuses to delete or rename an open file. `chmod` modes and symlinks mostly
+  do not apply there (use `src/utils/secure-perms.ts`). File ids (`ino`) need `bigint` stats
+  (`src/utils/same-file.ts`); `src/file-identity-discipline.test.ts` fails any other `ino` comparison.
+- **Tests:** a test that only makes sense on POSIX skips on `win32` and says why; it is never
+  deleted to make a shard green.
+
+CI runs Linux and Windows (`.github/workflows/windows.yml`, four shards plus `windows-native`).
+**No CI job runs macOS.** A macOS-specific path is unverified until someone runs it on a Mac, so
+say so in the PR instead of claiming it works.
+
+## Changelog entries are fragments
+
+Do not edit `CHANGELOG.md` in a pull request. Add `changes/<name>.md` with the entry under its
+`### Added` / `### Fixed` / … heading, exactly as it should appear under `## [Unreleased]`
+([`changes/README.md`](./changes/README.md)). Fragments never conflict; edits to the shared
+`[Unreleased]` lines conflicted with every other open branch on each merge.
+
+## Before you push
+
+CI runs its steps in order and stops at the first red one, so a push used to show one failure at a
+time. Run the whole local gate first:
+
+```
+node scripts/prepush.mjs
+```
+
+It checks, in one pass: that the installed tools match `package-lock.json` (a stale `prettier` gave a
+false green format check), that the branch is current with `origin/main` (CI tests the merge), build,
+format, lint, `kit review --enforce` over **all** stages, the tests of the changed files, that every
+new source file has a test (CI's coverage gate, which `kit review` does not run), `kit self-audit` (CI's self-audit job, which also fails on rules `kit review` does not run, such as an export no other file names), Semgrep at the
+version and with the rule packs `.github/workflows/security.yml` names, and that the PR text holds no
+session URL. A Semgrep of another version does not run: the line shows `!` and `--strict` fails it. It lists every problem, then exits non-zero if there is one.
+
+`--allow "<check name>"` names a `kit review` check that fails for a reason outside your change, for
+example `enforcement gate liveness` in a worktree. It must be the exact name, and it is printed.
+
+## Public artifacts — issue & PR hygiene
+
+`sandstream/kit` is a **public** repository. When opening issues or PRs here:
+
+- **Never put an agent session URL in an issue or PR body**: a `claude.ai/code/session_…`
+  link, or a link to another agent's session or task. It is internal session metadata,
+  not useful to readers, and it clutters the public record (it accumulated on ~160
+  existing artifacts). The only footer is the tool's generic line with no session
+  link, such as `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+- No internal session IDs, private dashboard/console links, or paths under
+  another customer's project in public bodies.
+- Findings that could be a real security leak in a named third-party repo go to
+  a private security channel, never a public kit issue.
+
 ## Architecture decisions are a gate, and `kit check` does not run it
 
 `docs/adr` holds the ADRs; `kit adr list` prints each one and how it is held. The four
@@ -36,7 +98,9 @@ residual risk, but owns only the rig — the frozen input, ingest schema, determ
 adjudication and receipts — never the judgement), ADR-0008 (service passkeys and tokens
 have separate owners) and ADR-0009 (cloud evidence is ingested read-only; held by the tests
 its `enforced_by` names). ADR-0010 (a gate may ask a person, only through the agent harness;
-an unanswerable ask is a deny) is proposed and gates nothing until the owner accepts it.
+an unanswerable ask is a deny) and ADR-0011 (files and secrets may live in the repo as ciphertext
+per recipient, and no one may be locked out) are proposed and gate nothing until the owner
+accepts them.
 
 `node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
 does **not** include the ADR stage — only `kit review` (check + design + standards + adr + skill)
