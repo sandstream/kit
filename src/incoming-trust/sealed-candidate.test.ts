@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, lstatSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { it } from "node:test";
 import { captureIncomingCandidate, verifyRetainedIncomingCandidate } from "./candidate-flow.js";
@@ -45,7 +52,9 @@ it(
       );
       const result = withSealedRuntime(runtime, sha256, (sealed) => {
         assert.notEqual(lstatSync(sealed).dev, lstatSync(runtime).dev);
-        writeFileSync(runtime, "changed");
+        const replacement = join(f.root, "replacement");
+        writeFileSync(replacement, "changed", { flag: "wx", mode: 0o600 });
+        renameSync(replacement, runtime);
         const probe = spawnSync(sealed, ["--version"], { encoding: "utf8", timeout: 5000 });
         assert.equal(probe.status, 0, String(probe.error) + probe.stderr);
         return probe.stdout.trim();

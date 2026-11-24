@@ -31,9 +31,11 @@ export function readSnapshotFile(
 ) {
   if (!expected.isFile()) throw new Error("Incoming snapshot: unsupported-file");
   if (expected.size > BigInt(maxBytes)) throw new Error("Incoming snapshot: input-limit");
+  // Open an existing file only. The mode is ignored without O_CREAT.
   const input = openSync(
     source,
     constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    0o600,
   );
   try {
     if (!unchanged(expected, fstatSync(input, { bigint: true })))

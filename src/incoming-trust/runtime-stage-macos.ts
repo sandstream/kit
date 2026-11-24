@@ -11,7 +11,7 @@ import { readSnapshotBytes } from "./snapshot-io.js";
 // Only a staging executable and protocol markers may be removed here.
 const stageScript = `
 set -eu
-root=$1
+root=$KIT_RUNTIME_STAGE_ROOT
 umask 077
 /bin/mkdir -m 700 "$root"
 cd "$root"
@@ -47,8 +47,9 @@ export function startRuntimeStage() {
     "kit-incoming-runtime-" + randomBytes(16).toString("hex"),
   );
   const marker = join(root, "ready");
-  const child = spawn("/bin/sh", ["-c", stageScript, "kit-runtime-stage", root], {
-    env: { PATH: "/usr/bin:/bin", LC_ALL: "C" },
+  // The shell receives a fixed script. The staging path is a quoted data value.
+  const child = spawn("/bin/sh", ["-c", stageScript], {
+    env: { PATH: "/usr/bin:/bin", LC_ALL: "C", KIT_RUNTIME_STAGE_ROOT: root },
     stdio: ["pipe", "ignore", "ignore"],
     detached: true,
   });

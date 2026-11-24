@@ -16,6 +16,7 @@ import { storeFixture } from "../incoming-trust/authority-store.test-support.js"
 import { QUARANTINE_ACKNOWLEDGEMENT } from "../incoming-trust/authority-files.js";
 
 const CLI = fileURLToPath(new URL("../cli.js", import.meta.url));
+const CLI_TEST_WINDOW_MS = 4 * 60_000;
 const CHECKS = ["inventory", "artifacts", "scanners"].map((id) => ({
   id,
   status: "pass",
@@ -87,6 +88,9 @@ it("drives enroll, stage, request, approve and status through the real CLI", () 
   try {
     dependencyFreeRepository(f);
     assert.deepEqual(json(f, "status"), { enrolled: false });
+    // The approval must survive several independent CLI starts on a loaded runner.
+    f.proof.authority.maxApprovalAgeMs = CLI_TEST_WINDOW_MS;
+    f.proof.authority.maxVerificationAgeMs = CLI_TEST_WINDOW_MS;
     const authority = writeJson(f, "authority.json", f.proof.authority);
     assert.equal(json(f, "enroll", "--authority", authority).phase, "pending");
     const snapshot = join(f.root, "snapshot");
@@ -112,7 +116,7 @@ it("drives enroll, stage, request, approve and status through the real CLI", () 
     Object.assign(f.proof.verification, verification);
     f.proof.approval.context = { ...verification.context };
     f.proof.approval.issuedAt = verification.createdAt;
-    f.proof.approval.expiresAt = verification.createdAt + 20_000;
+    f.proof.approval.expiresAt = verification.createdAt + CLI_TEST_WINDOW_MS;
     f.proof.resign();
     assert.equal(f.proof.approval.verificationDigest, requested.verificationDigest);
     const approval = writeJson(f, "approval.json", f.proof.approval);

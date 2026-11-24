@@ -24,7 +24,7 @@ it("removes its staging executable on ordinary release", { skip }, () => {
   const stage = startRuntimeStage();
   try {
     stage.assertCurrent();
-    writeFileSync(stage.executable, "fixture");
+    writeFileSync(stage.executable, "fixture", { flag: "wx", mode: 0o600 });
   } finally {
     stage.release();
   }
@@ -70,7 +70,7 @@ it(
   { skip },
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "kit-runtime-stage-test-")));
-    const scratch = join(root, "scratch");
+    const scratch = join(root, "scratch with spaces");
     const marker = join(root, "copied");
     const probe = join(root, "probe.mjs");
     mkdirSync(scratch);

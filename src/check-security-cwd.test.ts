@@ -117,17 +117,31 @@ function statusOf(results: Awaited<ReturnType<typeof checkSecurity>>, name: stri
   return hit ? hit.status : "absent";
 }
 
+function ignoreVerdictFrom(caller: string, governed: string): string {
+  const module = new URL("./check-security.js", import.meta.url);
+  // Keep the fixture cwd in the child so Windows releases it when the child exits.
+  return execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const { checkSecurity } = await import(${JSON.stringify(module.href)});
+       const checks = await checkSecurity(process.argv[1]);
+       process.stdout.write(checks.find((check) => check.name === ".env gitignored")?.status ?? "absent");`,
+      governed,
+    ],
+    { cwd: caller, encoding: "utf8", timeout: 120_000 },
+  );
+}
+
 describe("checkSecurity honours the cwd it is given", () => {
-  it("the .env gitignore verdict follows the GOVERNED tree, not the process's", async () => {
+  it("the .env gitignore verdict follows the GOVERNED tree, not the process's", () => {
     const A = projectWithGitignore();
     const B = projectWithout();
     try {
       // Process sits in A (complete .gitignore) and asks about B (none).
-      const aboutB = await inCwd(A, () => checkSecurity(B));
-      const aboutA = await inCwd(A, () => checkSecurity(A));
-
-      const bStatus = statusOf(aboutB, ".env gitignored");
-      const aStatus = statusOf(aboutA, ".env gitignored");
+      const bStatus = ignoreVerdictFrom(A, B);
+      const aStatus = ignoreVerdictFrom(A, A);
 
       // The pair IS the assertion. Ignoring `cwd` makes both answers A's answer.
       assert.notEqual(
