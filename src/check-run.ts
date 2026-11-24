@@ -303,6 +303,8 @@ export function securityCheckToJson(s: SecurityCheckResult): JsonCheck {
     ...(s.didNotRun ? { didNotRun: true } : {}),
     ...(s.hasFindings ? { hasFindings: true } : {}),
     ...(s.scanIncomplete ? { scanIncomplete: true } : {}),
+    ...(s.evidenceStatus ? { evidenceStatus: s.evidenceStatus } : {}),
+    ...(s.evidenceSources ? { evidenceSources: s.evidenceSources } : {}),
   };
 }
 

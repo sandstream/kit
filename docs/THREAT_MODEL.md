@@ -191,9 +191,11 @@ yours — kit ships no default value.
 - Releases are published with `npm publish --provenance` (SLSA attestation).
 - Git tags are GPG-signed.
 - The dependency tree is bumblebee-scanned as a release gate in
-  `.github/workflows/publish.yml` (`KIT_BUMBLEBEE_REQUIRED=1`: a match, or a scan
-  that could not run, fails the release), and again on every push and pull request
-  to `main` plus nightly in `.github/workflows/security.yml`.
+  `.github/workflows/publish.yml` and in `.github/workflows/security.yml`.
+  With `KIT_BUMBLEBEE_REQUIRED=1`, a finding or incomplete scan fails the gate.
+  Complete evidence requires a successful process and a matching final report.
+  The JSON row marks stale catalogs separately from complete-empty evidence.
+  Catalog age remains advisory for the pinned release.
 - The published `kit` binary chmod's its dist artifacts to 0755 explicitly
   in `npm run build`; no runtime arbitrary-permission grants.
 

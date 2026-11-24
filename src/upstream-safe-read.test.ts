@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import fs, { appendFileSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -67,6 +68,30 @@ describe("readRegularFileIfPresent", () => {
       assert.throws(() => readRegularFileIfPresent(join(dir, "big")), /too large/);
     }));
 });
+
+it("stops at the observed file size when a repository file grows", (t) =>
+  inDir((dir) => {
+    const file = join(dir, "changed");
+    writeFileSync(file, "a");
+    const read = fs.readSync;
+    const spy = t.mock.method(
+      fs,
+      "readSync",
+      (fd: number, buffer: Buffer, offset: number, length: number, position: number | null) => {
+        appendFileSync(file, "extra bytes");
+        return read(fd, buffer, offset, length, position);
+      },
+    );
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => readRegularFileIfPresent(file), /size changed/);
+      assert.equal(spy.mock.callCount(), 1);
+      assert.equal(spy.mock.calls[0].arguments[3], 2);
+    } finally {
+      spy.mock.restore();
+      syncBuiltinESMExports();
+    }
+  }));
 
 describe("entryExists", () => {
   it("is true for a file, a symlink and a folder, and false for nothing", () =>

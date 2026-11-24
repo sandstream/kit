@@ -4,15 +4,25 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { checkApkFloors } from "./check-apk-floors.js";
 import { gateStatus } from "./check-security.js";
-import { tarOf } from "./apk-index.test-support.js";
+import {
+  alpineFixtureFetcher,
+  apkIndexFixture,
+  checkApkFloorsFixture,
+  secdbFixture,
+  secdbIndexFixture,
+  signApkIndexFixture,
+  unsignedApkIndexFixture,
+} from "./apk-index.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const VALID_MAIN = {
+  distroversion: "v3.24",
+  reponame: "main",
   packages: [{ pkg: { name: "expat", secfixes: { "2.10.0-r0": ["CVE-2026-117610"] } } }],
 };
-const INDEX = gzipSync(tarOf({ APKINDEX: "P:libexpat\nV:2.10.0-r0\no:expat\n" }));
+const INDEX = apkIndexFixture("v3.24", "P:libexpat\nV:2.10.0-r0\no:expat\n");
+const PAYLOAD = unsignedApkIndexFixture("v3.24", "P:libexpat\nV:2.10.0-r0\no:expat\n");
 
 async function inspectSources(main: unknown, index = INDEX, floor = "2.8.5-r0") {
   const root = mkdtempSync(join(tmpdir(), "kit-apk-integrity-"));
@@ -21,17 +31,16 @@ async function inspectSources(main: unknown, index = INDEX, floor = "2.8.5-r0") 
       join(root, "Dockerfile"),
       `FROM node:22-alpine\nRUN apk add 'libexpat>=${floor}'\n`,
     );
-    return await checkApkFloors(
+    return await checkApkFloorsFixture(
       root,
-      async (url) => {
-        if (url === "https://secdb.alpinelinux.org/")
-          return Buffer.from('<a href="v3.24/">v3.24/</a>');
+      alpineFixtureFetcher(async (url) => {
+        if (url === "https://secdb.alpinelinux.org/") return secdbIndexFixture("v3.24");
         if (url.endsWith("/main.json"))
           return Buffer.isBuffer(main) ? main : Buffer.from(JSON.stringify(main));
-        if (url.endsWith("/community.json")) return Buffer.from('{"packages":[]}');
+        if (url.endsWith("/community.json")) return secdbFixture("v3.24", "community");
         if (url.endsWith("/APKINDEX.tar.gz")) return index;
         throw new Error("Unexpected source URL");
-      },
+      }),
       {},
     );
   } finally {
@@ -55,6 +64,7 @@ it("passes a fixed floor after a complete source comparison", async () => {
 
 it("keeps a malformed fix record unverified instead of dropping the vulnerability", async () => {
   const result = await inspectSources({
+    ...VALID_MAIN,
     packages: [{ pkg: { name: "expat", secfixes: { "2.10.0-r0": "CVE-2026-117610" } } }],
   });
   assert.equal(result.status, "warn");
@@ -63,11 +73,11 @@ it("keeps a malformed fix record unverified instead of dropping the vulnerabilit
 });
 
 it("keeps a truncated tar body unverified despite complete gzip framing", async () => {
-  const truncated = gzipSync(gunzipSync(INDEX).subarray(0, 522));
+  const truncated = signApkIndexFixture(gzipSync(gunzipSync(PAYLOAD).subarray(0, 1024 + 522)));
   const result = await inspectSources(VALID_MAIN, truncated);
   assert.equal(result.status, "warn");
   assert.equal(result.didNotRun, true);
-  assert.match(result.detail, /unverified/);
+  assert.match(result.detail, /partial tar block/);
 });
 
 it("refuses invalid UTF-8 before replacement bytes can hide a source package", async () => {
@@ -80,7 +90,7 @@ it("refuses invalid UTF-8 before replacement bytes can hide a source package", a
 });
 
 it("refuses a hidden gzip member instead of passing the complete visible index", async () => {
-  const hidden = Buffer.concat([INDEX, Buffer.alloc(1), INDEX]);
+  const hidden = signApkIndexFixture(Buffer.concat([PAYLOAD, Buffer.alloc(1), PAYLOAD]));
   const result = await inspectSources(VALID_MAIN, hidden, "2.10.0-r0");
   assert.equal(result.status, "warn");
   assert.equal(result.didNotRun, true);

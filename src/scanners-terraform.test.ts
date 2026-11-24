@@ -48,11 +48,12 @@ describe("downloaded provider binaries stay out of the scan", () => {
 });
 
 describe("trivy config mode for infrastructure code", () => {
-  it("runs trivy in config mode with sarif output", () => {
+  it("runs Trivy config in native JSON mode and ingests SARIF", () => {
     const d = def("trivy-config");
     assert.equal(d.bin, "trivy");
     assert.equal(d.args[0], "config");
-    assert.ok(d.args.includes("sarif"));
+    assert.deepEqual(d.args.slice(-4), ["--format", "json", "--quiet", "."]);
+    assert.equal(d.format, "sarif");
   });
 
   it("applies when a .tf file or a Dockerfile exists", () => {
@@ -241,10 +242,11 @@ describe("nothing to scan does not satisfy a required scanner", () => {
     assert.equal(scanHealthGate([run], { strict: true }).ok, true);
   });
 
-  it("an ordinary not-applicable stays a legitimate skip for a required scanner", () => {
+  it("a required scanner needs applicable input to produce evidence", () => {
     const g = scanHealthGate([{ ...run, noTarget: undefined }], {
       requiredScanners: ["osv-scanner"],
     });
-    assert.equal(g.ok, true);
+    assert.equal(g.ok, false);
+    assert.match(g.failures[0], /nothing to scan/);
   });
 });

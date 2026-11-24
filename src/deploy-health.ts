@@ -11,6 +11,7 @@
  * link-local and metadata addresses. The address check resolves the name once and fetch
  * resolves it again, so a DNS answer that changes between the two is not covered.
  */
+import { readCappedBody } from "./utils/readCappedBody.js";
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 import type { DeployCheckResult } from "./check-deploy.js";
@@ -173,24 +174,6 @@ function pick(value: unknown, path: string): unknown {
   return node;
 }
 
-async function readCapped(res: Response): Promise<string | null> {
-  const reader = res.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 async function readTarget(
   target: DeployHealthTarget,
   timeoutMs: number,
@@ -214,7 +197,8 @@ async function readTarget(
   if (res.status >= 300 && res.status < 400)
     return unverified("the endpoint redirects, kit does not follow a redirect");
   if (!res.ok) return unverified(`the endpoint answered HTTP ${res.status}`);
-  const body = await readCapped(res).catch(() => null);
+  const bytes = await readCappedBody(res, MAX_BODY_BYTES).catch(() => null);
+  const body = bytes?.toString("utf8") ?? null;
   if (body === null) return unverified("the response is larger than 64 KB");
   let data: unknown;
   try {
