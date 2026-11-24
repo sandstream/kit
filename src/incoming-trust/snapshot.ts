@@ -17,15 +17,19 @@ export interface IncomingSnapshot {
   bytes: number;
 }
 
-function expectedLayout(path: string): boolean {
+function expectedLayout(path: string, layout: "snapshot" | "candidate"): boolean {
+  const expected =
+    layout === "candidate" ? ["artifacts", "manifest.json", "tree"] : ["manifest.json", "tree"];
   const directory = opendirSync(path);
   try {
     const names: string[] = [];
     for (let entry = directory.readSync(); entry; entry = directory.readSync()) {
       names.push(entry.name);
-      if (names.length > 2) return false;
+      if (names.length > expected.length) return false;
     }
-    return JSON.stringify(names.sort()) === '["manifest.json","tree"]';
+    return (
+      names.length === expected.length && names.sort().every((name, i) => name === expected[i])
+    );
   } finally {
     directory.closeSync();
   }
@@ -35,6 +39,7 @@ export function verifyIncomingSnapshot(
   destination: string,
   expectedDigest: string,
   options?: Partial<IncomingSnapshotLimits>,
+  layout: "snapshot" | "candidate" = "snapshot",
 ): { ok: boolean } {
   if (typeof expectedDigest !== "string" || !/^[a-f0-9]{64}$/.test(expectedDigest))
     return { ok: false };
@@ -44,7 +49,7 @@ export function verifyIncomingSnapshot(
     const root = lstatSync(destination, { bigint: true });
     if (!root.isDirectory()) return { ok: false };
     assertPrivateEntry(destination, root);
-    if (!expectedLayout(destination)) return { ok: false };
+    if (!expectedLayout(destination, layout)) return { ok: false };
     const path = join(destination, "manifest.json");
     const manifestInfo = lstatSync(path, { bigint: true });
     assertPrivateEntry(path, manifestInfo);
