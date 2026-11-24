@@ -91,6 +91,28 @@ test("JSON verification identifies malformed records without printing their cont
   assert.doesNotMatch(result.stdout + result.stderr, /private-event-sentinel/);
 });
 
+test("JSON verification reports non-object entries and preserves the log", (t) => {
+  const fixture = auditFixture(t);
+  const logPath = join(fixture.project, ".kit-audit.jsonl");
+  for (const value of [null, [], 1, true, "private-event-sentinel"]) {
+    const content = `${JSON.stringify(value)}\n`;
+    writeFileSync(logPath, content);
+
+    const result = auditCli(fixture, ["verify", "--read-only", "--json"]);
+    assert.equal(result.status, 1, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ok, false);
+    assert.deepEqual(report.chain, {
+      ok: false,
+      entries: 0,
+      brokenAt: 0,
+      reason: "audit entry must be a JSON object",
+    });
+    assert.doesNotMatch(result.stdout + result.stderr, /private-event-sentinel/);
+    assert.equal(readFileSync(logPath, "utf8"), content);
+  }
+});
+
 for (const strict of [false, true]) {
   test(`JSON verification preserves missing-log policy (strict=${strict})`, (t) => {
     const fixture = auditFixture(t);

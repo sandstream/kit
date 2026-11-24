@@ -1,13 +1,16 @@
-import { readFile, writeFile, mkdir, stat, rename, unlink } from "node:fs/promises";
+import { lstatSync, type BigIntStats } from "node:fs";
+import { readFile, mkdir, open, stat, rename, unlink, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AnchorRecord } from "./audit-anchor.js";
 import { canonicalAuditLogPath } from "./audit-log-path.js";
-import { secureFileStrict } from "./utils/secure-perms.js";
+import { secureFileStrictAsync } from "./utils/secure-perms.js";
 import { identityOf, sameIdentity } from "./utils/same-file.js";
 import { externalReceiptIdentity, validExternalStatement } from "./audit-external.js";
 
 export type AnchorStore = Record<string, AnchorRecord>;
+
+export class AuditAnchorIndexAccessError extends Error {}
 
 export async function readAnchorStore(path: string): Promise<AnchorStore> {
   try {
@@ -20,9 +23,11 @@ export async function readAnchorStore(path: string): Promise<AnchorStore> {
     }
     return parsed as AnchorStore;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    // eslint-disable-next-line preserve-caught-error -- Parser errors can disclose index content.
-    throw new Error(
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return {};
+    const Failure = code === "EACCES" || code === "EPERM" ? AuditAnchorIndexAccessError : Error;
+    // Parser errors can disclose index content.
+    throw new Failure(
       "The audit anchor index is unreadable or invalid. Preserve it before recovery.",
     );
   }
@@ -124,29 +129,82 @@ export function listAnchorRecords(
     });
 }
 
-async function publishStore(path: string, store: AnchorStore): Promise<void> {
-  const temporary = join(dirname(path), `.kit-audit-index-${randomUUID()}.tmp`);
+export interface PreparedAnchorStore {
+  path: string;
+  temporary: string;
+  handle: FileHandle;
+  parent: BigIntStats;
+  identity: BigIntStats;
+}
+
+function stagedFileIsOwned(prepared: PreparedAnchorStore): boolean {
+  const parent = lstatSync(dirname(prepared.path), { bigint: true, throwIfNoEntry: false });
+  const entry = lstatSync(prepared.temporary, { bigint: true, throwIfNoEntry: false });
+  return !!(
+    parent?.isDirectory() &&
+    sameIdentity(parent, prepared.parent) &&
+    entry?.isFile() &&
+    entry.nlink === 1n &&
+    sameIdentity(entry, prepared.identity)
+  );
+}
+
+function assertStagedFile(prepared: PreparedAnchorStore): void {
+  if (!stagedFileIsOwned(prepared)) throw new Error("The prepared audit anchor changed.");
+}
+
+export async function closePreparedAnchorStore(prepared: PreparedAnchorStore): Promise<void> {
   try {
-    await writeFile(temporary, JSON.stringify(store, null, 2) + "\n", { flag: "wx", mode: 0o600 });
-    secureFileStrict(temporary);
-    await rename(temporary, path);
+    if (stagedFileIsOwned(prepared)) {
+      await unlink(prepared.temporary).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
   } finally {
-    await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
-    });
+    await prepared.handle.close();
+  }
+}
+
+/** Secure an empty replacement before acquiring either audit lock. */
+export async function prepareAnchorStore(path: string): Promise<PreparedAnchorStore> {
+  await mkdir(dirname(path), { recursive: true });
+  const canonical = canonicalAuditLogPath(path);
+  const directory = dirname(canonical);
+  const parent = lstatSync(directory, { bigint: true });
+  const temporary = join(directory, `.kit-audit-index-${randomUUID()}.tmp`);
+  const handle = await open(temporary, "wx", 0o600);
+  let prepared: PreparedAnchorStore | undefined;
+  try {
+    prepared = {
+      path: canonical,
+      temporary,
+      handle,
+      parent,
+      identity: await handle.stat({ bigint: true }),
+    };
+    assertStagedFile(prepared);
+    await secureFileStrictAsync(temporary);
+    assertStagedFile(prepared);
+    return prepared;
+  } catch (error) {
+    if (prepared) await closePreparedAnchorStore(prepared);
+    else await handle.close();
+    throw error;
   }
 }
 
 /** Merge and atomically publish one seal while other logs retain their records. */
 export async function storeAnchorRecord(
-  path: string,
+  prepared: PreparedAnchorStore,
   logPath: string,
   record: AnchorRecord,
 ): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const canonical = canonicalAuditLogPath(path);
+  const canonical = prepared.path;
   const { withSqliteMutex } = await import("./sqlite-mutex.js");
   await withSqliteMutex(`${canonical}.lock.sqlite`, async () => {
+    assertStagedFile(prepared);
+    if (canonicalAuditLogPath(canonical) !== canonical)
+      throw new Error("The audit anchor index path changed.");
     const store = await readAnchorStore(canonical);
     for (const storedPath of Object.keys(store)) {
       if (sameLog(storedPath, logPath)) {
@@ -160,6 +218,10 @@ export async function storeAnchorRecord(
       }
     }
     store[canonicalAuditLogPath(logPath)] = record;
-    await publishStore(canonical, store);
+    await prepared.handle.writeFile(JSON.stringify(store, null, 2) + "\n", "utf8");
+    assertStagedFile(prepared);
+    if (canonicalAuditLogPath(canonical) !== canonical)
+      throw new Error("The audit anchor index path changed.");
+    await rename(prepared.temporary, canonical);
   });
 }

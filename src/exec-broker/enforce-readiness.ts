@@ -20,7 +20,9 @@ export type EnforceVerdict =
   | "ready" // ops observed, none would be denied → safe to flip
   | "would-block" // at least one observed op would be denied under enforce
   | "untested" // no observe data — cannot claim ready
-  | "unverifiable"; // the audit chain is broken, so the observe events are not evidence
+  | "unverifiable"; // the local audit snapshot could not be verified
+
+export type UntestedObserveReason = "missing-log" | "empty-log" | "no-observations";
 
 export interface EnforceReadiness {
   opsObserved: number;
@@ -29,8 +31,10 @@ export interface EnforceReadiness {
   /** Distinct would-be-denial reasons, most frequent first (verbatim — no fragile target parsing). */
   reasons: { reason: string; count: number }[];
   verdict: EnforceVerdict;
-  /** Where and why the audit chain breaks. Set only with the `unverifiable` verdict. */
+  /** Why the audit snapshot could not be verified. Set only with `unverifiable`. */
   evidenceBreak?: string;
+  /** Why the local log provided no observe evidence. Set only with `untested`. */
+  untestedReason?: UntestedObserveReason;
 }
 
 /**

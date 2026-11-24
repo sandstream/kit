@@ -21,15 +21,12 @@
  * Deterministic, local-only, no telemetry, no egress.
  */
 import {
-  chmodSync,
   closeSync,
   constants,
   existsSync,
   fstatSync,
-  lstatSync,
   openSync,
   readFileSync,
-  readlinkSync,
   writeFileSync,
   copyFileSync,
   mkdirSync,
@@ -37,9 +34,8 @@ import {
   renameSync,
   rmdirSync,
   rmSync,
-  symlinkSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   POLICY_FILE,
@@ -51,7 +47,11 @@ import {
   type PolicyVerifyStatus,
 } from "./policy-doc.js";
 import { POLICY_SIGNERS_FILE, getSignersPath, hasPolicyAnchor } from "./policy-trust.js";
-import { sameIdentity } from "./utils/same-file.js";
+import {
+  applySignedPairAtomically,
+  errorCode,
+  type ApplySignedPairResult,
+} from "./signed-file-pair.js";
 
 export type PullStatus =
   /** Verified against the local anchor and written to the project. */
@@ -97,138 +97,18 @@ export function readRegularSource(path: string): Buffer | null {
   }
 }
 
-type RenameFile = (from: string, to: string) => void;
-
-export interface ApplyPolicyPairResult {
-  ok: boolean;
-  detail: string;
-}
-
-type SignatureSnapshot =
-  { kind: "file"; bytes: Buffer; mode: number } | { kind: "symlink"; target: string };
-
-function errorCode(error: unknown): string {
-  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
-    return error.code;
-  }
-  return "filesystem error";
-}
-
-function readSignatureSnapshot(path: string): SignatureSnapshot | null {
-  // A symlink target can only be read by path in portable Node. Read it before
-  // checking the entry, so no later path read follows a checked symlink.
-  let linkTarget: string | null = null;
-  try {
-    linkTarget = readlinkSync(path);
-  } catch (error) {
-    if (errorCode(error) === "ENOENT") return null;
-    if (errorCode(error) !== "EINVAL") throw error;
-  }
-  if (linkTarget !== null) {
-    const info = lstatSync(path);
-    if (!info.isSymbolicLink()) {
-      throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
-    }
-    return { kind: "symlink", target: linkTarget };
-  }
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
-  try {
-    const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isFile())
-      throw Object.assign(new Error("signature is not a regular file"), { code: "EINVAL" });
-    const bytes = readFileSync(fd);
-    const entry = lstatSync(path, { bigint: true });
-    if (!entry.isFile() || !sameIdentity(opened, entry)) {
-      throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
-    }
-    return { kind: "file", bytes, mode: Number(opened.mode) };
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function restoreSignature(path: string, snapshot: SignatureSnapshot | null): void {
-  if (snapshot === null) {
-    rmSync(path, { force: true });
-    return;
-  }
-  const stage = mkdtempSync(join(dirname(path), ".kit-policy-restore-"));
-  try {
-    const replacement = join(stage, "signature");
-    if (snapshot.kind === "symlink") {
-      symlinkSync(snapshot.target, replacement);
-    } else {
-      writeFileSync(replacement, snapshot.bytes, { mode: snapshot.mode });
-      chmodSync(replacement, snapshot.mode);
-    }
-    renameSync(replacement, path);
-  } finally {
-    rmSync(stage, { recursive: true, force: true });
-  }
-}
-
-function rollbackSignature(
-  path: string,
-  snapshot: SignatureSnapshot | null,
-  applyError: unknown,
-): ApplyPolicyPairResult {
-  try {
-    restoreSignature(path, snapshot);
-  } catch (restoreError) {
-    return {
-      ok: false,
-      detail: `apply failed (${errorCode(applyError)}); signature rollback also failed (${errorCode(restoreError)}) — policy remains fail-closed`,
-    };
-  }
-  return {
-    ok: false,
-    detail: `apply failed (${errorCode(applyError)}); previous pair retained`,
-  };
-}
-
-/**
- * Install a verified policy pair without ever exposing a new policy under an old signature.
- * The signature moves first, making any interrupted transition fail closed; the policy is the
- * final atomic rename. If that rename fails, restore the exact previous signature bytes.
- */
 export function applyPolicyPairAtomically(
   destRoot: string,
   policyBytes: Buffer,
   signatureBytes: Buffer,
-  renameFile: RenameFile = renameSync,
-): ApplyPolicyPairResult {
-  let stage: string | null = null;
-  const destPolicy = getPolicyPath(destRoot);
-  const destSignature = getPolicySigPath(destRoot);
-  let previousSignature: SignatureSnapshot | null = null;
-  let signatureReplaced = false;
-
-  try {
-    previousSignature = readSignatureSnapshot(destSignature);
-    stage = mkdtempSync(join(destRoot, ".kit-policy-apply-"));
-    const nextPolicy = join(stage, POLICY_FILE);
-    const nextSignature = join(stage, POLICY_SIG_FILE);
-    writeFileSync(nextPolicy, policyBytes);
-    writeFileSync(nextSignature, signatureBytes);
-
-    renameFile(nextSignature, destSignature);
-    signatureReplaced = true;
-    renameFile(nextPolicy, destPolicy);
-    return { ok: true, detail: "verified policy pair installed" };
-  } catch (error) {
-    if (signatureReplaced) {
-      return rollbackSignature(destSignature, previousSignature, error);
-    }
-    return { ok: false, detail: `apply failed (${errorCode(error)}); previous pair retained` };
-  } finally {
-    if (stage) {
-      try {
-        rmSync(stage, { recursive: true, force: true });
-      } catch {
-        // The applied pair is already complete; stale private staging data is non-authoritative.
-      }
-    }
-  }
+  renameFile: (from: string, to: string) => void = renameSync,
+): ApplySignedPairResult {
+  return applySignedPairAtomically(
+    { document: getPolicyPath(destRoot), signature: getPolicySigPath(destRoot), kind: "policy" },
+    policyBytes,
+    signatureBytes,
+    renameFile,
+  );
 }
 
 /**

@@ -126,30 +126,23 @@ function hashLine(preHashJson: string): string {
   return createHash("sha256").update(preHashJson).digest("hex");
 }
 
-/** Read a valid chain's last hash. Preserve invalid logs and refuse further appends. */
-async function readChainTail(logPath: string): Promise<{ hash: string; separator: string }> {
-  try {
-    const content = await readFile(logPath, "utf-8");
-    if (!verifyAuditChain(content).ok) {
-      throw new Error(
-        "The audit chain is invalid. Preserve the log and recover it before appending.",
-      );
-    }
-    const lines = content.split("\n").filter((l) => l.trim().length > 0);
-    const separator = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
-    if (lines.length === 0) return { hash: GENESIS_HASH, separator };
-    const last = JSON.parse(lines[lines.length - 1]) as { hash: string };
-    return { hash: last.hash, separator };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT")
-      return { hash: GENESIS_HASH, separator: "" };
-    throw error;
+/** Get the tail of the snapshot held under the write lock. */
+function chainTail(content: string): { hash: string; separator: string } {
+  if (!verifyAuditChain(content).ok) {
+    throw new Error(
+      "The audit chain is invalid. Preserve the log and recover it before appending.",
+    );
   }
+  const lines = content.split("\n").filter((line) => line.trim().length > 0);
+  const separator = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
+  const last = lines.at(-1);
+  if (!last) return { hash: GENESIS_HASH, separator };
+  return { hash: (JSON.parse(last) as { hash: string }).hash, separator };
 }
 
-/** Append one event and advance its anchor while the caller holds the log lock. */
-async function appendChained(logPath: string, event: AuditEvent): Promise<string> {
-  const { hash: prev, separator } = await readChainTail(logPath);
+/** Append one event while the caller holds the log lock. */
+async function appendChained(logPath: string, content: string, event: AuditEvent): Promise<string> {
+  const { hash: prev, separator } = chainTail(content);
   const preHash = JSON.stringify({ ...event, prev });
   const hash = hashLine(preHash);
   // Best-effort identity signing: if a local kit identity exists, sign the
@@ -168,8 +161,10 @@ async function appendChained(logPath: string, event: AuditEvent): Promise<string
 }
 
 async function appendSerialized(logPath: string, event: AuditEvent): Promise<void> {
-  const { appendWithAuditAnchor } = await import("./audit-anchor.js");
-  await appendWithAuditAnchor(logPath, (canonical) => appendChained(canonical, event));
+  const { appendWithAuditAnchor } = await import("./audit-anchored-append.js");
+  await appendWithAuditAnchor(logPath, (canonical, content) =>
+    appendChained(canonical, content, event),
+  );
 }
 
 /**
@@ -234,16 +229,19 @@ export function verifyAuditChain(content: string): ChainVerifyResult {
   const lines = content.split("\n").filter((l) => l.trim().length > 0);
   let prev = GENESIS_HASH;
   for (let i = 0; i < lines.length; i++) {
-    let obj: Record<string, unknown>;
+    let entry: unknown;
     try {
-      obj = JSON.parse(lines[i]) as Record<string, unknown>;
+      entry = JSON.parse(lines[i]);
     } catch {
       return { ok: false, entries: i, brokenAt: i, reason: "unparseable line" };
+    }
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return { ok: false, entries: i, brokenAt: i, reason: "audit entry must be a JSON object" };
     }
     // `sig`/`kid` are attached AFTER the hash is computed (see appendChained),
     // so they must be excluded from the hashed remainder. Lines without them
     // (legacy/keyless) leave `rest` unchanged → backward-compatible.
-    const { hash, sig: _sig, kid: _kid, ...rest } = obj;
+    const { hash, sig: _sig, kid: _kid, ...rest } = entry as Record<string, unknown>;
     if (typeof hash !== "string") {
       return { ok: false, entries: i, brokenAt: i, reason: "missing hash (unchained entry)" };
     }

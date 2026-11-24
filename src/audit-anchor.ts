@@ -31,17 +31,19 @@
  * A timestamp alone does not detect rollback. An attacker who controls the
  * launcher can replace the delegated verifier. See ExternalTimestampAnchor.
  *
- * The append path stays KEYLESS so a project-sandboxed agent (which cannot read
- * `~/.kit`) can still append audit entries; anchoring is layered on top and is
- * best-effort / fail-soft on the write path. A log that was never anchored
- * verifies as "legacy (unanchored)" - a warning, not a hard failure.
+ * A project-sandboxed agent that cannot access the index can append to the keyless chain.
+ * When the index has a seal for this log, verify its prefix before appending.
+ * Auto-advance after a successful write remains best-effort.
  */
 import { readFile } from "node:fs/promises";
 import {
+  closePreparedAnchorStore,
   readAnchorStore,
   findAnchorRecord,
   listAnchorRecords,
+  prepareAnchorStore,
   storeAnchorRecord,
+  type PreparedAnchorStore,
 } from "./audit-anchor-store.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -294,15 +296,20 @@ export async function anchorAuditLog(
   opts: { external?: boolean; acceptRollback?: boolean } = {},
 ): Promise<AnchorRecord> {
   const { withAuditWriteLock } = await import("./audit-write-lock.js");
-  return withAuditWriteLock(logPath, async (canonical) => {
-    if ((await readFile(canonical, "utf8")) !== content) {
-      throw new Error(
-        "The audit log changed after the snapshot was read. Read it again before anchoring.",
-      );
-    }
-    if (!opts.acceptRollback) await refuseResealOverAlarm(canonical, content, dir);
-    return sealAuditLog(canonical, content, dir, opts);
-  });
+  const prepared = await prepareAnchorStore(anchorRecordPath(dir));
+  try {
+    return await withAuditWriteLock(logPath, async (canonical) => {
+      if ((await readFile(canonical, "utf8")) !== content) {
+        throw new Error(
+          "The audit log changed after the snapshot was read. Read it again before anchoring.",
+        );
+      }
+      if (!opts.acceptRollback) await refuseResealOverAlarm(canonical, content, dir);
+      return sealAuditLog(canonical, content, prepared, dir, opts);
+    });
+  } finally {
+    await closePreparedAnchorStore(prepared);
+  }
 }
 
 /**
@@ -329,6 +336,7 @@ async function refuseResealOverAlarm(
 async function sealAuditLog(
   logPath: string,
   content: string,
+  prepared: PreparedAnchorStore,
   dir?: string,
   opts: { external?: boolean } = {},
 ): Promise<AnchorRecord> {
@@ -352,7 +360,7 @@ async function sealAuditLog(
   if (opts.external) {
     rec.external = await issueExternalReceipt(logPath, rec);
   }
-  await storeAnchorRecord(anchorRecordPath(dir), logPath, rec);
+  await storeAnchorRecord(prepared, logPath, rec);
   return rec;
 }
 
@@ -618,22 +626,30 @@ export async function tryAdvanceAnchorOnAppend(
   if (process.env.KIT_AUDIT_ANCHOR === "0") return;
   try {
     const { withAuditWriteLock } = await import("./audit-write-lock.js");
-    await withAuditWriteLock(logPath, (canonical) => advanceAnchor(canonical, dir, opts));
+    await withAnchorStoreForAppend(dir, (prepared) =>
+      withAuditWriteLock(logPath, (canonical) =>
+        advanceAuditAnchorUnderLock(canonical, prepared, dir, opts),
+      ),
+    );
   } catch {
     // A failed anchor does not invalidate an otherwise successful local append.
   }
 }
 
-/** Hold the log lock across the append and its optional seal. */
-export async function appendWithAuditAnchor(
-  logPath: string,
-  append: (canonical: string) => Promise<string>,
-): Promise<void> {
-  const { withAuditWriteLock } = await import("./audit-write-lock.js");
-  await withAuditWriteLock(logPath, async (canonical) => {
-    const hash = await append(canonical);
-    await advanceAnchor(canonical, undefined, { expectedTailHashes: [hash] });
-  });
+/** An unavailable anchor store must not prevent a valid local append. */
+export async function withAnchorStoreForAppend<T>(
+  dir: string | undefined,
+  operation: (prepared?: PreparedAnchorStore) => Promise<T>,
+): Promise<T> {
+  const prepared =
+    process.env.KIT_AUDIT_ANCHOR === "0"
+      ? undefined
+      : await prepareAnchorStore(anchorRecordPath(dir)).catch(() => undefined);
+  try {
+    return await operation(prepared);
+  } finally {
+    if (prepared) await closePreparedAnchorStore(prepared).catch(() => undefined);
+  }
 }
 
 function matchesAppendedTail(seals: LineSeal[] | null, expected?: string[]): boolean {
@@ -655,12 +671,14 @@ async function canExtendAnchor(
   return verified.status === "anchored-ok" && (verified.newSinceAnchor ?? 0) <= maxNewEntries;
 }
 
-async function advanceAnchor(
+/** Advance only after the caller locks the audit log. */
+export async function advanceAuditAnchorUnderLock(
   logPath: string,
+  prepared: PreparedAnchorStore | undefined,
   dir?: string,
   opts: { expectedNewEntries?: number; expectedTailHashes?: string[] } = {},
 ): Promise<void> {
-  if (process.env.KIT_AUDIT_ANCHOR === "0") return;
+  if (!prepared) return;
   const expectedTailHashes = opts.expectedTailHashes;
   const expectedNewEntries = Math.max(
     1,
@@ -694,7 +712,7 @@ async function advanceAnchor(
       if (total > expectedNewEntries) return;
       if (total === 0) return; // nothing (or unparseable) to seal
     }
-    await sealAuditLog(logPath, content, dir);
+    await sealAuditLog(logPath, content, prepared, dir);
   } catch {
     // Best-effort: append must succeed even when anchoring cannot (sandbox /
     // unwritable home / unparseable log). The keyless chain still protects the

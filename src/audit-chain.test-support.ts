@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { anchorAuditLog } from "./audit-anchor.js";
 
 /** Build audit log content with a valid hash chain, as kit's own writer produces it. */
 export function chainedAuditLog(events: readonly Record<string, unknown>[]): string {
@@ -16,4 +18,13 @@ export function chainedAuditLog(events: readonly Record<string, unknown>[]): str
 /** One observe event of the exec broker, before it is chained. */
 export function observeEvent(wouldDeny: string[]): Record<string, unknown> {
   return { operation: "bash", success: true, metadata: { phase: "observe", wouldDeny } };
+}
+
+export async function writeSealedAuditLog(
+  path: string,
+  content: string,
+  anchorDir: string,
+): Promise<void> {
+  writeFileSync(path, content);
+  await anchorAuditLog(path, content, anchorDir);
 }

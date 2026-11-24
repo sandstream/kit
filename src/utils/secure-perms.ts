@@ -3,9 +3,10 @@
 // Ordinary helpers are fail-soft because many callers protect data only after a successful
 // write. Authority-bearing callers use strict variants and verify the ACL before trusting a
 // local marker.
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { chmodSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 type PrivatePathKind = "file" | "dir";
 
@@ -50,6 +51,24 @@ export function secureFileStrict(path: string): void {
   securePrivatePath(path, "file");
 }
 
+/** Establish the same owner-only access without blocking concurrent writes. */
+export async function secureFileStrictAsync(path: string): Promise<void> {
+  if (process.platform !== "win32") {
+    secureFileStrict(path);
+    return;
+  }
+  const command = windowsAclCommand(path, "file", true);
+  if (!command) throw new Error("Cannot establish Windows ACL: SystemRoot is unavailable");
+  let output: string;
+  try {
+    ({ stdout: output } = await promisify(execFile)(command.file, command.args, command.options));
+  } catch (error) {
+    throw aclEstablishError(path, error);
+  }
+  if (output.trim() !== "PRIVATE")
+    throw new Error(`Cannot verify owner-only Windows ACL for ${path}`);
+}
+
 /** Establish owner-only directory access or throw. */
 export function secureDirStrict(path: string): void {
   securePrivatePath(path, "dir");
@@ -81,42 +100,56 @@ export function secureDir(path: string): void {
   }
 }
 
-function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boolean {
+function windowsAclCommand(path: string, kind: PrivatePathKind, repair: boolean) {
   const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
-  if (!systemRoot) {
-    if (repair) throw new Error("Cannot establish Windows ACL: SystemRoot is unavailable");
-    return false;
-  }
+  if (!systemRoot) return undefined;
   // Absolute system path avoids PATH search for an authority-bearing subprocess.
-  const powershell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const file = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   const encoded = Buffer.from(windowsAclScript(), "utf16le").toString("base64");
-  try {
-    const output = execFileSync(
-      powershell,
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 10_000,
-        env: {
-          ...process.env,
-          KIT_PRIVATE_ACL_PATH: path,
-          KIT_PRIVATE_ACL_KIND: kind,
-          KIT_PRIVATE_ACL_REPAIR: repair ? "1" : "0",
-        },
+  return {
+    file,
+    args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+    options: {
+      encoding: "utf8" as const,
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        KIT_PRIVATE_ACL_PATH: path,
+        KIT_PRIVATE_ACL_KIND: kind,
+        KIT_PRIVATE_ACL_REPAIR: repair ? "1" : "0",
       },
-    );
-    if (output.trim() === "PRIVATE") return true;
+    },
+  };
+}
+
+function aclEstablishError(path: string, error: unknown): Error {
+  const detail = windowsAclErrorDetail(error);
+  return new Error(
+    `Cannot establish owner-only Windows ACL for ${path}${detail ? `: ${detail}` : ""}`,
+    {
+      cause: error,
+    },
+  );
+}
+
+function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boolean {
+  let missingSystemRoot = false;
+  try {
+    const command = windowsAclCommand(path, kind, repair);
+    if (!command) missingSystemRoot = true;
+    else if (
+      execFileSync(command.file, command.args, {
+        ...command.options,
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim() === "PRIVATE"
+    )
+      return true;
   } catch (err) {
-    if (repair) {
-      const detail = windowsAclErrorDetail(err);
-      throw new Error(
-        `Cannot establish owner-only Windows ACL for ${path}${detail ? `: ${detail}` : ""}`,
-        { cause: err },
-      );
-    }
+    if (repair) throw aclEstablishError(path, err);
     return false;
   }
+  if (repair && missingSystemRoot)
+    throw new Error("Cannot establish Windows ACL: SystemRoot is unavailable");
   if (repair) throw new Error(`Cannot verify owner-only Windows ACL for ${path}`);
   return false;
 }

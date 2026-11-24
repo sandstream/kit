@@ -952,7 +952,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   broker: {
     handler: cmdBroker,
     stability: "experimental",
-    help: "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reports ready | would-block (+ what breaks) | untested | unverifiable (broken audit chain); enforce does the guided, signed flip (refuses unless ready, --force overrides) (--json, --gate, --force)",
+    help: "Exec-broker runtime posture. enforce-readiness reports ready, would-block, untested, or unverifiable. enforce records the request when auditing is enabled and verifies the signed profile. --force overrides readiness. (--json, --gate, --force)",
   },
   pkg: {
     handler: cmdPkg,
