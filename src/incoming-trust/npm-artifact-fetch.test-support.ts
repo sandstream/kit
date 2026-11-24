@@ -60,19 +60,21 @@ async function makeCertificate(
     "CN=kit-transport-test",
     "[extensions]",
     "basicConstraints=critical,CA:TRUE",
-    "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign",
+    "keyUsage=critical,digitalSignature,keyCertSign",
     "extendedKeyUsage=serverAuth",
     `subjectAltName=${hostMatches ? "IP:127.0.0.1" : "DNS:wrong.invalid"}`,
   ].join("\n");
   await writeFile(join(dir, "openssl.cnf"), config, { mode: 0o600 });
-  // This is test-only material. No key is stored in the delivery or a personal store.
+  // Generate a test-only P-256 key. RSA generation timed out under Windows suite load.
   execFileSync(
     "openssl",
     [
       "req",
       "-x509",
       "-newkey",
-      "rsa:2048",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:prime256v1",
       "-nodes",
       "-days",
       "1",
