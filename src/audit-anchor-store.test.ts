@@ -18,6 +18,121 @@ import {
   startAuditWorker,
 } from "./audit-concurrency.test-support.js";
 
+test(
+  "protects the empty anchor index before either write lock",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const fixture = auditFixture(t, true);
+    await runAuditWorkers([
+      startAuditWorker(
+        fixture,
+        `
+    assert.equal(await audit.appendAuditEventDirect(event("seed"), { cwd: project }), true);
+    const fs = (await import("node:fs")).default;
+    const { DatabaseSync } = await import("node:sqlite");
+    const { syncBuiltinESMExports } = await import("node:module");
+    const begin = DatabaseSync.prototype.exec;
+    const close = DatabaseSync.prototype.close;
+    const locks = new Set();
+    DatabaseSync.prototype.exec = function (sql) {
+      const result = begin.call(this, sql);
+      if (sql === "BEGIN IMMEDIATE" && this.location()?.endsWith(".lock.sqlite")) locks.add(this);
+      return result;
+    };
+    DatabaseSync.prototype.close = function () {
+      locks.delete(this);
+      return close.call(this);
+    };
+    const chmod = fs.chmodSync;
+    const protection = [];
+    fs.chmodSync = (path, mode) => {
+      if (String(path).includes(".kit-audit-index-")) {
+        protection.push({ locks: locks.size, bytes: fs.statSync(path).size });
+      }
+      return chmod(path, mode);
+    };
+    syncBuiltinESMExports();
+    assert.equal(await audit.appendAuditEventDirect(event("second"), { cwd: project }), true);
+    assert.deepEqual(protection, [{ locks: 0, bytes: 0 }]);
+    const log = join(project, ".kit-audit.jsonl");
+    const sealed = await anchor.readAnchorRecord(log);
+    const verified = anchor.verifyAgainstAnchor(
+      await readFile(log, "utf8"), sealed, await anchor.tryReadAuditAnchorKey(),
+    );
+    assert.equal(verified.status, "anchored-ok");
+    assert.equal(verified.newSinceAnchor, 0);
+    `,
+      ),
+    ]);
+  },
+);
+
+test(
+  "continues a valid append when preparing an anchor index fails",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const fixture = auditFixture(t, true);
+    await runAuditWorkers([
+      startAuditWorker(
+        fixture,
+        `
+    assert.equal(await audit.appendAuditEventDirect(event("seed"), { cwd: project }), true);
+    const log = join(project, ".kit-audit.jsonl");
+    const index = anchor.anchorRecordPath();
+    const before = await readFile(index, "utf8");
+    const fs = (await import("node:fs")).default;
+    const { dirname } = await import("node:path");
+    const { syncBuiltinESMExports } = await import("node:module");
+    const chmod = fs.chmodSync;
+    fs.chmodSync = (path, mode) => {
+      if (String(path).includes(".kit-audit-index-")) throw new Error("index protection failed");
+      return chmod(path, mode);
+    };
+    syncBuiltinESMExports();
+    assert.equal(await audit.appendAuditEventDirect(event("second"), { cwd: project }), true);
+    const content = await readFile(log, "utf8");
+    assert.deepEqual(audit.verifyAuditChain(content), { ok: true, entries: 2 });
+    await assert.rejects(anchor.anchorAuditLog(log, content), /index protection failed/);
+    assert.equal(await readFile(index, "utf8"), before);
+    assert.deepEqual(fs.readdirSync(dirname(index)).filter(name => name.startsWith(".kit-audit-index-")), []);
+    `,
+      ),
+    ]);
+  },
+);
+
+test("preserves the previous index and removes staging when publishing fails", async (t) => {
+  const fixture = auditFixture(t, true);
+  await runAuditWorkers([
+    startAuditWorker(
+      fixture,
+      `
+    assert.equal(await audit.appendAuditEventDirect(event("seed"), { cwd: project }), true);
+    const log = join(project, ".kit-audit.jsonl");
+    const index = anchor.anchorRecordPath();
+    const before = await readFile(index, "utf8");
+    const fs = (await import("node:fs/promises")).default;
+    const { dirname } = await import("node:path");
+    const { syncBuiltinESMExports } = await import("node:module");
+    const rename = fs.rename;
+    fs.rename = (source, destination) => {
+      if (String(source).includes(".kit-audit-index-")) throw new Error("index rename failed");
+      return rename(source, destination);
+    };
+    syncBuiltinESMExports();
+    assert.equal(await audit.appendAuditEventDirect(event("second"), { cwd: project }), true);
+    assert.equal(await readFile(index, "utf8"), before);
+    assert.deepEqual((await fs.readdir(dirname(index))).filter(name => name.startsWith(".kit-audit-index-")), []);
+    const content = await readFile(log, "utf8");
+    assert.deepEqual(audit.verifyAuditChain(content), { ok: true, entries: 2 });
+    await assert.rejects(anchor.anchorAuditLog(log, content), /index rename failed/);
+    assert.equal(await readFile(index, "utf8"), before);
+    assert.deepEqual((await fs.readdir(dirname(index))).filter(name => name.startsWith(".kit-audit-index-")), []);
+    `,
+    ),
+  ]);
+});
+
 test("concurrent seals for different logs retain every anchor record", async (t) => {
   const fixture = auditFixture(t);
   allowSlowLock(fixture);

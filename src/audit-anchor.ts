@@ -37,10 +37,13 @@
  */
 import { readFile } from "node:fs/promises";
 import {
+  closePreparedAnchorStore,
   readAnchorStore,
   findAnchorRecord,
   listAnchorRecords,
+  prepareAnchorStore,
   storeAnchorRecord,
+  type PreparedAnchorStore,
 } from "./audit-anchor-store.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -293,15 +296,20 @@ export async function anchorAuditLog(
   opts: { external?: boolean; acceptRollback?: boolean } = {},
 ): Promise<AnchorRecord> {
   const { withAuditWriteLock } = await import("./audit-write-lock.js");
-  return withAuditWriteLock(logPath, async (canonical) => {
-    if ((await readFile(canonical, "utf8")) !== content) {
-      throw new Error(
-        "The audit log changed after the snapshot was read. Read it again before anchoring.",
-      );
-    }
-    if (!opts.acceptRollback) await refuseResealOverAlarm(canonical, content, dir);
-    return sealAuditLog(canonical, content, dir, opts);
-  });
+  const prepared = await prepareAnchorStore(anchorRecordPath(dir));
+  try {
+    return await withAuditWriteLock(logPath, async (canonical) => {
+      if ((await readFile(canonical, "utf8")) !== content) {
+        throw new Error(
+          "The audit log changed after the snapshot was read. Read it again before anchoring.",
+        );
+      }
+      if (!opts.acceptRollback) await refuseResealOverAlarm(canonical, content, dir);
+      return sealAuditLog(canonical, content, prepared, dir, opts);
+    });
+  } finally {
+    await closePreparedAnchorStore(prepared);
+  }
 }
 
 /**
@@ -328,6 +336,7 @@ async function refuseResealOverAlarm(
 async function sealAuditLog(
   logPath: string,
   content: string,
+  prepared: PreparedAnchorStore,
   dir?: string,
   opts: { external?: boolean } = {},
 ): Promise<AnchorRecord> {
@@ -351,7 +360,7 @@ async function sealAuditLog(
   if (opts.external) {
     rec.external = await issueExternalReceipt(logPath, rec);
   }
-  await storeAnchorRecord(anchorRecordPath(dir), logPath, rec);
+  await storeAnchorRecord(prepared, logPath, rec);
   return rec;
 }
 
@@ -617,11 +626,29 @@ export async function tryAdvanceAnchorOnAppend(
   if (process.env.KIT_AUDIT_ANCHOR === "0") return;
   try {
     const { withAuditWriteLock } = await import("./audit-write-lock.js");
-    await withAuditWriteLock(logPath, (canonical) =>
-      advanceAuditAnchorUnderLock(canonical, dir, opts),
+    await withAnchorStoreForAppend(dir, (prepared) =>
+      withAuditWriteLock(logPath, (canonical) =>
+        advanceAuditAnchorUnderLock(canonical, prepared, dir, opts),
+      ),
     );
   } catch {
     // A failed anchor does not invalidate an otherwise successful local append.
+  }
+}
+
+/** An unavailable anchor store must not prevent a valid local append. */
+export async function withAnchorStoreForAppend<T>(
+  dir: string | undefined,
+  operation: (prepared?: PreparedAnchorStore) => Promise<T>,
+): Promise<T> {
+  const prepared =
+    process.env.KIT_AUDIT_ANCHOR === "0"
+      ? undefined
+      : await prepareAnchorStore(anchorRecordPath(dir)).catch(() => undefined);
+  try {
+    return await operation(prepared);
+  } finally {
+    if (prepared) await closePreparedAnchorStore(prepared).catch(() => undefined);
   }
 }
 
@@ -647,10 +674,11 @@ async function canExtendAnchor(
 /** Advance only after the caller locks the audit log. */
 export async function advanceAuditAnchorUnderLock(
   logPath: string,
+  prepared: PreparedAnchorStore | undefined,
   dir?: string,
   opts: { expectedNewEntries?: number; expectedTailHashes?: string[] } = {},
 ): Promise<void> {
-  if (process.env.KIT_AUDIT_ANCHOR === "0") return;
+  if (!prepared) return;
   const expectedTailHashes = opts.expectedTailHashes;
   const expectedNewEntries = Math.max(
     1,
@@ -684,7 +712,7 @@ export async function advanceAuditAnchorUnderLock(
       if (total > expectedNewEntries) return;
       if (total === 0) return; // nothing (or unparseable) to seal
     }
-    await sealAuditLog(logPath, content, dir);
+    await sealAuditLog(logPath, content, prepared, dir);
   } catch {
     // Best-effort: append must succeed even when anchoring cannot (sandbox /
     // unwritable home / unparseable log). The keyless chain still protects the
