@@ -9,6 +9,7 @@
  *
  * Pure: the caller fetches the active rules and, when readable, classic protection.
  */
+import { describeApprovers, type AgentApprover } from "./agent-approval-policy.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 const NAME = "default branch required reviews";
@@ -41,10 +42,42 @@ export function approvalsFromClassic(reviews: unknown): number | null {
   return count(record(reviews)?.required_approving_review_count);
 }
 
+/**
+ * The row when a repository lets an agent post an approving review (src/agent-approval-policy.ts).
+ * GitHub counts it as one approval: with one required, a change can merge with no person approving.
+ */
+function withAgentApprovers(
+  branch: string,
+  required: number,
+  agents: AgentApprover[],
+): SecurityCheckResult {
+  const who = describeApprovers(agents);
+  if (required >= 2) {
+    return {
+      category: "exposure",
+      name: NAME,
+      status: "pass",
+      detail: `${branch}: ${required} approval(s) required; one of them can be an agent's: ${who}`,
+    };
+  }
+  return {
+    category: "exposure",
+    name: NAME,
+    status: "warn",
+    severity: "medium",
+    detail:
+      `${branch}: 1 approval required, and an agent can give it: ${who}. GitHub counts that ` +
+      "approval, so a change on those paths can merge with no person approving",
+    suggestion:
+      "require 2 approvals in GitHub, or give those paths a person in the policy (seats) so the agent's approval is not the only one",
+  };
+}
+
 export function reviewRequirement(
   branch: string,
   fromRules: number | null,
   fromClassic: number | null,
+  agents: AgentApprover[] = [],
 ): SecurityCheckResult {
   const known = [fromRules, fromClassic].filter((n): n is number => n !== null);
   if (known.length === 0) {
@@ -73,6 +106,7 @@ export function reviewRequirement(
         "account or GitHub App), so the author's identity cannot approve its own work",
     };
   }
+  if (agents.length > 0) return withAgentApprovers(branch, required, agents);
   return {
     category: "exposure",
     name: NAME,
