@@ -48,7 +48,7 @@ None / N/A
 
 ## Checklist
 
-- [ ] I've read [CONTRIBUTING.md](CONTRIBUTING.md)
+- [ ] I've read [CONTRIBUTING.md](https://github.com/sandstream/kit/blob/main/CONTRIBUTING.md)
 - [ ] My code follows the project's style guidelines
 - [ ] I've updated documentation as needed
 - [ ] All new code has test coverage
