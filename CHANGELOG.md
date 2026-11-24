@@ -1,5 +1,317 @@
 ## [Unreleased]
 
+## [7.6.0] - 2026-11-24
+
+### Added
+
+- **`kit ingest osv` says whether the project's own source imports each vulnerable package.** Every
+  OSV finding now carries one deterministic fact beside it: `imported by project source: a.ts, b.ts
+  (+N more)`, `not imported by project source; in the lockfile as a dependency of <pkg>`, `not
+  imported by anything kit read (dynamic or generated imports are not seen)` or `import use not
+  checked: <reason>`. In `--json` it is the additive `importFact` field, next to a `package` field
+  with the name and ecosystem from the report. It is a text-level read of npm/Node and Python
+  source in the current directory, with no model and no network, built once per run, and it never
+  changes a finding's severity, status or order. When the walk hits its bound, the lockfile cannot
+  be read or a PyPI name may differ from its import name, the answer is "not checked", never a
+  negative claim. `kit scan` and `kit check` do not print the fact yet (kit-research
+  `owasp-xpsd-vs-kit`).
+
+- **`kit agent-config --plan` shows what it will change in the Claude Code settings before it
+  writes them, and `--apply <hash>` writes only that plan.** `--plan` writes nothing (no settings,
+  gate marker, wrapper or rules file): it runs the existing writers on a temporary copy of
+  `.claude/settings.json` and `.claude/settings.local.json` (or `~/.claude/settings.json` with
+  `--user`) and prints a line diff per file, two checked invariants (nothing outside `hooks`
+  changes except the keys agent-config owns: `permissions.allow`, `permissions.deny`,
+  `sandbox.enabled`, `sandbox.filesystem.denyRead`; every hook entry that is not kit's is still
+  there, in the same order), and a `plan hash`. `--apply <hash>` recomputes the plan and refuses
+  with a non-zero exit when the hash differs. A plain `kit agent-config` writes as before and
+  prints the same diff first, except with `--non-interactive` or in CI.
+
+- **The `dependency surface` check can count known advisories per direct dependency (opt in).** With `[scan] advisories = true` or `KIT_ADVISORIES=1`, `kit check` asks OSV (`api.osv.dev`) which advisories exist for each package and version in the lockfile, then names the direct dependencies that bring the most, so the heavy source of them is visible. It reads all three lockfile formats. It is off by default, because it sends the name and version of every package in the lockfile to `api.osv.dev`, private packages included, and a lockfile does not always say which registry a package came from. It sends nothing else, caches the answers for 24 hours in `~/.kit/osv-advisories.json`, and never moves the verdict. In an air gap (`[air_gap]` or `KIT_AIRGAP`) it makes no request and reads only the cache. A lookup that cannot finish gives a skipped row that says so, so a missing count is never read as a clean one. `KIT_ADVISORIES=0` turns it off and wins over the config.
+
+- **The `dependency surface` check reads `pnpm-lock.yaml`.** It reads format 9, which pnpm 9 and pnpm 10 write, by hand, so kit still takes in no YAML library. The lockfile holds engines, install scripts and the platform a package is built for, so those rules run. It holds no bin names, so the row says that bin names were not checked. A lockfile of another format, or a file that is not a pnpm lockfile, is skipped with a row that names the file and the format, and is not guessed at. Checked against the lockfile of a real app: 542 packages by the check and 542 distinct package names counted separately.
+
+- **The `dependency surface` check reads `yarn.lock`, and finds the lockfile of a workspace.** Both yarn formats are read by hand (classic, and berry from version 2), so kit takes in no YAML library. A yarn lockfile has no dev flag, `engines` or install-script data, so a package counts as development only when no runtime dependency reaches it, and the row says that `node-pin` and `install-scripts` were not checked instead of leaving them out. A member of a monorepo often has no lockfile of its own, or a stale leftover: the check then reads the nearest workspace root's lockfile (a `workspaces` field or a `lerna.json`), counts only what the member reaches, and names the file it used. A lockfile that is missing most of the project's direct dependencies is out of date or belongs to another project: the check says so and measures nothing, instead of printing wrong totals. A new `dominant` rule names a runtime dependency that accounts for at least a quarter of what ships however widely it is imported, because a framework is a dependency too. The scan now reads files in parallel and stops after 8 seconds, with the row saying how many files it read.
+
+- **`kit check` and `kit review` show how much of a project's dependency tree is weight it gets little from.** A new `dependency surface` row gives the numbers (direct packages, total, shipped and development only, and the heaviest dependency), and up to four suggestion rows follow: runtime dependencies that no file imports and no script or config names (`unused`), dependencies whose removal would free 15 or more packages while production code imports them in three files or fewer (`heavy`, counted by what only they need, so shared weight is not blamed on one of them), packages whose `engines` range stops below the project's Node floor (`node-pin`), packages installed in more than one version (`duplicates`) and shipped packages that run install scripts (`install-scripts`). It reads `package-lock.json` (version 2 or 3), `package.json`, the project's source (tests counted separately), stylesheets, scripts, config files and workflows. Nothing is executed. Every row is `pass`: the findings are suggestions from a heuristic and never move the verdict. The row says what it cannot see (dynamic imports, tools started from elsewhere, packages a framework loads by convention). A project with only `yarn.lock` or `pnpm-lock.yaml` gets one honest `skip` row naming the lockfile. Run on kit itself it finds the same things a manual pass did: the unused `@upstash/redis`, and `@modelcontextprotocol/sdk` (78 packages only through it, kit uses stdio only).
+
+- **`kit triage cargo <crate>[@version]` and `kit triage go <package>[@version]`.** A crates.io
+  release and a Go module release get the same cooling period (`[supply_chain]`, default 14 days)
+  and OSV check as npm, pip and gem. For a crate kit reads each version's publish time and whether
+  it was yanked, the crate's age, downloads and owners. For a Go module it asks the module proxy,
+  resolving `@latest` and the module that holds the package as `go` does. What was not read is
+  printed as `NOT CHECKED`: a crate's `build.rs` and procedural macros, a module's source, and the
+  Go publish time itself, since the proxy gives the tagged commit's date, which its author sets.
+  `KIT_CRATES_REGISTRY` and `KIT_GOPROXY` name mirrors; under air-gap no mirror means no query.
+- **`kit triage brew` reads a cask.** A cask (`homebrew/cask/<token>`, which is how the gate names
+  `brew install --cask <token>`) is scored on its upstream repository as a formula is; before, a
+  cask read as a formula with no upstream and never passed.
+
+- `kit check` and `kit gha-audit` warn when a workflow grants `copilot-requests: write` or `models: read` at the top level. Every job without its own `permissions:` block then holds it, and can call a model on the organisation's account and send what it reads there. A grant on a single job is not reported.
+
+- `kit gha-audit` (and `kit check --category security`) warns on a workflow that expands every secret at once with `toJSON(secrets)`, and names the lines. The "wfx" campaign of November 2026 pushed a step of this shape into existing workflows from stolen accounts. A secret passed by name, `toJSON(vars)` and a comment are not reported.
+
+- **Incoming trust can start a signed Node entry through the macOS sandbox.** Kit checks the launch policy and read-only retained inputs under the current generation lock. The delegate checks its restrictions before loading the entry and stops the process at the signed time limit. On macOS, a separate host process ejects each temporary image when Kit exits abruptly.
+
+- **Incoming trust retains the verified npm archives.** Kit saves the exact compressed bytes with the captured tree. It verifies the retained candidate offline before staging it for approval.
+
+- **Incoming trust can check a retained candidate against the current approval.** The preflight command checks the repository, signed report, retained tree and npm archives while it holds the authority store's generation lock.
+
+- **Incoming preflight can verify a read-only image of an approved candidate.** On macOS with the disk image commands, the sealed preflight copies the candidate within fixed limits and verifies its mounted files against the signed approval. It ejects the image before reporting success.
+
+- **Incoming Node runs can load locked npm packages from approved archives.** Kit builds a read-only runtime tree from the captured project and retained archive bytes. The signed launch policy needs one independently verified SHA-256 digest for each compressed npm archive. The launch gate checks the derived files and records the input digest. Kit starts no installation scripts during materialization.
+
+- `kit mcp callback [--for <authorization URL>] [<address> | -]` finishes an OAuth sign-in whose `localhost` callback page cannot load because the listener is on another machine than the browser. It checks the pasted address (one `state`, one `code` or one `error`, no userinfo or fragment, a loopback host, and with `--for` the sign-in's own `redirect_uri` and `state`), makes one request without following redirects, and prints the host and HTTP status, never the address. It stores nothing. The gates refuse it from an agent's shell tool.
+
+- `kit check --category security` warns when a lifecycle script (`preinstall`, `install`, `postinstall`, `prepare`) in the repository's own `package.json` runs a hidden file, such as `"postinstall": "sh .ci-ab12cd.sh"`. The "wfx" campaign of November 2026 added that pair to more than 800 repositories from stolen accounts. A script in a dot directory with an ordinary name (`.husky/install.mjs`), an ordinary `postinstall` and every other script key are not reported.
+
+- `kit check` has a row for credentials that sit in plaintext in the home directory, the files an infostealer collects: AWS, npm, netrc, Postgres, PyPI, git, Docker, GitHub CLI, gcloud, Kubernetes, Terraform, Claude Code, Codex and kit's own MCP tokens, plus SSH keys without a passphrase. It lists each file with how long since it was written, and warns when one is 90 days old or more, or readable by other accounts. It never reads a value out and makes no network request.
+
+- `kit agent-config --portable-gates` writes the Claude Code gate entries to `.claude/settings.json` as lines that can be committed. kit's usual gate command names a wrapper that exists only on the machine where `kit agent-config` ran, so kit kept the gates out of a tracked settings file, and a fresh checkout on another machine or an agent host had none. A portable line runs kit's wrapper when the machine has one and `kit` from `PATH` otherwise; where kit is not installed it exits 2 with the install command, so gated tool calls are refused instead of running ungated. Once the file holds such a line, later `kit agent-config` runs keep the gates there. kit recognises the line by exact text. Not verified on native Windows or macOS: the line needs `sh`.
+
+- `kit profile` can freeze the files an agent runs as its tools. With MCP "code mode" the agent calls MCP servers through generated files such as `servers/<server>/<tool>.ts` and saves working code as skills for its next run; an edit to one changes what a tool does without a tool call any gate sees. List the globs in `.kit-profile.toml` (`code_tool_paths = ["servers/**", "skills/**"]`); `kit profile freeze` records each matching file with a SHA-256, and `kit profile check` reports a file that was added, removed or changed (`--gate` fails on it). Files are walked, not read from git, so an uncommitted file the agent added is found. kit does not guess the globs: a `servers/` directory is often application code.
+
+- `kit profile freeze` records the hooks of the project's `.claude/settings.json`, each as event, matcher and command, with a SHA-256 of the project script it runs. `kit profile check` reports a hook that was added or removed and one whose script changed, the way it reports skills and MCP servers; `--gate` fails on it. A profile frozen before this has no hook list: its hooks are not judged, and the output says to freeze again. `.claude/settings.local.json` and `~/.claude/settings.json` are not in the profile, because they belong to one machine.
+
+- `kit check` reports whether the default branch's required status checks are pinned to the app that reports them (row "default branch required check sources", GitHub, with the token kit already uses for branch protection). A required check that names no source accepts a same-named check from any token that can write commit statuses; the row warns and names those checks. Rulesets are read with read access; classic protection needs admin and is reported as not read.
+
+- `kit scan` marks each finding with CISA KEV (Known Exploited Vulnerabilities) and FIRST EPSS (exploitation probability), and lists KEV findings first. A finding whose CVE is in KEV fails the scan whatever its severity label says. osv-scanner findings now keep their CVE/GHSA `aliases`, so an npm advisory keyed by GHSA still matches KEV. Both feeds are cached for 24 hours in `~/.kit/exploit-intel.json`. A feed that cannot be read is a warning, and a failure with `--strict`. Air gap reads only the cache. Turn it off with `[scan] exploit_intel = false` or `KIT_EXPLOIT_INTEL=0`.
+- `kit watch` ranks a Dependabot PR that fixes a CVE in CISA KEV first, shows `KEV` in the status line, and opens an action item for it even when its severity is medium or low.
+
+- **`kit triage prompt "<text>"` reads a pasted install prompt before an agent follows it.** A line
+  such as `Read https://humanmaxxing.ai/start.md and follow it` goes through the same rules as
+  `kit triage instructions` (here a `remote-instructions` finding), and the report lists every URL
+  and its host, says the target is unversioned, and names the next step: `kit triage instructions`
+  on the fetched file, or `kit triage repo <owner/repo>` and `kit triage skill <dir>` for a
+  `git clone`. The text can come from stdin (no argument, or `-`). Nothing is fetched, cloned or
+  run; it exits non-zero on a finding, as `kit triage instructions` does.
+
+- `kit usage` groups refusals by the reason they were refused, not only by gate. Reasons that differ only in a path, host, package, quoted value or number fall into one group ("write to <path> denied — no verified scope/RoE (…)"), so the one wall most refusals hit is the first line, with its count. The Floor tab shows the top three; `--markdown` and `--json` (`floor.byReason`) carry up to six. The grouping is a fixed set of text substitutions; no model reads the reasons.
+
+- `kit check` and `kit agent-audit` record a sha256 per user-level agent file (`~/.claude/skills`, `commands`, `agents`, `rules`, `~/.claude/CLAUDE.md`, Codex's `AGENTS.md` and skills) in `~/.kit/user-surfaces.json`, and warn on every run while a file is added, changed or removed relative to that baseline. `kit agent-audit --accept-user-surfaces` accepts the current files. The first run records the baseline; read-only mode writes none.
+
+- `kit check` (security) reports whether the daily `kit watch` is still running (row "security watch freshness"). A run older than 48 hours warns with its age and date ("the last kit watch run was 40 days ago (2026-10-14): the daily run has stopped"), and a launchd entry or `kit-watch` workflow that never produced a run warns too. Before, a stopped watch showed only as `sec-prs:stale` in Claude Code's status line, so other harnesses and `kit check` never saw it. A project that never set up the watch gets no row; a cron entry cannot be seen, because kit does not edit crontabs.
+
+### Changed
+
+- The "default branch required reviews" row reads the repository's agent approval policies and says when an agent can give a required approval. With Anthropic's Claude Approvals, a tracked `.claude/approvals.yml` (or `.yaml`, in any directory) whose rule says `claude: approves` lets Claude post an approving review that GitHub counts. With one approval required the row now warns ("a change on those paths can merge with no person approving") and names the file and lines; with two or more it passes and names the agent. A policy in observe mode is not reported. The reader is per tool: OpenAI Codex's GitHub review posts comments and documents no setting that approves, so it has none.
+
+- `npm run build` runs one script, `scripts/build.mjs`, instead of sixteen chained `npm run` calls. It compiles `adapter-sdk` and `kit-plugin-supabase` first, then the root and the other packages at the same time. Measured on 4 cores: 39 s before, 28 s after. A full build still starts from an empty `dist/`.
+- `npm run build:dev` is a new incremental build for development: it recompiles what changed and removes compiled files whose source is gone. Measured: 8 s after a one-file change. CI and release builds stay full.
+
+- The env-write gate refuses an agent's Write or Edit that adds a hook to `.claude/settings.json`, `.claude/settings.local.json` or `~/.claude/settings.json`, on any event, where one of the three wires a kit gate. The harness runs a hook command itself, so no gate sees it; an added hook used to be allowed as long as kit's own entries stayed. A person adds the hook, or an installer run as a process does (`kit agent-config`, `kit hooks`). Other changes to the settings file are still allowed.
+
+- `kit check` and `kit agent-audit` warn about a hook that runs a project file on every hook event, not only `SessionStart`. The same script wired on `Stop`, `PostToolUse`, `UserPromptSubmit`, `PreCompact` or `PreToolUse` gave "no issues", although the harness runs it outside every tool-call gate. One warning per event and file; a repository with such hooks sees new warnings.
+
+- CI runs the Linux test suite in four parallel shards, as the Windows job does. Every test file still runs once on every pull request and push to `main`. `build-and-test` remains the single result: it passes only when the checks job (format, lint, build, gates) and all four shards passed.
+
+- `kit mcp` serves MCP with kit's own stdio server (`src/mcp-stdio.ts`, JSON-RPC 2.0 over standard input and output) instead of `@modelcontextprotocol/sdk`. A production install goes from 92 packages to 2 (`smol-toml` and `zod`). The SDK is a development dependency that the tests use as the reference server: the same messages go to both servers and every answer is compared, for the ten kit tools. The tool list, the schemas, the error text and the protocol version negotiation are the same.
+
+- The few-dependencies plan no longer says `tsx` exists for one script. 59 files use it and 47 tests load it to run `.ts` files in a child process, so it stays.
+
+- CI's Semgrep moves from 1.183.0 to 1.184.0, the newest release older than the 14-day cooling period (published 2026-11-05). Measured on this repository with CI's four rule packs: the same files scanned (1,149 / 1,149 / 877 / 877), 0 findings and 0 errors with both versions. 1.185.0 and 1.186.0 are still inside the cooling period.
+
+- `kit triage skill <pack>` now judges the hook fragments and scripts a pack ships outside its skill directories by the rules it applies to a Claude Code plugin's hooks and scripts: a `*.json` in Claude Code settings shape or with entries carrying `event` and `handler.command`, and every `.sh`, `.py` or `.js` file, are read and no longer listed as `NOT CHECKED`; the rest still are.
+
+### Removed
+
+- **`@upstash/redis` is no longer a runtime dependency.** No production code imported it: the Upstash adapter calls `api.upstash.com` with the global `fetch`, and the package name in `service-registry.ts` is only a string to detect in other projects. It still shipped, with one package of its own, so the production tree goes from 94 to 92 packages and kit has three runtime dependencies (`@modelcontextprotocol/sdk`, `smol-toml`, `zod`). ADR-0002 is amended. `src/dependency-floor.test.ts` now also fails when a declared runtime dependency is imported nowhere in `src/`, which is the gap that let this one stay.
+
+- Retired the obsolete local Compose stack that referenced the separate Marketplace application.
+- Run Kit from a checkout with `npm run dev -- check`.
+
+### Fixed
+
+- The gates refuse `kit agent-audit --accept-user-surfaces` from an agent's shell tool. An agent could rewrite a user-level skill and accept the change itself, which silenced the drift warning. A person runs the acceptance in their own terminal.
+
+- **`AGENTS.md` gives Codex and the other agents that read it the same rules as `CLAUDE.md`.** It held only the managed kit block and the ADR section, so an agent reading it was never told to check paths on macOS and Windows, to add a changelog fragment instead of editing `CHANGELOG.md`, to run `node scripts/prepush.mjs` before pushing, or to keep session URLs out of public issue and PR bodies. The two files are now identical, the session-URL rule names any agent's session or task link, and both list ADR-0011 with the proposed ADRs. `src/agent-instructions-parity.test.ts` fails when the files differ.
+
+- **AISLE empty results require a declared file scope.** Kit treats missing targets, repeated file paths and paths outside the reported scope as incomplete coverage.
+
+- The kit image requires Alpine `libcrypto3` and `libssl3` `3.5.9-r1` or later.
+
+- `kit agent-audit` and `kit check` read the hooks in Codex's `.codex/config.toml`, Cursor's `.cursor/hooks.json` and Gemini CLI's `.gemini/settings.json`, with the same malware-shape and project-script checks as `.claude/settings.json`. kit writes its own gate into all three, but a hook there that piped a download into a shell gave no row: the TOML file was read for secrets only, and the Cursor and Gemini files were not read at all. Cursor's flat hook entries are read as well as the nested shape.
+
+- `kit audit verify` reports the position of an audit entry that is not a JSON object. The command returns a failed verification report and preserves the log.
+
+- **A lost audit event now fails the command that lost it.** When an append to the audit log
+  failed (the write lock timed out, the log was damaged, the disk was full), kit printed one line
+  on stderr and still exited with code 0. Several callers ignored the result of the append,
+  among them `kit panic`, the environment switch and the record of a secret write, so a script or
+  a hook that reads only the exit code could not tell that the record was incomplete. kit now
+  counts the lost events, prints the count when the process ends, and exits with code 1 where
+  the code would have been 0. A gate's refusal code (2) is kept, and the operation itself is not
+  stopped. Windows reaches the lock timeout first, which is the known limit of 7.3.0; this change
+  makes that loss visible on every platform and does not yet remove its cause.
+
+- Audit writers verify the existing seal under the log lock before they append.
+  They refuse a truncated, missing, or unverifiable sealed log and preserve the evidence.
+  The check also applies when automatic seal updates are disabled.
+
+- `kit broker enforce` records the request before it writes the profile when audit logging is enabled.
+  It refuses the update if that write fails, including with `--force`.
+- Kit prepares the new signature before it writes the profile. It verifies the published signature
+  before it reports enforcement as active.
+- If the audit log cannot record the completed transition, Kit reports the active state and exits 1.
+  A retry can complete a sealed request that matches the installed, verified profile.
+
+- Broker readiness distinguishes a missing audit log, an empty log, and a log without observe events.
+- `kit broker enforce-readiness --json` reports the cause in `untestedReason`.
+
+- `kit check` and `kit usage prove` run two negative controls that make a gate refuse, and each refusal was written to the project's audit log with nothing to tell it from an agent's: every `kit check` added a row saying a plaintext Stripe key was written to `.env`. The control rows now carry `metadata.session_id: "kit-negative-control"`.
+
+- **`kit triage docker` says it does not check the image's vulnerabilities.** Docker Hub metadata
+  lists no packages, so `nginx:1.31.8` passed 100/100 with nothing said, though it carries the
+  HTTP/2 RCEs CVE-2026-123633 and CVE-2026-123007 (fixed in 1.31.9 / 1.30.7). Every docker triage
+  now prints `NOT CHECKED: known vulnerabilities in the image` and points at `kit scan` (trivy,
+  osv-scanner), so the coverage line reads PARTIAL. When a run mixes a probe the ecosystem cannot
+  answer with one whose source was unreachable, the coverage line now names both groups instead of
+  calling both permanent. Found in kit-research `nginx-http2-rce-and-oss-scanner-vs-kit`.
+
+- **The documentation names what `kit agent-audit`, `kit agent-config --portable-gates` and `kit profile freeze` cover today.** The per-agent table in `docs/FEATURES.md` said Gemini CLI had no config audit and named only `.cursor/mcp.json` for Cursor and `.codex/config` for Codex, after `kit agent-audit` had started reading the hooks in `.gemini/settings.json`, `.cursor/hooks.json` and `.codex/config.toml`; Copilot's `.vscode/mcp.json` was audited and marked as not. Footnote 3 now lists every file it reads, and `src/docs-agent-audit-files.test.ts` fails when the list in `src/agent-audit.ts` names a file the footnote does not. `docs/COMMANDS.md` describes `--portable-gates`, says that `kit profile freeze` records hooks and the files named by `code_tool_paths`, and no longer carries a "last updated 2026-11-04 (kit 7.2.0)" stamp that the file had outlived.
+
+- `kit check` now reports a model endpoint redirected away from the vendor (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL` and the others) and a code-loading variable (`NODE_OPTIONS` and the others), from the process environment and the Claude settings `env` blocks. Only `kit agent-audit` reported them; `kit check` printed "agent-audit: no issues" for a settings file that sent every prompt to another host. Plain HTTP to another host is a failure, as it already was in `kit agent-audit`.
+- The endpoint row's detail was not a sentence ("sends model traffic a host that is not the vendor's receives …"). It now reads "`ANTHROPIC_BASE_URL`: a host that is not the vendor's receives every prompt, tool result and secret the agent reads".
+
+- **An empty audit log is no longer reported as an intact chain.** `kit audit verify` printed
+  "audit chain intact, 0 entries" for a log file with no entry, so a log that was emptied read
+  the same as a log that verifies. It now reports that the log is empty and that nothing was
+  verified, as a separate outcome from a missing log. It fails under `--strict`,
+  `require_anchor`, `--require-external` and on a machine that has anchored logs, in the same
+  way as a missing log. The JSON report carries `reason: "audit log is empty; nothing verified"`
+  and `chain: null`.
+- `kit audit verify --all` fails when a sealed log has zero entries.
+- `kit audit verify --all --strict` fails when there are no indexed logs or all logs are missing.
+- `kit audit verify` fails when the audit log exists but cannot be read.
+- `kit broker enforce-readiness`, `kit broker enforce`, and `kit doctor` check the audit chain
+  and the complete local HMAC seal before they use observe records. Broken, truncated, or
+  unsealed evidence gives `unverifiable`. `--gate` fails and `kit broker enforce` requires
+  `--force` for that verdict. These checks leave the log and anchor unchanged.
+
+- `kit check`: the `enforcement evidence` row now says it does not prove that the wired gate commands run kit. Its negative controls run kit's own build, and a settings entry that points at any executable exiting 0 passed both gate rows.
+
+- **`kit gate-bash` gates `cargo install`, `cargo binstall`, `go install` and `brew install`.** The
+  gate covered npm, PyPI and RubyGems and passed every other install with no output: measured,
+  `npm i -g @el4cteo/fast-anything` was refused on the 14-day cooling hold while
+  `cargo install fast-anything`, the same one-day-old program, exited 0. Each named crate, Go
+  package (`pkg@version`, also under `go run`) and Homebrew formula or cask is now triaged first,
+  and the command is refused unless every one passes. An install kit cannot reduce to a registry
+  name is refused. `cargo install --path`, `go install .` and `go install ./cmd/x` build what is
+  on disk and pass. `cargo install --git`, `--registry`, `--index`, a formula given as a file or
+  URL, and an environment word that moves the registry (`GOPROXY=`, `CARGO_REGISTRIES_*_INDEX=`,
+  `HOMEBREW_BOTTLE_DOMAIN=`) are refused as unverified sources, with a pointer to
+  `kit triage repo`. Not covered: a registry moved by a config file or an earlier `export`, and
+  commands that fetch dependencies without naming them (`cargo build`, `cargo add`, `go get`,
+  `brew upgrade`, `brew bundle`).
+
+- `kit check`: `enforcement evidence` now resolves each wired `gate-bash` and `gate-env` command to the kit entrypoint it would start, by reading files only, and fails when a gate is not kit. A settings entry pointing at any executable that exits 0 passed the row before. A gate that runs another kit version warns.
+
+- `gate-env` and `gate-bash` now refuse an agent's Write, Edit or shell command that removes or replaces kit's `gate-bash`/`gate-env` entries in `.claude/settings.json`, `.claude/settings.local.json` or `~/.claude/settings.json`, or leaves that file unparseable. Adding another tool's hooks stays allowed, and `kit agent-config` still rewrites them.
+
+- **Grype directory scans use the exact project path and verify package coverage.** Kit reads the package inventory from the same Grype run. A required Grype scan fails when no package was scanned or the inventory does not establish coverage. Readable findings remain available when coverage is incomplete.
+
+- The malware-shape rule for agent hooks and status lines matched only a download piped into `sh`, `bash` or `zsh`. It now also matches a download piped into `python3`, `node`, `perl`, `ruby` or PowerShell, PowerShell's `irm … | iex` and `iex (iwr …)` (kit runs on Windows), and a download saved and then run (`curl -o f … && sh f`, `chmod +x f && ./f`). The saved path has to be what runs next, so `curl -o out.json … && node build.js` is not flagged.
+
+- **Kit checks OSV package identity before accepting an empty result.** Incomplete package records or advisory groups make coverage incomplete. Kit retains readable findings and package details from the report.
+
+- **The pull request template links `CONTRIBUTING.md` by its full URL, and `docs/RELEASING.md` names the `SECURITY.md` step.** The template's relative link resolved against the pull request's own address once its text became a PR body, so every PR that kept the checklist carried a link that went nowhere. The release prepare step now says to name the new release line in `SECURITY.md`'s supported versions on a minor or major release.
+
+- Redaction now covers an OAuth callback URL's authorization `code` (when the query also carries `state`) and a PKCE `code_verifier`. A pasted `http://localhost:<port>/callback?code=…&state=…` passed through unredacted.
+
+- The publish job can read the workflow artifact the SBOM action attaches to the release. The 7.5.0 run uploaded the SBOM and then got "Not Found" on the download, so the release had no SBOM until it was attached by hand.
+
+- **`SECURITY.md` names 7.5.x as the supported release line.** Its table said 6.12.x received security fixes and every older version should upgrade to it, while kit shipped 7.5.0; it was last edited for 6.12.1. `src/security-supported-version.test.ts` fails when the supported row does not name the major.minor line in `package.json`,, so a minor or major release fails until the table names the new line.
+
+- **Semgrep delegates require evidence of scanned files.** Kit checks native file coverage and matches findings against SARIF from the same run. A required scan with no scanned files or incomplete evidence fails the scanner gate.
+
+- **Sentrux reports with no checked rules do not qualify as clean.** Kit verifies the coverage and count fields from native rule reports and retains readable findings when part of a report is incomplete.
+
+- **Snyk issue pagination follows the published link format.** Kit accepts both string links and JSON:API link objects. It retains readable findings and refuses links that change the requested issue scope. An empty result requires a valid JSON:API response.
+
+- `alpine apk floors` no longer passes on partial Alpine data. A truncated or concatenated APKINDEX archive, invalid UTF-8, a malformed secfixes record, an unknown or conflicting origin, an HTTP 206 response and an unreachable branch each keep the comparison unverified. Community advisories and the community index are now read too, so a community subpackage is compared with its own advisories.
+- `alpine apk floors` reports a Dockerfile it cannot read as unverified. Before, it dropped that file's floors, and a repository whose only Dockerfile was unreadable showed "no apk add version floors".
+- A pass names the Alpine branches it was checked on and the four sources it read.
+
+- Kit verifies the Alpine secdb branch and repository before it compares package floors.
+- Kit keeps known findings when another source fails and reports incomplete Dockerfile discovery.
+
+- Kit reports each Alpine source outcome in the JSON check result.
+- Kit rejects APKINDEX records from another branch or architecture and checks the age of the HTTP response data.
+
+- Kit verifies Bumblebee's process status, report counts, and requested scan scope before it reports clean coverage.
+- Kit retains valid findings after a failed run and labels stale catalogs separately.
+
+- Kit checks the exit status and report structure for OSV and Trivy security checks.
+- Reports with incomplete coverage retain readable findings and keep the security gate unverified.
+- Trivy requires a result for the relevant scan type before it reports no findings.
+
+- A strict scan reports unverified CISA catalog coverage when it can read only an old cache.
+- A future date cannot prove cache freshness. Kit still reports known marks from the cache.
+
+- Kit refuses to count an incomplete CISA catalog or FIRST response as checked.
+- Partial responses keep readable marks and cannot refresh the verified cache.
+- Kit caches complete EPSS replies with no score for the requested CVE.
+
+- Kit rejects partial CISA and FIRST responses and invalid UTF-8.
+- Kit stops reading a threat data response when it exceeds 32 MiB.
+
+- The opt-in GuardDog check verifies native npm and PyPI reports against the selected manifest.
+- An incomplete report keeps valid malware findings and blocks the strict security gate.
+- Kit runs GuardDog on each check. Legacy clean verdicts cannot establish current coverage.
+
+- Require Docker image rows to match the daemon image count before reporting no matches.
+- Keep known indicators when a Docker inventory is incomplete.
+- Report unreadable or invalid external findings files and retain usable findings.
+
+- Require format-specific audit evidence before comparing or changing a pnpm, Bun, or Yarn advisory baseline.
+- Keep confirmed advisories from incomplete reports and preserve the baseline when scope cannot be verified.
+- Audit Bun from a private text lockfile snapshot. Audit Yarn 4 recursively and require explicit confirmation when JSON output is empty.
+
+- npm checks require a version 2 audit report with counts that agree with its findings and the selected lockfile inventory.
+- Security checks, prescan, and the advisory baseline keep supported npm findings from incomplete reports. An incomplete report blocks a baseline update.
+- pip-audit reads a private copy of the flat exact pins in requirements.txt in its static mode. It verifies the returned package inventory and retains vulnerabilities from a findings exit.
+- Python requirements with includes, markers, URLs, or unpinned packages produce an unverified result. Kit reports confirmed Python findings without assigning a severity.
+
+- Include omitted project, image, and Maven SBOM inputs in scan coverage, strict exit status, and reports.
+- Require complete coverage before replacing a scan baseline.
+- Apply base scanner requirements to all of the scanner's scheduled targets.
+
+- `kit scan` keeps findings from incomplete delegate reports and blocks a required or strict scan with incomplete coverage.
+- `kit ingest` distinguishes missing and partial SARIF reports from completed scans without findings.
+
+- Require scan evidence before reporting clean Git history or agent transcripts.
+- Preserve secret findings when history reports or transcript inventories are incomplete.
+- Use the same transcript result in security checks and coverage reports.
+
+- Kit treats failed or incomplete Semgrep scans as unverified.
+- Kit keeps valid findings when the same Semgrep report contains scan errors.
+
+- `kit triage skill <path> --deep` requires complete static coverage from SkillSpector. It fails when the scan is unavailable, invalid, or incomplete.
+- `kit triage check-skills` requires coverage evidence in the receipt for each staged skill. Rescan skills with older deep receipts.
+
+- **`kit triage --help` lists every type `kit triage` runs, and `kit escalate pr` has its own help.** `kit triage` ran twenty types and its `--help` listed fifteen: `brew`, `mcp`, `model`, `plugin` and `vault-config` printed only the parent's one-liner, were missing from `contracts/kit.opencli.json`, and `model`, `plugin` and `vault-config` were named in no document. `kit escalate pr --help` printed the parent's line too. Each now has a help entry, a row in `docs/COMMANDS.md` (with `kit triage prompt`, which had none) and a place in the contract. `src/triage-help-coverage.test.ts` fails when a type `kit triage` runs has no help entry or no row.
+
+- `kit triage skill <plugin>` now reports the MCP servers a Claude Code plugin registers (`.mcp.json`, or `mcpServers` in `plugin.json`). It warns when a server runs a program from `PATH` that the plugin does not ship, runs an unpinned package runner, or is remote. A plugin's MCP server starts with every session and was not reported at all.
+
+- **`kit triage skill` flags a Claude Code plugin that runs a downloaded script unverified.** A hook command in `hooks/hooks.json` (or the manifest) or a plugin script that pipes a download into a shell (`curl … | sh`, `wget -qO- … | bash`, `bash <(curl …)`, `sh -c "$(curl …)"`, `eval "$(curl …)"`) or into PowerShell (`iex (iwr …)`, `irm … | iex`, `Invoke-Expression (Invoke-WebRequest …)`) now gets a warning that names the URL's host. Before, such a plugin got only the generic warning about its hook event, and the hook command text itself was never scanned: it now gets the same line scan as a script, labelled `hooks/hooks.json <Event> command`. A download saved with `-o` and then checked with a checksum is not flagged.
+
+- `kit triage skill <local path>` now also runs the instruction rules over the skill's files and prints how many lines fired and which rules, under the skill report. A pack could print 100/100, TRIAGE PASSED while `kit triage instructions` found 66 lines in the same files. The score and verdict are unchanged, and the output says so.
+
+- `kit triage skill <pack>` now declares the pack's files outside its skill directories (hooks, setup instructions, scripts) as `NOT CHECKED`, with `Coverage: PARTIAL`. Before, it printed 100/100, TRIAGE PASSED without saying it had read only the skills.
+
+- The lethal-trifecta audit counts a grant to run an interpreter with a wildcard (`Bash(python3:*)`, `Bash(node:*)`, `Bash(npx tsx ./servers/*)`, `Bash(bun run *)` and the like) as holding all three legs, as it does an unrestricted `Bash`. It counted as none, so a session allowed `Bash(python3:*)` and `WebFetch` passed with "no agent holds untrusted input, private data and a way out together", although the interpreter can read any file and open any connection. Agents that call MCP servers through generated code hold exactly this grant. An exact command without a wildcard (`node --version`) is still narrow.
+
+- **Trivy scan results require native scope evidence.** Kit checks package and configuration counts from the same filesystem, configuration or image scan that supplies the findings. Empty scope and incomplete evidence are reported separately, and readable findings remain available if SARIF conversion is incomplete.
+
+- `kit usage` no longer counts kit's own negative controls as refusals. Every `kit check` with the gates wired makes two gates refuse on purpose and logs both; since they are marked (`metadata.session_id: "kit-negative-control"`), the Floor tab shows them on a line of their own, "kit's own negative controls … not counted", and leaves them out of the audited and refused totals. Before, a repository where no agent had been refused anything showed "2 audited operations, 2 refused" after one `kit check`.
+
+- **Wiz issue coverage rejects repeated issue IDs.** Kit retains distinct findings from partial responses and keeps authentication and issue requests on their configured endpoints.
+
+### Security
+
+- Kit verifies APKINDEX signatures against Alpine's pinned x86_64 keys before it uses package origin data.
+- Kit checks the age of the signed index timestamp as well as the HTTP timestamp.
+
 ## [7.5.0] - 2026-11-18
 
 ### Added

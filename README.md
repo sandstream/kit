@@ -77,6 +77,23 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.6.0: no result counts as clean unless the evidence is complete.** A scanner report that is
+  missing, partial, stale, malformed or out of scope is now its own outcome, separate from a complete
+  report with no findings. This covers npm, pnpm, Yarn, Bun and pip audits, OSV, Trivy, Grype,
+  Semgrep, GuardDog, Bumblebee, Alpine apk floors (with signed APKINDEX data), CISA KEV and FIRST
+  EPSS, and the AISLE, Sentrux, Snyk and Wiz plugins. Readable findings from an incomplete report are
+  kept. The audit log fails the command that lost an event, and an empty log is no longer an intact
+  chain. `kit scan` marks findings with KEV and EPSS, and `kit ingest osv` says whether the project's
+  own source imports each vulnerable package. New `kit check` rows: plaintext credentials in the
+  home directory, a redirected model endpoint, required checks that accept any source, a stopped
+  `kit watch`, and a hidden file run by the repository's own lifecycle script. `kit triage` reads
+  cargo, go, brew casks and a pasted install prompt. The gates refuse an agent's write that adds a
+  hook to a Claude Code settings file, and `kit agent-audit` reads Codex, Cursor and Gemini hooks.
+  kit now has two runtime dependencies: `kit mcp` runs on kit's own stdio server, and
+  `@upstash/redis` is gone. Two things to know before you update: a required or strict scan with
+  incomplete coverage now fails where it used to pass, and an agent can no longer add a hook to
+  `.claude/settings.json` itself. macOS is unverified in CI. Full list in the
+  [CHANGELOG](CHANGELOG.md).
 - **7.5.0: kit gates more, and says what it could not check.** The agent gates refuse commands that
   cannot be undone (a force push, a push to `main`, `git reset --hard`) and decoded or downloaded text
   piped into an interpreter. They also gate `gem install` and `bundle add`, and read installs run

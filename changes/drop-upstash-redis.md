@@ -1,3 +1,0 @@
-### Removed
-
-- **`@upstash/redis` is no longer a runtime dependency.** No production code imported it: the Upstash adapter calls `api.upstash.com` with the global `fetch`, and the package name in `service-registry.ts` is only a string to detect in other projects. It still shipped, with one package of its own, so the production tree goes from 94 to 92 packages and kit has three runtime dependencies (`@modelcontextprotocol/sdk`, `smol-toml`, `zod`). ADR-0002 is amended. `src/dependency-floor.test.ts` now also fails when a declared runtime dependency is imported nowhere in `src/`, which is the gap that let this one stay.

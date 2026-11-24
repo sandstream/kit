@@ -1,3 +1,0 @@
-### Fixed
-
-- **`AGENTS.md` gives Codex and the other agents that read it the same rules as `CLAUDE.md`.** It held only the managed kit block and the ADR section, so an agent reading it was never told to check paths on macOS and Windows, to add a changelog fragment instead of editing `CHANGELOG.md`, to run `node scripts/prepush.mjs` before pushing, or to keep session URLs out of public issue and PR bodies. The two files are now identical, the session-URL rule names any agent's session or task link, and both list ADR-0011 with the proposed ADRs. `src/agent-instructions-parity.test.ts` fails when the files differ.

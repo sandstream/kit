@@ -1,3 +1,0 @@
-### Added
-
-- `kit profile` can freeze the files an agent runs as its tools. With MCP "code mode" the agent calls MCP servers through generated files such as `servers/<server>/<tool>.ts` and saves working code as skills for its next run; an edit to one changes what a tool does without a tool call any gate sees. List the globs in `.kit-profile.toml` (`code_tool_paths = ["servers/**", "skills/**"]`); `kit profile freeze` records each matching file with a SHA-256, and `kit profile check` reports a file that was added, removed or changed (`--gate` fails on it). Files are walked, not read from git, so an uncommitted file the agent added is found. kit does not guess the globs: a `servers/` directory is often application code.
