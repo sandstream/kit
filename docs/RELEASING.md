@@ -19,7 +19,8 @@ than shipping under a version whose changelog does not mention it.
 # 1. Prepare: bump package.json, then assemble the changelog fragments and name the section:
 node scripts/changelog-fragments.mjs assemble   # merges changes/*.md into [Unreleased]
 #    rename `## [Unreleased]` to `## [X.Y.Z] - <date>`, add a fresh empty `## [Unreleased]`,
-#    and merge that PR.
+#    on a minor or major release name the new X.Y line in SECURITY.md's Supported versions
+#    (src/security-supported-version.test.ts fails until it does), and merge that PR.
 # 2. Tag the prep commit itself (signed — the job verifies the signature):
 git tag -s vX.Y.Z <prep-commit> -m "vX.Y.Z: <one line>"
 git push origin vX.Y.Z

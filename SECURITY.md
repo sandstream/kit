@@ -15,8 +15,8 @@ Coordinated disclosure: we'll publish a CVE + advisory after the fix is released
 
 | Version  | Supported                                   |
 | -------- | ------------------------------------------- |
-| 6.12.x   | Yes, receives security fixes                |
-| < 6.12   | No, upgrade to the latest 6.12.x release    |
+| 7.5.x    | Yes, receives security fixes                |
+| < 7.5    | No, upgrade to the latest 7.5.x release     |
 
 ## Threat model + data flow
 
