@@ -1,3 +1,0 @@
-### Fixed
-
-- **`kit triage --help` lists every type `kit triage` runs, and `kit escalate pr` has its own help.** `kit triage` ran twenty types and its `--help` listed fifteen: `brew`, `mcp`, `model`, `plugin` and `vault-config` printed only the parent's one-liner, were missing from `contracts/kit.opencli.json`, and `model`, `plugin` and `vault-config` were named in no document. `kit escalate pr --help` printed the parent's line too. Each now has a help entry, a row in `docs/COMMANDS.md` (with `kit triage prompt`, which had none) and a place in the contract. `src/triage-help-coverage.test.ts` fails when a type `kit triage` runs has no help entry or no row.
