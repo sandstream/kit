@@ -13,7 +13,11 @@ import {
   privateFileIsControlled,
 } from "../utils/secure-perms.js";
 import { copySnapshotFile, readSnapshotFile, unchanged } from "./snapshot-io.js";
-import { snapshotManifest, type IncomingSnapshotEntry } from "./snapshot-format.js";
+import {
+  snapshotEntryBytes,
+  snapshotManifest,
+  type IncomingSnapshotEntry,
+} from "./snapshot-format.js";
 import type { IncomingSnapshotLimits } from "./snapshot-limits.js";
 import { readSnapshotLink } from "./snapshot-links.js";
 
@@ -57,7 +61,7 @@ function boundedNames(source: string, state: Capture): string[] {
 }
 
 function addEntry(state: Capture, entry: IncomingSnapshotEntry): void {
-  state.manifestBytes += Buffer.byteLength(JSON.stringify(entry)) + (state.entries.length ? 1 : 0);
+  state.manifestBytes += snapshotEntryBytes(entry, state.entries.length > 0);
   if (state.manifestBytes > state.limits.maxManifestBytes)
     throw new Error("Incoming snapshot: manifest-limit");
   state.entries.push(entry);

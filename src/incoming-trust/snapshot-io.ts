@@ -31,9 +31,11 @@ export function readSnapshotFile(
 ) {
   if (!expected.isFile()) throw new Error("Incoming snapshot: unsupported-file");
   if (expected.size > BigInt(maxBytes)) throw new Error("Incoming snapshot: input-limit");
+  // Open an existing file only. The mode is ignored without O_CREAT.
   const input = openSync(
     source,
     constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    0o600,
   );
   try {
     if (!unchanged(expected, fstatSync(input, { bigint: true })))
@@ -96,10 +98,16 @@ export function copySnapshotFile(
   }
 }
 
+export function readSnapshotBytes(path: string, info: BigIntStats, maxBytes: number): Buffer {
+  const chunks: Buffer[] = [];
+  readSnapshotFile(path, info, maxBytes, (chunk) => chunks.push(Buffer.from(chunk)));
+  return Buffer.concat(chunks);
+}
+
 export function readSnapshotManifest(path: string, maxBytes: number): string {
   const info = lstatSync(path, { bigint: true });
   if (info.size > BigInt(maxBytes)) throw new Error("Incoming snapshot: manifest-limit");
-  const chunks: Buffer[] = [];
-  readSnapshotFile(path, info, maxBytes, (chunk) => chunks.push(Buffer.from(chunk)));
-  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks));
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+    readSnapshotBytes(path, info, maxBytes),
+  );
 }

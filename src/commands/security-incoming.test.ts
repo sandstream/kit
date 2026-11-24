@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
@@ -9,6 +16,7 @@ import { storeFixture } from "../incoming-trust/authority-store.test-support.js"
 import { QUARANTINE_ACKNOWLEDGEMENT } from "../incoming-trust/authority-files.js";
 
 const CLI = fileURLToPath(new URL("../cli.js", import.meta.url));
+const CLI_TEST_WINDOW_MS = 4 * 60_000;
 const CHECKS = ["inventory", "artifacts", "scanners"].map((id) => ({
   id,
   status: "pass",
@@ -80,6 +88,9 @@ it("drives enroll, stage, request, approve and status through the real CLI", () 
   try {
     dependencyFreeRepository(f);
     assert.deepEqual(json(f, "status"), { enrolled: false });
+    // The approval must survive several independent CLI starts on a loaded runner.
+    f.proof.authority.maxApprovalAgeMs = CLI_TEST_WINDOW_MS;
+    f.proof.authority.maxVerificationAgeMs = CLI_TEST_WINDOW_MS;
     const authority = writeJson(f, "authority.json", f.proof.authority);
     assert.equal(json(f, "enroll", "--authority", authority).phase, "pending");
     const snapshot = join(f.root, "snapshot");
@@ -94,6 +105,7 @@ it("drives enroll, stage, request, approve and status through the real CLI", () 
       "https://registry.npmjs.org",
     );
     assert.match(staged.candidateDigest, /^[0-9a-f]{64}$/);
+    assert.deepEqual(readdirSync(join(snapshot, "artifacts")), []);
     const checks = writeJson(f, "checks.json", [
       ...CHECKS,
       ...(f.store.read(f.repository)?.evidence ?? []),
@@ -104,13 +116,16 @@ it("drives enroll, stage, request, approve and status through the real CLI", () 
     Object.assign(f.proof.verification, verification);
     f.proof.approval.context = { ...verification.context };
     f.proof.approval.issuedAt = verification.createdAt;
-    f.proof.approval.expiresAt = verification.createdAt + 20_000;
+    f.proof.approval.expiresAt = verification.createdAt + CLI_TEST_WINDOW_MS;
     f.proof.resign();
     assert.equal(f.proof.approval.verificationDigest, requested.verificationDigest);
     const approval = writeJson(f, "approval.json", f.proof.approval);
     const accepted = json(f, "approve", "--verification", out, "--approval", approval);
     assert.equal(accepted.phase, "accepted");
     assert.equal(json(f, "status").phase, "accepted");
+    assert.deepEqual(json(f, "preflight", "--snapshot-dir", snapshot, "--verification", out), {
+      verified: true,
+    });
   } finally {
     f.cleanup();
   }
