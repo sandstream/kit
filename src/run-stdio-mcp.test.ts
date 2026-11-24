@@ -7,10 +7,6 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createCliContractFixture } from "./cli-contract.test-support.js";
 
-const source = import.meta.url.endsWith(".ts");
-const moduleUrl = new URL(source ? "./mcp-server.ts" : "./mcp-server.js", import.meta.url).href;
-const loader = source ? ["--import", import.meta.resolve("tsx")] : [];
-
 for (const boundary of ["stdout", "stdin"]) {
   it(`MCP run isolates child ${boundary} from the protocol transport`, async (t) => {
     const fixture = createCliContractFixture();
@@ -24,17 +20,12 @@ for (const boundary of ["stdout", "stdin"]) {
     writeFileSync(
       script,
       boundary === "stdout"
-        ? `console.log('plain child output'); console.log(${JSON.stringify(notification)});`
+        ? `console.log('plain child output'); console.log(${JSON.stringify(notification)}); if (process.argv[2] === "fail") process.exitCode = 7;`
         : "const timer = setTimeout(() => process.exit(19), 1000); process.stdin.on('end', () => { clearTimeout(timer); console.log('CHILD_STDIN_CLOSED'); }); process.stdin.resume();",
     );
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [
-        ...loader,
-        "--input-type=module",
-        "-e",
-        `const {startMcpServer} = await import(${JSON.stringify(moduleUrl)}); await startMcpServer();`,
-      ],
+      args: [...fixture.cliArgs, "mcp"],
       cwd: fixture.cwd,
       env: Object.fromEntries(
         Object.entries(fixture.env).filter(
@@ -54,16 +45,36 @@ for (const boundary of ["stdout", "stdin"]) {
     };
     try {
       await client.connect(transport);
+      const tools = (await client.listTools()).tools.map(({ name }) => name);
+      assert.ok(tools.includes("kit_run"));
+      const command = `"${process.execPath}" "${script}"`;
       const result = await client.callTool({
         name: "kit_run",
-        arguments: { command: `"${process.execPath}" "${script}"` },
+        arguments: { command },
       });
       assert.equal(Boolean(result.isError), false, JSON.stringify(result));
+      assert.match(JSON.stringify(result.content), /Exit code: 0/);
       assert.match(
         JSON.stringify(result.content),
         boundary === "stdout" ? /plain child output.*CHILD_PROTOCOL_MESSAGE/ : /CHILD_STDIN_CLOSED/,
       );
-      assert.ok((await client.listTools()).tools.some((tool) => tool.name === "kit_run"));
+      if (boundary === "stdout") {
+        const failed = await client.callTool({
+          name: "kit_run",
+          arguments: { command: command + " fail" },
+        });
+        assert.equal(failed.isError, true);
+        assert.match(JSON.stringify(failed.content), /Exit code: 7/);
+        assert.match(JSON.stringify(failed.content), /plain child output/);
+
+        const invalid = await client.callTool({ name: "kit_run", arguments: {} });
+        assert.equal(invalid.isError, true);
+        assert.match(JSON.stringify(invalid.content), /command/);
+      }
+      assert.deepEqual(
+        (await client.listTools()).tools.map(({ name }) => name),
+        tools,
+      );
       assert.deepEqual(notifications, [], "child output is data, never an MCP notification");
       assert.deepEqual(errors, [], "child output must not corrupt JSON-RPC frames");
     } finally {

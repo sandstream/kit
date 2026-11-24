@@ -9,6 +9,7 @@ import { rmTemp } from "./temp-cleanup.test-support.js";
 const source = import.meta.url.endsWith(".ts");
 const cli = fileURLToPath(new URL(source ? "./cli.ts" : "./cli.js", import.meta.url));
 const loader = source ? ["--import", import.meta.resolve("tsx")] : [];
+const cliArgs = [...loader, cli];
 
 // Windows' own caches under the fixture's LOCALAPPDATA. kit runs PowerShell to set ACLs
 // (src/utils/secure-perms.ts), and PowerShell sometimes writes its startup-profile cache there
@@ -28,7 +29,7 @@ function snapshot(root: string): Record<string, string> {
 }
 
 function run(cwd: string, env: NodeJS.ProcessEnv, args: string[], input?: string) {
-  const result = spawnSync(process.execPath, [...loader, cli, ...args], {
+  const result = spawnSync(process.execPath, [...cliArgs, ...args], {
     cwd,
     env,
     encoding: "utf8",
@@ -85,6 +86,7 @@ export function createCliContractFixture(config = "version = 1\n") {
     root,
     cwd,
     env,
+    cliArgs: [...cliArgs],
     run: (args: string[], input?: string) => run(cwd, env, args, input),
     snapshot: () => snapshot(root),
     cleanup: () => rmTemp(root),
