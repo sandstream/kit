@@ -103,6 +103,7 @@ test(
 
 test("preserves the previous index and removes staging when publishing fails", async (t) => {
   const fixture = auditFixture(t, true);
+  allowSlowLock(fixture);
   await runAuditWorkers([
     startAuditWorker(
       fixture,
@@ -115,8 +116,13 @@ test("preserves the previous index and removes staging when publishing fails", a
     const { dirname } = await import("node:path");
     const { syncBuiltinESMExports } = await import("node:module");
     const rename = fs.rename;
-    fs.rename = (source, destination) => {
-      if (String(source).includes(".kit-audit-index-")) throw new Error("index rename failed");
+    let attempts = 0;
+    fs.rename = async (source, destination) => {
+      if (String(source).includes(".kit-audit-index-")) {
+        attempts++;
+        assert.equal(await readFile(index, "utf8"), before);
+        throw Object.assign(new Error("index rename failed"), { code: "EPERM" });
+      }
       return rename(source, destination);
     };
     syncBuiltinESMExports();
@@ -126,12 +132,52 @@ test("preserves the previous index and removes staging when publishing fails", a
     const content = await readFile(log, "utf8");
     assert.deepEqual(audit.verifyAuditChain(content), { ok: true, entries: 2 });
     await assert.rejects(anchor.anchorAuditLog(log, content), /index rename failed/);
+    assert.equal(attempts, process.platform === "win32" ? 8 : 2);
     assert.equal(await readFile(index, "utf8"), before);
     assert.deepEqual((await fs.readdir(dirname(index))).filter(name => name.startsWith(".kit-audit-index-")), []);
     `,
     ),
   ]);
 });
+
+test(
+  "retries a transient Windows EPERM and publishes the new seal",
+  {
+    skip: process.platform !== "win32",
+  },
+  async (t) => {
+    const fixture = auditFixture(t, true);
+    await runAuditWorkers([
+      startAuditWorker(
+        fixture,
+        `
+    assert.equal(await audit.appendAuditEventDirect(event("seed"), { cwd: project }), true);
+    const log = join(project, ".kit-audit.jsonl");
+    const index = anchor.anchorRecordPath();
+    const before = await readFile(index, "utf8");
+    const fs = (await import("node:fs/promises")).default;
+    const { syncBuiltinESMExports } = await import("node:module");
+    const rename = fs.rename;
+    let attempts = 0;
+    fs.rename = async (source, destination) => {
+      if (String(source).includes(".kit-audit-index-")) {
+        assert.equal(await readFile(index, "utf8"), before);
+        if (++attempts === 1) throw Object.assign(new Error("index rename blocked"), { code: "EPERM" });
+      }
+      return rename(source, destination);
+    };
+    syncBuiltinESMExports();
+    assert.equal(await audit.appendAuditEventDirect(event("second"), { cwd: project }), true);
+    assert.equal(attempts, 2);
+    const record = await anchor.readAnchorRecord(log);
+    const verified = anchor.verifyAgainstAnchor(await readFile(log, "utf8"), record, await anchor.tryReadAuditAnchorKey());
+    assert.equal(verified.status, "anchored-ok");
+    assert.equal(verified.newSinceAnchor, 0);
+    `,
+      ),
+    ]);
+  },
+);
 
 test("concurrent seals for different logs retain every anchor record", async (t) => {
   const fixture = auditFixture(t);

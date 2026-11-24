@@ -62,9 +62,9 @@ WORKDIR /app
 RUN apk add --no-cache --upgrade \
         'bash>=5.3.9-r1' \
         'dumb-init>=1.2.5-r4' \
-        'libcrypto3>=3.5.9-r0' \
+        'libcrypto3>=3.5.9-r1' \
         'libexpat>=2.10.0-r0' \
-        'libssl3>=3.5.9-r0' \
+        'libssl3>=3.5.9-r1' \
         'python3>=3.14.10-r1' \
     && npm install -g npm@11.21.1 --ignore-scripts \
     && npm cache clean --force

@@ -1,3 +1,4 @@
+import { secdbIndexFixture } from "./apk-index.test-support.js";
 /**
  * The pure half of the apk-floor check: Dockerfile parsing, secdb and APKINDEX parsing, and the
  * comparison. The libexpat case is the one that shipped: a floor of 2.8.5-r0 while Alpine had
@@ -79,9 +80,14 @@ describe("dockerfile apk floors: secdb and APKINDEX", () => {
   });
 
   it("picks the newest stable branch from the secdb index", () => {
-    const html = '<a href="edge/">edge/</a><a href="v3.9/">v3.9/</a><a href="v3.24/">v3.24/</a>';
-    assert.equal(newestStableBranch(html), "v3.24");
-    assert.equal(newestStableBranch("nothing"), null);
+    const index = secdbIndexFixture("edge", "v3.9", "v3.24").toString("utf8");
+    assert.equal(newestStableBranch(index), "v3.24");
+    assert.equal(newestStableBranch(secdbIndexFixture("edge").toString("utf8")), null);
+    assert.throws(
+      () => newestStableBranch('<a href="v3.25/">v3.25/</a>'),
+      /complete directory listing/,
+    );
+    assert.equal(newestStableBranch(index.replace("edge/", "v3.99/")), "v3.24");
   });
 });
 

@@ -11,10 +11,8 @@
  * injectable deps so the orchestration is testable without real scanners.
  */
 import type { SecurityCheckResult } from "./check-security.js";
-import { ingestStrict, type IngestFormat } from "./adapters/ingest.js";
-import { abortedRun } from "./scan-abort.js";
-import { exitGateFinding } from "./scan-exit-gate.js";
-import { redactSecrets } from "./utils/redactSecrets.js";
+import type { IngestFormat, IngestGap } from "./adapters/ingest.js";
+import { settleScanner, type ScannerProcess } from "./scan-result.js";
 
 /**
  * Downloaded terraform provider binaries. They are vendored Go programs: scanning them produced 54
@@ -79,20 +77,17 @@ export function isLocalSemgrepConfig(config: string): boolean {
  *   - explicit `--config <config>` (never `auto`, which forces telemetry on),
  *   - `--metrics off` so nothing is reported to the registry,
  *   - `--exclude` of common vendored/build/test noise.
- * sarif mode emits SARIF and scans `.`; json mode emits JSON without rewriting
- * rule ids and relies on the caller's positional target.
+ * Delegate mode emits native report data, uses normal rule ids and scans `.`.
+ * Check mode keeps original rule ids and relies on the caller's positional target.
  */
-export function buildSemgrepArgs(opts: { mode: "sarif" | "json"; config: string }): string[] {
+export function buildSemgrepArgs(opts: { mode: "delegate" | "json"; config: string }): string[] {
   const args = ["scan", "--config", opts.config, "--metrics", "off", "--quiet"];
-  if (opts.mode === "sarif") {
-    args.push("--sarif");
-  } else {
-    args.push("--json", "--no-rewrite-rule-ids");
-  }
+  args.push("--json");
+  if (opts.mode === "json") args.push("--no-rewrite-rule-ids");
   for (const glob of SEMGREP_EXCLUDES) {
     args.push("--exclude", glob);
   }
-  if (opts.mode === "sarif") {
+  if (opts.mode === "delegate") {
     args.push(".");
   }
   return args;
@@ -104,7 +99,8 @@ export interface ScannerDef {
   bin: string;
   /** args that emit SARIF/OSV on stdout */
   args: string[];
-  format: IngestFormat;
+  format: IngestFormat; // Format Kit ingests after any native evidence processing.
+  evidence?: "grype-directory" | "trivy-fs" | "trivy-config" | "trivy-image" | "semgrep" | "snyk";
   /** env var that must be set (e.g. SNYK_TOKEN) */
   needsToken?: string;
   /** marker files that make the scanner applicable; undefined = always */
@@ -115,13 +111,14 @@ export interface ScannerDef {
   /** Extra args/env applied in air-gap mode so the scanner runs against a local DB. */
   offline?: { args?: string[]; env?: Record<string, string> };
   /**
-   * Exit-code gate: the tool has no stable findings-JSON to parse, so its own exit status IS the
-   * verdict: 0 = clean, non-zero = one high-severity policy violation. (Socket: `socket ci`
-   * uploads manifests and fails on policy; `format` is unused, the branch skips ingest.)
+   * Read the Socket policy verdict and retain reported violations.
+   * Socket CI supplies no proof of policy coverage. This path does not use `format`.
    */
   exitGate?: boolean;
   /** Exit code that means "nothing here to scan" (osv-scanner: 128), not a failure. */
   noTargetExit?: number;
+  /** A nonzero exit code the delegate reserves for a completed report with findings. */
+  findingsExit?: number;
   cwd?: string; // repo-relative directory to run in; set by expandPerProject (scan-projects.ts)
 }
 
@@ -130,15 +127,27 @@ export const SCANNERS: ScannerDef[] = [
   {
     id: "snyk",
     bin: "snyk",
+    evidence: "snyk",
     args: ["test", "--sarif"],
     format: "sarif",
     needsToken: "SNYK_TOKEN",
+    findingsExit: 1,
     cloudOnly: true,
   },
   {
     id: "trivy",
     bin: "trivy",
-    args: ["fs", "--skip-dirs", PROVIDER_GLOB, "--format", "sarif", "--quiet", "."],
+    evidence: "trivy-fs",
+    args: [
+      "fs",
+      "--skip-dirs",
+      PROVIDER_GLOB,
+      "--format",
+      "json",
+      "--list-all-pkgs",
+      "--quiet",
+      ".",
+    ],
     format: "sarif",
     // run against the pre-synced local DB; never reach out to update it
     offline: { args: ["--offline-scan", "--skip-db-update"] },
@@ -148,7 +157,8 @@ export const SCANNERS: ScannerDef[] = [
     // runs as root). `trivy fs` above looks at dependencies only. Applies only where such files exist.
     id: "trivy-config",
     bin: "trivy",
-    args: ["config", "--skip-dirs", PROVIDER_GLOB, "--format", "sarif", "--quiet", "."],
+    evidence: "trivy-config",
+    args: ["config", "--skip-dirs", PROVIDER_GLOB, "--format", "json", "--quiet", "."],
     format: "sarif",
     detect: ["*.tf", "Dockerfile"],
     // the check bundle is fetched from a registry unless told not to
@@ -158,6 +168,7 @@ export const SCANNERS: ScannerDef[] = [
     id: "grype",
     bin: "grype",
     args: ["dir:.", "--exclude", PROVIDER_GLOB_ALL, "-o", "sarif", "-q"],
+    evidence: "grype-directory",
     format: "sarif",
     offline: { env: { GRYPE_DB_AUTO_UPDATE: "false" } },
   },
@@ -172,7 +183,8 @@ export const SCANNERS: ScannerDef[] = [
     // is the only way to run semgrep air-gapped.
     id: "semgrep",
     bin: "semgrep",
-    args: buildSemgrepArgs({ mode: "sarif", config: semgrepConfig(process.env) }),
+    evidence: "semgrep",
+    args: buildSemgrepArgs({ mode: "delegate", config: semgrepConfig(process.env) }),
     format: "sarif",
     cloudOnly: true,
     needsToken: "KIT_SEMGREP_CONFIG",
@@ -185,12 +197,10 @@ export const SCANNERS: ScannerDef[] = [
     format: "osv",
     offline: { args: ["--offline"] },
     noTargetExit: 128,
+    findingsExit: 1,
   },
   {
-    // Socket uploads manifests to socket.dev (cloud) → not air-gappable. The CLI
-    // has no stable findings-JSON, so kit gates on `socket ci`'s exit code rather
-    // than parsing output. Opt-in: needs SOCKET_SECURITY_API_TOKEN (wired by
-    // `kit setup` in connected/non-air-gap posture).
+    // Socket uploads manifests to socket.dev. The delegate needs a token and network access.
     id: "socket",
     bin: "socket",
     args: ["ci"],
@@ -280,7 +290,7 @@ export function airGapScanners(
       const cfg = semgrepConfig(env);
       if (isLocalSemgrepConfig(cfg)) {
         // Local ruleset → safe to run air-gapped; rebuild args against that config.
-        scanners.push({ ...d, args: buildSemgrepArgs({ mode: "sarif", config: cfg }) });
+        scanners.push({ ...d, args: buildSemgrepArgs({ mode: "delegate", config: cfg }) });
       } else {
         dropped.push(d.id);
       }
@@ -400,7 +410,7 @@ export function suppressBaselined(
 }
 
 export type ScannerStatus =
-  "ran" | "not-installed" | "no-token" | "not-applicable" | "error" | "timed-out"; // kit stopped it at its time limit
+  "ran" | "not-installed" | "no-token" | "not-applicable" | "error" | "partial" | "timed-out"; // kit stopped it at its time limit
 export interface ScannerRun {
   id: string;
   status: ScannerStatus;
@@ -409,37 +419,11 @@ export interface ScannerRun {
   reason?: string;
   /** The scanner found nothing to scan (not-applicable). A required scanner does not accept this. */
   noTarget?: boolean;
-}
-
-const MAX_REASON = 160;
-const FAILURE_LINE = new RegExp(
-  "error|fatal|fail|cannot|unable|denied|not found|no package|invalid",
-  "i",
-);
-const ANSI_SEQUENCE = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[A-Za-z]", "g");
-
-/** Drop control characters except the newline, so a scanner cannot steer the terminal. */
-function withoutControls(text: string): string {
-  let out = "";
-  for (const ch of text.replace(ANSI_SEQUENCE, "")) {
-    const code = ch.charCodeAt(0);
-    if (code === 10 || (code > 31 && code !== 127)) out += ch;
-  }
-  return out;
-}
-
-/**
- * One safe line from scanner stderr. Progress lines come first and the cause comes later, so the
- * line that names a failure wins, else the last line. Control characters are removed, credentials
- * redacted, and the length capped.
- */
-function scannerReason(stderr: string | undefined): string | undefined {
-  const lines = redactSecrets(withoutControls(stderr ?? ""))
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  const line = lines.find((l) => FAILURE_LINE.test(l)) ?? lines[lines.length - 1];
-  return line ? line.slice(0, MAX_REASON) : undefined;
+  reportGap?: IngestGap;
+  packageCount?: number;
+  checkCount?: number;
+  fileCount?: number;
+  targetFiles?: string[];
 }
 
 /** Environment for a scanner child. PWD is reset because Go tools trust it over the real directory. */
@@ -456,7 +440,13 @@ export function scannerEnv(
  * is unknown (a green result hides the gap). `ran` succeeded; `not-applicable` is
  * a legitimate skip (the scanner does not apply to this project) and is NOT a gap.
  */
-const NON_RUNNING_STATUSES: ScannerStatus[] = ["not-installed", "no-token", "error", "timed-out"];
+const NON_RUNNING_STATUSES: ScannerStatus[] = [
+  "not-installed",
+  "no-token",
+  "error",
+  "partial",
+  "timed-out",
+];
 
 export interface ScanGateOptions {
   /** Scanner ids that MUST run; if one did not, the gate fails (even without strict). */
@@ -490,12 +480,15 @@ export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): 
   const seen = new Set<string>();
   for (const r of runs) {
     seen.add(r.id);
-    if (r.noTarget && required.has(r.id)) {
+    if (r.status === "not-applicable" && required.has(r.id)) {
       failures.push(`required scanner ${r.id} found nothing to scan`);
       continue;
     }
     if (!NON_RUNNING_STATUSES.includes(r.status)) continue; // ran or not-applicable
-    const why = `${r.id} did not run (${r.status})`;
+    const why =
+      r.status === "partial"
+        ? `${r.id} did not complete (partial)`
+        : `${r.id} did not run (${r.status})`;
     if (required.has(r.id)) failures.push(`required scanner ${why}`);
     else if (opts.strict) failures.push(`${why} [strict]`);
     else warnings.push(why);
@@ -508,50 +501,19 @@ export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): 
 
 export interface ScanDeps {
   resolve(bin: string): Promise<string | null>;
-  run(bin: string, args: string[], timeoutMs?: number, cwd?: string): Promise<ScanResult>;
+  run(
+    bin: string,
+    args: string[],
+    timeoutMs?: number,
+    cwd?: string,
+    evidence?: ScannerDef["evidence"],
+  ): Promise<ScannerProcess>;
   hasEnv(name: string): boolean;
-  detect(markers: string[]): boolean;
-}
-
-type ScanResult = {
-  ok: boolean;
-  stdout: string;
-  stderr?: string;
-  exitCode?: number;
-  truncated?: boolean;
-  timedOut?: boolean;
-};
-
-/**
- * Turn a scanner's raw result into its run record and findings.
- *
- * Most scanners exit non-zero WHEN findings exist, so a non-zero exit alone is not an error: the
- * output is parsed regardless. But a non-empty output kit CANNOT parse (junk, an error blob, the
- * wrong format) must NOT be treated as "ran clean", or a broken scanner hides behind a green
- * verdict. Empty output is "ran/0" only if the process also succeeded. An exit code the scanner
- * defines as "nothing to scan" is not-applicable, not a failure.
- */
-function settleRun(
-  s: ScannerDef,
-  res: ScanResult,
-): { run: ScannerRun; findings?: SecurityCheckResult[] } {
-  const reason = scannerReason(res.stderr);
-  const aborted = abortedRun(s, res);
-  if (aborted) return { run: aborted };
-  if (!res.stdout && s.noTargetExit !== undefined && res.exitCode === s.noTargetExit) {
-    return { run: { id: s.id, status: "not-applicable", findings: 0, reason, noTarget: true } };
-  }
-  if (!res.stdout) {
-    return res.ok
-      ? { run: { id: s.id, status: "ran", findings: 0 } }
-      : { run: { id: s.id, status: "error", findings: 0, reason } };
-  }
-  const outcome = ingestStrict(s.format, res.stdout);
-  if (!outcome.ok) {
-    return { run: { id: s.id, status: "error", findings: 0, reason: reason ?? outcome.reason } };
-  }
-  const run: ScannerRun = { id: s.id, status: "ran", findings: outcome.findings.length };
-  return { run, findings: outcome.findings };
+  detect(
+    markers: string[],
+    cwd?: string,
+    evidence?: ScannerDef["evidence"],
+  ): boolean | Promise<boolean>;
 }
 
 /** Run each applicable+installed scanner, ingest its output, merge into one verdict. */
@@ -562,7 +524,7 @@ export async function runScanners(
   const runs: ScannerRun[] = [];
   const perScanner: { id: string; findings: SecurityCheckResult[] }[] = [];
   for (const s of scanners) {
-    if (s.detect && !deps.detect(s.detect)) {
+    if (s.detect && !(await deps.detect(s.detect, s.cwd, s.evidence))) {
       runs.push({ id: s.id, status: "not-applicable", findings: 0 });
       continue;
     }
@@ -575,20 +537,8 @@ export async function runScanners(
       runs.push({ id: s.id, status: "no-token", findings: 0 });
       continue;
     }
-    const res = await deps.run(bin, s.args, s.timeoutMs, s.cwd);
-    // Exit-code-gated scanners (e.g. Socket): no parseable findings — the tool's
-    // own exit status IS the verdict. Never false-green on a crash: any non-zero
-    // exit becomes one high-severity finding (worded by cause, see scan-exit-gate).
-    if (s.exitGate) {
-      if (res.ok) {
-        runs.push({ id: s.id, status: "ran", findings: 0 });
-      } else {
-        perScanner.push({ id: s.id, findings: [exitGateFinding(s, res)] });
-        runs.push({ id: s.id, status: "ran", findings: 1 });
-      }
-      continue;
-    }
-    const settled = settleRun(s, res);
+    const res = await deps.run(bin, s.args, s.timeoutMs, s.cwd, s.evidence);
+    const settled = settleScanner(s, res);
     runs.push(settled.run);
     if (settled.findings) perScanner.push({ id: s.id, findings: settled.findings });
   }

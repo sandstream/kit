@@ -27,6 +27,11 @@ console.log(`${recorded.written} issues recorded`);
 
 ## API
 
+`fetchIssues` follows pagination until the last page or the requested limit.
+If the limit cuts off coverage, an issue ID repeats, or part of the request fails,
+`IncompleteWizIssuesError.findings` contains the distinct issues read so far.
+Authentication and issue requests reject redirects.
+
 `makeClient(options?)` exchanges client credentials for an access token. `fetchIssues(client, options?)` reads issue-graph nodes; `recordWizIssues(issues, cwd?)` appends local scan-result rows and returns the count written.
 
 ## Testing

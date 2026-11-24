@@ -28,7 +28,17 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { fetchWithRetry } from "./download-retry.js";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import {
+  BUMBLEBEE_REPORT_LIMIT,
+  parseScanOutput,
+  type BumblebeeFinding,
+  type ScanOutcome,
+} from "./bumblebee-report.js";
+import { scannerGap } from "./check-scanner-evidence.js";
+import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+
+export type { BumblebeeFinding, ScanOutcome } from "./bumblebee-report.js";
 
 const exec = promisify(execFile);
 
@@ -325,87 +335,6 @@ async function downloadAndInstall(
   }
 }
 
-export interface BumblebeeFinding {
-  severity: string;
-  catalogId: string;
-  catalogName: string;
-  ecosystem: string;
-  packageName: string;
-  version: string;
-  sourceFile: string;
-  evidence: string;
-}
-
-export interface ScanOutcome {
-  /** scan_summary.status, e.g. "complete". "unknown" if no summary was seen. */
-  status: string;
-  timedOut: boolean;
-  summarySeen: boolean;
-  findings: BumblebeeFinding[];
-  /** Total packages inspected (emitted + suppressed). */
-  packagesScanned: number;
-}
-
-function str(rec: Record<string, unknown>, key: string): string {
-  const v = rec[key];
-  return typeof v === "string" ? v : "";
-}
-
-function num(v: unknown): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-
-/**
- * Parse bumblebee NDJSON stdout into findings + summary.
- * Blank or unparseable lines are ignored. Diagnostics (on stderr) are not seen
- * here. bumblebee exits 0 even when findings are present, so callers must judge
- * exposure from the parsed findings, never from the process exit code.
- */
-export function parseScanOutput(stdout: string): ScanOutcome {
-  const outcome: ScanOutcome = {
-    status: "unknown",
-    timedOut: false,
-    summarySeen: false,
-    findings: [],
-    packagesScanned: 0,
-  };
-
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    let rec: Record<string, unknown>;
-    try {
-      rec = JSON.parse(trimmed) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-
-    if (rec.record_type === "finding") {
-      outcome.findings.push({
-        severity: str(rec, "severity") || "unknown",
-        catalogId: str(rec, "catalog_id"),
-        catalogName: str(rec, "catalog_name"),
-        ecosystem: str(rec, "ecosystem"),
-        packageName: str(rec, "package_name") || str(rec, "normalized_name"),
-        version: str(rec, "version"),
-        sourceFile: str(rec, "source_file"),
-        evidence: str(rec, "evidence"),
-      });
-    } else if (rec.record_type === "scan_summary") {
-      outcome.summarySeen = true;
-      outcome.status = str(rec, "status") || "unknown";
-      outcome.timedOut = rec.timed_out === true;
-      const emitted = num(rec.package_records_emitted);
-      const suppressed = num(rec.package_records_suppressed);
-      const counts = rec.counts as Record<string, unknown> | undefined;
-      outcome.packagesScanned = emitted + suppressed || num(counts?.package);
-    }
-  }
-
-  return outcome;
-}
-
 const SEVERITY_RANK: Record<string, number> = {
   critical: 4,
   high: 3,
@@ -479,25 +408,21 @@ export interface ScanRequest {
   profile: string;
   /** Explicit roots to scan (required for deep; optional otherwise). */
   roots: string[];
+  cwd?: string;
   /** Process timeout, ms. Default 120_000. */
   timeoutMs?: number;
   /** bumblebee --max-duration value (wall-clock cap). Default "90s". */
   maxDuration?: string;
 }
 
-/**
- * Run a bumblebee scan in findings-only mode against the bundled catalogs.
- * Returns the parsed outcome, or an `error` string on operational failure.
- */
-export async function runScan(
-  req: ScanRequest,
-): Promise<{ outcome?: ScanOutcome; error?: string }> {
+/** Run the pinned scanner and preserve validated findings even when coverage fails. */
+export async function runScan(req: ScanRequest): Promise<ScanOutcome> {
   const args = [
     "scan",
     "-profile",
     req.profile,
     "-exposure-catalog",
-    req.install.catalogDir,
+    resolve(req.install.catalogDir),
     "-findings-only",
     "-output",
     "stdout",
@@ -508,21 +433,34 @@ export async function runScan(
     args.push("-root", root);
   }
 
-  try {
-    const { stdout } = await exec(req.install.binPath, args, {
-      timeout: req.timeoutMs ?? 120_000,
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    return { outcome: parseScanOutput(stdout) };
-  } catch (err) {
-    // bumblebee may exit non-zero on operational error; if it still produced a
-    // summary, the parsed output is authoritative.
-    if (err && typeof err === "object" && "stdout" in err) {
-      const outcome = parseScanOutput(String((err as { stdout?: unknown }).stdout ?? ""));
-      if (outcome.summarySeen) return { outcome };
-    }
+  const result = await execFileNoThrow(resolve(req.install.binPath), args, {
+    timeout: req.timeoutMs ?? 120_000,
+    maxBuffer: BUMBLEBEE_REPORT_LIMIT,
+    cwd: req.cwd,
+  });
+  const report = parseScanOutput(result.stdout);
+  const gap =
+    scannerGap(
+      { count: report.findings.length, gap: report.gap?.status, note: report.gap?.reason },
+      result,
+    ) ?? scanScopeGap(req, report);
+  if (gap) return { ...report, gap };
+  const catalogMtime = await newestCatalogMtime(resolve(req.install.catalogDir));
+  if (catalogMtime === null) {
     return {
-      error: err instanceof Error ? err.message : String(err),
+      ...report,
+      gap: { status: "missing", reason: "no readable Bumblebee threat catalog" },
     };
   }
+  return { ...report, catalogMtime };
+}
+
+function scanScopeGap(req: ScanRequest, report: ScanOutcome): ScanOutcome["gap"] {
+  if (report.profile !== req.profile)
+    return { status: "partial", reason: "scanner reported a different profile" };
+  const cwd = req.cwd ?? process.cwd();
+  const covered = new Set(report.roots?.map((root) => resolve(cwd, root)));
+  if (req.roots.some((root) => !covered.has(resolve(cwd, root))))
+    return { status: "partial", reason: "scanner omitted a requested root" };
+  return undefined;
 }

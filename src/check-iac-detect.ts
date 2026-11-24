@@ -1,5 +1,5 @@
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 
 /**
  * Where infrastructure code lives. `trivy config` reads a tree, so a root with no Dockerfile of its
@@ -38,8 +38,8 @@ function isIacFile(name: string): boolean {
   );
 }
 
-/** Directories (relative, "." for the root) that hold a Dockerfile, a compose file or Terraform. */
-export async function findIac(root: string): Promise<string[]> {
+/** Dockerfile, Compose and Terraform paths within the bounded project discovery. */
+export async function findIacFiles(root: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, rel: string, depth: number): Promise<void> => {
     let entries;
@@ -48,13 +48,18 @@ export async function findIac(root: string): Promise<string[]> {
     } catch {
       return;
     }
-    if (entries.some((e) => e.isFile() && isIacFile(e.name))) found.push(rel || ".");
-    if (depth >= MAX_DEPTH) return;
-    for (const e of entries) {
-      if (!e.isDirectory() || SKIPPED.has(e.name)) continue;
-      await walk(join(dir, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1);
+    for (const entry of entries) {
+      const path = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isFile() && isIacFile(entry.name)) found.push(path);
+      if (entry.isDirectory() && depth < MAX_DEPTH && !SKIPPED.has(entry.name))
+        await walk(join(dir, entry.name), path, depth + 1);
     }
   };
   await walk(root, "", 0);
   return found.sort();
+}
+
+/** Directories (relative, "." for the root) that hold discovered IaC. */
+export async function findIac(root: string): Promise<string[]> {
+  return [...new Set((await findIacFiles(root)).map((path) => posix.dirname(path)))].sort();
 }

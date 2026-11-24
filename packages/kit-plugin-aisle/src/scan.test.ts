@@ -101,7 +101,9 @@ describe("aisle nano-analyzer plugin", () => {
       /Invalid AISLE nano-analyzer summary JSON/,
     );
   });
+});
 
+describe("AISLE finding output", () => {
   it("records normalized findings to .kit-scan-results.jsonl", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-aisle-"));
     try {
@@ -136,6 +138,92 @@ describe("aisle nano-analyzer plugin", () => {
     } finally {
       rmSync(outDir, { recursive: true, force: true });
       rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unrelated triage envelope", () => {
+    assert.throws(
+      () => parseAisleNanoTriageJson('{"error":"fixture"}'),
+      /expected a findings array/,
+    );
+  });
+});
+
+describe("AISLE directory coverage", () => {
+  it("accepts a clean upstream summary when the producer omits triage.json", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "aisle-output-"));
+    try {
+      const summary = {
+        target: outDir,
+        files_scanned: 1,
+        clean_files: 1,
+        error_files: 0,
+        files_skipped: 0,
+        per_file: [{ file: "src/example.c", status: "ok", severities: { high: 0 } }],
+      };
+      writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary));
+      assert.deepEqual(await ingestAisleNanoOutputDir(outDir, outDir), { written: 0 });
+      summary.per_file[0]!.severities.high = 1;
+      writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary));
+      await assert.rejects(() => ingestAisleNanoOutputDir(outDir, outDir), { code: "ENOENT" });
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("retains findings and reports incomplete coverage when a file scan failed", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "aisle-output-"));
+    try {
+      const summary = JSON.parse(SUMMARY);
+      summary.files_scanned = 2;
+      summary.error_files = 1;
+      summary.per_file.push({ file: "src/error.c", status: "error", severities: {} });
+      writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary));
+      writeFileSync(join(outDir, "triage.json"), "[]");
+      await assert.rejects(
+        () => ingestAisleNanoOutputDir(outDir, outDir),
+        /Incomplete AISLE report/,
+      );
+
+      writeFileSync(join(outDir, "triage.json"), TRIAGE);
+      assert.deepEqual(await ingestAisleNanoOutputDir(outDir, outDir), {
+        written: 1,
+        coverage: "partial",
+      });
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("AISLE declared file scope", () => {
+  it("refuses empty coverage for missing targets, aliased files and out-of-scope paths", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "aisle-output-"));
+    try {
+      writeFileSync(join(outDir, "triage.json"), "[]");
+      for (const [target, files] of [
+        [undefined, ["src/a.c", "src/b.c"]],
+        ["/fixture", ["src/a.c", "./src/a.c"]],
+        ["/fixture", ["src/a.c", "../outside.c"]],
+        [String.raw`C:\fixture`, [String.raw`src\a.c`, "src/a.c"]],
+      ] as const) {
+        const text = JSON.stringify({
+          target,
+          files_scanned: 2,
+          clean_files: 2,
+          error_files: 0,
+          files_skipped: 0,
+          per_file: files.map((file) => ({ file, status: "ok", severities: { high: 0 } })),
+        });
+        writeFileSync(join(outDir, "summary.json"), text);
+        assert.equal(parseAisleNanoSummaryJson(text).coverage, "partial");
+        await assert.rejects(
+          () => ingestAisleNanoOutputDir(outDir, outDir),
+          /Incomplete AISLE report/,
+        );
+      }
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
     }
   });
 });

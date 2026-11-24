@@ -32,7 +32,8 @@ describe("scannedHead: what a clean scan covered", () => {
 describe("staleCatalogDetail", () => {
   it("is a plain note while the catalogs are recent", () => {
     const text = staleCatalogDetail(12, 40, null, "project");
-    assert.match(text, /no known exposures \(12 packages, profile=project\)/);
+    assert.match(text, /Compared 12 packages, profile=project with the pinned catalogs/);
+    assert.doesNotMatch(text, /no known exposures/);
     assert.match(text, /40 days old/);
     assert.match(text, /advisory, not gated/);
     assert.doesNotMatch(text, /WARNING/);

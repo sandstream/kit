@@ -8,7 +8,7 @@ Ingests local AISLE nano-analyzer results into kit's scan-results log. This pack
 npm install sandstream-kit-plugin-aisle
 ```
 
-Run the nano-analyzer separately so its output directory contains `triage.json` (and optionally `summary.json`).
+Run the nano-analyzer separately and import its output directory. An empty result requires a complete `summary.json` with a declared target and distinct file paths under that target. Kit can retain readable findings from `triage.json` with partial coverage.
 
 ## Configuration
 
@@ -26,6 +26,10 @@ console.log(`${result.written} findings recorded`);
 The function appends normalized findings to `.kit-scan-results.jsonl` in the chosen project directory. By default it records `VALID` findings; options include `minConfidence`, `defaultSeverity`, and `includeRejected`. No credential is required for local ingestion.
 
 ## API
+
+Directory import reports `coverage: "partial"` when it retains findings from an incomplete scan.
+If the scan is incomplete and no findings can be retained, import returns an error.
+A complete summary with zero findings can verify an empty result when the producer omits `triage.json`.
 
 `parseAisleNanoTriageJson` and `parseAisleNanoSummaryJson` parse source JSON. `normalizeAisleNanoFindings` produces kit findings without writing. `recordAisleNanoFindings` writes already parsed triage findings; `ingestAisleNanoOutputDir` reads an output directory and writes them. `normalizeSeverity` maps source severity labels to kit's four levels.
 

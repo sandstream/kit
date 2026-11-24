@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { gzipSync } from "node:zlib";
 import { apkIndexText } from "./dockerfile-apk-floors.js";
-import { tarOf } from "./apk-index.test-support.js";
+import { fixtureIndexKeys, signApkIndexFixture, tarOf } from "./apk-index.test-support.js";
+import { verifyApkIndex } from "./alpine-index-signature.js";
 
 const TEXT = "P:binary-a\nV:2.0-r0\no:source-a\n\n";
 const INDEX = tarOf({ APKINDEX: TEXT });
@@ -48,6 +49,14 @@ it("accepts unsigned, signed-fragment, PAX, and multiple-signature structures", 
 
 it("accepts the GNU header encoding used by Alpine", () => {
   assert.equal(apkIndexText(changedHeader(257, "ustar  \0")), TEXT);
+});
+
+it("uses signed index timestamps even with independent PAX timestamps in the signature member", () => {
+  const payload = gzipSync(Buffer.concat([pax("mtime", "1700000000.125"), INDEX]));
+  const signed = signApkIndexFixture(payload, pax("mtime", "1800000000.25"));
+  const result = verifyApkIndex(signed, fixtureIndexKeys());
+  assert.equal(result.mtime, 1_700_000_000.125);
+  assert.equal(result.text, TEXT);
 });
 
 it("accepts the email-based signature key names used by Alpine", () => {

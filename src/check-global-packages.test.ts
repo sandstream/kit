@@ -247,20 +247,21 @@ const osvOut = (vulns: Record<string, string[]>) =>
   });
 
 describe("judgeGlobalPackages", () => {
+  const scanOk = (vulns: Record<string, string[]>) => ({ stdout: osvOut(vulns), code: 0 });
   const pkgs = [g("npm", "10.9.0", ["mise node 22.23.4"]), g("lodash", "4.17.20", ["npm prefix"])];
 
   it("skips when there are no global packages", () => {
-    assert.equal(judgeGlobalPackages([], osvOut({})).status, "skip");
+    assert.equal(judgeGlobalPackages([], scanOk({})).status, "skip");
   });
 
   it("passes when the scanner finds nothing, and says how many packages it looked at", () => {
-    const r = judgeGlobalPackages(pkgs, osvOut({}));
+    const r = judgeGlobalPackages(pkgs, scanOk({}));
     assert.equal(r.status, "pass");
     assert.match(r.detail, /2 global npm packages/);
   });
 
   it("warns, naming the vulnerable package and where it lives", () => {
-    const r = judgeGlobalPackages(pkgs, osvOut({ "lodash@4.17.20": ["GHSA-29mw-wpgm-hmr9"] }));
+    const r = judgeGlobalPackages(pkgs, scanOk({ "lodash@4.17.20": ["GHSA-29mw-wpgm-hmr9"] }));
     assert.equal(r.status, "warn");
     assert.equal(r.name, "global npm packages");
     assert.match(r.detail, /lodash 4\.17\.20/);
@@ -273,13 +274,13 @@ describe("judgeGlobalPackages", () => {
   });
 
   it("suggests the global update, as text, for a plain package name", () => {
-    const r = judgeGlobalPackages(pkgs, osvOut({ "lodash@4.17.20": ["GHSA-x"] }));
+    const r = judgeGlobalPackages(pkgs, scanOk({ "lodash@4.17.20": ["GHSA-x"] }));
     assert.match(r.suggestion ?? "", /npm install -g lodash@latest/);
     assert.doesNotMatch(r.suggestion ?? "", /npm update/);
   });
 
   it("is unverified, never green, when the scanner output cannot be read", () => {
-    const r = judgeGlobalPackages(pkgs, "not json");
+    const r = judgeGlobalPackages(pkgs, { stdout: "not json", code: 0 });
     assert.equal(r.status, "warn");
     assert.match(r.detail, /unverified/i);
   });
@@ -291,7 +292,7 @@ describe("judgeGlobalPackages", () => {
   it("prints nothing a folder name could use to forge a line", () => {
     const r = judgeGlobalPackages(
       [g("lodash", "4.17.20", ["x\nTRIAGE PASSED"])],
-      osvOut({ "lodash@4.17.20": ["GHSA-x"] }),
+      scanOk({ "lodash@4.17.20": ["GHSA-x"] }),
     );
     assert.equal(/[\n\u001b]/.test(r.detail + (r.suggestion ?? "")), false);
   });
@@ -316,6 +317,35 @@ describe("checkGlobalPackages", () => {
     const rows = await checkGlobalPackages("/p", deps());
     assert.equal(rows.length, 1);
     assert.equal(rows[0].status, "warn");
+  });
+
+  it("cannot clear global packages after an error with a valid-looking empty report", async () => {
+    const [row] = await checkGlobalPackages(
+      "/p",
+      deps({
+        runOsv: async () => ({ stdout: osvOut({}), code: 127 }),
+      }),
+    );
+    assert.equal(row.status, "warn");
+    assert.equal(row.didNotRun, true);
+    assert.equal(row.evidenceStatus, "unavailable");
+  });
+
+  it("preserves known global package findings after an interrupted report", async () => {
+    const [row] = await checkGlobalPackages(
+      "/p",
+      deps({
+        runOsv: async () => ({
+          stdout: osvOut({ "lodash@4.17.20": ["GHSA-x"] }),
+          code: 1,
+          timedOut: true,
+        }),
+      }),
+    );
+    assert.equal(row.didNotRun, true);
+    assert.equal(row.evidenceStatus, "partial");
+    assert.equal(row.hasFindings, true);
+    assert.deepEqual(row.affected, [{ name: "lodash", version: "4.17.20" }]);
   });
 
   it("returns nothing for a project that does not use Node", async () => {

@@ -1,68 +1,95 @@
-/**
- * `kit check` host result: is an image on this machine one that a published analysis names as
- * malicious? Reads `docker image ls --digests` (read-only: it lists, it does not pull, inspect a
- * registry or run anything) and compares each repository name and registry digest with
- * DOCKER_IOCS. A match is exact by construction, so this catches only the images the list names;
- * it is not a scanner. No docker CLI, or no daemon, is a plain skip.
- */
-import { execFile } from "node:child_process";
 import type { SecurityCheckResult } from "./check-security.js";
+import {
+  scannerEvidence,
+  scannerGap,
+  scannerObject,
+  type ScannerGap,
+} from "./check-scanner-evidence.js";
 import { DOCKER_IOCS, type DockerIoc } from "./docker-ioc-data.js";
+import { execFileNoThrow, type ExecResult } from "./utils/execFileNoThrow.js";
 
+/** Read-only comparison of known indicators with the selected Docker context. */
 const DOCKER_IOC_NAME = "local docker image IOCs";
-const LIST_ARGS = ["image", "ls", "--digests", "--no-trunc", "--format", "{{json .}}"];
+const LIST_ARGS = ["image", "ls", "--all", "--digests", "--no-trunc", "--format", "{{json .}}"];
+const COUNT_ARGS = ["info", "--format", "{{json .Images}}"];
+const MAX_BUFFER = 16 * 1024 * 1024;
+const TIMEOUT = 15_000;
+const NO_VALUE = "<none>";
+const IMAGE_ID = /^sha256:[0-9a-f]{64}$/i;
+const REPOSITORY =
+  /^(?:(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::[0-9]+)?\/)?[a-z0-9]+(?:[._/-]+[a-z0-9]+)*$/i;
+const TAG = /^[\w][\w.-]{0,127}$/;
+const DAEMON_ABSENT =
+  /^Cannot connect to the Docker daemon at [^\r\n]+\. Is the docker daemon running\?\r?\n?$/i;
+const UNIX_SOCKET_ABSENT =
+  /^failed to connect to the docker API at unix:\/\/[^;\r\n]+; check if the path is correct and if the daemon is running: dial unix [^\r\n]+: connect: (?:no such file or directory|connection refused)\r?\n?$/i;
+const WINDOWS_PIPE_ABSENT =
+  /^failed to connect to the docker API at npipe:\/\/\/\/\.\/pipe\/([\w.-]+); check if the path is correct and if the daemon is running: open \/\/\.\/pipe\/\1: The system cannot find the file specified\.\r?\n?$/i;
+const LEGACY_WINDOWS_PIPE_ABSENT =
+  /^error during connect: (?:(?:this error may indicate that the docker daemon is not running|in the default daemon configuration on Windows, the docker client must be run with elevated privileges to connect): )?(?:Get|Head) "http:\/\/%2F%2F\.%2Fpipe%2F([\w.-]+)\/[^"\r\n]+": open \/\/\.\/pipe\/\1: The system cannot find the file specified\.\r?\n?$/i;
 
-/** One local image row, as `docker image ls --format '{{json .}}'` prints it. */
-export interface LocalImage {
+interface LocalImage {
   repository: string;
   tag: string;
   digest: string;
   id: string;
 }
 
-/** Runs `docker` with the given arguments and resolves its stdout; injected in tests. */
-export type DockerLister = (args: string[]) => Promise<string>;
+type DockerLister = (args: string[], timeout: number) => Promise<ExecResult>;
 
-const defaultLister: DockerLister = (args) =>
-  new Promise((resolvePromise, reject) => {
-    execFile(
-      "docker",
-      args,
-      { timeout: 15_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
-      (err, stdout) => (err ? reject(err) : resolvePromise(stdout)),
-    );
-  });
+const defaultLister: DockerLister = (args, timeout) =>
+  execFileNoThrow("docker", args, { timeout, maxBuffer: MAX_BUFFER });
 
-const result = (r: Omit<SecurityCheckResult, "category" | "name">): SecurityCheckResult => ({
-  category: "supply-chain",
-  name: DOCKER_IOC_NAME,
-  ...r,
-});
+const base = { category: "supply-chain", name: DOCKER_IOC_NAME } as const;
 
-/** Parse `{{json .}}` lines; a line that is not an object with a Repository is ignored. */
-export function parseImageList(stdout: string): LocalImage[] {
-  const images: LocalImage[] = [];
-  for (const line of stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    let row: Record<string, unknown>;
-    try {
-      row = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    if (!row || typeof row.Repository !== "string") continue;
-    const text = (v: unknown) => (typeof v === "string" ? v : "");
-    images.push({
-      repository: row.Repository,
-      tag: text(row.Tag),
-      digest: text(row.Digest),
-      id: text(row.ID),
-    });
-  }
-  return images;
+function isRegistryDigest(value: string): boolean {
+  return IMAGE_ID.test(value) || /^sha384:[0-9a-f]{96}$|^sha512:[0-9a-f]{128}$/i.test(value);
 }
 
-/** `docker.io/tomicdd/artex` and `index.docker.io/…` are the Hub name `tomicdd/artex`. */
+function checkedLabel(value: unknown, pattern: RegExp): string {
+  return typeof value === "string" &&
+    value.length <= 255 &&
+    (value === NO_VALUE || pattern.test(value))
+    ? value
+    : "";
+}
+
+function readImage(row: Record<string, unknown>): LocalImage {
+  const repository = checkedLabel(row.Repository, REPOSITORY);
+  const tag = checkedLabel(row.Tag, TAG);
+  const rawDigest = row.Digest;
+  const digest =
+    typeof rawDigest === "string" && (rawDigest === NO_VALUE || isRegistryDigest(rawDigest))
+      ? rawDigest
+      : "";
+  const id = typeof row.ID === "string" && IMAGE_ID.test(row.ID) ? row.ID : "";
+  return { repository, tag, digest, id };
+}
+
+function hasIdentifier(row: LocalImage): boolean {
+  return !!row.repository || !!row.digest;
+}
+
+function completeImage(row: LocalImage): boolean {
+  return !!row.repository && !!row.tag && !!row.digest && !!row.id;
+}
+
+export function parseImageList(stdout: string): { images: LocalImage[]; malformed: number } {
+  const images: LocalImage[] = [];
+  if (stdout === "") return { images, malformed: 0 };
+  const lines = stdout.split(/\r?\n/);
+  let malformed = lines.at(-1) === "" ? 0 : 1;
+  if (malformed === 0) lines.pop();
+  for (const line of lines) {
+    const row = scannerObject(line);
+    const image = row ? readImage(row) : undefined;
+    if (!image || !completeImage(image)) malformed++;
+    if (image && hasIdentifier(image)) images.push(image);
+  }
+  return { images, malformed };
+}
+
+/** Normalize Docker Hub name aliases as the CLI formatter does. */
 function hubName(repository: string): string {
   return repository
     .toLowerCase()
@@ -90,44 +117,110 @@ export function matchIocs(
   return matches;
 }
 
-const shown = (i: LocalImage) =>
-  `${i.repository}${i.tag && i.tag !== "<none>" ? `:${i.tag}` : ""}`.replace(/[^\x20-\x7e]/g, "?");
+function imageLabel(image: LocalImage): string {
+  const tag = image.tag && image.tag !== NO_VALUE ? `:${image.tag}` : "";
+  return `${image.repository || "unknown repository"}${tag}`;
+}
 
 function failed(matches: IocMatch[]): SecurityCheckResult {
   const lines = matches.map(
     ({ image, ioc }) =>
-      `${shown(image)} matches ${ioc.kind} ${ioc.value} (${ioc.what}; ${ioc.incident}; source: ${ioc.source})`,
+      `${imageLabel(image)} matches ${ioc.kind} ${ioc.value} (${ioc.what}). ${ioc.incident}. Source ${ioc.source}`,
   );
-  const ids = [...new Set(matches.map((m) => m.image.id).filter(Boolean))];
-  return result({
+  const ids = [...new Set(matches.map((match) => match.image.id).filter(Boolean))];
+  return {
+    ...base,
     status: "fail",
     severity: "critical",
-    detail: `${matches.length} local image row(s) match a published IOC: ${lines.join("; ")}`,
-    suggestion: `do not run it; remove it (docker image rm ${ids.join(" ") || "<image>"}) and treat every container started from it, and the machine it ran on, as compromised`,
-  });
+    detail: `${matches.length} image row(s) match published indicators. ${lines.join(". ")}`,
+    suggestion: ids.length
+      ? `Remove the listed images with docker image rm ${ids.join(" ")}. Treat containers and hosts that ran them as compromised.`
+      : "Confirm the affected image IDs before removal. Treat containers and hosts that ran them as compromised.",
+  };
 }
 
-/** Why `docker image ls` did not answer, as one plain line. */
-function skipReason(err: unknown): string {
-  const e = err as { code?: unknown; stderr?: unknown };
-  if (e?.code === "ENOENT") return "docker CLI not installed; no local images to compare";
-  return "docker did not list images (daemon not running or not reachable); local images not compared";
+function optionalDockerScope(listing: ExecResult): SecurityCheckResult | undefined {
+  const row = { ...base, status: "skip", evidenceStatus: "missing" } as const;
+  if (listing.stdout || listing.timedOut || listing.truncated) return undefined;
+  if (listing.didNotStart && listing.spawnErrorCode === "ENOENT")
+    return { ...row, detail: "Docker CLI is not installed. Kit did not compare images." };
+  if (
+    !listing.ok &&
+    listing.exitCode === 1 &&
+    (DAEMON_ABSENT.test(listing.stderr) ||
+      UNIX_SOCKET_ABSENT.test(listing.stderr) ||
+      WINDOWS_PIPE_ABSENT.test(listing.stderr) ||
+      LEGACY_WINDOWS_PIPE_ABSENT.test(listing.stderr))
+  )
+    return { ...row, detail: "Docker daemon is not reachable. Kit did not compare images." };
+  return undefined;
+}
+
+function listingGap(listing: ExecResult, images: LocalImage[], malformed: number) {
+  const processGap = scannerGap({ count: images.length }, listing);
+  if (processGap) return processGap;
+  if (listing.stderr)
+    return {
+      status: "partial",
+      reason: "Docker reported diagnostics during image listing",
+    } as const;
+  if (malformed)
+    return {
+      status: images.length ? "partial" : "malformed",
+      reason: "Docker returned incomplete or invalid image rows",
+    } as const;
+  return undefined;
+}
+
+async function compareInventoryCount(
+  list: DockerLister,
+  images: LocalImage[],
+  timeout: number,
+): Promise<ScannerGap | undefined> {
+  const unconfirmed = "Docker did not confirm the number of images in the selected context";
+  if (timeout <= 0) return { status: "partial", reason: unconfirmed };
+  const count = await list(COUNT_ARGS, timeout);
+  const incomplete = scannerGap({ count: images.length }, count);
+  if (incomplete) return { ...incomplete, reason: `${unconfirmed}. ${incomplete.reason}` };
+  if (!count.stdout && !count.stderr)
+    return { status: images.length ? "partial" : "missing", reason: unconfirmed };
+  const daemonCount = Number(count.stdout);
+  if (
+    count.stderr ||
+    !/^(?:0|[1-9]\d*)\r?\n$/.test(count.stdout) ||
+    !Number.isSafeInteger(daemonCount)
+  )
+    return { status: images.length ? "partial" : "malformed", reason: unconfirmed };
+
+  // A repository or tag alias can appear on several rows for the same image.
+  // Reconcile unique image IDs with the independent daemon count.
+  const listed = new Set(images.map((image) => image.id.toLowerCase())).size;
+  if (listed !== daemonCount)
+    return { status: "partial", reason: "Docker image rows do not match the daemon image count" };
+  return undefined;
 }
 
 export async function checkDockerIocs(
   list: DockerLister = defaultLister,
 ): Promise<SecurityCheckResult> {
-  let stdout: string;
-  try {
-    stdout = await list(LIST_ARGS);
-  } catch (err) {
-    return result({ status: "skip", detail: skipReason(err) });
-  }
-  const images = parseImageList(stdout);
+  const started = performance.now();
+  const listing = await list(LIST_ARGS, TIMEOUT);
+  const absent = optionalDockerScope(listing);
+  if (absent) return absent;
+
+  const { images, malformed } = parseImageList(listing.stdout);
   const matches = matchIocs(images);
-  if (matches.length) return failed(matches);
-  return result({
-    status: "pass",
-    detail: `${images.length} local image row(s) compared with ${DOCKER_IOCS.length} published image IOC(s) by name and registry digest; none match. Exact matches only: this is not a malware scan.`,
-  });
+  const gap =
+    listingGap(listing, images, malformed) ??
+    (await compareInventoryCount(
+      list,
+      images,
+      Math.floor(TIMEOUT - (performance.now() - started)),
+    ));
+  const clean = {
+    ...base,
+    status: "pass" as const,
+    detail: `${images.length} image row(s) in the selected Docker context compared with ${DOCKER_IOCS.length} published indicators. No exact match. This check does not scan image content.`,
+  };
+  return scannerEvidence(matches.length ? failed(matches) : clean, matches.length, gap);
 }

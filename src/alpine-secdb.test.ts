@@ -180,15 +180,15 @@ describe("parseSecdb (part 4)", () => {
     );
   });
 
-  it("treats prototype property names as ordinary package and version keys", () => {
+  it("treats prototype property names without treating them as object properties", () => {
     const json: unknown = JSON.parse(
-      '{"packages":[{"pkg":{"name":"__proto__","secfixes":{"__proto__":["ID-1"],"constructor":["ID-2"]}}}]}',
+      '{"packages":[{"pkg":{"name":"constructor","secfixes":{"__proto__":["ID-1"],"constructor":["ID-2"]}}}]}',
     );
     assert.deepEqual(
       parseSecdb(json),
       new Map([
         [
-          "__proto__",
+          "constructor",
           new Map([
             ["__proto__", ["ID-1"]],
             ["constructor", ["ID-2"]],
@@ -218,23 +218,17 @@ describe("parseSecdb (part 4)", () => {
       assert.throws(() => parseSecdb(feed("")), /secdb:/);
     });
 
-    it(`rejects every ASCII control character in a ${field}`, () => {
-      const codes = [...Array.from({ length: 32 }, (_, code) => code), 127];
+    it(`rejects every C0 and C1 control character and DEL in a ${field}`, () => {
+      const codes = [
+        ...Array.from({ length: 32 }, (_, code) => code),
+        0x7f,
+        ...Array.from({ length: 32 }, (_, code) => 0x80 + code),
+      ];
       for (const code of codes) {
         assert.throws(
           () => parseSecdb(feed(`before${String.fromCharCode(code)}after`)),
           /secdb:/,
-          `ASCII control character ${code}`,
-        );
-      }
-    });
-
-    it(`rejects every C1 control character in a ${field}, like CSI (U+009B)`, () => {
-      for (let code = 0x80; code <= 0x9f; code++) {
-        assert.throws(
-          () => parseSecdb(feed(`before${String.fromCharCode(code)}after`)),
-          /secdb:/,
-          `C1 control character ${code}`,
+          `Control character ${code}`,
         );
       }
     });

@@ -16,6 +16,8 @@ import {
   describeRemaining,
   worstSeverity,
   type Severity,
+  type Advisory,
+  type Baseline,
 } from "./advisory-baseline.js";
 
 const NAME = "advisory baseline";
@@ -26,6 +28,24 @@ function toKitSeverity(s: Severity | null): SecurityCheckResult["severity"] {
   if (s === "high") return "high";
   if (s === "moderate") return "medium";
   return "low";
+}
+
+function incompleteAudit(
+  base: Omit<SecurityCheckResult, "status" | "detail">,
+  baseline: Baseline,
+  advisories: Advisory[],
+  error: string,
+): SecurityCheckResult {
+  const { added } = diffAgainstBaseline(advisories, baseline);
+  const known = added.length === 0 ? "" : `. ${added.length} confirmed new advisory(ies)`;
+  return {
+    ...base,
+    status: "fail",
+    severity: added.length > 0 ? toKitSeverity(worstSeverity(added)) : "medium",
+    didNotRun: true,
+    ...(added.length > 0 ? { hasFindings: true } : {}),
+    detail: error + known,
+  };
 }
 
 export async function checkAdvisoryBaseline(root: string): Promise<SecurityCheckResult> {
@@ -59,16 +79,8 @@ export async function checkAdvisoryBaseline(root: string): Promise<SecurityCheck
   }
 
   const outcome = runAudit(root, runner);
-  if (outcome.error) {
-    // A scan that could not run is not a clean scan. didNotRun makes the CI gate treat it that way.
-    return {
-      ...base,
-      status: "fail",
-      severity: "medium",
-      didNotRun: true,
-      detail: outcome.error,
-    };
-  }
+  base.evidenceStatus = outcome.evidenceStatus;
+  if (outcome.error) return incompleteAudit(base, baseline, outcome.advisories, outcome.error);
 
   const { added, stale, remaining } = diffAgainstBaseline(outcome.advisories, baseline);
 

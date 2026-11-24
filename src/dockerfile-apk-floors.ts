@@ -145,7 +145,7 @@ export function judgeFloors(
         continue;
       }
       if (cmp >= 0) continue;
-      cves.push(...ids);
+      for (const id of ids) cves.push(id);
       if (!fixedIn || (compareApkVersions(version, fixedIn) ?? 0) > 0) fixedIn = version;
     }
     if (fixedIn)
@@ -160,12 +160,16 @@ export function judgeFloors(
   return { findings, unparsed: [...new Set(unparsed)], unresolved: [...new Set(unresolved)] };
 }
 
-/** The newest stable branch (`v3.N`) in secdb's index page. */
+/** Read the newest stable link in Alpine secdb's complete root directory listing. */
 export function newestStableBranch(indexHtml: string): string | null {
-  const branches = [...indexHtml.matchAll(/\bv(\d+)\.(\d+)\//g)].map((m) => [
-    Number(m[1]),
-    Number(m[2]),
-  ]);
+  const listing =
+    /^\s*<html>\s*<head>\s*<title>Index of \/<\/title>\s*<\/head>\s*<body>\s*<h1>Index of \/<\/h1>\s*<hr>\s*<pre>([\s\S]*?)<\/pre>\s*<hr>\s*<\/body>\s*<\/html>\s*$/.exec(
+      indexHtml,
+    );
+  if (!listing) throw new Error("secdb index is not a complete directory listing");
+  const branches = [...listing[1].matchAll(/<a href="v(\d+)\.(\d+)\/">v\1\.\2\/<\/a>/g)]
+    .map((match) => [Number(match[1]), Number(match[2])])
+    .filter((parts) => parts.every(Number.isSafeInteger));
   branches.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const top = branches.at(-1);
   return top ? `v${top[0]}.${top[1]}` : null;

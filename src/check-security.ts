@@ -8,7 +8,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { execFileNoThrow, failedDetail } from "./utils/execFileNoThrow.js";
+import { pathToFileURL } from "node:url";
+import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import {
   LOCAL_COVER,
   scannedHead,
@@ -18,8 +19,7 @@ import {
 import { checkEnvIgnoreProtection } from "./check-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
-import { classifyGuardDog } from "./guarddog.js";
-import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
+import { classifyGuardDog, guardDogScope, GUARDDOG_CHECK } from "./guarddog.js";
 import {
   buildSemgrepArgs,
   semgrepConfig,
@@ -27,8 +27,9 @@ import {
   isLocalSemgrepConfig,
   PROVIDER_GLOB,
 } from "./scanners.js";
-import { findIac } from "./check-iac-detect.js";
+import { findIacFiles } from "./check-iac-detect.js";
 import { checkApkFloors } from "./check-apk-floors.js";
+import type { AlpineSourceEvidence } from "./check-apk-sources.js";
 import { checkMavenSbomCoverage } from "./maven-sbom.js";
 import type { SecurityLevel } from "./check-projects.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
@@ -39,20 +40,38 @@ import {
   ensureBumblebee,
   runScan,
   maxSeverity,
-  newestCatalogMtime,
   isCatalogStale,
   BUMBLEBEE_VERSION,
   type BumblebeeFinding,
   type EnsureFailureKind,
-  type ScannerInstall,
   type ScanOutcome,
 } from "./bumblebee.js";
 import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
+import { OSV_EXITS, readOsvReport } from "./osv-report.js";
+import { readTrivyReport } from "./trivy-report.js";
+import { readSemgrepReport } from "./semgrep-report.js";
+import { npmAuditLockfile, runNpmAudit } from "./npm-audit-scope.js";
+import { checkPipAudit } from "./check-pip-audit.js";
+import {
+  scannerEvidence,
+  scannerGap,
+  scannerObject,
+  scannerRecord,
+  type ScannerEvidenceStatus,
+  type ScannerGap,
+} from "./check-scanner-evidence.js";
 import { checkTranscriptSecrets } from "./check-transcripts.js";
 import { checkLicenses } from "./check-licenses.js";
 import { checkBrowserScripts } from "./check-browser-scripts.js";
 import { npmLockfileCover } from "./check-pinned-lockfile.js";
+import { readRegularFileBytesIfPresent } from "./upstream-safe-read.js";
+import {
+  gitHistoryScope,
+  readBasicSecretGrep,
+  trufflehogHistoryGap,
+  type BasicSecretMatch,
+} from "./history-secret-evidence.js";
 
 const exec = promisify(execFile);
 
@@ -126,6 +145,8 @@ export interface SecurityCheckResult extends Partial<{ hasFindings: true; scanIn
    * didNotRun — it is an honest skip.
    */
   didNotRun?: boolean;
+  evidenceStatus?: ScannerEvidenceStatus;
+  evidenceSources?: AlpineSourceEvidence[];
   /**
    * An out-of-verdict advisory riding on this result. Some signals must NOT move
    * pass/fail — catalog age is a function of the wall clock, an upstream release is a
@@ -445,9 +466,12 @@ async function highFindingsResult(
   auditResult: unknown,
   high: number,
   critical: number,
+  allowExceptions: boolean,
 ): Promise<SecurityCheckResult> {
   const counts = `${critical} critical, ${high} high vulnerabilities`;
-  const { covered, note } = await auditDecision(root, auditResult);
+  const { covered, note } = allowExceptions
+    ? await auditDecision(root, auditResult)
+    : { covered: false, note: "" };
   if (covered) {
     return {
       category: "dependency",
@@ -486,9 +510,7 @@ export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> 
   // (#353). Skip honestly instead — it is not-applicable, not a failure, and those
   // repos' dependency vulnerabilities are still covered by osv-scanner. (No
   // false-green risk: OSV runs regardless.)
-  const hasNpmLock = await access(resolve(root, "package-lock.json"))
-    .then(() => true)
-    .catch(() => false);
+  const hasNpmLock = npmAuditLockfile(root) !== undefined;
   if (!hasNpmLock) {
     const other = (
       await Promise.all(
@@ -509,154 +531,19 @@ export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> 
     };
   }
 
-  try {
-    const timeout = Number(process.env.KIT_NPM_AUDIT_TIMEOUT_MS ?? "") || 300_000;
-    const { stdout } = await exec("npm", ["audit", "--audit-level=high", "--json"], {
-      timeout,
-      cwd: root,
-    });
-    // Exit 0 = npm found nothing >= high. But a broken / odd npm that exits 0
-    // with no report must NOT be read as a clean pass — be honest (warn), don't
-    // false-green.
-    if (!stdout || !stdout.trim()) {
-      return {
-        category: "dependency",
-        name: "npm audit",
-        status: "warn",
-        detail: "npm audit exited 0 but produced no report — could not confirm (unverified)",
-        severity: "low",
-        didNotRun: true,
-      };
-    }
-    return {
-      category: "dependency",
-      name: "npm audit",
-      status: "pass",
-      detail: "no high/critical vulnerabilities",
-    };
-  } catch (error: unknown) {
-    const failure =
-      error && typeof error === "object"
-        ? (error as {
-            stdout?: unknown;
-            code?: unknown;
-            killed?: unknown;
-            signal?: unknown;
-            message?: unknown;
-          })
-        : null;
-    if (failure?.stdout !== undefined) {
-      try {
-        const stdout =
-          typeof failure.stdout === "string"
-            ? failure.stdout
-            : Buffer.isBuffer(failure.stdout)
-              ? failure.stdout.toString("utf8")
-              : "";
-        const auditResult = JSON.parse(stdout);
-        const vulnerabilities = auditResult.metadata?.vulnerabilities || {};
-        const high = vulnerabilities.high || 0;
-        const critical = vulnerabilities.critical || 0;
-
-        if (high > 0 || critical > 0)
-          return await highFindingsResult(root, auditResult, high, critical);
-      } catch {
-        // JSON parse failed, treat as fail
-      }
-    }
-
-    const timedOut =
-      failure?.killed === true ||
-      failure?.code === "ETIMEDOUT" ||
-      failure?.signal === "SIGTERM" ||
-      (typeof failure?.message === "string" && /timed?\s*out/i.test(failure.message));
-    return {
-      category: "dependency",
-      name: "npm audit",
-      status: "warn",
-      detail: timedOut
-        ? "npm audit timed out — vulnerability status unverified"
-        : "npm audit could not run — vulnerability status unverified",
-      severity: "medium",
-      didNotRun: true,
-    };
-  }
-}
-
-/**
- * Run pip-audit for Python dependencies
- */
-async function checkPipAudit(root: string): Promise<SecurityCheckResult> {
-  try {
-    // Check if requirements.txt exists
-    await access(resolve(root, "requirements.txt"));
-  } catch {
-    return {
-      category: "dependency",
-      name: "pip-audit",
-      status: "skip",
-      detail: "no requirements.txt found",
-    };
-  }
-
-  // Resolve pip-audit mise-first (commonly a pipx / `mise use -g` global, off PATH
-  // when mise isn't activated); fall back to the bare name for non-mise installs.
-  const pipAuditBin = (await resolveToolBin("pip-audit")) ?? "pip-audit";
-  try {
-    // Check if pip-audit is installed
-    await exec(pipAuditBin, ["--version"], { timeout: 5_000, cwd: root });
-  } catch {
-    return {
-      category: "dependency",
-      name: "pip-audit",
-      status: "warn",
-      detail: "pip-audit not installed (run: pip install pip-audit)",
-      severity: "medium",
-      // requirements.txt is present (we returned above otherwise) → a Python
-      // project's CVEs are UNSCANNED because the tool is absent: a scanner-health
-      // failure under strict, not an honest skip.
-      didNotRun: true,
-    };
-  }
-
-  try {
-    const { stdout } = await exec(pipAuditBin, ["--format=json"], {
-      timeout: 30_000,
-      cwd: root,
-    });
-
-    const result = JSON.parse(stdout);
-    const vulns = result.dependencies || [];
-
-    if (vulns.length === 0) {
-      return {
-        category: "dependency",
-        name: "pip-audit",
-        status: "pass",
-        detail: "no vulnerabilities found",
-      };
-    }
-
-    const highSeverity = vulns.filter((v: { vulnerabilities?: Array<{ severity?: string }> }) =>
-      v.vulnerabilities?.some((vuln) => vuln.severity === "high" || vuln.severity === "critical"),
-    ).length;
-
-    return {
-      category: "dependency",
-      name: "pip-audit",
-      status: highSeverity > 0 ? "fail" : "warn",
-      detail: `${vulns.length} vulnerable dependencies`,
-      severity: highSeverity > 0 ? "high" : "medium",
-    };
-  } catch {
-    return {
-      category: "dependency",
-      name: "pip-audit",
-      status: "fail",
-      detail: "audit check failed",
-      severity: "high",
-    };
-  }
+  const timeout = Number(process.env.KIT_NPM_AUDIT_TIMEOUT_MS ?? "") || 300_000;
+  const { report, gap } = await runNpmAudit(root, timeout);
+  const { high, critical } = report.metadata.vulnerabilities;
+  const row: SecurityCheckResult =
+    high + critical > 0
+      ? await highFindingsResult(root, report, high, critical, !gap)
+      : {
+          category: "dependency",
+          name: "npm audit",
+          status: "pass",
+          detail: "no high or critical findings in the npm audit report",
+        };
+  return scannerEvidence(row, report.count, gap);
 }
 
 /**
@@ -1512,49 +1399,71 @@ export function classifyTrufflehogFindings(
   stdout: string,
   readFile: (path: string) => string | null = () => null,
   ignores: SecretsIgnoreEntry[] = [],
-): {
-  verified: number;
-  unverified: number;
-  publicByDesign: number;
-  example: number;
-  ignored: number;
-} {
-  let verified = 0;
-  let unverified = 0;
-  let publicByDesign = 0;
-  let example = 0;
-  let ignored = 0;
-  for (const line of stdout.trim().split("\n")) {
-    if (!line.includes('"DetectorName"')) continue;
-    try {
-      const j = JSON.parse(line) as {
-        DetectorName?: string;
-        Verified?: boolean;
-        Raw?: string;
-        SourceMetadata?: { Data?: { Git?: { file?: string; commit?: string } } };
-      };
-      const finding: TrufflehogFinding = {
-        verified: j.Verified === true,
-        raw: j.Raw ?? "",
-        file: j.SourceMetadata?.Data?.Git?.file,
-        detector: j.DetectorName,
-        commit: j.SourceMetadata?.Data?.Git?.commit,
-      };
-      if (finding.verified) verified++;
-      else if (isPublicByDesign(finding, readFile)) publicByDesign++;
-      else if (isExampleCredential(finding)) example++;
-      else if (isIgnoredFinding(finding, ignores)) ignored++;
-      else unverified++;
-    } catch {
-      unverified++;
-    }
-  }
-  return { verified, unverified, publicByDesign, example, ignored };
+) {
+  return classifyTrufflehogReport(stdout, readFile, ignores).counts;
 }
 
-/**
- * Scan for secrets in code using trufflehog or basic pattern matching
- */
+function classifyTrufflehogReport(
+  stdout: string,
+  readFile: (path: string) => string | null,
+  ignores: SecretsIgnoreEntry[],
+) {
+  const counts = { verified: 0, unverified: 0, publicByDesign: 0, example: 0, ignored: 0 };
+  let malformed = false;
+  const lines = stdout === "" ? [] : stdout.replace(/\r?\n$/, "").split(/\r?\n/);
+  for (const line of lines) {
+    const record = scannerObject(line);
+    if (!record || typeof record.DetectorName !== "string" || !record.DetectorName.trim()) {
+      malformed = true;
+      if (line.includes('"DetectorName"')) counts.unverified++;
+      continue;
+    }
+    const { finding, valid } = readTrufflehogFinding(record, record.DetectorName);
+    if (!valid) malformed = true;
+    const classification = classifyTrufflehogFinding(finding, readFile, ignores);
+    counts[classification]++;
+  }
+  return { counts, malformed };
+}
+
+function readTrufflehogFinding(record: Record<string, unknown>, detector: string) {
+  const metadata = scannerRecord(record.SourceMetadata) ? record.SourceMetadata : undefined;
+  const data = scannerRecord(metadata?.Data) ? metadata.Data : undefined;
+  const git = scannerRecord(data?.Git) ? data.Git : undefined;
+  const file = typeof git?.file === "string" ? git.file : undefined;
+  const commit = typeof git?.commit === "string" ? git.commit : undefined;
+  const finding: TrufflehogFinding = {
+    verified: record.Verified === true,
+    raw: typeof record.Raw === "string" ? record.Raw : "",
+    detector,
+    file,
+    commit,
+  };
+  const valid =
+    typeof record.Verified === "boolean" &&
+    typeof record.Raw === "string" &&
+    git !== undefined &&
+    file === git.file &&
+    commit === git.commit;
+  return { finding, valid };
+}
+
+function classifyTrufflehogFinding(
+  finding: TrufflehogFinding,
+  readFile: (path: string) => string | null,
+  ignores: SecretsIgnoreEntry[],
+): "verified" | "unverified" | "publicByDesign" | "example" | "ignored" {
+  if (finding.verified) return "verified";
+  try {
+    if (isPublicByDesign(finding, readFile)) return "publicByDesign";
+    if (isExampleCredential(finding)) return "example";
+    if (isIgnoredFinding(finding, ignores)) return "ignored";
+  } catch {
+    // A finding with unreadable context still needs review.
+  }
+  return "unverified";
+}
+
 /**
  * Filter git-grep hits from the DEGRADED secrets path (no trufflehog) down to the files
  * worth a warn. It's an UNVERIFIED grep, so it drops the three dominant false-positive
@@ -1574,15 +1483,20 @@ export function classifyTrufflehogFindings(
  * Input: `git grep -n` output lines (`file:line:content`). Pure and deterministic.
  */
 export function basicSecretScanFiles(lines: string[]): string[] {
+  const matches = lines.flatMap((line) => {
+    const match = line.match(/^([^:]+):\d+:(.*)$/);
+    return match ? [{ file: match[1], content: match[2] }] : [];
+  });
+  return basicSecretFiles(matches);
+}
+
+function basicSecretFiles(matches: BasicSecretMatch[]): string[] {
   const VALUE_RE =
     /(?:api[_-]?key|secret[_-]?key|password|token|credential)["']?\s*[:=]\s*["']([^"']{20,})/i;
   const TEMPLATE_VALUE =
     /^\s*(\$\{\{[^}]*\}\}|\$\{[A-Za-z_][A-Za-z0-9_:.-]*\}|\{\{[^}]*\}\}|\$\([^)]*\))\s*$/;
   const files = new Set<string>();
-  for (const line of lines) {
-    const m = line.match(/^([^:]+):\d+:(.*)$/);
-    if (!m) continue;
-    const [, file, content] = m;
+  for (const { file, content } of matches) {
     if (skipsBasicScan(file, content)) continue;
     const value = content.match(VALUE_RE)?.[1] ?? "";
     if (/^[A-Z][A-Z0-9_]+$/.test(value)) continue; // env-var name, not a secret
@@ -1600,157 +1514,164 @@ export function basicSecretScanFiles(lines: string[]): string[] {
   return [...files];
 }
 
+const HISTORY_SECRET_SCAN = { category: "secrets", name: "secrets scan" } as const;
+const NO_HISTORY_SECRET_SCOPE = {
+  ...HISTORY_SECRET_SCAN,
+  status: "skip",
+  evidenceStatus: "missing",
+  detail: "no committed content in local Git history",
+} as const;
+
+async function checkBasicSecretScan(
+  root: string,
+  hasHistory: boolean,
+  scopeLimit?: ScannerGap,
+): Promise<SecurityCheckResult> {
+  const process = await execFileNoThrow(
+    "git",
+    [
+      "grep",
+      "--no-color",
+      "--no-column",
+      "--no-textconv",
+      "--no-recurse-submodules",
+      "--full-name",
+      "-H",
+      "-I",
+      "-n",
+      "-z",
+      "-iE",
+      "-e",
+      "(api[_-]?key|secret[_-]?key|password|token|credential)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^\"']{20,}",
+      "--",
+    ],
+    { timeout: 10_000, cwd: root },
+  );
+  const { matches, gap } = readBasicSecretGrep(process);
+  const files = basicSecretFiles(matches);
+  if (!gap && !scopeLimit && !hasHistory && files.length === 0) return NO_HISTORY_SECRET_SCOPE;
+
+  const limitation =
+    "the Git grep fallback covers tracked working-tree text only. Install TruffleHog to scan Git history";
+  const detail = files.length
+    ? `${files.length} file(s) with unverified secret-shaped strings in the working tree`
+    : matches.length
+      ? "all Git grep matches were excluded by the basic scan filters"
+      : "Git grep found no matches";
+  return scannerEvidence(
+    {
+      ...HISTORY_SECRET_SCAN,
+      status: "warn",
+      severity: "medium",
+      detail,
+      ...(files.length ? { files } : {}),
+    },
+    files.length,
+    mergeHistoryLimits(
+      gap
+        ? { ...gap, reason: `${gap.reason}. TruffleHog is unavailable for Git history` }
+        : hasHistory
+          ? { status: "partial", reason: files.length ? limitation : `${detail}. ${limitation}` }
+          : undefined,
+      scopeLimit,
+    ),
+  );
+}
+
+function mergeHistoryLimits(gap?: ScannerGap, scopeLimit?: ScannerGap): ScannerGap | undefined {
+  return gap && scopeLimit
+    ? { ...gap, reason: `${gap.reason}. ${scopeLimit.reason}` }
+    : (gap ?? scopeLimit);
+}
+
+function historyScopeWarning(gap: ScannerGap): SecurityCheckResult {
+  return scannerEvidence({ ...HISTORY_SECRET_SCAN, status: "warn", detail: "" }, 0, gap);
+}
+
 export async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
-  try {
-    // Check if we're in a git repo
-    await exec("git", ["rev-parse", "--git-dir"], { timeout: 5_000, cwd: root });
-  } catch {
+  const scope = await gitHistoryScope(root);
+  if (scope.kind === "outside") {
     return {
-      category: "secrets",
-      name: "secrets scan",
+      ...HISTORY_SECRET_SCAN,
       status: "skip",
+      evidenceStatus: "missing",
       detail: "not a git repository",
     };
   }
+  if (scope.kind === "unknown") return historyScopeWarning(scope.gap);
 
-  // Deep scan with trufflehog — resolve mise-first so a mise-installed one is
-  // used (kit provisions it as a default), not just a bare-PATH one. Throwing
-  // when it's absent falls through to the basic pattern-matching below.
-  try {
-    const trufflehogBin = await resolveToolBin("trufflehog");
-    if (!trufflehogBin) throw new Error("trufflehog not installed");
+  const trufflehogBin = await resolveToolBin("trufflehog");
+  if (!trufflehogBin) return checkBasicSecretScan(root, scope.hasContent, scope.limit);
+  if (!scope.hasContent)
+    return scope.limit ? historyScopeWarning(scope.limit) : NO_HISTORY_SECRET_SCOPE;
 
+  const scan = await execFileNoThrow(
+    trufflehogBin,
+    [
+      "git",
+      pathToFileURL(root).href,
+      "--json",
+      "--no-update",
+      "--log-level=2",
+      "--no-ignore-tag",
+      "--fail",
+      "--fail-on-scan-errors",
+    ],
+    { timeout: 90_000, cwd: root },
+  );
+
+  const readWorktreeFile = (path: string): string | null => {
     try {
-      // Scan GIT (committed content) — not the raw filesystem. `filesystem .`
-      // walks node_modules (times out) and flags gitignored local files like
-      // `.env.production.local` that were never committed (false positives).
-      // Git mode is fast and only sees what's actually in the repo's history.
-      const { stdout } = await exec(
-        trufflehogBin,
-        ["git", `file://${root}`, "--json", "--no-update"],
-        { timeout: 90_000, cwd: root },
-      );
-
-      // Split verified-live from unverified (#noise-reduction). Only a VERIFIED
-      // secret — one trufflehog confirmed still works — is a critical fail (rotate
-      // now). Unverified secret-shaped strings (overwhelmingly test fixtures /
-      // example connection strings) are a warn to review, not a release-blocking
-      // critical. Avoids failing a clean repo on its own test data.
-      // Public-by-design client keys (#250: Firebase web config, Sentry DSN,
-      // PostHog) are split out with truthful advice — rotating them fixes nothing.
-      const readWorktreeFile = (p: string): string | null => {
-        try {
-          return readFileSync(resolve(root, p), "utf8");
-        } catch {
-          return null;
-        }
-      };
-      // Accepted historical findings, if the repo keeps a .kit-secretsignore. Absent
-      // file ⇒ no acceptances, which is the correct default for a repo that has never
-      // reviewed one.
-      let ignores: SecretsIgnoreEntry[] = [];
-      try {
-        ignores = parseSecretsIgnore(readFileSync(resolve(root, ".kit-secretsignore"), "utf8"));
-      } catch {
-        // no ignore file (or unreadable) — treat every finding on its own merits
-      }
-      const { verified, unverified, publicByDesign, example, ignored } = classifyTrufflehogFindings(
-        stdout,
-        readWorktreeFile,
-        ignores,
-      );
-      const pbdNote =
-        publicByDesign > 0
-          ? `; ${publicByDesign} public-by-design client key(s) (Firebase web config / DSN) — verify API-key restrictions + security rules, rotation not applicable`
-          : "";
-      // Example credentials are counted, not hidden: a reader can still see how many
-      // there are, but they don't hold the line at warn forever (see isExampleCredential).
-      const exampleNote =
-        example > 0
-          ? `; ${example} example credential(s) (unreachable host / placeholder secret — fixtures & docs), no rotation needed`
-          : "";
-      const ignoredNote =
-        ignored > 0 ? `; ${ignored} accepted historical finding(s) via .kit-secretsignore` : "";
-
-      if (verified > 0) {
-        return {
-          category: "secrets",
-          name: "secrets scan",
-          status: "fail",
-          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.${pbdNote}${exampleNote}${ignoredNote}`,
-          severity: "critical",
-        };
-      }
-      if (unverified > 0) {
-        return {
-          category: "secrets",
-          name: "secrets scan",
-          status: "warn",
-          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.${pbdNote}${exampleNote}${ignoredNote}`,
-          severity: "medium",
-        };
-      }
-
-      return {
-        category: "secrets",
-        name: "secrets scan",
-        status: "pass",
-        // Name the detector, not just the outcome: this path's coverage is trufflehog's set over
-        // full history, which is a different (much larger) bound than kit's own pattern list used
-        // by scan-staged and scan-build. A reader cannot size "no committed secrets" without it.
-        detail: `no committed secrets (trufflehog detector set, full history)${pbdNote}${exampleNote}${ignoredNote}`,
-      };
+      return readFileSync(resolve(root, path), "utf8");
     } catch {
-      return {
-        category: "secrets",
-        name: "secrets scan",
-        status: "warn",
-        detail: "trufflehog scan failed",
-        severity: "medium",
-      };
+      return null;
     }
-  } catch {
-    // Trufflehog not installed, use basic pattern matching
-    try {
-      const { stdout } = await exec(
-        "git",
-        [
-          "grep",
-          "-n",
-          "-iE",
-          "(api[_-]?key|secret[_-]?key|password|token|credential)[\"']?\\s*[:=]\\s*[\"'][^\"']{20,}",
-        ],
-        { timeout: 10_000, cwd: root },
-      );
+  };
+  const ignores = parseSecretsIgnore(readWorktreeFile(".kit-secretsignore") ?? "");
+  const { counts, malformed } = classifyTrufflehogReport(scan.stdout, readWorktreeFile, ignores);
+  const { verified, unverified, publicByDesign, example, ignored } = counts;
+  const gap = mergeHistoryLimits(
+    trufflehogHistoryGap(scan, {
+      verified,
+      unverified: unverified + publicByDesign + example + ignored,
+      malformed,
+    }),
+    scope.limit,
+  );
+  return describeTrufflehogResult(counts, gap);
+}
 
-      if (stdout.trim()) {
-        const files = basicSecretScanFiles(stdout.trim().split("\n"));
-
-        if (files.length > 0) {
-          return {
-            category: "secrets",
-            name: "secrets scan",
-            status: "warn",
-            detail: `${files.length} file(s) with unverified secret-shaped strings (basic scan, trufflehog absent — HEAD/working-tree only, does NOT scan git history) — review for real credentials`,
-            severity: "medium",
-            files,
-            suggestion:
-              "Install trufflehog for verified detection (it confirms live secrets, skipping test/example data):\n  • kit install (provisions the declared aqua:trufflesecurity/trufflehog)\n  • macOS/Linux: brew install trufflehog\n  • Go: go install github.com/trufflesecurity/trufflehog/v3@latest",
-          };
-        }
-      }
-    } catch {
-      // No matches or git grep failed
-    }
-
-    return {
-      category: "secrets",
-      name: "secrets scan",
-      status: "pass",
-      detail:
-        "basic scan: no secret-shaped strings outside tests/fixtures — HEAD/working-tree only, NOT git history; install trufflehog for full-history + verified detection",
-    };
+function describeTrufflehogResult(
+  counts: ReturnType<typeof classifyTrufflehogFindings>,
+  gap?: ScannerGap,
+): SecurityCheckResult {
+  const { verified, unverified, publicByDesign, example, ignored } = counts;
+  const total = verified + unverified + publicByDesign + example + ignored;
+  const notes = [
+    publicByDesign > 0
+      ? `${publicByDesign} public-by-design client key(s) (Firebase web config / DSN). Check API-key restrictions and security rules.`
+      : "",
+    example > 0 ? `${example} example credential(s) in fixtures or documentation.` : "",
+    ignored > 0 ? `${ignored} accepted historical finding(s) via .kit-secretsignore.` : "",
+  ].filter(Boolean);
+  const row: SecurityCheckResult = { ...HISTORY_SECRET_SCAN, status: "pass", detail: "" };
+  if (verified > 0) {
+    row.status = "fail";
+    row.severity = "critical";
+    row.detail = `${verified} VERIFIED-LIVE secret(s) in history reachable from local Git refs. Rotate them now`;
+  } else if (unverified > 0) {
+    row.status = "warn";
+    row.severity = "medium";
+    row.detail = `${unverified} unverified secret-shaped string(s) in history reachable from local Git refs (0 verified-live). Review the findings`;
+  } else if (gap) {
+    row.severity = "medium";
+    row.detail = "TruffleHog reported findings before coverage could be confirmed";
+  } else {
+    row.detail =
+      "no actionable committed secrets (TruffleHog detectors, history reachable from local Git refs)";
   }
+  const result = scannerEvidence(row, total, gap);
+  return notes.length ? { ...result, detail: `${result.detail}. ${notes.join(" ")}` } : result;
 }
 
 /**
@@ -1776,56 +1697,60 @@ async function checkSocket(): Promise<SecurityCheckResult> {
   };
 }
 
-/**
- * GuardDog (DataDog, OSS) — LOCAL behavioral-malware heuristics, the local-first
- * replacement for Socket (#105). OPT-IN (KIT_GUARDDOG=1): GuardDog needs semgrep
- * and `verify` fetches/scans each dependency, so it's too heavy for the default
- * check. Classification (incl. fail-closed on incomplete scans) is in guarddog.ts.
- */
-async function checkGuardDog(root: string): Promise<SecurityCheckResult> {
-  const base = { category: "supply-chain", name: "guarddog (malware)" } as const;
+/** GuardDog verification fetches dependency artifacts from the public registry. */
+export async function checkGuardDog(root: string): Promise<SecurityCheckResult> {
+  const base = GUARDDOG_CHECK;
   const envEnabled = ["1", "true", "yes", "on"].includes(
     (process.env.KIT_GUARDDOG ?? "").trim().toLowerCase(),
   );
-  // Persistent project opt-in via `.kit.toml [scan] guarddog = true` (best-effort
-  // config read) — so the choice lives in config, not just an ephemeral env var.
+  // A project can opt in through .kit.toml or the environment.
   let cfgEnabled = false;
   try {
     const { loadConfig } = await import("./config.js");
     const cfg = await loadConfig(resolve(root, ".kit.toml"));
     cfgEnabled = cfg.scan?.guarddog === true;
   } catch {
-    // no/invalid config → env var is the only switch
+    // The environment controls opt-in if the config cannot be read.
   }
   if (!envEnabled && !cfgEnabled) {
     return {
       ...base,
       status: "skip",
       detail:
-        "opt-in — set `guarddog = true` under [scan] in .kit.toml (or KIT_GUARDDOG=1) to run local malware heuristics (needs semgrep)",
+        "opt-in. Set `guarddog = true` under [scan] in .kit.toml or set KIT_GUARDDOG=1 to run local malware heuristics",
     };
   }
 
-  // Direct deps first (#205): guarddog costs ~25s/package (tarball + per-package
-  // semgrep) — a 12k-package lockfile can NEVER finish inside the check budget,
-  // so verifying it always produced an honest-but-useless UNVERIFIED. Direct
-  // deps are guarddog's depth; the full tree gets breadth from bumblebee + osv.
-  const candidates: { ecosystem: string; file: string }[] = [
+  const candidates = [
     { ecosystem: "npm", file: "package.json" },
     { ecosystem: "pypi", file: "requirements.txt" },
-  ];
-  let target: { ecosystem: string; file: string } | undefined;
-  for (const c of candidates) {
+  ] as const;
+  let target: ((typeof candidates)[number] & { manifest: Buffer }) | undefined;
+  for (const candidate of candidates) {
     try {
-      await access(resolve(root, c.file));
-      target = c;
+      const manifest = readRegularFileBytesIfPresent(resolve(root, candidate.file));
+      if (!manifest) continue;
+      target = { ...candidate, manifest };
       break;
     } catch {
-      // not present — try the next
+      return scannerEvidence({ ...base, status: "warn", detail: "" }, 0, {
+        status: "unavailable",
+        reason: `kit could not read the GuardDog target ${candidate.file}`,
+        didNotStart: true,
+      });
     }
   }
   if (!target) {
     return { ...base, status: "skip", detail: "no package.json / requirements.txt to scan" };
+  }
+  const { manifest, ecosystem, file } = target;
+  const scope = guardDogScope(ecosystem, manifest);
+  if (scope.gap === "malformed") {
+    return scannerEvidence({ ...base, status: "warn", detail: "" }, 0, {
+      status: "malformed",
+      reason: `GuardDog target ${file} is malformed`,
+      didNotStart: true,
+    });
   }
 
   const bin = await resolveToolBin("guarddog");
@@ -1833,48 +1758,31 @@ async function checkGuardDog(root: string): Promise<SecurityCheckResult> {
     return {
       ...base,
       status: "warn",
-      detail: "guarddog not installed — malware heuristics unavailable",
+      detail: "guarddog not installed. Malware heuristics are unavailable",
       severity: "medium",
       suggestion: "mise use pipx:guarddog",
-      // guarddog is opted in (env/config) AND a manifest is present, but the tool
-      // is absent → the opted-in malware scan did NOT run (mirrors semgrep below).
       didNotRun: true,
+      evidenceStatus: "unavailable",
     };
   }
 
-  // Verdict cache (#205): an unchanged direct-deps set with a completed clean
-  // scan doesn't re-pay the ~25s/package cost. Only CLEAN verdicts are cached;
-  // fails and incomplete scans always re-run. npm only (the hash reads
-  // package.json deps).
-  let depsHash: string | null = null;
-  if (target.ecosystem === "npm") {
-    try {
-      depsHash = depsHashFor(readFileSync(resolve(root, target.file), "utf8"));
-    } catch {
-      depsHash = null;
-    }
-    const cached = depsHash ? loadGuardDogCache() : null;
-    if (cached && depsHash && cached.depsHash === depsHash) {
-      return {
-        ...base,
-        status: "pass",
-        detail: `no malware indicators — cached clean verdict from ${cached.scannedAt.slice(0, 10)} (${cached.packages} direct dep(s), unchanged since)`,
-      };
-    }
-  }
-
+  // A verify report gives registry versions but no artifact or ruleset identity.
+  // A fresh scan is required even if a previous verdict covered these selectors.
   const timeoutMs = Number(process.env.KIT_GUARDDOG_TIMEOUT_MS ?? "") || 300_000;
-  const result = await execFileNoThrow(
-    bin,
-    [target.ecosystem, "verify", target.file, "--output-format=json"],
-    { timeout: timeoutMs, cwd: root },
-  );
-  const verdict = classifyGuardDog(result.stdout || result.stderr);
-  if (verdict.status === "pass" && depsHash) {
-    const packages = Number(verdict.detail.match(/\((\d+) package/)?.[1] ?? 0);
-    saveGuardDogCache({ depsHash, scannedAt: new Date().toISOString(), packages });
+  const result = await execFileNoThrow(bin, [ecosystem, "verify", file, "--output-format=json"], {
+    timeout: timeoutMs,
+    cwd: root,
+    // Older GuardDog includes devDependencies by default. Newer versions use this setting.
+    env: { ...process.env, GUARDDOG_NPM_INCLUDE_DEV_DEPENDENCIES: "true" },
+  });
+  let manifestChanged = true;
+  try {
+    const currentManifest = readRegularFileBytesIfPresent(resolve(root, file));
+    manifestChanged = !currentManifest || !manifest.equals(currentManifest);
+  } catch {
+    // An unreadable target cannot confirm the original scan scope.
   }
-  return verdict;
+  return classifyGuardDog(result, scope, manifestChanged);
 }
 
 /**
@@ -1916,53 +1824,13 @@ async function checkTrivy(root: string): Promise<SecurityCheckResult> {
     { timeout: 120_000, cwd: root },
   );
 
-  if (!result.ok && !result.stdout) {
-    return {
-      category: "supply-chain",
-      name: "trivy container scan",
-      status: "warn",
-      detail: failedDetail("trivy scan failed", result),
-      severity: "medium",
-      didNotRun: true,
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout);
-    const vulns: unknown[] = (parsed.Results ?? []).flatMap(
-      (r: { Vulnerabilities?: unknown[] }) => r.Vulnerabilities ?? [],
-    );
-
-    return {
-      category: "supply-chain",
-      name: "trivy container scan",
-      ...describeTrivyFsResult(vulns.length),
-    };
-  } catch {
-    return {
-      category: "supply-chain",
-      name: "trivy container scan",
-      status: "warn",
-      detail: failedDetail("trivy scan failed", result),
-      severity: "medium",
-      didNotRun: true,
-    };
-  }
-}
-
-/** Count HIGH/CRITICAL misconfigurations in a `trivy config --format json`
- *  payload. PURE so it can be unit-tested without running trivy. */
-export function parseTrivyMisconfigCount(stdout: string): number {
-  try {
-    const parsed = JSON.parse(stdout) as {
-      Results?: { Misconfigurations?: { Severity?: string }[] }[];
-    };
-    return (parsed.Results ?? [])
-      .flatMap((r) => r.Misconfigurations ?? [])
-      .filter((m) => m.Severity === "HIGH" || m.Severity === "CRITICAL").length;
-  } catch {
-    return -1; // unparseable
-  }
+  const report = readTrivyReport(result.stdout, "vulnerability");
+  const row: SecurityCheckResult = {
+    category: "supply-chain",
+    name: "trivy container scan",
+    ...describeTrivyFsResult(report.count),
+  };
+  return scannerEvidence(row, report.count, scannerGap(report, result));
 }
 
 /**
@@ -1975,7 +1843,7 @@ export function parseTrivyMisconfigCount(stdout: string): number {
 async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
   const name = "trivy config (IaC)";
   const cwd = root;
-  const iac = await findIac(cwd);
+  const iac = await findIacFiles(cwd);
   const hasIaC = iac.length > 0;
   if (!hasIaC) {
     return {
@@ -2016,31 +1884,24 @@ async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
     ],
     { timeout: 120_000, cwd: root },
   );
-  const count = parseTrivyMisconfigCount(result.stdout);
-  if (count < 0) {
-    return {
-      category: "supply-chain",
-      name,
-      status: "warn",
-      detail: failedDetail("trivy config scan failed", result),
-      severity: "medium",
-    };
-  }
-  if (count === 0) {
-    return {
-      category: "supply-chain",
-      name,
-      status: "pass",
-      detail: `no high/critical IaC misconfigurations in ${iac.length} location(s)`,
-    };
-  }
-  return {
-    category: "supply-chain",
-    name,
-    status: "warn",
-    detail: `${count} high/critical IaC misconfiguration(s) -run: trivy config .`,
-    severity: "high",
-  };
+  const report = readTrivyReport(result.stdout, "configuration", iac);
+  const { count } = report;
+  const row: SecurityCheckResult =
+    count > 0
+      ? {
+          category: "supply-chain",
+          name,
+          status: "warn",
+          detail: `${count} high/critical IaC misconfiguration(s) -run: trivy config .`,
+          severity: "high",
+        }
+      : {
+          category: "supply-chain",
+          name,
+          status: "pass",
+          detail: "no high/critical IaC misconfigurations in Trivy reported targets",
+        };
+  return scannerEvidence(row, count, scannerGap(report, result));
 }
 
 export type JvmKind = "maven" | "gradle";
@@ -2094,20 +1955,6 @@ export async function findJvmProject(
     frontier = next;
   }
   return null;
-}
-
-/** Count vulnerabilities in a `trivy fs --format json` payload. PURE so it can
- *  be unit-tested without running trivy. -1 = unparseable. The caller passes
- *  `--severity HIGH,CRITICAL`, so every counted vuln is already high/critical. */
-export function parseTrivyVulnCount(stdout: string): number {
-  try {
-    const parsed = JSON.parse(stdout) as {
-      Results?: { Vulnerabilities?: unknown[] }[];
-    };
-    return (parsed.Results ?? []).flatMap((r) => r.Vulnerabilities ?? []).length;
-  } catch {
-    return -1;
-  }
 }
 
 /**
@@ -2202,57 +2049,24 @@ async function checkMavenAudit(root: string): Promise<SecurityCheckResult> {
     ],
     { timeout: 180_000, cwd: root },
   );
-  if (!result.ok && !result.stdout) {
-    return {
-      category: "dependency",
-      name,
-      status: "warn",
-      detail: failedDetail("trivy JVM scan failed", result),
-      severity: "medium",
-    };
-  }
-  const count = parseTrivyVulnCount(result.stdout);
-  if (count < 0) {
-    return {
-      category: "dependency",
-      name,
-      status: "warn",
-      detail: failedDetail("trivy JVM scan failed", result),
-      severity: "medium",
-    };
-  }
-  if (count === 0) {
-    return {
-      category: "dependency",
-      name,
-      status: "pass",
-      detail: "no high/critical JVM dependency CVEs",
-    };
-  }
-  return {
-    category: "dependency",
-    name,
-    status: "fail",
-    detail: `${count} high/critical JVM dependency CVE(s) -run: trivy fs --offline-scan ${mavenDir}`,
-    severity: "high",
-  };
-}
-
-const OSV_NO_RESULT = "osv-scanner gave no parseable result despite manifests; deps are UNSCANNED";
-
-/** Count vulnerabilities in an `osv-scanner --format json` payload. PURE so it
- *  can be unit-tested without running osv-scanner. -1 = unparseable. */
-export function parseOsvVulnCount(stdout: string): number {
-  try {
-    const parsed = JSON.parse(stdout) as {
-      results?: { packages?: { vulnerabilities?: unknown[] }[] }[];
-    };
-    return (parsed.results ?? [])
-      .flatMap((r) => r.packages ?? [])
-      .flatMap((p) => p.vulnerabilities ?? []).length;
-  } catch {
-    return -1;
-  }
+  const report = readTrivyReport(result.stdout, kind);
+  const { count } = report;
+  const row: SecurityCheckResult =
+    count > 0
+      ? {
+          category: "dependency",
+          name,
+          status: "fail",
+          detail: `${count} high/critical JVM dependency CVE(s) -run: trivy fs --offline-scan ${mavenDir}`,
+          severity: "high",
+        }
+      : {
+          category: "dependency",
+          name,
+          status: "pass",
+          detail: "no high/critical JVM dependency CVEs",
+        };
+  return scannerEvidence(row, count, scannerGap(report, result));
 }
 
 /**
@@ -2291,30 +2105,26 @@ async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
     timeout: 120_000,
     cwd: root,
   });
-  const count = parseOsvVulnCount(result.stdout);
-  if (count < 0) {
-    // No parseable JSON. With an osv ecosystem present the run FAILED (crash, timeout, a report
-    // cut off at kit's buffer) and must not read as clean → WARN; otherwise no lockfiles → skip.
-    return (await osvEcosystemPresent())
-      ? {
-          category: "supply-chain",
-          name,
-          status: "warn",
-          detail: failedDetail(OSV_NO_RESULT, result),
-          severity: "medium",
-          didNotRun: true,
-        }
-      : { category: "supply-chain", name, status: "skip", detail: "no lockfiles to scan" };
-  }
-  if (count === 0) {
+  const report = readOsvReport(result.stdout);
+  const gap = scannerGap(report, result, OSV_EXITS);
+  if (gap && report.count === 0 && !(await osvEcosystemPresent()))
     return {
       category: "supply-chain",
       name,
-      status: "pass",
-      detail: "no known dependency vulnerabilities",
+      status: "skip",
+      detail: "no applicable manifests for OSV",
+      evidenceStatus: gap.status,
     };
-  }
-  return osvFinding(name, result.stdout);
+  const row: SecurityCheckResult =
+    report.count > 0
+      ? osvFinding(name, report)
+      : {
+          category: "supply-chain",
+          name,
+          status: "pass",
+          detail: "no known dependency vulnerabilities",
+        };
+  return scannerEvidence(row, report.count, gap);
 }
 
 export { checkLicenses };
@@ -2355,40 +2165,6 @@ function semgrepAirGapRefusal(config: string): SecurityCheckResult {
   };
 }
 
-function semgrepVerdict(raw: string, config: string): SecurityCheckResult {
-  try {
-    const parsed = JSON.parse(raw) as { results?: Array<{ extra?: { severity?: string } }> };
-    const findings: Array<{ extra?: { severity?: string } }> = parsed.results ?? [];
-    const high = findings.filter(
-      (f) => f.extra?.severity === "ERROR" || f.extra?.severity === "WARNING",
-    );
-
-    if (high.length === 0) {
-      return {
-        category: "supply-chain",
-        name: SEMGREP_NAME,
-        status: "pass",
-        detail: "no security issues found",
-      };
-    }
-    return {
-      category: "supply-chain",
-      name: SEMGREP_NAME,
-      status: high.some((f) => f.extra?.severity === "ERROR") ? "fail" : "warn",
-      detail: `${high.length} security finding(s) -run: semgrep scan --config ${config}`,
-      severity: high.some((f) => f.extra?.severity === "ERROR") ? "high" : "medium",
-    };
-  } catch {
-    return {
-      category: "supply-chain",
-      name: SEMGREP_NAME,
-      status: "warn",
-      detail: "semgrep scan failed",
-      severity: "low",
-    };
-  }
-}
-
 async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
   // SAST is opt-in. Once requested, a missing scanner is an unscanned warning,
   // while air-gap mode refuses registry rules before spawning the process.
@@ -2404,7 +2180,25 @@ async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
     timeout: 120_000,
     cwd: root,
   });
-  return semgrepVerdict(result.stdout || result.stderr, config);
+  const report = readSemgrepReport(result.stdout);
+  const { count, blocking, scanned } = report;
+  const row: SecurityCheckResult =
+    count > 0
+      ? {
+          category: "supply-chain",
+          name: SEMGREP_NAME,
+          status: blocking ? "fail" : "warn",
+          detail: `${count} security finding(s). Run semgrep scan --config ${config}`,
+          severity: blocking ? "high" : "medium",
+        }
+      : {
+          category: "supply-chain",
+          name: SEMGREP_NAME,
+          status: "pass",
+          detail: `Semgrep reported ${scanned} scanned file(s) and no findings at warning severity or higher`,
+        };
+  // This command omits --error, so only exit zero can establish coverage.
+  return scannerEvidence(row, count, scannerGap(report, result));
 }
 
 /**
@@ -2443,6 +2237,7 @@ function bumblebeeInstallFailure(
       category: "supply-chain",
       name: BUMBLEBEE_NAME,
       status: "fail",
+      evidenceStatus: "malformed",
       detail: `scanner ${reason}`,
       severity: "high",
       suggestion:
@@ -2453,23 +2248,12 @@ function bumblebeeInstallFailure(
     category: "supply-chain",
     name: BUMBLEBEE_NAME,
     status: context.unscanned,
+    evidenceStatus: kind === "unsupported" ? "unsupported" : "unavailable",
+    ...(context.required || kind === "config" ? { didNotRun: true } : {}),
     detail: `scanner unavailable: ${reason}${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
     severity: context.required ? "high" : "low",
     suggestion:
       "Provide a binary with KIT_BUMBLEBEE_BIN, or allow downloads (unset KIT_NO_DOWNLOAD). Manual install: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest",
-  };
-}
-
-function bumblebeeScanFailure(
-  context: BumblebeeCheckContext,
-  error: string | undefined,
-): SecurityCheckResult {
-  return {
-    category: "supply-chain",
-    name: BUMBLEBEE_NAME,
-    status: context.unscanned,
-    detail: `scan failed: ${error ?? "no output"}${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
-    severity: context.required ? "high" : "medium",
   };
 }
 
@@ -2493,20 +2277,6 @@ async function bumblebeeFindingsVerdict(
   };
 }
 
-function bumblebeeIncompleteVerdict(
-  outcome: ScanOutcome,
-  context: BumblebeeCheckContext,
-): SecurityCheckResult | null {
-  if (outcome.summarySeen && outcome.status === "complete" && !outcome.timedOut) return null;
-  return {
-    category: "supply-chain",
-    name: BUMBLEBEE_NAME,
-    status: context.unscanned,
-    detail: `scan incomplete (status=${outcome.status}${outcome.timedOut ? ", timed out" : ""})${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
-    severity: context.required ? "high" : "low",
-  };
-}
-
 export function bumblebeeStaleCatalogVerdict(
   outcome: ScanOutcome,
   ageDays: number,
@@ -2520,6 +2290,7 @@ export function bumblebeeStaleCatalogVerdict(
     category: "supply-chain",
     name: BUMBLEBEE_NAME,
     status: staleCatalogStatus(ageDays),
+    evidenceStatus: "stale",
     detail: staleCatalogDetail(outcome.packagesScanned, ageDays, update, profile),
     suggestion,
     ...(update && {
@@ -2533,13 +2304,11 @@ export function bumblebeeStaleCatalogVerdict(
 }
 
 async function bumblebeeCatalogAdvisory(
-  install: ScannerInstall,
   outcome: ScanOutcome,
   profile: string,
 ): Promise<SecurityCheckResult | null> {
-  const newest = await newestCatalogMtime(install.catalogDir);
-  if (newest === null) return null;
-  const { stale, ageDays } = isCatalogStale(newest, Date.now());
+  if (outcome.catalogMtime === undefined) return null;
+  const { stale, ageDays } = isCatalogStale(outcome.catalogMtime, Date.now());
   if (!stale) return null;
   // Cached-only lookup keeps the security verdict independent of network availability.
   const { readCachedBumblebeeUpdateSync } = await import("./bumblebee-update.js");
@@ -2550,6 +2319,8 @@ async function bumblebeeCatalogAdvisory(
 async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
   const context = bumblebeeContext();
   if (envFlagDisabled(process.env.KIT_BUMBLEBEE)) {
+    if (context.required)
+      return bumblebeeInstallFailure(context, "required scanner is disabled", "config");
     return {
       category: "supply-chain",
       name: BUMBLEBEE_NAME,
@@ -2567,22 +2338,21 @@ async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const { outcome, error } = await runScan({ install: ensured.install, profile, roots });
-  if (!outcome || error) return bumblebeeScanFailure(context, error);
-
+  const outcome = await runScan({ install: ensured.install, profile, roots, cwd: root });
   const findings = await bumblebeeFindingsVerdict(outcome, profile, root);
-  if (findings) return findings;
-  const incomplete = bumblebeeIncompleteVerdict(outcome, context);
-  if (incomplete) return incomplete;
-  const advisory = await bumblebeeCatalogAdvisory(ensured.install, outcome, profile);
-  return (
-    advisory ?? {
+  const row =
+    findings ??
+    ({
       category: "supply-chain",
       name: BUMBLEBEE_NAME,
-      status: "pass",
+      status: outcome.gap ? context.unscanned : "pass",
       detail: scannedHead(outcome.packagesScanned, profile),
-    }
-  );
+    } satisfies SecurityCheckResult);
+  if (!findings && !outcome.gap) {
+    const advisory = await bumblebeeCatalogAdvisory(outcome, profile);
+    if (advisory) return advisory;
+  }
+  return scannerEvidence(row, outcome.findings.length, outcome.gap);
 }
 
 /** Short, human-readable summary of the catalogs matched by findings. */

@@ -93,10 +93,14 @@ async function acquire(database: DatabaseSync, budget: Budget): Promise<void> {
  * Use a canonical path on a local filesystem with trusted parent directories.
  * Never unlink or replace the coordination file. Process exit releases its lock.
  * Callback writes are not part of the SQLite transaction and cannot be rolled back.
+ * The callback receives the monotonic acquisition deadline for any bounded retry.
  * Do not open raw validation descriptors: closing one can release another SQLite lock.
  * Path checks reject ordinary substitution, but cannot secure hostile parent directories.
  */
-export async function withSqliteMutex<T>(path: string, operation: () => Promise<T>): Promise<T> {
+export async function withSqliteMutex<T>(
+  path: string,
+  operation: (deadline: number) => Promise<T>,
+): Promise<T> {
   const waitMs = lockWaitMs();
   const budget: Budget = { deadline: performance.now() + waitMs, waitMs };
   while (localLocks.has(path)) await wait(budget);
@@ -107,7 +111,7 @@ export async function withSqliteMutex<T>(path: string, operation: () => Promise<
     database = opened.database;
     await acquire(database, budget);
     assertIdentity(path, opened.stat);
-    return await operation();
+    return await operation(budget.deadline);
   } finally {
     try {
       // No database data changes. Closing rolls back and releases the OS lock.

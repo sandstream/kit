@@ -124,17 +124,44 @@ Run `kit ingest sarif report.sarif`, `kit ingest osv report.json`, or
 Add `--json` for structured output.
 Use `--` before a report filename that starts with a hyphen.
 
-The command reads one local report and prints normalized findings.
+Kit ingest reads one local report and prints normalized findings.
 It does not store findings, launch a scanner, or contact a cloud service.
-It also suppresses the normal post-command registry notices, including in interactive use.
-The scanner adapters use the same strict parser when they feed the security verdict.
+It suppresses post-command registry notices, including in interactive use.
 
-A successful import produces exit 0, including when the report contains findings with status `fail`.
-That exit code confirms a valid import. It does not certify the account or resolve a finding.
-Valid empty reports produce a count of zero.
-A SARIF run that reports `executionSuccessful: false` is not an empty report: with no results it
-is refused, and with results the findings are printed with a note that they are partial. Only
-SARIF 2.1.0 is read.
+Exit 0 confirms a valid import, including reports with findings.
+A completed SARIF scan without findings has a run with an empty results array.
+Missing results, a stopped run, or a reported execution error indicate a coverage gap.
+A partial report with readable findings prints them and adds `"coverage": "partial"` to JSON output.
+A partial report without findings exits 1. Kit reads SARIF 2.1.0.
+
+An OSV package without advisories must include a name, version, and ecosystem, or a full Git commit hash.
+Kit accepts the package inventory from OSV-Scanner's `--all-packages` output.
+An advisory group that refers to a missing advisory makes the report incomplete.
+Kit retains the advisories it can read.
+
+`kit scan` reports incomplete delegates separately from their findings.
+`kit scan --strict` rejects incomplete coverage.
+A required delegate must complete its scan before the scanner gate can pass.
+A baseline update also needs a completed scan and an approved scanner gate.
+The SARIF export records each delegate's status and keeps coverage gaps visible on import.
+The Socket delegate checks the reported policy verdict and the process exit status.
+The Socket report does not identify the policy data used for that scan.
+Kit records Socket coverage as partial and retains reported policy violations.
+A Socket result cannot satisfy a required delegate, strict mode or a baseline update.
+An error without a policy verdict indicates that the scan did not complete.
+For a directory scan, Grype reports the scoped package inventory alongside its findings.
+If Grype reports no packages, a required Grype delegate cannot pass.
+An unreadable inventory or one that does not match the project makes coverage incomplete.
+Trivy checks the native package or configuration inventory before accepting its SARIF findings.
+Kit reports a run with no applicable inventory separately from a completed scan without findings.
+JSON output includes the reported package or check count when Kit can verify it.
+For configuration scans, Kit requires checked Dockerfile and Compose targets and Terraform modules from its bounded project discovery.
+Kit retains the location and severity of secret findings and removes the matched secret text.
+Semgrep provides its scanned file count and SARIF findings from the same execution.
+A required Semgrep scan needs verified file coverage.
+Snyk reports the target files and dependency count from the same run.
+Kit compares that count and the issue IDs with the SARIF report.
+A scoped Snyk run can report zero dependencies.
 
 An OSV finding names a package, so it carries one more fact: whether the source of the project in
 the current directory imports that package. The line is one of:
@@ -162,12 +189,56 @@ record becomes a failure at its own overall severity (`informational` becomes `l
 `needs_validation` record becomes a `low` warning whose detail starts with "unverified". A `rejected`
 record is counted in a note on stderr and not imported. The model judged these records; kit maps them
 and does not judge them again.
-Invalid JSON, invalid report structure, and read errors produce exit 1.
-JSON errors contain `ok: false` and `error`, not a successful empty finding list.
+A damaged Cloudflare report retains readable findings with unique fingerprints.
+A report without readable findings exits 1 if its coverage is incomplete.
+JSON errors include `ok: false`, `error` and an evidence status in `reportGap`.
+A missing report file has status `missing`. A file Kit cannot read has status `unavailable`.
 
 The output states that an external report does not verify the current account state.
 Displayed findings mask recognized credentials and remove terminal controls.
 The parser retains original identities for other consumers.
+
+## OSV and Trivy security check evidence
+
+Kit checks the process exit status and the report before it verifies coverage.
+The JSON security rows use `evidenceStatus` to distinguish complete, complete-empty, missing, malformed, partial, unsupported, and unavailable evidence.
+Kit keeps readable findings when the scanner returns incomplete evidence.
+The strict security gate fails a check whose coverage remains unverified.
+Trivy requires a reported target for the scan type.
+Its configuration check compares the report with discovered Dockerfile, Compose, and Terraform targets.
+Terraform targets match by directory. If a scanner omits a Compose file, its coverage remains unverified.
+The filesystem check covers files and does not inspect a built image.
+
+## GuardDog security check evidence
+
+Enable GuardDog with `KIT_GUARDDOG=1` or `guarddog = true` under `[scan]`.
+Kit checks `package.json` first and uses `requirements.txt` when the npm manifest is absent.
+The npm check covers `dependencies` and `devDependencies`.
+GuardDog selects and scans registry versions for these declarations. It fetches their artifacts from npm or PyPI.
+Kit checks that the report covers each package and each exact version it can identify.
+For a single range, Kit uses GuardDog's registry version selection.
+Private artifacts, lockfile resolutions and transitive dependencies are outside this check's coverage.
+Unsupported declarations, such as local npm dependencies or pip requirement includes, leave coverage unverified.
+
+GuardDog writes an array of dependency results to stdout.
+A successful empty array verifies an empty manifest within the selected scope.
+A missing target or report, malformed output, package omissions and scanner errors leave coverage unverified.
+Kit retains reported malware indicators and the strict security gate fails when coverage is unverified.
+The check runs GuardDog each time. The report has no artifact digest or ruleset identity for reuse.
+Kit ignores legacy GuardDog verdict files.
+
+## Exploit intelligence in scan results
+
+The JSON result shows separate coverage for CISA KEV and FIRST EPSS.
+A complete empty response confirms that the feed returned no matches for the request.
+Kit keeps readable marks from partial replies. Those replies cannot clear the strict check or refresh the cache.
+A verified EPSS response can cache the absence of a score for each requested CVE.
+Kit reuses verified cache records for less than 24 hours.
+Kit refuses a CISA release older than the last verified release.
+Kit accepts EPSS score dates from the current UTC day and the previous UTC day.
+Kit requires complete responses from the configured feed addresses and refuses redirects.
+The previous cache format supplies fallback marks until Kit reads a verified response.
+Concurrent Kit processes merge verified updates before they replace the cache file.
 
 ## Global behavior
 

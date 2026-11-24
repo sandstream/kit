@@ -15,6 +15,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { runAudit, type Severity } from "./advisory-baseline.js";
+import { npmAuditArgs } from "./npm-audit-report.js";
+import { npmAuditLockfile } from "./npm-audit-scope.js";
+import { readRegularFileBytesIfPresent } from "./upstream-safe-read.js";
 
 export interface Vulnerability {
   package: string;
@@ -73,12 +76,6 @@ const printable = (text: string): string => text.replace(/[^\x20-\x7e]/g, "?").s
 const SEVERITIES: Severity[] = ["critical", "high", "moderate", "low", "info"];
 const DAY_MS = 24 * 3600 * 1000;
 const DEFAULT_BUDGET_MS = 15_000;
-// Only npm for now: `npm audit` and `npm outdated` read package-lock.json.
-const LOCKFILES = ["package-lock.json"];
-
-function lockfileOf(dir: string): string | undefined {
-  return LOCKFILES.find((name) => existsSync(join(dir, name)));
-}
 
 function subdirectories(dir: string): string[] {
   try {
@@ -96,7 +93,7 @@ export function findSkillProjects(roots: string[]): string[] {
   for (const root of roots) {
     for (const skill of subdirectories(root)) {
       for (const dir of [skill, ...subdirectories(skill)]) {
-        if (existsSync(join(dir, "package.json")) && lockfileOf(dir)) found.add(dir);
+        if (existsSync(join(dir, "package.json")) && npmAuditLockfile(dir)) found.add(dir);
       }
     }
   }
@@ -128,13 +125,6 @@ function writeCache(path: string, cache: Cache): void {
   } catch {
     /* a cache that cannot be written only costs a repeat check */
   }
-}
-
-function lockHash(dir: string): string {
-  const lock = lockfileOf(dir);
-  return createHash("sha256")
-    .update(lock ? readFileSync(join(dir, lock)) : "")
-    .digest("hex");
 }
 
 function skillNameOf(dir: string, roots: string[]): string {
@@ -259,7 +249,17 @@ function remoteDependencyNote(dir: string, roots: string[]): string | undefined 
 
 function safeLockHash(dir: string): string | undefined {
   try {
-    return lockHash(dir);
+    const lock = npmAuditLockfile(dir);
+    if (!lock) return undefined;
+    const bytes = readRegularFileBytesIfPresent(join(dir, lock));
+    if (!bytes) return undefined;
+    // Results from the old audit reader do not prove the v2 report or lockfile coverage.
+    return createHash("sha256")
+      .update("npm audit v2 coverage\0")
+      .update(lock)
+      .update("\0")
+      .update(bytes)
+      .digest("hex");
   } catch {
     return undefined;
   }
@@ -374,7 +374,7 @@ function outdatedMajors(dir: string): Behind[] {
 function checkWithNpm(dir: string): SkillDepsCheck {
   const outcome = runAudit(
     dir,
-    { manager: "npm", command: ["npm", "audit", "--json", ...pinnedTo()] },
+    { manager: "npm", command: ["npm", ...npmAuditArgs("info"), ...pinnedTo()] },
     CHECK_TIMEOUT_MS,
     safeEnv(process.env),
   );

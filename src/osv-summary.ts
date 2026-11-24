@@ -1,12 +1,7 @@
 import type { SecurityCheckResult } from "./check-security.js";
+import type { OsvPackage, OsvReport } from "./osv-report.js";
 
 type Level = NonNullable<SecurityCheckResult["severity"]>;
-
-interface OsvPackage {
-  package?: { name?: string; version?: string; ecosystem?: string };
-  vulnerabilities?: { id?: string }[];
-  groups?: { max_severity?: string }[];
-}
 
 /** CVSS v3 bands: 9.0 critical, 7.0 high, 4.0 medium, below that low. */
 export function osvSeverity(score: number): Level {
@@ -56,7 +51,7 @@ const hasMalware = (vulnerable: OsvPackage[]): boolean =>
  */
 function rate(vulnerable: OsvPackage[]): Rating {
   const scores = vulnerable.flatMap(scoresOf);
-  const worst = scores.length > 0 ? Math.max(...scores) : null;
+  const worst = scores.length > 0 ? scores.reduce((max, score) => Math.max(max, score)) : null;
   const unscored = unscoredCount(vulnerable);
   const malware = hasMalware(vulnerable);
   let severity: Level = worst === null ? "high" : osvSeverity(worst);
@@ -83,12 +78,8 @@ function npmUpdateCommand(vulnerable: OsvPackage[]): string | undefined {
  * versions come from the lockfile, so only plain package-name text reaches the row or the suggested
  * command, at most ten packages are listed, and anything else shows as `?`.
  */
-export function osvFinding(name: string, stdout: string): SecurityCheckResult {
-  const parsed = JSON.parse(stdout) as { results?: { packages?: OsvPackage[] }[] };
-  const vulnerable = (parsed.results ?? [])
-    .flatMap((r) => r.packages ?? [])
-    .filter((p) => (p.vulnerabilities ?? []).length > 0);
-  const count = vulnerable.reduce((n, p) => n + (p.vulnerabilities ?? []).length, 0);
+export function osvFinding(name: string, report: OsvReport): SecurityCheckResult {
+  const { count, packages: vulnerable } = report;
   const { severity, notes } = rate(vulnerable);
   const names = vulnerable.map(
     (p) => `${safeName(p.package?.name)} ${safeVersion(p.package?.version)}`,

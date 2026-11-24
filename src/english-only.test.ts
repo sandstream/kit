@@ -33,7 +33,7 @@ import { dirname, resolve, join, relative } from "node:path";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SCAN_DIRS = ["src", "skills", "docs", ".github", "scripts"];
-const SCAN_FILES = ["README.md", "package.json", "eslint.config.js", "docker-compose.yml"];
+const SCAN_FILES = ["README.md", "package.json", "eslint.config.js", "Dockerfile"];
 /**
  * `package-lock.json` is excluded: it is generated, and third-party package metadata is not kit's
  * surface. `CHANGELOG.md` is excluded for the reason given above.
