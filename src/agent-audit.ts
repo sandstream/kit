@@ -69,10 +69,34 @@ export function auditMcpServers(json: string): string[] {
   return out;
 }
 
+/**
+ * Fetch-and-execute shapes. Only `curl|wget … | sh|bash|zsh` was matched, so the same download piped
+ * into `python3` or `node`, PowerShell's `irm … | iex` (kit runs on Windows), or a download saved and
+ * then run (`curl -o f … && sh f`) passed the rule that exists to catch it (kit-research
+ * `agent-config-audit-vs-kit`). Lengths are bounded so a long line cannot make a pattern backtrack.
+ */
+const INTERPRETER = "(?:sudo\\s+)?(?:sh|bash|zsh|dash|ksh|python3?|node|perl|ruby|pwsh|powershell)";
 const SUSPICIOUS_HOOK_PATTERNS: { re: RegExp; why: string }[] = [
   {
-    re: /(curl|wget)\b[^\n|]*\|\s*(sh|bash|zsh)\b/i,
+    re: new RegExp(`(curl|wget)\\b[^\\n|]{0,400}\\|\\s*${INTERPRETER}\\b`, "i"),
     why: "pipes a download straight into a shell",
+  },
+  {
+    re: /\b(iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n|]{0,400}\|\s*(iex|invoke-expression)\b/i,
+    why: "pipes a download straight into PowerShell's Invoke-Expression",
+  },
+  {
+    re: /\b(iex|invoke-expression)\b[\s(]{0,20}(iwr|irm|invoke-webrequest|invoke-restmethod|\(?\s*new-object\s+net\.webclient)/i,
+    why: "evaluates a download with PowerShell's Invoke-Expression",
+  },
+  {
+    // The saved path (group 2) must be what runs next: `curl -o out.json … && node build.js` is not this.
+    re: new RegExp(
+      `(curl|wget)\\b[^\\n]{0,400}?\\s(?:-o|--output|--output-document)\\s+["']?([^\\s"']{1,200})["']?` +
+        `[^\\n]{0,400}?(?:&&|;|\\|\\|)\\s*(?:${INTERPRETER}\\s+|chmod\\s+\\+x\\s+)?(?:\\./)?\\2(?=$|[\\s;&|"'])`,
+      "i",
+    ),
+    why: "downloads a file and runs it",
   },
   {
     re: /base64\s+(-d|--decode|-D)\b[^\n|]*\|\s*(sh|bash|zsh)\b/i,
