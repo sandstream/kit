@@ -102,6 +102,14 @@ function renderFloor(f: UsageFacts): string[] {
   for (const [op, n] of fl.byOperation) {
     out.push(line(`  ${op.slice(0, 30)}`, `${num(n).padStart(6)}  ${bar(n, fl.refusals, 12)}`));
   }
+  if (fl.byReason.length > 0) {
+    // The wall: one reason usually dominates, and its text says who can clear it.
+    out.push(line(""));
+    out.push(line(`  ${c.dim}by reason${c.reset}`));
+    for (const g of fl.byReason.slice(0, 3)) {
+      out.push(line(`  ${num(g.count).padStart(4)}  ${g.operation} · ${g.reason}`));
+    }
+  }
   out.push(line(""));
   out.push(
     line(

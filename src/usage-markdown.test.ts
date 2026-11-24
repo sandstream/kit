@@ -33,6 +33,14 @@ const facts: UsageFacts = {
       ["policy-check", 294],
       ["odd|name", 3],
     ],
+    byReason: [
+      {
+        operation: "gate-fs",
+        reason:
+          "write to <path> denied — no verified scope/RoE (…); a wired fs-gate grants nothing",
+        count: 4,
+      },
+    ],
     bypassedCommits: 55,
     controls: 6,
     actorUnknown: true,
@@ -59,6 +67,10 @@ describe("kit usage --markdown", () => {
     );
     assert.match(md, /⚠️ \*\*55\*\* commits bypassed the pre-commit hook/);
     assert.match(md, /_6 refusals by kit's own negative controls .* are not counted\._/);
+    assert.match(
+      md,
+      /\| write to <path> denied — no verified scope\/RoE \(…\); a wired fs-gate grants nothing \| `gate-fs` \| 4 \|/,
+    );
     assert.match(md, /_No saved check run\. Run `kit check` once\._/);
     assert.match(md, /Latest: `pip fastmcp-slim`/);
     assert.doesNotMatch(md, /[│╭╮╰╯├┤─]/);
