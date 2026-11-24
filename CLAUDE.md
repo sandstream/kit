@@ -68,10 +68,11 @@ example `enforcement gate liveness` in a worktree. It must be the exact name, an
 
 `sandstream/kit` is a **public** repository. When opening issues or PRs here:
 
-- **Never put a `claude.ai/code/session_…` URL in an issue or PR body.** It is
-  internal session metadata, not useful to readers, and it clutters the public
-  record (it accumulated on ~160 existing artifacts). The only footer to use is
-  the generic `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+- **Never put an agent session URL in an issue or PR body**: a `claude.ai/code/session_…`
+  link, or a link to another agent's session or task. It is internal session metadata,
+  not useful to readers, and it clutters the public record (it accumulated on ~160
+  existing artifacts). The only footer is the tool's generic line with no session
+  link, such as `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 - No internal session IDs, private dashboard/console links, or paths under
   another customer's project in public bodies.
 - Findings that could be a real security leak in a named third-party repo go to
@@ -97,7 +98,9 @@ residual risk, but owns only the rig — the frozen input, ingest schema, determ
 adjudication and receipts — never the judgement), ADR-0008 (service passkeys and tokens
 have separate owners) and ADR-0009 (cloud evidence is ingested read-only; held by the tests
 its `enforced_by` names). ADR-0010 (a gate may ask a person, only through the agent harness;
-an unanswerable ask is a deny) is proposed and gates nothing until the owner accepts it.
+an unanswerable ask is a deny) and ADR-0011 (files and secrets may live in the repo as ciphertext
+per recipient, and no one may be locked out) are proposed and gate nothing until the owner
+accepts them.
 
 `node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
 does **not** include the ADR stage — only `kit review` (check + design + standards + adr + skill)
