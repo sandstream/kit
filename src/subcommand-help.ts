@@ -8,6 +8,8 @@
  * entry here, which is how 46 of them had come to print only their parent's one-liner.
  */
 export const SUBCOMMAND_HELP: Record<string, string> = {
+  "escalate pr":
+    "Read the current pull request, its signed review receipt and independent review reports, and write the exact actions to .kit-escalation.txt (--merge-denied after a permission layer refuses a merge)",
   "escalate feed":
     "Track what outside services report as broken as action items: github (failed workflows on the default branch, open Dependabot alerts) and vercel (failed production deploys). kit escalate feed <github|vercel> [--repo owner/name | --team id-or-slug] [--dry-run] [--json]",
   "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
@@ -197,6 +199,16 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Read a pasted install prompt (argument or stdin) for planted attacks, the URLs and hosts it names and repos it clones; fetches nothing",
   "triage pkg":
     "Check a macOS installer package: checksum, publisher Team ID, notarization. Does not install it",
+  "triage brew":
+    "Homebrew formula or cask: resolves the upstream repository, then scores it as kit triage repo does",
+  "triage mcp":
+    "MCP tool metadata: reads the tool definitions for poisoning and pins them against drift. kit triage mcp <server> --tools <file>",
+  "triage model":
+    "An untrusted AI artifact (model weights or a dataset) before you load it; --scan-bytes adds a byte-level malware scan through a local ClamAV",
+  "triage plugin":
+    "kitPlugins: npm supply-chain checks and a manifest-poisoning scan; every declared plugin when no name is given",
+  "triage vault-config":
+    "The secret-backend selection (.kit.toml secrets.store and each key's source); never reads a secret value",
   "plugin search": "Search plugin marketplace",
   "plugin install": "Install an official plugin",
   "plugin uninstall": "Remove an official package and adapter registration",

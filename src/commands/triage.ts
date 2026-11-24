@@ -55,8 +55,11 @@ const PIP_AND_GEM_HELP = [
   "  kit triage go <package>[@version]    Evaluate a Go module release on the module proxy (cooling, OSV); module source not read",
 ].join("\n");
 
-/** Every type `kit triage` accepts, for the unknown-type message (several dispatch before it). */
-const TRIAGE_TYPES = [
+/**
+ * Every type `kit triage` accepts, for the unknown-type message (several dispatch before it).
+ * src/triage-help-coverage.test.ts fails when one of them has no `kit triage <type> --help` entry.
+ */
+export const TRIAGE_TYPES = [
   "npm",
   "pip",
   "gem",

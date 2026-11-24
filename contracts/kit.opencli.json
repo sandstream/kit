@@ -1034,6 +1034,15 @@
           "x-kit-flags-inherited": true,
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
+        },
+        "pr": {
+          "kind": "command",
+          "summary": "Read the current pull request, its signed review receipt and independent review reports, and write the exact actions to .kit-escalation.txt (--merge-denied after a permission layer refuses a merge)",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
         }
       },
       "kind": "group",
@@ -3371,6 +3380,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "brew": {
+          "kind": "command",
+          "summary": "Homebrew formula or cask: resolves the upstream repository, then scores it as kit triage repo does",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "cargo": {
           "kind": "command",
           "summary": "crates.io release: cooling, yanked versions, OSV malicious records, owners; build-time code not read",
@@ -3434,6 +3452,24 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "mcp": {
+          "kind": "command",
+          "summary": "MCP tool metadata: reads the tool definitions for poisoning and pins them against drift. kit triage mcp <server> --tools <file>",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "model": {
+          "kind": "command",
+          "summary": "An untrusted AI artifact (model weights or a dataset) before you load it; --scan-bytes adds a byte-level malware scan through a local ClamAV",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "npm": {
           "kind": "command",
           "summary": "Evaluate npm package: registry metadata (deprecation, age, maintainers, license, install scripts)",
@@ -3455,6 +3491,15 @@
         "pkg": {
           "kind": "command",
           "summary": "Check a macOS installer package: checksum, publisher Team ID, notarization. Does not install it",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "plugin": {
+          "kind": "command",
+          "summary": "kitPlugins: npm supply-chain checks and a manifest-poisoning scan; every declared plugin when no name is given",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -3491,6 +3536,15 @@
         "tools": {
           "kind": "command",
           "summary": "List installed security tools",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "vault-config": {
+          "kind": "command",
+          "summary": "The secret-backend selection (.kit.toml secrets.store and each key's source); never reads a secret value",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
