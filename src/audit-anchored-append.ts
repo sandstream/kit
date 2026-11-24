@@ -4,6 +4,7 @@ import {
   readAnchorRecord,
   tryReadAuditAnchorKey,
   verifyAgainstAnchor,
+  withAnchorStoreForAppend,
   type AnchorRecord,
 } from "./audit-anchor.js";
 import { AuditAnchorIndexAccessError } from "./audit-anchor-store.js";
@@ -44,10 +45,14 @@ export async function appendWithAuditAnchor(
   logPath: string,
   append: (canonical: string, content: string) => Promise<string>,
 ): Promise<void> {
-  await withAuditWriteLock(logPath, async (canonical) => {
-    const content = await readAppendSnapshot(canonical);
-    await verifySealedPrefixForAppend(canonical, content);
-    const hash = await append(canonical, content ?? "");
-    await advanceAuditAnchorUnderLock(canonical, undefined, { expectedTailHashes: [hash] });
-  });
+  await withAnchorStoreForAppend(undefined, (prepared) =>
+    withAuditWriteLock(logPath, async (canonical) => {
+      const content = await readAppendSnapshot(canonical);
+      await verifySealedPrefixForAppend(canonical, content);
+      const hash = await append(canonical, content ?? "");
+      await advanceAuditAnchorUnderLock(canonical, prepared, undefined, {
+        expectedTailHashes: [hash],
+      });
+    }),
+  );
 }
