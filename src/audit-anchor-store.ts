@@ -2,6 +2,8 @@ import { lstatSync, type BigIntStats } from "node:fs";
 import { readFile, mkdir, open, stat, rename, unlink, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
+import { setTimeout as delay } from "node:timers/promises";
 import type { AnchorRecord } from "./audit-anchor.js";
 import { canonicalAuditLogPath } from "./audit-log-path.js";
 import { secureFileStrictAsync } from "./utils/secure-perms.js";
@@ -153,6 +155,36 @@ function assertStagedFile(prepared: PreparedAnchorStore): void {
   if (!stagedFileIsOwned(prepared)) throw new Error("The prepared audit anchor changed.");
 }
 
+const WINDOWS_RENAME_RETRIES = 3;
+const WINDOWS_RENAME_DELAY_MS = 50;
+
+async function publishPreparedAnchorStore(
+  prepared: PreparedAnchorStore,
+  deadline: number,
+): Promise<void> {
+  for (let retries = 0; ; retries++) {
+    assertStagedFile(prepared);
+    if (canonicalAuditLogPath(prepared.path) !== prepared.path)
+      throw new Error("The audit anchor index path changed.");
+    try {
+      await rename(prepared.temporary, prepared.path);
+      return;
+    } catch (error) {
+      if (
+        process.platform !== "win32" ||
+        (error as NodeJS.ErrnoException).code !== "EPERM" ||
+        retries >= WINDOWS_RENAME_RETRIES ||
+        deadline - performance.now() <= WINDOWS_RENAME_DELAY_MS
+      ) {
+        throw error;
+      }
+      // Keep the old index at its path until a replacement succeeds.
+      await delay(WINDOWS_RENAME_DELAY_MS);
+      if (performance.now() >= deadline) throw error;
+    }
+  }
+}
+
 export async function closePreparedAnchorStore(prepared: PreparedAnchorStore): Promise<void> {
   try {
     if (stagedFileIsOwned(prepared)) {
@@ -201,7 +233,7 @@ export async function storeAnchorRecord(
 ): Promise<void> {
   const canonical = prepared.path;
   const { withSqliteMutex } = await import("./sqlite-mutex.js");
-  await withSqliteMutex(`${canonical}.lock.sqlite`, async () => {
+  await withSqliteMutex(`${canonical}.lock.sqlite`, async (deadline) => {
     assertStagedFile(prepared);
     if (canonicalAuditLogPath(canonical) !== canonical)
       throw new Error("The audit anchor index path changed.");
@@ -219,9 +251,6 @@ export async function storeAnchorRecord(
     }
     store[canonicalAuditLogPath(logPath)] = record;
     await prepared.handle.writeFile(JSON.stringify(store, null, 2) + "\n", "utf8");
-    assertStagedFile(prepared);
-    if (canonicalAuditLogPath(canonical) !== canonical)
-      throw new Error("The audit anchor index path changed.");
-    await rename(prepared.temporary, canonical);
+    await publishPreparedAnchorStore(prepared, deadline);
   });
 }
