@@ -96,6 +96,11 @@ const ALLOWED: { file: string; snippet: string; why: string }[] = [
     why: "detects normative language in what a USER wrote — kit reading Swedish, not speaking it",
   },
   {
+    file: "src/skill-rule-gates.ts",
+    snippet: "\\b(aldrig|förbjud\\w*|undvik)\\b",
+    why: "detects rule words in skills a USER wrote — kit reading Swedish, not speaking it",
+  },
+  {
     file: "src/memory/learn.ts",
     snippet: "nej|sluta|fel|inte|istället|igen",
     why: "correction detection over USER input, alongside the English alternatives",

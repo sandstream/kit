@@ -20,8 +20,10 @@ import type { StandardPluginSpec } from "./standards-plugins.js";
 /** Project skill directories of Claude Code, Codex and the shared `.agents` layout. */
 export const SKILL_DIRS = [".claude/skills", ".agents/skills", ".codex/skills"];
 
-const RULE_WORD =
-  /\b(never|must not|mustn't|do not|don't|always|forbid(?:den)?|avoid|aldrig|förbjud\w*|undvik)\b/i;
+const RULE_WORD_EN = /\b(never|must not|mustn't|do not|don't|always|forbid(?:den)?|avoid)\b/i;
+/** Skills are often written in the team's language; this reads Swedish rule words, it does not speak them. */
+const RULE_WORD_SV = /\b(aldrig|förbjud\w*|undvik)\b/i;
+const isRuleLine = (text: string): boolean => RULE_WORD_EN.test(text) || RULE_WORD_SV.test(text);
 const CODE_TOKEN = /`([^`\n]{2,80})`/g;
 /** A token that names code rather than an ordinary word: punctuation, a call or camelCase. */
 const CODE_SHAPE = /[.()*_:<>[\]/]|[a-z][A-Z]/;
@@ -74,7 +76,7 @@ export function findUngatedSkillRules(
         continue;
       }
       lines.forEach((text, i) => {
-        if (!RULE_WORD.test(text)) return;
+        if (!isRuleLine(text)) return;
         for (const m of text.matchAll(CODE_TOKEN)) {
           const token = m[1]!.trim();
           if (CODE_SHAPE.test(token) && !gated(token, plugins)) {
