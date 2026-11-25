@@ -5,7 +5,7 @@ const sleepCell = new Int32Array(new SharedArrayBuffer(4));
 
 /** Remove a test directory even if Windows briefly holds it open after a child exits. */
 export function rmTemp(path: string): void {
-  const deadline = performance.now() + 5_000;
+  const deadline = performance.now() + 20_000;
   for (;;) {
     try {
       rmSync(path, { recursive: true, force: true, maxRetries: 20, retryDelay });
