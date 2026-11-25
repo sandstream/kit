@@ -1,4 +1,14 @@
 #!/usr/bin/env sh
 # commit-msg — block internal references in the commit MESSAGE itself
 # (the leak vector a file-only scan misses: a "scrub" commit naming what it removed).
-exec "$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --msg "$1"
+"$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --msg "$1" || exit 1
+
+# Stamp only a tree recorded after the local pre-commit checks succeeded.
+sentinel=$(git rev-parse --git-path .kit-hook-ran) || exit 0
+if [ -f "$sentinel" ] && tree=$(git write-tree) && [ "$(cat "$sentinel")" = "$tree" ]; then
+  # The local post-commit detector still needs the file's timestamp.
+  { date -u +"%Y-%m-%dT%H:%M:%SZ" > "$sentinel"; } 2>/dev/null || exit 0
+  git interpret-trailers --in-place --if-exists replace --if-missing add \
+    --trailer "Kit-Hook-Tree: $tree" -- "$1" ||
+    printf '%s\n' 'kit: could not record the local hook marker' >&2
+fi
