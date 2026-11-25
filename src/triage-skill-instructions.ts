@@ -12,7 +12,7 @@
  */
 import { existsSync, statSync } from "node:fs";
 
-import { scanInstructions } from "./instruction-scan.js";
+import { filesReadPhrase, scanInstructions } from "./instruction-scan.js";
 
 const SHOWN_RULES = 6;
 
@@ -32,12 +32,13 @@ export function skillInstructionLines(target: string): string[] | null {
     return null;
   }
   const scan = scanInstructions(target, isDir);
-  const head = "Instruction rules (the same files, read as text an agent follows):";
+  const head =
+    "Instruction rules (SKILL.md, the .md files it links or keeps in references/, read as text an agent follows):";
   if (scan.files.length === 0) return [head, "  no agent instruction file found"];
-  const read = scan.files.length - scan.unread.length;
+  const read = filesReadPhrase(scan);
   const partial = scan.complete ? "" : "; the scan was incomplete, so this is a lower bound";
   if (scan.findings.length === 0) {
-    return [head, `  no finding in ${read} file(s) read${partial} (a floor, not a guard)`];
+    return [head, `  no finding in ${read}${partial} (a floor, not a guard)`];
   }
   const files = new Set(scan.findings.map((f) => f.file)).size;
   const rules = countBy(scan.findings.map((f) => f.rule));
@@ -48,7 +49,7 @@ export function skillInstructionLines(target: string): string[] | null {
     .join(", ");
   return [
     head,
-    `  ! ${scan.findings.length} finding(s) in ${files} of ${read} file(s) read${partial}: ${list}${more}`,
+    `  ! ${scan.findings.length} finding(s) in ${files} of ${read}${partial}: ${list}${more}`,
     "  The score and verdict above do not count these: a rule cannot tell a line that describes an",
     "  attack from one that carries it out. Read them: kit triage instructions <path>",
   ];
