@@ -52,6 +52,17 @@ function secretState(result: {
   return result.unverified ? undefined : "missing";
 }
 
+function secretStatus(name: string, source: string, result: Omit<SecretStatus, "name" | "source">) {
+  return {
+    name,
+    source,
+    available: result.available,
+    detail: result.detail,
+    unverified: result.unverified,
+    state: result.state ?? secretState(result),
+  };
+}
+
 interface OnePasswordCache {
   status: Awaited<ReturnType<typeof check1PasswordStatus>> | null;
 }
@@ -434,14 +445,7 @@ export async function checkSecrets(
           result = { available: false, detail: `Unknown source: ${config.source}` };
       }
 
-      keys.push({
-        name,
-        source: config.source,
-        available: result.available,
-        detail: result.detail,
-        unverified: result.unverified,
-        state: result.state ?? secretState(result),
-      });
+      keys.push(secretStatus(name, config.source, result));
     }
   }
 
