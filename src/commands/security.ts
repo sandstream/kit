@@ -24,8 +24,7 @@ import {
   checkSecretPolicy,
 } from "../security-policy.js";
 import { clearBumblebeeCache } from "../bumblebee.js";
-import { scanStagedFiles } from "../scan-staged.js";
-import { applyScanAllowlist } from "../scan-allow-run.js";
+import { cmdSecurityScanStaged } from "./security-scan-staged.js";
 import { existsSync } from "node:fs";
 import { cmdSecurityScanBuild } from "./security-scan-build.js";
 import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
@@ -419,53 +418,6 @@ export async function cmdSecurity(): Promise<boolean> {
   }
   console.log(
     `\n${c.dim}Add a package: ${c.bold}kit security policy add <pkg>${c.reset}${c.dim}, or edit .kit-allowlist.json directly.${c.reset}\n`,
-  );
-  return false;
-}
-
-async function cmdSecurityScanStaged(): Promise<boolean> {
-  // Designed to run from a git pre-commit hook. Prints nothing on success so
-  // the hook output stays quiet for normal commits; exits non-zero with a
-  // structured report when a credential pattern is staged.
-  const allowed = await applyScanAllowlist(await scanStagedFiles());
-  if (!allowed.ok) return false; // a broken [[scan.allow]] blocks the commit
-  const hits = allowed.hits;
-  if (hits.length === 0) return true;
-
-  // Test/fixture hits are REPORTED, never blocking: fake credentials live there by
-  // design, and kit's own audit-redaction test has to stage a secret-shaped key to prove
-  // the redaction works. Blocking it left `--no-verify` as the only way through, which
-  // switches off the entire hook — a gate that cries wolf teaches people to disable it.
-  // The repo-wide grep in check-security.ts already drew this line; this gate did not.
-  const blocking = hits.filter((h) => !h.advisory);
-  const advisory = hits.filter((h) => h.advisory);
-
-  if (advisory.length > 0) {
-    console.error(
-      `${c.dim}note: ${advisory.length} test/fixture file(s) contain secret-shaped strings (expected — not blocking):${c.reset}`,
-    );
-    for (const hit of advisory) {
-      const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
-      console.error(`  ${c.dim}· ${hit.file}  ${labels}${c.reset}`);
-    }
-    console.error(
-      `${c.dim}  trufflehog locally and the CI gitleaks job still scan these and verify live.${c.reset}`,
-    );
-  }
-
-  if (blocking.length === 0) return true;
-
-  const total = blocking.reduce((sum, h) => sum + h.findings.length, 0);
-  console.error(`${c.red}✗ kit secret-scan blocked the commit${c.reset}`);
-  console.error(
-    `${c.dim}Found ${total} potential secret(s) in ${blocking.length} staged file(s):${c.reset}`,
-  );
-  for (const hit of blocking) {
-    const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
-    console.error(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
-  }
-  console.error(
-    `\n${c.dim}If a finding is a false positive, add a reviewed ${c.bold}[[scan.allow]]${c.reset}${c.dim} entry to .kit.toml (a reason is required), or bypass with ${c.bold}git commit --no-verify${c.reset}${c.dim}. Prefer migrating the value to a vault first (${c.bold}kit secrets migrate${c.reset}${c.dim}).${c.reset}`,
   );
   return false;
 }

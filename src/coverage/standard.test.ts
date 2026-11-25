@@ -116,3 +116,19 @@ describe("pluralizeUnit", () => {
     assert.equal(pluralizeUnit("key"), "keys");
   });
 });
+
+describe("LLM06 describes the exec-broker kit ships", () => {
+  // src/exec-broker/ and `kit broker enforce` ship; the rationale called the broker a 5.0
+  // roadmap item.
+  const rationale = OWASP_LLM_TOP10.mapping["LLM06:2025"]?.rationale ?? "";
+
+  it("does not call the broker a roadmap item", () => {
+    assert.doesNotMatch(rationale, /roadmap/i);
+  });
+
+  it("names the broker and the limits it ships with", () => {
+    assert.match(rationale, /kit broker/);
+    assert.match(rationale, /opt-in/);
+    assert.match(rationale, /declare/);
+  });
+});

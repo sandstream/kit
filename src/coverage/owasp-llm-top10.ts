@@ -71,7 +71,7 @@ export const OWASP_LLM_TOP10: StandardDescriptor = {
       bucket: "auto",
       checks: ["gate-bash", "gate-env", "agent-audit"],
       rationale:
-        "kit constrains agent agency at the action boundary — deny-by-default installs/secret-writes (PreToolUse gates) and governed mutating MCP tools. Full exec-time agency scoping (egress/fs/secret-scoped broker) is on the 5.0 roadmap.",
+        "kit constrains agent agency at the action boundary — deny-by-default installs/secret-writes (PreToolUse gates) and governed mutating MCP tools. The exec-broker (`kit broker`) adds exec-time scoping: it checks an operation's declared egress, filesystem writes and environment against a signed scope before it runs, and audits each allow/deny. It is opt-in (a passthrough until `[scope].enforce_runtime` or a broker policy file turns it on), it mediates only the effects a tool adapter declares, and for an arbitrary `kit run` command it sees only egress.",
     },
     "LLM07:2025": {
       bucket: "gap",

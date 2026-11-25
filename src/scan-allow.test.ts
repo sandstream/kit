@@ -81,7 +81,10 @@ const entry: AllowEntry = {
 const finding = (label: string, preview = 'key: "maven-…"') => ({ label, preview });
 const hit = (file: string, ...findings: ReturnType<typeof finding>[]): StagedHit => ({
   file,
-  findings,
+  findings: findings.map((value) => ({
+    ...value,
+    evidence: { file, pattern: value.label, line: 1 },
+  })),
 });
 const present = () => true;
 
@@ -121,9 +124,9 @@ describe("applyAllow", () => {
   });
 
   it("never lets the unscannable finding through", () => {
-    const blob = finding("unscannable staged blob (fail-closed)");
-    const loose = { ...entry, match: blob.label };
-    const out = applyAllow([hit(".gitlab-ci.yml", blob)], [loose], [], present);
+    const gap = "unscannable staged blob (fail-closed)";
+    const loose = { ...entry, match: gap };
+    const out = applyAllow([{ ...hit(".gitlab-ci.yml"), gap }], [loose], [], present);
     assert.equal(out.hits.length, 1);
     assert.deepEqual(out.used, []);
   });

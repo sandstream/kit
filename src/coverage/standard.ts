@@ -11,7 +11,14 @@
  * Pure + deterministic (data → report). Reuses coverage.ts's evidence primitives so
  * the two share one meaning of "verified/failing/unrun".
  */
-import { evidenceFor, indexResults, citationsFor, type Bucket, type EvidenceState } from "./coverage.js";
+import {
+  evidenceFor,
+  indexResults,
+  citationsFor,
+  type Bucket,
+  type EvidenceState,
+  type EvidenceStatus,
+} from "./coverage.js";
 import type { RuleRef } from "../rules/catalog.js";
 import type { SecurityCheckResult } from "../check-security.js";
 
@@ -85,7 +92,7 @@ export interface StandardReport {
 /** Build the flat entry list in descriptor order. Throws on an unmapped requirement. */
 export function buildStandardEntries(
   descriptor: StandardDescriptor,
-  byKey?: Map<string, SecurityCheckResult["status"]>,
+  byKey?: Map<string, EvidenceStatus>,
 ): StandardEntry[] {
   return descriptor.requirements.map((requirement) => {
     const mapping = descriptor.mapping[requirement.id];
