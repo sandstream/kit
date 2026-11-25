@@ -22,15 +22,22 @@ export interface SecretStatus {
 
 async function checkEnvSecret(
   name: string,
-): Promise<{ available: boolean; detail: string; unverified?: boolean }> {
-  if (process.env[name]) {
+  options: { verifyVercelToken?: boolean; offline?: boolean },
+): Promise<Omit<SecretStatus, "name" | "source">> {
+  const value = process.env[name];
+  if (value) {
+    if (name === "VERCEL_TOKEN" && options.verifyVercelToken) {
+      const { verifyVercelToken } = await import("./secret-vercel-probe.js");
+      return verifyVercelToken(value, options.offline === true);
+    }
     return { available: true, detail: "Set in environment" };
   }
-  if (process.env[name] === "") {
+  if (value === "") {
     return {
       available: false,
       detail: "Set but empty in environment (a Sensitive platform variable gives no value locally)",
       unverified: true,
+      state: "unreadable",
     };
   }
   return { available: false, detail: "Not set in environment" };
@@ -42,7 +49,18 @@ function secretState(result: {
   unverified?: boolean;
 }): SecretStatus["state"] {
   if (result.available) return undefined;
-  return result.unverified && /empty/i.test(result.detail) ? "unreadable" : "missing";
+  return result.unverified ? undefined : "missing";
+}
+
+function secretStatus(name: string, source: string, result: Omit<SecretStatus, "name" | "source">) {
+  return {
+    name,
+    source,
+    available: result.available,
+    detail: result.detail,
+    unverified: result.unverified,
+    state: result.state ?? secretState(result),
+  };
 }
 
 interface OnePasswordCache {
@@ -354,33 +372,32 @@ async function checkAzureSecret(
   }
 }
 
+async function templateIsPresent(cwd: string, template: string): Promise<boolean> {
+  try {
+    await access(resolve(cwd, template));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function checkSecrets(
   secrets: SecretsConfig,
   cwd = process.cwd(),
+  options: { verifyVercelToken?: boolean; offline?: boolean } = {},
 ): Promise<{ templateExists: boolean | null; keys: SecretStatus[] }> {
-  let templateExists: boolean | null = null;
-  if (secrets.template) {
-    try {
-      // `template` is a repo-relative path in .kit.toml, so it must resolve against the
-      // GOVERNED project. Bare `access(secrets.template)` resolved it against the calling
-      // process and reported the caller's .env.template as the target's.
-      await access(resolve(cwd, secrets.template));
-      templateExists = true;
-    } catch {
-      templateExists = false;
-    }
-  }
+  const templateExists = secrets.template ? await templateIsPresent(cwd, secrets.template) : null;
 
   const keys: SecretStatus[] = [];
   const opCache: OnePasswordCache = { status: null };
 
   if (secrets.keys) {
     for (const [name, config] of Object.entries(secrets.keys)) {
-      let result: { available: boolean; detail: string; unverified?: boolean };
+      let result: Omit<SecretStatus, "name" | "source">;
 
       switch (config.source) {
         case "env":
-          result = await checkEnvSecret(name);
+          result = await checkEnvSecret(name, options);
           break;
         case "1password":
           result = config.ref
@@ -428,14 +445,7 @@ export async function checkSecrets(
           result = { available: false, detail: `Unknown source: ${config.source}` };
       }
 
-      keys.push({
-        name,
-        source: config.source,
-        available: result.available,
-        detail: result.detail,
-        unverified: result.unverified,
-        state: secretState(result),
-      });
+      keys.push(secretStatus(name, config.source, result));
     }
   }
 
