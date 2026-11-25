@@ -1,0 +1,3 @@
+### Fixed
+
+- **`kit rig report` no longer drops failed or skipped targets from recall.** Recall per run was caught / defects reviewed, so a run that caught one holdout defect and failed on another, or had no row for the rest, reported 100%. Recall now divides by every defect in that half of the manifest, a target a run failed on or has no row for counts as not caught (as flagged for a control), and the report names each run's shortfall ("holdout run s1: reviewed 1 of 9; failed d09 (refused); no row d12, …"). A reviewer that crashed, timed out or refused a target is recorded with a new `"failed": "<why>"` row; a row that contradicts an earlier one for the same run and target is reported as malformed.
