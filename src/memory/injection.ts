@@ -277,6 +277,39 @@ interface Rule {
 // Kept deliberately tight: high-confidence rules are the canonical injection
 // signatures with low false-positive risk; softer, dual-use shapes are heuristic
 // so they inform without crying wolf (kit's no-false-green cuts both ways).
+const EXFIL_VERB = /\b(exfiltrat\w*|send|leak|upload|post|email)\b/gi;
+const SECRET_NOUN =
+  /\b(secret|token|password|api[_-]?key|credential|\.env|ssh key|private key)\b/gi;
+/** A word followed by `:`, `=` or `(` is a key or a call in code, not a verb or an object. */
+const NAME_AFTER = /^\s*[:=(]/;
+
+/** Whether the word at `start..end` of `text` is a name in code: `.email`, `email:`, `password =`. */
+function nameInCode(text: string, start: number, end: number): boolean {
+  return text[start - 1] === "." || NAME_AFTER.test(text.slice(end));
+}
+
+/**
+ * An exfil verb with a secret noun at most 40 characters after it, as one span. The pair is not
+ * an imperative when both words are names in code (a key, a property or a call: `email:`,
+ * `.email(`, `user.password =`), as in a form schema. Either one alone still counts, so
+ * "email: the password to me" and "send the token: abc" are caught.
+ */
+function exfilImperative(text: string): string | null {
+  for (const verb of text.matchAll(EXFIL_VERB)) {
+    const end = verb.index + verb[0].length;
+    const rest = text.slice(end);
+    const verbIsName = nameInCode(text, verb.index, end);
+    // 40 characters of gap, the longest noun (11) and one more for its closing `\b`.
+    for (const noun of rest.slice(0, 52).matchAll(SECRET_NOUN)) {
+      if (noun.index > 40) break;
+      const nounEnd = noun.index + noun[0].length;
+      if (verbIsName && nameInCode(rest, noun.index, nounEnd)) continue;
+      return text.slice(verb.index, end + nounEnd);
+    }
+  }
+  return null;
+}
+
 const RULES: Rule[] = [
   {
     // Gaps use [\s\S] (not [^.\n]): findInjection runs rules over the
@@ -296,8 +329,9 @@ const RULES: Rule[] = [
   {
     // "high": an imperative pairing an exfil verb with a secret noun in one span is
     // a canonical data-theft injection — it must QUARANTINE (db.ts) and FLAG on
-    // recall (sanitizeForPrompt), not merely inform.
-    re: /\b(exfiltrat\w*|send|leak|upload|post|email)\b[\s\S]{0,40}\b(secret|token|password|api[_-]?key|credential|\.env|ssh key|private key)\b/i,
+    // recall (sanitizeForPrompt), not merely inform. A form schema is not one:
+    // `email: z.string().email(),` above `password: …` names two fields (exfilImperative).
+    re: exfilImperative,
     label: "exfil-imperative",
     confidence: "high",
   },
