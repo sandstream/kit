@@ -11,6 +11,13 @@ The scanner selects `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, an
 It also selects `.cursorrules`, `.windsurfrules`, `copilot-instructions.md`, and `.cursor/rules/*.mdc`.
 An explicit file target is read regardless of its name.
 
+Beside each `SKILL.md` it also reads the `.md` files the skill links (`[x](PHASE2.md)`) or names
+(`references/format.md`), and every `.md` file directly in the skill's `references/` directory,
+because an agent following the skill reads them as instructions too. One hop only: a file those
+files name is not followed. A name must stay inside the skill directory after symlinks are
+resolved, and a symlinked companion is not read. At most 20 per skill; the rest are listed in
+`coverageGaps` as a file limit. `companions` lists the files read this way.
+
 The scanner skips `node_modules`, `dist`, `build`, `vendor`, `target`, and `coverage` directories.
 It enters these dot-directories: `.claude`, `.cursor`, `.github`, `.codex`, and `.gemini`.
 Other dot-directories and directory symlinks are outside the discovery scope.
@@ -33,13 +40,13 @@ A missing target emits a diagnostic and fails.
 
 The fixed limits are:
 
-| Resource | Limit |
-| --- | --- |
-| Directory depth | 8 below the target |
-| Directory entries | 20,000 across the traversal |
-| Selected instruction files | 500 |
-| Bytes per file | 1,000,000 |
-| Reported findings | 1,000 |
+| Resource                   | Limit                       |
+| -------------------------- | --------------------------- |
+| Directory depth            | 8 below the target          |
+| Directory entries          | 20,000 across the traversal |
+| Selected instruction files | 500                         |
+| Bytes per file             | 1,000,000                   |
+| Reported findings          | 1,000                       |
 
 An input exactly at a limit can pass if no data remains unexamined.
 If discovery or analysis stops, the result remains incomplete. Narrow the target and run the scan again.
