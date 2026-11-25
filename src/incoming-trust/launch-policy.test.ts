@@ -23,6 +23,7 @@ it("refuses policy fields and entry paths that the delegate cannot enforce", () 
     { credentials: ["secret"] },
     { network: ["remote.invalid"] },
     { children: true },
+    { requiredCheck: "unknown" },
   ]) {
     assert.deepEqual(prepareLaunchPolicy({ ...baseline, ...change }), {
       ok: false,

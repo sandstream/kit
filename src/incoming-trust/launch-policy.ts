@@ -24,6 +24,7 @@ interface IncomingLaunchPolicy {
   outputDirectory: string;
   timeoutMs: number;
   npmArtifacts?: ExpectedNpmArtifact[];
+  requiredCheck?: "dockerfile-secrets";
 }
 
 function validOutputDirectory(path: unknown): path is string {
@@ -39,10 +40,12 @@ function validOutputDirectory(path: unknown): path is string {
 function launchPolicy(value: unknown): value is IncomingLaunchPolicy {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const policy = value as Partial<IncomingLaunchPolicy>;
-  const keys = Object.keys(value).sort().join(",");
+  const requiredKeys = Object.keys(value)
+    .filter((key) => key !== "npmArtifacts" && key !== "requiredCheck")
+    .sort()
+    .join(",");
   return (
-    (keys === "entry,outputDirectory,schema,timeoutMs" ||
-      keys === "entry,npmArtifacts,outputDirectory,schema,timeoutMs") &&
+    requiredKeys === "entry,outputDirectory,schema,timeoutMs" &&
     policy.schema === 1 &&
     typeof policy.entry === "string" &&
     relativePath(policy.entry) &&
@@ -51,7 +54,8 @@ function launchPolicy(value: unknown): value is IncomingLaunchPolicy {
     typeof policy.timeoutMs === "number" &&
     Number.isSafeInteger(policy.timeoutMs) &&
     policy.timeoutMs >= 1000 &&
-    policy.timeoutMs <= 30_000
+    policy.timeoutMs <= 30_000 &&
+    (!Object.hasOwn(policy, "requiredCheck") || policy.requiredCheck === "dockerfile-secrets")
   );
 }
 
@@ -118,6 +122,7 @@ export function prepareLaunchPolicy(value: unknown): PreparedLaunchPolicy | Refu
       policy.outputDirectory,
       policy.timeoutMs,
       policy.npmArtifacts,
+      ...(policy.requiredCheck ? [policy.requiredCheck] : []),
     ];
     return {
       ok: true,

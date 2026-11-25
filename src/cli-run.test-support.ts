@@ -28,9 +28,17 @@ export function outsideAgentSession(env: NodeJS.ProcessEnv = process.env): NodeJ
   return out;
 }
 
-/**
- * Run the kit CLI in a given directory, capturing output and exit code.
- */
+export function cliFixtureEnv(): NodeJS.ProcessEnv {
+  return {
+    ...outsideAgentSession(),
+    // Windows CLI fixtures use no host Docker inventory unless a test opts in.
+    ...(process.platform === "win32"
+      ? { DOCKER_HOST: `npipe:////./pipe/kit-cli-fixture-${process.pid}`, DOCKER_CONTEXT: "" }
+      : {}),
+  };
+}
+
+/** Run the kit CLI in a given directory, capturing output and exit code. */
 export async function runCli(
   args: string[],
   cwd: string,
@@ -45,7 +53,7 @@ export async function runCli(
     const { stdout, stderr } = await exec(process.execPath, [CLI_PATH, ...args], {
       cwd,
       env: {
-        ...outsideAgentSession(),
+        ...cliFixtureEnv(),
         // Disable governance to avoid budget state side-effects
         KIT_CLAUDE_SETTINGS: join(agentStateDir, "claude-settings.json"),
         KIT_CODEX_HOOKS: join(agentStateDir, "codex-hooks.json"),

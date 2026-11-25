@@ -104,9 +104,22 @@ for (const [step, fixtureSource] of [
   ["detach-image", 'replace(cp, "execFileSync", (command) => command === "/usr/bin/hdiutil");'],
   ["inspect-mount", 'replace(fs, "lstatSync", (path) => path === workspace + "/mounted");'],
   ["remove-workspace", 'replace(fs, "rmSync", (path) => path === workspace);'],
+  [
+    "retry-mount",
+    `const inspect = fs.lstatSync;
+let mounted = true;
+fs.lstatSync = (path, ...args) => {
+  if (path !== workspace + "/mounted" || !mounted) return inspect(path, ...args);
+  mounted = false;
+  return { dev: -1n };
+};`,
+  ],
 ]) {
+  const retry = step === "retry-mount";
   it(
-    `reports ${step} without forwarding the internal error`,
+    retry
+      ? "retries cleanup while the mount is still present"
+      : `reports ${step} without forwarding the internal error`,
     {
       skip: process.platform === "win32",
       timeout: 10_000,
@@ -143,6 +156,11 @@ syncBuiltinESMExports();
           ownerHost(root, preload),
         );
         owner.awaitReady();
+        if (retry) {
+          owner.release();
+          assert.equal(existsSync(workspace), false);
+          return;
+        }
         assert.throws(() => owner.release(), {
           message: `Disk image cleanup failed (${step})`,
           cleanupStep: step,

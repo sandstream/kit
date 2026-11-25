@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { SecurityCheckResult } from "../check-security.js";
 import { sameIdentity } from "../utils/same-file.js";
 import { privateDirIsControlled } from "../utils/secure-perms.js";
 import { runtimeProfile, RUN_ENV, SEATBELT } from "./launch-profile.js";
@@ -19,10 +20,17 @@ export type IncomingRun = (
       runId: string;
       inputDigest: string;
       code: number | null;
-      outcome: "exited" | "timed-out" | "interrupted" | "output-limit" | "boundary-failed";
+      outcome:
+        | "exited"
+        | "timed-out"
+        | "interrupted"
+        | "output-limit"
+        | "boundary-failed"
+        | "check-failed";
       boundaryReason?: string;
       stdout: string;
       stderr: string;
+      requiredCheck?: SecurityCheckResult;
     }
 ) & { cleanupStep?: ImageCleanupStep };
 

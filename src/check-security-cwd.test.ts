@@ -41,6 +41,7 @@ import {
   writeNpmAuditCwdFixture,
 } from "./check-security-cwd-fixture.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { cliFixtureEnv } from "./cli-run.test-support.js";
 
 /** A project whose .gitignore covers every .env spelling the check looks for. */
 function projectWithGitignore(): string {
@@ -130,7 +131,7 @@ function ignoreVerdictFrom(caller: string, governed: string): string {
        process.stdout.write(checks.find((check) => check.name === ".env gitignored")?.status ?? "absent");`,
       governed,
     ],
-    { cwd: caller, encoding: "utf8", timeout: 120_000 },
+    { cwd: caller, encoding: "utf8", env: cliFixtureEnv(), timeout: 120_000 },
   );
 }
 

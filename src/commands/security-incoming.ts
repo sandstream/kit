@@ -238,9 +238,13 @@ function run(inv: Invocation): boolean {
     policy: readJsonFile(flagValue(inv.argv, "--policy"), "--policy"),
   });
   if (inv.json) console.log(JSON.stringify(result));
-  else if (result.ran)
+  else if (result.ran) {
     console.log(`Run ${result.runId} ${result.outcome} (exit ${result.code ?? "none"}).`);
-  else if (result.ran === null)
+    if (result.requiredCheck) {
+      const { name, status, detail } = result.requiredCheck;
+      console.log(`${name} ${status}: ${detail}`);
+    }
+  } else if (result.ran === null)
     console.error(`Incoming trust run status unavailable: ${result.reason}`);
   else console.error(`Incoming trust run refused: ${result.reason}`);
   if (!inv.json && result.cleanupStep)

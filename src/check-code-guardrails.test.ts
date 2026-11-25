@@ -90,6 +90,29 @@ it("detects the legacy Dockerfile ENV form", async (t) => {
   assert.doesNotMatch(result?.detail ?? "", /my-password/);
 });
 
+it("blocks when the required Dockerfile inspector is missing or returns no report", async (t) => {
+  const f = fixture(t);
+  for (const inspector of [null, async () => null]) {
+    const rows = await checkCodeGuardrails(f.root, inspector);
+    const docker = rows.find((row) => row.name === "literal Dockerfile secret");
+    assert.equal(docker?.status, "fail");
+    assert.equal(docker?.didNotRun, true);
+    assert.equal(rows.find((row) => row.name === "public cloud command")?.status, "pass");
+  }
+});
+
+it("passes the governed root to the Dockerfile inspector and derives the finding in Kit", async (t) => {
+  const f = fixture(t);
+  const rows = await checkCodeGuardrails(f.root, async (root) => {
+    assert.equal(root, f.root);
+    return { hits: [{ file: "Dockerfile", line: 2, indicator: "API_TOKEN" }], errors: [] };
+  });
+  const docker = rows.find((row) => row.name === "literal Dockerfile secret");
+  assert.equal(docker?.status, "fail");
+  assert.deepEqual(docker?.files, ["Dockerfile"]);
+  assert.match(docker?.detail ?? "", /Dockerfile:2 \(API_TOKEN\)/);
+});
+
 it("detects a commented-out security guard but accepts active code", async (t) => {
   const f = fixture(t);
   f.put(

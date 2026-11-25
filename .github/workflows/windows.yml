@@ -80,9 +80,9 @@ jobs:
         shell: bash
         env:
           KIT_TEST_SHARD: ${{ matrix.shard }}/4
-          # Four files at once on the 4-core runner; the heavy memory/PAL files take up to ~170 s
-          # alone, so the per-file timeout is raised to keep slow from reading as hung.
-          KIT_TEST_CONCURRENCY: "4"
+          # Test files also start Node, PowerShell and scanner subprocesses. Leave
+          # capacity for those processes on the four-core runner.
+          KIT_TEST_CONCURRENCY: "2"
           KIT_TEST_TIMEOUT_MS: "600000"
         run: |
           set -o pipefail

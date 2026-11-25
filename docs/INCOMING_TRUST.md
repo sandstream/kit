@@ -95,4 +95,24 @@ If an image owner reports a cleanup failure, the command names the failed step.
 JSON output uses the optional `cleanupStep` field.
 An unavailable supervisor report yields `ran: null` and a nonzero exit.
 
+### Required Dockerfile inspection
+
+Set `requiredCheck` to `"dockerfile-secrets"` in the launch policy before
+generating its digest. The external signer approves this purpose, the entry,
+and the retained candidate. Include the Dockerfiles to inspect in the retained
+project. Kit evaluates the approved snapshot for this run. The standard
+`kit check` and `kit ci` commands use the current bundled inspectors.
+
+The approved entry must be a regular file. It writes one JSON object to
+stdout with `schema: "kit.dockerfile-inspection/v1"`, `scanned`, and `hits`.
+Return every eligible Dockerfile path once in `scanned`. Each `hits` record
+has a `file`, a positive `line` number, and an `indicator` with the environment
+variable name. Report findings without including their values. Kit checks
+the paths against the sealed snapshot and derives the verdict. The JSON
+receipt includes `requiredCheck`. Kit clears the raw worker output in this mode.
+
+Missing or incompatible evidence, a finding, a worker error, a timeout, or a
+failed run check returns a nonzero exit. The native delegate requirements above
+also apply to this mode.
+
 Design and limits: [src/incoming-trust/README.md](../src/incoming-trust/README.md).

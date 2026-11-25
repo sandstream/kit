@@ -14,7 +14,7 @@ export async function launchFixture(
   timeoutMs = 5000,
   populate?: (repository: string) => void,
   capture?: (source: string, destination: string) => Promise<IncomingCandidateFlow>,
-  npmArtifacts?: ExpectedNpmArtifact[],
+  inspection?: { npmArtifacts?: ExpectedNpmArtifact[]; requiredCheck?: "dockerfile-secrets" },
 ) {
   const fixture = storeFixture();
   try {
@@ -47,7 +47,7 @@ export async function launchFixture(
       entry: "main.mjs",
       outputDirectory: join(root, "results"),
       timeoutMs,
-      ...(npmArtifacts ? { npmArtifacts } : {}),
+      ...inspection,
     };
     const prepared = prepareLaunchPolicy(policy);
     if (!prepared.ok) assert.fail(prepared.reason);
