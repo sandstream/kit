@@ -31,6 +31,7 @@ import {
   emitGitlabJunit,
   autoInstallScanners,
   maybeEmitCheckAttestation,
+  ciTextRow,
 } from "../cli-checks-shared.js";
 
 /** Icon per check status. `skip` is its own state — it is neither a pass nor a failure (#517). */
@@ -268,11 +269,11 @@ export async function cmdCi(): Promise<boolean> {
         const warnings = checks.filter((c) => c.status === "warn");
         if (failures.length > 0) {
           console.log(`FAILURES:`);
-          failures.forEach((f) => console.log(`  ✗ [${f.category}] ${f.name}: ${f.detail}`));
+          failures.forEach((f) => console.log(ciTextRow("✗", f)));
         }
         if (warnings.length > 0) {
           console.log(`WARNINGS:`);
-          warnings.forEach((w) => console.log(`  ! [${w.category}] ${w.name}: ${w.detail}`));
+          warnings.forEach((w) => console.log(ciTextRow("!", w)));
         }
         console.log(
           `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
