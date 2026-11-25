@@ -202,16 +202,25 @@ def _report_mcp_servers(rep, plugin_dir, manifest):
             rep.warn(f"{source}: MCP server {name!r} runs `{command}` from PATH on every session -- the plugin does not ship it; triage how that program is installed")
 
 
-def triage_local_plugin(rep, secrets_in):
-    """Triage a local Claude Code plugin directory (one with .claude-plugin/plugin.json)."""
-    plugin_dir = rep.target
-    manifest = _load_json(rep, os.path.join(plugin_dir, ".claude-plugin", "plugin.json"), "plugin.json")
+def _plugin_manifest(rep, plugin_dir, manifest):
+    """The plugin's manifest: the one given (a `strict: false` marketplace entry) or plugin.json."""
+    if manifest is None:
+        manifest = _load_json(rep, os.path.join(plugin_dir, ".claude-plugin", "plugin.json"), "plugin.json")
     if isinstance(manifest, dict):
         rep.fact(f"plugin {manifest.get('name', '?')} {manifest.get('version', '')}".rstrip())
+    return manifest
+
+
+def triage_local_plugin(rep, secrets_in, manifest=None, roots=None):
+    """Triage a local Claude Code plugin directory (one with .claude-plugin/plugin.json). A
+    marketplace entry with `strict: false` is its own manifest (`manifest`), and when it lists its
+    `skills` only those folders are walked (`roots`), not the whole marketplace."""
+    plugin_dir = rep.target
+    manifest = _plugin_manifest(rep, plugin_dir, manifest)
     _report_hooks(rep, plugin_dir, manifest or {})
     _report_mcp_servers(rep, plugin_dir, manifest or {})
     read, unread, skills = 0, [], 0
-    for full in _walk(plugin_dir):
+    for full in (f for r in (roots or [plugin_dir]) for f in _walk(r)):
         rel = os.path.relpath(full, plugin_dir).replace(os.sep, "/")
         try:
             if os.path.islink(full) or os.path.getsize(full) > FILE_LIMIT:
@@ -253,22 +262,54 @@ class _InPlugin:
 MARKETPLACE_LIMIT = 100
 
 
+def _inside(base, full):
+    return full == base or full.startswith(base + os.sep)
+
+
+def _entry_skill_roots(rep, base, full, entry):
+    """The skill folders a `strict: false` entry lists, each kept inside the marketplace."""
+    roots = []
+    for rel in entry.get("skills") or []:
+        path = os.path.realpath(os.path.join(full, str(rel)))
+        if _inside(base, path) and os.path.isdir(path):
+            roots.append(path)
+        else:
+            rep.warn(f"plugin {entry.get('name', '?')!r}: skill {rel} is missing or outside the marketplace -- not read")
+    return roots
+
+
 def _marketplace_plugin(rep, base, entry, secrets_in):
-    """Triage one marketplace entry when its source is a folder inside the marketplace."""
+    """Triage one marketplace entry whose source is a folder in the marketplace (`./` included)."""
     name = str(entry.get("name", "?"))
-    source = entry.get("source")
-    if not isinstance(source, str):
-        rep.warn(f"plugin {name!r}: source is not a local folder ({json.dumps(source)[:80]}) -- triage it on its own")
+    full = os.path.realpath(os.path.join(base, entry["source"]))
+    if not _inside(base, full):
+        rep.critical(f"plugin {name!r}: source {entry['source']} lies outside the marketplace -- not read")
         return False
-    full = os.path.realpath(os.path.join(base, source))
-    if not full.startswith(base + os.sep):
-        rep.critical(f"plugin {name!r}: source {source} lies outside the marketplace -- not read")
-        return False
-    if not os.path.isfile(os.path.join(full, ".claude-plugin", "plugin.json")):
-        rep.warn(f"plugin {name!r}: {source} has no .claude-plugin/plugin.json -- not triaged")
-        return False
-    triage_local_plugin(_InPlugin(rep, full, f"{name}: "), secrets_in)
-    return True
+    view = _InPlugin(rep, full, f"{name}: ")
+    if os.path.isfile(os.path.join(full, ".claude-plugin", "plugin.json")):
+        triage_local_plugin(view, secrets_in)
+        return True
+    if entry.get("strict") is False:
+        roots = _entry_skill_roots(rep, base, full, entry) if entry.get("skills") else None
+        triage_local_plugin(view, secrets_in, manifest=entry, roots=roots)
+        return True
+    rep.warn(f"plugin {name!r}: {entry['source']} has no .claude-plugin/plugin.json and is not strict: false -- not triaged")
+    return False
+
+
+def _remote_summary(rep, remote):
+    """One line for the entries kit does not fetch, by kind; a `command` source runs at install."""
+    kinds = {}
+    for entry in remote:
+        src = entry.get("source")
+        kind = str(src.get("source", "?")) if isinstance(src, dict) else type(src).__name__
+        kinds.setdefault(kind, []).append(str(entry.get("name", "?")))
+    for kind, names in sorted(kinds.items()):
+        more = f" and {len(names) - 5} more" if len(names) > 5 else ""
+        if kind == "command":
+            rep.warn(f"{len(names)} plugin(s) are installed by running a command, not from a folder: {', '.join(names[:5])}{more} -- read that command before installing")
+        else:
+            rep.fact(f"{len(names)} plugin(s) come from a {kind} source kit does not fetch: {', '.join(names[:5])}{more} -- triage them on their own")
 
 
 def triage_local_marketplace(rep, secrets_in):
@@ -283,7 +324,10 @@ def triage_local_marketplace(rep, secrets_in):
             rep.critical("marketplace.json lists no plugins")
         return
     entries = [p for p in plugins if isinstance(p, dict)]
-    done = sum(_marketplace_plugin(rep, base, e, secrets_in) for e in entries[:MARKETPLACE_LIMIT])
-    if len(entries) > MARKETPLACE_LIMIT:
-        rep.warn(f"only the first {MARKETPLACE_LIMIT} of {len(entries)} plugins were triaged")
-    rep.fact(f"marketplace {data.get('name', '?')}: triaged {done} of {len(entries)} plugin(s)")
+    local = [e for e in entries if isinstance(e.get("source"), str)]
+    remote = [e for e in entries if not isinstance(e.get("source"), str)]
+    done = sum(_marketplace_plugin(rep, base, e, secrets_in) for e in local[:MARKETPLACE_LIMIT])
+    if len(local) > MARKETPLACE_LIMIT:
+        rep.warn(f"only the first {MARKETPLACE_LIMIT} of {len(local)} local plugins were triaged")
+    _remote_summary(rep, remote)
+    rep.fact(f"marketplace {data.get('name', '?')}: triaged {done} of {len(local)} local plugin(s); {len(remote)} from other sources")
