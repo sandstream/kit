@@ -1,0 +1,21 @@
+openai-codex-security-skill-cases
+Copyright 2025 OpenAI
+
+This directory redistributes test inputs from the openai/codex-security repository,
+licensed under the Apache License, Version 2.0 (see LICENSE in this directory).
+
+Source repository: https://github.com/openai/codex-security
+Source commit:     256cddf5eb503a8e34b991c86265ec85776a9b07 (2026-11-24)
+Source paths:
+  evals/check-skills/fixtures/**  -> cases.json (each file's path, the sha256 of its
+                                     upstream bytes and its full text, unchanged)
+  evals/check-skills/README.md    -> claude-code-cases.json (the three "Additional Claude
+                                     Code cases": the skill text of its setup script,
+                                     transcribed into JSON; the text itself is unchanged)
+                                  -> README.md (the expected decisions, quoted)
+
+Changes made by kit: the upstream files were packed into cases.json and the setup
+script's skill text was transcribed into claude-code-cases.json, so that no scanner of kit's
+own tree and no agent harness reads them as kit's skills or code; README.md and NOTICE were
+added. The kit test src/triage-labelled-skill-corpus.test.ts writes each case back out, checks
+its sha256 against upstream's, and triages it. No upstream product code is included.
