@@ -153,12 +153,10 @@ def _read_hooks_and_scripts(rep, root, rest):
     plugin = _plugin_scan()
     left, entries, scripts = [], 0, 0
     for rel in rest:
-        is_json = rel.endswith(".json")
-        text = _read_text(os.path.join(root, *rel.split("/"))) if is_json or rel.endswith(_HOOK_SCRIPTS) else None
-        hooks = _hook_entries(text) if is_json and text is not None else []
-        if is_json and not hooks and _is_settings_object(rel, text):
+        is_json, text, hooks, state = _classify_rest_file(root, rel)
+        if state == "read":
             continue  # a Claude Code settings file with no hooks: read, nothing to judge
-        if text is None or (is_json and not hooks):
+        if state == "unread":
             left.append(rel)
             continue
         _secrets_in(rep, rel, text)
@@ -173,6 +171,20 @@ def _read_hooks_and_scripts(rep, root, rest):
     if entries or scripts:
         rep.fact(f"read {entries} hook entr{'y' if entries == 1 else 'ies'} and {scripts} script(s) outside the skill directories")
     return left
+
+
+def _classify_rest_file(root, rel):
+    """Read one file outside the skill directories: (is_json, text, hooks, state), where state
+    is "read" (a settings file with no hooks), "unread" (unreadable, or JSON in no hook shape)
+    or "judge"."""
+    is_json = rel.endswith(".json")
+    text = _read_text(os.path.join(root, *rel.split("/"))) if is_json or rel.endswith(_HOOK_SCRIPTS) else None
+    hooks = _hook_entries(text) if is_json and text is not None else []
+    if is_json and not hooks and _is_settings_object(rel, text):
+        return is_json, text, hooks, "read"
+    if text is None or (is_json and not hooks):
+        return is_json, text, hooks, "unread"
+    return is_json, text, hooks, "judge"
 
 
 def _is_settings_object(rel, text):
