@@ -7,8 +7,9 @@ The scan uses pattern rules. A complete scan without findings does not prove tha
 
 ## Scope
 
-The scanner selects `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, and `SKILL.md`.
+The scanner selects `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` (Codex), `GEMINI.md`, and `SKILL.md`.
 It also selects `.cursorrules`, `.windsurfrules`, `copilot-instructions.md`, and `.cursor/rules/*.mdc`.
+It selects every `.md` under `.claude/rules/`, `.claude/commands/`, and `.claude/agents/` (Claude Code).
 An explicit file target is read regardless of its name.
 
 Beside each `SKILL.md` it also reads the `.md` files the skill links (`[x](PHASE2.md)`) or names
@@ -19,7 +20,7 @@ resolved, and a symlinked companion is not read. At most 20 per skill; the rest 
 `coverageGaps` as a file limit. `companions` lists the files read this way.
 
 The scanner skips `node_modules`, `dist`, `build`, `vendor`, `target`, and `coverage` directories.
-It enters these dot-directories: `.claude`, `.cursor`, `.github`, `.codex`, and `.gemini`.
+It enters these dot-directories: `.claude`, `.cursor`, `.github`, `.codex`, `.gemini`, and `.agents`.
 Other dot-directories and directory symlinks are outside the discovery scope.
 README files are not selected during directory discovery.
 
