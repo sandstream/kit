@@ -10,6 +10,7 @@ import { hasFlag, envTruthy } from "./utils/flags.js";
 import { escapeWorkflowCmd, xmlEscape } from "./utils/ci-escape.js";
 import type { AlpineSourceEvidence } from "./check-apk-sources.js";
 import type { ScannerEvidenceStatus } from "./check-scanner-evidence.js";
+import type { RuleRef } from "./rules/catalog.js";
 import type { kitConfig } from "./config.js";
 
 const __dirname = join(fileURLToPath(import.meta.url), "..");
@@ -78,6 +79,10 @@ export interface JsonCheck {
   /** Evidence state of a scanner-backed row, when the check reports one. */
   evidenceStatus?: ScannerEvidenceStatus;
   evidenceSources?: AlpineSourceEvidence[];
+  /** The CWE/OWASP citation the text output shows as `[CWE-798]`, when the check maps one. */
+  rule?: RuleRef;
+  /** Installation or remediation instructions, as the text output prints them. */
+  suggestion?: string;
 }
 
 /** The full `--json` document for check / ci. */
@@ -108,6 +113,20 @@ export function detectCiFormat(): CiFormat {
   if (process.env.GITLAB_CI === "true") return "gitlab";
   if (process.env.CI === "true") return "text";
   return "text";
+}
+
+/**
+ * One `kit ci --format text` row, with the files it names (first five) on the lines below — the
+ * same list `kit check` prints, so a secrets warning says WHICH files instead of only how many.
+ */
+export function ciTextRow(mark: string, ch: JsonCheck): string {
+  const files = ch.files ?? [];
+  const more = files.length > 5 ? [`    ... and ${files.length - 5} more file(s)`] : [];
+  return [
+    `  ${mark} [${ch.category}] ${ch.name}: ${ch.detail}`,
+    ...files.slice(0, 5).map((f) => `    • ${f}`),
+    ...more,
+  ].join("\n");
 }
 
 /** Emit GitHub Actions `::error::` / `::warning::` annotations for failing/warning checks. */
