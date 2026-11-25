@@ -131,6 +131,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--pin",
     "--self",
     "--strict",
+    "--verify-vercel-token",
   ],
   ci: [
     "--attest",

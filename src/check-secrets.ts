@@ -22,15 +22,22 @@ export interface SecretStatus {
 
 async function checkEnvSecret(
   name: string,
-): Promise<{ available: boolean; detail: string; unverified?: boolean }> {
-  if (process.env[name]) {
+  options: { verifyVercelToken?: boolean; offline?: boolean },
+): Promise<Omit<SecretStatus, "name" | "source">> {
+  const value = process.env[name];
+  if (value) {
+    if (name === "VERCEL_TOKEN" && options.verifyVercelToken) {
+      const { verifyVercelToken } = await import("./secret-vercel-probe.js");
+      return verifyVercelToken(value, options.offline === true);
+    }
     return { available: true, detail: "Set in environment" };
   }
-  if (process.env[name] === "") {
+  if (value === "") {
     return {
       available: false,
       detail: "Set but empty in environment (a Sensitive platform variable gives no value locally)",
       unverified: true,
+      state: "unreadable",
     };
   }
   return { available: false, detail: "Not set in environment" };
@@ -42,7 +49,7 @@ function secretState(result: {
   unverified?: boolean;
 }): SecretStatus["state"] {
   if (result.available) return undefined;
-  return result.unverified && /empty/i.test(result.detail) ? "unreadable" : "missing";
+  return result.unverified ? undefined : "missing";
 }
 
 interface OnePasswordCache {
@@ -357,6 +364,7 @@ async function checkAzureSecret(
 export async function checkSecrets(
   secrets: SecretsConfig,
   cwd = process.cwd(),
+  options: { verifyVercelToken?: boolean; offline?: boolean } = {},
 ): Promise<{ templateExists: boolean | null; keys: SecretStatus[] }> {
   let templateExists: boolean | null = null;
   if (secrets.template) {
@@ -376,11 +384,11 @@ export async function checkSecrets(
 
   if (secrets.keys) {
     for (const [name, config] of Object.entries(secrets.keys)) {
-      let result: { available: boolean; detail: string; unverified?: boolean };
+      let result: Omit<SecretStatus, "name" | "source">;
 
       switch (config.source) {
         case "env":
-          result = await checkEnvSecret(name);
+          result = await checkEnvSecret(name, options);
           break;
         case "1password":
           result = config.ref
@@ -434,7 +442,7 @@ export async function checkSecrets(
         available: result.available,
         detail: result.detail,
         unverified: result.unverified,
-        state: secretState(result),
+        state: result.state ?? secretState(result),
       });
     }
   }

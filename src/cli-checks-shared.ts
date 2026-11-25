@@ -62,6 +62,7 @@ export interface JsonCheck {
   status: "pass" | "fail" | "warn" | "skip";
   detail: string;
   category: string;
+  secretState?: "missing" | "unreadable" | "invalid";
   files?: string[];
   severity?: "critical" | "high" | "medium" | "low";
   /**

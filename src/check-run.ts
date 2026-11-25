@@ -16,6 +16,7 @@ import { KIT_FILE } from "./cli-shared.js";
 import { checkTools, type ToolStatus } from "./check-tools.js";
 import { checkServices, type ServiceStatus } from "./check-services.js";
 import { checkSecrets, type SecretStatus } from "./check-secrets.js";
+import { resolveAirGap } from "./airgap/config.js";
 import { checkSkills, type SkillCheckResult } from "./check-skills.js";
 import {
   checkHooks,
@@ -124,6 +125,7 @@ export interface RunCheckOptions {
   config?: kitConfig;
   /** Fetch release data for the runtime rows instead of reading the cache only (`--online`). */
   online?: boolean;
+  verifyVercelToken?: boolean;
   /** Fail (not warn) on untested files — the CLI's --enforce-tests. */
   enforceTests?: boolean;
   /** Security gate posture (lenient / fail-on-warning) for the verdict. */
@@ -206,7 +208,12 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       : [];
   const secrets =
     wants("secrets") && config.secrets
-      ? await step("secrets", () => checkSecrets(config.secrets!, cwd))
+      ? await step("secrets", () =>
+          checkSecrets(config.secrets!, cwd, {
+            verifyVercelToken: opts.verifyVercelToken,
+            offline: resolveAirGap(config.air_gap).enabled,
+          }),
+        )
       : { templateExists: null, keys: [] };
   const skills =
     wants("skills") && config.skills ? await step("skills", () => checkSkills(config.skills!)) : [];
@@ -333,6 +340,8 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
       status: (s.unverified ? "warn" : s.available ? "pass" : "fail") as JsonCheck["status"],
       detail: s.detail ?? (s.available ? "available" : "missing"),
       category: "secrets",
+      ...(s.state && { secretState: s.state }),
+      ...(s.unverified && { didNotRun: true }),
     })),
     ...r.skills.map((s) => ({
       name: s.name,

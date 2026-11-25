@@ -297,6 +297,15 @@ The scan excludes `__tests__`, `__mocks__`, and `fixtures` directories by defaul
 It also excludes `.test` and `.spec` JavaScript or TypeScript files and their source maps.
 Add `--include-tests` to scan them. Directories named `test` or `tests` are still scanned.
 
+### Verify a Vercel token
+
+Run `kit check --category secrets --verify-vercel-token` when `VERCEL_TOKEN` is declared
+with `source = "env"`. Kit sends the token only to [Vercel's user endpoint](https://vercel.com/docs/rest-api/user/get-the-user).
+It follows no redirect and prints neither the token nor the response body.
+The JSON check uses `secretState` for a missing, unreadable, or rejected token.
+Air-gap mode and network errors report an unverified check. With no verification flag,
+the ordinary check reports whether the environment value is present.
+
 ### Code guardrails in the security check
 
 `kit check --category security` scans shell scripts, GitHub workflow commands, Dockerfiles, and source files.

@@ -60,6 +60,7 @@ import { hitlBlocksFromCheckResults } from "../hitl.js";
 // `kit check --attest` (README "Opt-in signed receipt of which scanners ran + the verdict") exited
 // 1 with "unknown flag" and the check never ran. A false green's mirror image: a gate that refuses
 // to run at all. Anything added here must be verified against the literal the CALLEE reads.
+const VERCEL_VERIFY_FLAG = "--verify-vercel-token";
 export const CHECK_FLAGS = [
   "--json",
   "--strict",
@@ -68,6 +69,7 @@ export const CHECK_FLAGS = [
   "--fail-on-worse",
   "--enforce-tests",
   "--online", // check-run.ts: fetch release data for the runtime rows
+  VERCEL_VERIFY_FLAG,
   "--category",
   "--pin",
   "--key",
@@ -98,6 +100,7 @@ type Counted = { passed: number; failed: number; warnings: number; skipped: numb
 /** What the flags ask for: the dimensions to run and how strict the verdict is. */
 interface RunOptions {
   categories: ReturnType<typeof parseCategoryFlag>["categories"];
+  verifyVercelToken: boolean;
   lenient: boolean;
   failOnWarning: boolean;
 }
@@ -134,6 +137,10 @@ async function routeSubcommand(): Promise<boolean | undefined> {
 /** Reads the flags of the default check. Returns undefined after it has printed a refusal. */
 function parseRunOptions(): RunOptions | undefined {
   if (rejectUnknownFlags("kit check", CHECK_FLAGS)) return undefined;
+  if (process.argv.some((arg) => arg.startsWith(`${VERCEL_VERIFY_FLAG}=`))) {
+    console.error(`${VERCEL_VERIFY_FLAG} does not accept a value.`);
+    return undefined;
+  }
 
   // --category narrows which dimensions run. An unrecognised value is an error, not
   // a silent full run — the previous behaviour, which made the flag a no-op wherever
@@ -153,6 +160,7 @@ function parseRunOptions(): RunOptions | undefined {
   // warnings unless --fail-on-warning / --strict / KIT_CI_STRICT.
   return {
     categories: parsed.categories,
+    verifyVercelToken: hasFlag(process.argv, VERCEL_VERIFY_FLAG),
     lenient: hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT),
     failOnWarning:
       hasFlag(process.argv, "--fail-on-warning") ||
@@ -168,6 +176,16 @@ export async function cmdCheck(): Promise<boolean> {
   const options = parseRunOptions();
   if (!options) return false;
   const config = await loadConfig(resolveConfigPath());
+  if (
+    options.verifyVercelToken &&
+    ((options.categories && !options.categories.includes("secrets")) ||
+      config.secrets?.keys?.VERCEL_TOKEN?.source !== "env")
+  ) {
+    console.error(
+      '--verify-vercel-token requires the secrets category and VERCEL_TOKEN with source = "env".',
+    );
+    return false;
+  }
 
   return await withGovernance(
     config,
@@ -198,6 +216,7 @@ async function runCheckAction(
     config,
     enforceTests: hasFlag(process.argv, "--enforce-tests"),
     online: hasFlag(process.argv, "--online"),
+    verifyVercelToken: options.verifyVercelToken,
     categories: options.categories,
     gate: { lenient: options.lenient, failOnWarning: options.failOnWarning },
     step,
