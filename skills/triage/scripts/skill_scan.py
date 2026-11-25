@@ -71,6 +71,10 @@ def triage_local_skill(rep):
     if os.path.isfile(os.path.join(target, ".claude-plugin", "plugin.json")):
         _plugin_scan().triage_local_plugin(rep, _secrets_in)
         return True
+    # A plugin marketplace is triaged plugin by plugin: it holds plugins, not skills.
+    if os.path.isfile(os.path.join(target, ".claude-plugin", "marketplace.json")):
+        _plugin_scan().triage_local_marketplace(rep, _secrets_in)
+        return True
     path = next((p for p in (target, os.path.join(target, "SKILL.md")) if os.path.isfile(p)), None)
     if path:
         _triage_skill_file(rep, path, path != target, "")
