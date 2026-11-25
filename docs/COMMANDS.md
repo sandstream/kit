@@ -153,7 +153,7 @@ port = 3107
 
 ### Declarative Standards Plugins
 
-`.kit/standards.d/*.toml` plugins default to forbid-mode: a `match` regex hit is a finding. Directory excludes are subtree globs, so `exclude = ["scripts/"]` excludes `scripts/x.ts`; kit warns when an exclude pattern matches zero source files.
+`.kit/standards.d/*.toml` plugins default to forbid-mode: a `match` regex hit is a finding. `match` is tested one line at a time, so a construct split across lines (`class OrderPlacedEvent` on one line, `: EventBase` on the next) is not found; a rule that spans lines needs a `*.mjs` plugin. Directory excludes are subtree globs, so `exclude = ["scripts/"]` excludes `scripts/x.ts`; kit warns when an exclude pattern matches zero source files.
 
 ```toml
 [standard]
