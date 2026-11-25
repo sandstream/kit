@@ -5,6 +5,7 @@ import { c } from "./utils/colors.js";
 import { exec } from "./utils/exec.js";
 import { applyAllow, parseScanAllow, type AllowEntry } from "./scan-allow.js";
 import type { StagedHit } from "./scan-staged.js";
+import { sanitizeDisplayText } from "./display-text.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -64,8 +65,9 @@ function report(
   stale: ReturnType<typeof applyAllow>["stale"],
 ) {
   for (const u of used) {
+    const lines = u.evidence.map(({ line }) => line).join(", ");
     console.error(
-      `${c.dim}note: ${u.count} finding(s) in ${u.file} allowed by [[scan.allow]] ${label(u.entry)}: ${u.entry.reason}${c.reset}`,
+      `${c.dim}note: ${u.count} finding(s) in ${sanitizeDisplayText(u.file)} allowed by [[scan.allow]] ${sanitizeDisplayText(label(u.entry))}, lines ${lines}: ${sanitizeDisplayText(u.entry.reason)}${c.reset}`,
     );
   }
   for (const s of stale) {
@@ -83,7 +85,7 @@ function report(
 export async function applyScanAllowlist(
   hits: StagedHit[],
   cwd: string = process.cwd(),
-): Promise<{ hits: StagedHit[]; ok: boolean }> {
+): Promise<{ hits: StagedHit[]; ok: boolean; used: ReturnType<typeof applyAllow>["used"] }> {
   const staged = await stagedPaths(cwd);
   const committed = await committedConfig(cwd, staged);
   if (workingCopyDiffers(cwd, committed)) {
@@ -93,8 +95,8 @@ export async function applyScanAllowlist(
   }
   const { entries, problems } = parseScanAllow(allowTables(committed));
   for (const p of problems) console.error(`${c.red}✗ ${p.message}${c.reset}`);
-  if (problems.length > 0) return { hits, ok: false };
-  if (entries.length === 0) return { hits, ok: true };
+  if (problems.length > 0) return { hits, ok: false, used: [] };
+  if (entries.length === 0) return { hits, ok: true, used: [] };
   const result = applyAllow(hits, entries, staged, (p) => existsSync(join(cwd, p)));
   report(result.used, result.stale);
   if (result.used.length > 0 && staged.includes(KIT_FILE)) {
@@ -102,5 +104,5 @@ export async function applyScanAllowlist(
       `${c.yellow}warning: ${KIT_FILE} is part of this commit and an allow entry silenced a finding. Check that the entry is intended.${c.reset}`,
     );
   }
-  return { hits: result.hits, ok: true };
+  return { hits: result.hits, ok: true, used: result.used };
 }
