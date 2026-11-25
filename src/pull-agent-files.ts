@@ -5,8 +5,11 @@
  * `AGENTS.md` line telling the agent to run a script first is how a worm with stolen Git
  * credentials spreads from one machine to the next (kit-research `strutil-core-gem-worm-vs-kit`).
  * `kit security verify-pull` printed "No security concerns" for exactly that pull. The paths are
- * the ones the agent audit and the instruction scan already read; this module only names them
- * for a pulled range. Paths are git paths, always `/`-separated. Pure.
+ * the ones the agent audit and the instruction scan already read, plus every file kit's own agent
+ * config writes a gate into; this module only names them for a pulled range. The two lists drifted
+ * once (Codex, Cursor and Droid hook files passed a pull unnamed), so `pull-agent-files.test.ts`
+ * reads both lists out of their sources and fails on a path missing here. Paths are git paths,
+ * always `/`-separated. Pure.
  */
 
 /** Instruction files, read wherever they sit (the instruction scan's names). */
@@ -32,7 +35,15 @@ const EXACT: Record<string, string> = {
   ".vscode/mcp.json": "MCP servers",
   "opencode.json": "agent config (MCP servers)",
   "opencode.jsonc": "agent config (MCP servers)",
-  ".codex/config.toml": "agent config (MCP servers)",
+  ".codex/config.toml": "agent config (hooks, MCP servers)",
+  ".codex/config.json": "agent config (MCP servers)",
+  ".codex/hooks.json": "agent hooks",
+  ".cursor/hooks.json": "agent hooks",
+  ".factory/hooks.json": "agent hooks",
+  ".factory/hooks/hooks.json": "agent hooks",
+  ".agents/hooks.json": "agent hooks",
+  ".augment/settings.json": "agent settings (hooks)",
+  ".clinerules": "agent rules",
   ".vscode/tasks.json": "editor tasks (can run when the folder opens)",
   ".devcontainer.json": "dev container (runs commands on create)",
   ".devcontainer/devcontainer.json": "dev container (runs commands on create)",
@@ -45,6 +56,10 @@ const PREFIXES: [string, string][] = [
   [".claude/agents/", "subagent"],
   [".claude/skills/", "agent skill"],
   [".claude/hooks/", "agent hook script"],
+  [".claude/plugins/", "agent plugin"],
+  [".opencode/plugin/", "agent plugin"],
+  [".clinerules/hooks/", "agent hook script"],
+  [".clinerules/", "agent rules"],
   [".agents/", "agent skill"],
   [".cursor/rules/", "agent rules"],
   [".github/workflows/", "CI workflow"],
