@@ -8,8 +8,11 @@ import {
   honestyDisclaimer,
   formatCoverageText,
   evidenceFor,
+  indexResults,
   type Bucket,
 } from "./coverage.js";
+import { buildStandardReport } from "./standard.js";
+import { NIST_800_53 } from "./nist-800-53.js";
 import type { SecurityCheckResult } from "../check-security.js";
 
 const VALID_BUCKETS: Bucket[] = ["auto", "gap", "manual", "na"];
@@ -259,5 +262,52 @@ describe("coverage live evidence binding (--verify, #11)", () => {
       detail: "fixture",
     };
     assert.equal(v1424(buildCoverageReport([unrelated])).evidence, "unrun");
+  });
+});
+
+describe("coverage --verify: an incomplete backing row does not verify a control", () => {
+  // Measured: NIST 800-53 PT came back "verified" because `agent transcripts` passed, while
+  // `secrets scan`, which also backs PT, warned with 13 findings and did not finish.
+  const row = (r: Partial<SecurityCheckResult> & { name: string }): SecurityCheckResult => ({
+    category: "secrets",
+    status: "pass",
+    detail: "",
+    ...r,
+  });
+  const secretsWarn = row({
+    name: "secrets scan",
+    status: "warn",
+    hasFindings: true,
+    didNotRun: true,
+    scanIncomplete: true,
+  });
+  const transcriptsPass = row({ name: "agent transcripts" });
+
+  it("a warn with findings beside a pass is not verified", () => {
+    const byKey = indexResults([secretsWarn, transcriptsPass]);
+    assert.equal(evidenceFor(["secrets scan", "scan-transcripts"], byKey), "unrun");
+  });
+
+  it("a did-not-run row beside a pass is not verified", () => {
+    const notRun = row({ name: "secrets scan", status: "warn", didNotRun: true });
+    const byKey = indexResults([notRun, transcriptsPass]);
+    assert.equal(evidenceFor(["secrets scan", "scan-transcripts"], byKey), "unrun");
+  });
+
+  it("a fail still wins over an incomplete row", () => {
+    const byKey = indexResults([secretsWarn, row({ name: "agent transcripts", status: "fail" })]);
+    assert.equal(evidenceFor(["secrets scan", "scan-transcripts"], byKey), "failing");
+  });
+
+  it("an ordinary warn beside a pass stays verified, as before", () => {
+    const byKey = indexResults([row({ name: "secrets scan", status: "warn" }), transcriptsPass]);
+    assert.equal(evidenceFor(["secrets scan", "scan-transcripts"], byKey), "verified");
+  });
+
+  it("NIST 800-53 PT is not verified by that run", () => {
+    const report = buildStandardReport(NIST_800_53, [secretsWarn, transcriptsPass]);
+    const pt = report.sections.flatMap((s) => s.entries).find((e) => e.requirement.id === "PT");
+    assert.ok(pt, "PT control present");
+    assert.equal(pt.evidence, "unrun");
   });
 });

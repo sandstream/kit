@@ -1,0 +1,41 @@
+import { z } from "zod";
+import type { SecretFinding, SecretMatch } from "./utils/redactSecrets.js";
+
+const evidenceLine = z.number().int().positive();
+export const findingEvidenceSchema = z.strictObject({
+  file: z
+    .string()
+    .min(1)
+    .refine((value) => !value.includes("\0")),
+  line: evidenceLine,
+  pattern: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,127}$/i),
+});
+
+export type FindingEvidence = z.infer<typeof findingEvidenceSchema>;
+
+export const falsePositiveMarkSchema = z.strictObject({
+  reason: z.string().trim().min(8),
+});
+
+export type EvidencedSecret = SecretFinding & { evidence: FindingEvidence };
+
+export function locateSecretMatches(
+  file: string,
+  text: string,
+  matches: readonly SecretMatch[],
+): EvidencedSecret[] {
+  const ordered = [...matches].sort((a, b) => a.offset - b.offset);
+  let line = 1;
+  let next = text.indexOf("\n");
+  return ordered.map(({ label, preview, offset }) => {
+    while (next !== -1 && next < offset) {
+      line++;
+      next = text.indexOf("\n", next + 1);
+    }
+    return {
+      label,
+      preview,
+      evidence: findingEvidenceSchema.parse({ file, line, pattern: label }),
+    };
+  });
+}

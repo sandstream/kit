@@ -9,8 +9,10 @@ import {
   parseCategoryFlag,
   isCheckCategory,
   CHECK_CATEGORIES,
+  securityCheckToJson,
   type CheckRunResult,
 } from "./check-run.js";
+import type { SecurityCheckResult } from "./check-security.js";
 
 // runCheckGate is the collection core `kit check`, the MCP `kit_check` tool, and
 // `kit review`'s check stage all share; checkRunToJsonChecks is the one flattening
@@ -244,5 +246,43 @@ describe("parseCategoryFlag (pure)", () => {
       assert.deepEqual(parseCategoryFlag(cat), { categories: [cat] });
       assert.equal(isCheckCategory(cat), true);
     }
+  });
+});
+
+describe("securityCheckToJson keeps what the text output prints", () => {
+  const row: SecurityCheckResult = {
+    category: "secrets",
+    name: "secrets scan",
+    status: "warn",
+    detail: "2 file(s) with unverified secret-shaped strings in the working tree",
+    severity: "medium",
+    files: ["src/a.ts", "config/b.json"],
+    suggestion: "Install TruffleHog to scan Git history",
+    rule: {
+      id: "CWE-798",
+      source: "cwe",
+      ref: "https://cwe.mitre.org/data/definitions/798.html",
+      title: "Use of Hard-coded Credentials",
+    },
+  };
+
+  it("carries the rule citation, the files and the suggestion", () => {
+    const json = securityCheckToJson(row);
+    assert.deepEqual(json.rule, row.rule);
+    assert.deepEqual(json.files, ["src/a.ts", "config/b.json"]);
+    assert.equal(json.suggestion, "Install TruffleHog to scan Git history");
+  });
+
+  it("omits the fields when the result has none", () => {
+    const json = securityCheckToJson({
+      category: "exposure",
+      name: "x",
+      status: "pass",
+      detail: "ok",
+      files: [],
+    });
+    assert.equal("rule" in json, false);
+    assert.equal("files" in json, false);
+    assert.equal("suggestion" in json, false);
   });
 });
