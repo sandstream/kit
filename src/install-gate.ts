@@ -19,12 +19,10 @@
  * command strings are refused before ecosystem detection. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
-import { mayChangeDirectory } from "./install-gate-cwd.js";
+import { refIsBareName, shadowedBins } from "./install-gate-cwd.js";
 import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
 import { checkRequirementsInstall, requirementFileValues } from "./install-gate-requirements.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
 import {
   claudePluginInstall,
@@ -1217,30 +1215,6 @@ export interface BashGateVerdict {
   reason: string;
   checked: GateVerdict[];
   notes?: string[]; // what an allowed command runs untriaged: install-gate-notes.ts
-}
-
-/** Does `<cwd>/node_modules/.bin/<name>` exist? Exactly what a plain `npx <name>`
- *  resolves to before ever touching the registry. */
-function hasLocalBin(cwd: string, name: string): boolean {
-  if (existsSync(join(cwd, "node_modules", ".bin", name))) return true;
-  return (
-    process.platform === "win32" && existsSync(join(cwd, "node_modules", ".bin", `${name}.cmd`))
-  );
-}
-
-/** Runner names a local `.bin` shadows, read in the directory npx runs in: none when the command
- *  may change directory first, because the hook's cwd is then not that directory. */
-function shadowedBins(command: string, names: string[], cwd?: string): string[] {
-  if (!cwd || mayChangeDirectory(command)) return [];
-  return names.filter((name) => hasLocalBin(cwd, name));
-}
-
-/** True when `ref` (`npm:<name>[@version]`) names exactly `bare` — not merely a prefix
- *  (`npm:tsc-x` must not match `bare = "tsc"`). The version suffix always starts `@`,
- *  and a bare scoped name (`@scope/pkg`) never collides with that. */
-function refIsBareName(ref: string, bare: string): boolean {
-  const prefix = `npm:${bare}`;
-  return ref === prefix || ref.startsWith(`${prefix}@`);
 }
 
 /**
