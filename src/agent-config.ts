@@ -268,7 +268,8 @@ export function detectAgentTargets(cwd: string = process.cwd()): AgentTarget[] {
  * Insert or update the managed kit block in `content`. Pure string transform —
  * no I/O — so it's trivially testable.
  *
- * - No existing block → append (with a blank-line separator if the file is non-empty).
+ * - No existing block → append (with a blank-line separator if the file is non-empty):
+ *   `created` for an empty file, `appended` when the file already had content of its own.
  * - Existing block → replace just the marker-delimited region, preserving everything else.
  */
 export function upsertKitBlock(
@@ -276,7 +277,7 @@ export function upsertKitBlock(
   userRules?: UserRulesProfile | null,
 ): {
   next: string;
-  action: "created" | "updated" | "unchanged";
+  action: "created" | "appended" | "updated" | "unchanged";
 } {
   const block = `${KIT_BLOCK_BEGIN}\n\n${buildKitInstruction(userRules)}\n\n${KIT_BLOCK_END}`;
   const begin = content.indexOf(KIT_BLOCK_BEGIN);
@@ -297,13 +298,16 @@ export function upsertKitBlock(
         : content.endsWith("\n")
           ? "\n"
           : "\n\n";
-  return { next: content + sep + block + "\n", action: "created" };
+  return {
+    next: content + sep + block + "\n",
+    action: content.length === 0 ? "created" : "appended",
+  };
 }
 
 export interface AgentConfigResult {
   agent: string;
   file: string;
-  action: "created" | "updated" | "unchanged" | "failed";
+  action: "created" | "appended" | "updated" | "unchanged" | "failed";
   detail: string;
 }
 
@@ -323,6 +327,13 @@ export function rulesFileIn(cwd: string, file: string): string {
   }
   return file;
 }
+
+/** What happened to a rules file, said the way `kit agent-config` prints it. */
+const BLOCK_DETAIL: Record<"created" | "appended" | "updated", (file: string) => string> = {
+  created: (file) => `wrote kit block to ${file}`,
+  appended: (file) => `appended kit block to ${file}`,
+  updated: (file) => `updated kit block in ${file}`,
+};
 
 /**
  * Write the managed kit block into each detected agent's rules file.
@@ -365,8 +376,7 @@ export async function writeAgentConfig(
         agent: t.agent,
         file: t.file,
         action,
-        detail:
-          action === "created" ? `wrote kit block to ${t.file}` : `updated kit block in ${t.file}`,
+        detail: BLOCK_DETAIL[action](t.file),
       });
     } catch (err) {
       results.push({
@@ -496,11 +506,7 @@ export async function installAiderRules(
   }
 
   const blockNote =
-    action === "created"
-      ? "wrote kit block to CONVENTIONS.md"
-      : action === "updated"
-        ? "updated kit block in CONVENTIONS.md"
-        : "kit block already current";
+    action === "unchanged" ? "kit block already current" : BLOCK_DETAIL[action](file);
   return {
     agent: "Aider",
     file,
