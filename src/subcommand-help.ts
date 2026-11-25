@@ -12,6 +12,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Read the current pull request, its signed review receipt and independent review reports, and write the exact actions to .kit-escalation.txt (--merge-denied after a permission layer refuses a merge)",
   "escalate feed":
     "Track what outside services report as broken as action items: github (failed workflows on the default branch, open Dependabot alerts) and vercel (failed production deploys). kit escalate feed <github|vercel> [--repo owner/name | --team id-or-slug] [--dry-run] [--json]",
+  "review gate":
+    "Read-only, deterministic verdict on one pull request: kit review gate --pr <n> [--repo owner/name] [--json]. Prints approve (exit 0), owner (3: protected path, wide module or over 1500 lines), hold (4: failed checks or red main), pending (5) or incomplete (6: a read failed; never approves), with the reasons and the exact head SHA; appends one audit row. Reads GitHub, not the agent, so it is harness-neutral. Never posts. Token: GITHUB_TOKEN or GH_TOKEN, none for public repos",
   "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
   "check verify-vercel-token": "Verify an environment-provided Vercel token",
   "check compare":
