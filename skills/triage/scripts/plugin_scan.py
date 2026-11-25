@@ -201,7 +201,58 @@ def _pipe_to_shell(rep, where, code):
         rep.warn(f"{where}: runs a script downloaded {src} without verifying it (download piped into a shell)")
 
 
+def _frontmatter_block(text):
+    """The lines between the opening and closing `---` of a SKILL.md, or []."""
+    lines = text.replace("\r\n", "\n").split("\n")
+    if not lines or lines[0].strip() != "---":
+        return []
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == "---":
+            return lines[1:i]
+    return []
+
+
+def _indent(line):
+    return len(line) - len(line.lstrip(" "))
+
+
+def _frontmatter_hook_entries(block):
+    """(event, matcher, command) for each hook a skill's frontmatter declares under `hooks:`.
+    Read by indentation, as text: kit ships no YAML parser (ADR-0002)."""
+    out, event, matcher, base = [], None, "*", None
+    for line in block:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if base is None:
+            if re.match(r"^hooks\s*:\s*$", line):
+                base = _indent(line)
+            continue
+        if _indent(line) <= base:
+            break
+        key = re.match(r"^\s*-?\s*([\w.-]+)\s*:\s*(.*)$", line)
+        if not key:
+            continue
+        name, value = key.group(1), key.group(2).strip().strip("'\"")
+        if not value and name[:1].isupper():  # an event key: PreToolUse, SessionStart …
+            event, matcher = name, "*"
+        elif name == "matcher":
+            matcher = value or "*"
+        elif name == "command" and event:
+            out.append((event, matcher, value))
+    return out
+
+
+def frontmatter_hooks(rep, rel, text):
+    """A skill can register hooks in its frontmatter that run while the skill is active
+    (claude-plugins-official `claude-security` threat-model: PreToolUse on Write|Edit). They are
+    judged as plugin hooks are; before this they were not read at all."""
+    for event, matcher, command in _frontmatter_hook_entries(_frontmatter_block(text)):
+        _judge_hook(rep, f"{rel} frontmatter", event, matcher)
+        _scan_script(rep, f"{rel} frontmatter {event} command", command)
+
+
 def _skill_frontmatter(rep, rel, text):
+    frontmatter_hooks(rep, rel, text)
     head = text[:400]
     if not head.lstrip().startswith("---"):
         rep.critical(f"{rel}: no YAML frontmatter (--- ... ---)")
@@ -227,7 +278,12 @@ def _mcp_servers(plugin_dir, manifest):
     elif isinstance(declared, str):
         rel = declared[2:] if declared.startswith("./") else declared
         sources.append((rel, os.path.join(plugin_dir, *rel.split("/"))))
+    seen = set()
     for source, path in sources:
+        real = os.path.realpath(path)
+        if real in seen:
+            continue
+        seen.add(real)
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -238,6 +294,59 @@ def _mcp_servers(plugin_dir, manifest):
     return out
 
 
+LOOPBACK = re.compile(r"^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$", re.IGNORECASE)
+
+
+def _report_mcp_url(rep, source, name, url):
+    """An empty url is a placeholder the user fills in; a loopback host is a server on this machine,
+    not a remote one. Everything else is remote: its tools and their output come from that host."""
+    if not url.strip():
+        rep.fact(f"{source}: MCP server {name!r} has an empty url (a placeholder) -- nothing connects until it is set")
+        return
+    host = URL_HOST.search(url)
+    if host and LOOPBACK.match(host.group(1)):
+        rep.fact(f"{source}: MCP server {name!r} is on this machine ({host.group(1)}) -- triage the program that serves it")
+        return
+    rep.warn(f"{source}: MCP server {name!r} is remote ({host.group(1) if host else 'unparsed URL'}) -- its tools and their output come from that host")
+
+
+def _lsp_servers(plugin_dir, manifest):
+    """(name, server) for each language server a plugin declares in `lspServers`, inline or as a
+    path to a JSON file inside the plugin."""
+    declared = manifest.get("lspServers")
+    if isinstance(declared, str):
+        rel = declared[2:] if declared.startswith("./") else declared
+        path = os.path.realpath(os.path.join(plugin_dir, *rel.split("/")))
+        if not path.startswith(os.path.realpath(plugin_dir) + os.sep):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                declared = json.load(f)
+        except (OSError, ValueError):
+            return []
+    if not isinstance(declared, dict):
+        return []
+    return [(n, v) for n, v in sorted(declared.items()) if isinstance(v, dict)]
+
+
+def _report_lsp_servers(rep, plugin_dir, manifest):
+    """A language server starts when a matching file is opened, like an MCP server at session
+    start. 12 official plugins start one from PATH and read as "0 MCP server(s)", 100/100."""
+    servers = _lsp_servers(plugin_dir, manifest)
+    if not servers:
+        return
+    rep.fact(f"plugin registers {len(servers)} LSP server(s)")
+    for name, server in servers:
+        command = str(server.get("command", ""))
+        args = [str(a) for a in server.get("args", [])] if isinstance(server.get("args"), list) else []
+        line = " ".join([command] + args)
+        _scan_script(rep, f"LSP server {name!r}", line)
+        if command.startswith(("./", "${CLAUDE_PLUGIN_ROOT}", "$CLAUDE_PLUGIN_ROOT")) or RUNNER.search(line):
+            rep.fact(f"LSP server {name!r} runs `{line[:120]}`")
+        else:
+            rep.warn(f"LSP server {name!r} runs `{command}` from PATH when a matching file is opened -- the plugin does not ship it; triage how that program is installed")
+
+
 def _report_mcp_servers(rep, plugin_dir, manifest):
     """An MCP server a plugin registers starts with every session, like a hook. Its command was not
     reported at all (kit-research `fast-anything-vs-kit`: a plugin whose `.mcp.json` runs a binary
@@ -246,8 +355,7 @@ def _report_mcp_servers(rep, plugin_dir, manifest):
     rep.fact(f"plugin registers {len(servers)} MCP server(s)")
     for source, name, server in servers:
         if isinstance(server.get("url"), str):
-            host = URL_HOST.search(server["url"])
-            rep.warn(f"{source}: MCP server {name!r} is remote ({host.group(1) if host else 'unparsed URL'}) -- its tools and their output come from that host")
+            _report_mcp_url(rep, source, name, server["url"])
             continue
         command = str(server.get("command", ""))
         args = [str(a) for a in server.get("args", [])] if isinstance(server.get("args"), list) else []
@@ -269,6 +377,7 @@ def triage_local_plugin(rep, secrets_in):
         rep.fact(f"plugin {manifest.get('name', '?')} {manifest.get('version', '')}".rstrip())
     _report_hooks(rep, plugin_dir, manifest or {})
     _report_mcp_servers(rep, plugin_dir, manifest or {})
+    _report_lsp_servers(rep, plugin_dir, manifest or {})
     read, unread, skills = 0, [], 0
     for full in _walk(plugin_dir):
         rel = os.path.relpath(full, plugin_dir).replace(os.sep, "/")
