@@ -5,5 +5,4 @@
   `package.json` was already blocked (kit#844), while the pip equivalent exited 0 silently: the
   requirement-file value is skipped as a package, so the gate saw no target. `pip3`,
   `python -m pip` and `uv pip install` are covered; a nested `-r`, an index option, an editable or
-  a URL in the file is refused. `pip-sync` and `uv pip sync` are not covered. Found by a
-  kit-research reconcile (kit-research#223).
+  a URL in the file is refused. Found by a kit-research reconcile (kit-research#223).

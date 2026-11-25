@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { decideBashGate, parseInstallCommand } from "./install-gate.js";
-import { pipNormalise, requirementFileValues } from "./install-gate-requirements.js";
+import {
+  pipNormalise,
+  requirementFileValues,
+  syncFileValues,
+} from "./install-gate-requirements.js";
 import { TRIAGE_LOG_FILE } from "./triage-receipt.js";
 
 const made: string[] = [];
@@ -155,5 +159,92 @@ describe("requirement file parsing helpers", () => {
     assert.equal(parseInstallCommand("pip install -r a.txt").requirementSegments.length, 1);
     assert.equal(parseInstallCommand("npm install -r a.txt").requirementSegments.length, 0);
     assert.equal(pipNormalise("Example_Pkg.Neutral"), "example-pkg-neutral");
+  });
+});
+
+const SYNCS = [
+  "pip-sync requirements.txt",
+  "pip-sync",
+  "python -m piptools sync requirements.txt",
+  "uv pip sync requirements.txt",
+  "uv pip sync --python 3.12 requirements.txt",
+  "uv pip sync --strict requirements.txt",
+];
+
+describe("pip-sync and uv pip sync of a requirements file that no commit gate covers", () => {
+  for (const command of SYNCS) {
+    it(`blocks \`${command}\` like pip install -r until every requirement has a receipt`, async () => {
+      const dir = project(REQS);
+      const verdict = await decideBashGate(command, undefined, dir);
+      assert.equal(verdict.block, true);
+      assert.equal(
+        verdict.reason,
+        `bare install in ${dir}: no fresh triage receipt (7 days) for ` +
+          `examplepkg-neutral, examplepkg-other. Run \`cd ${dir} && kit triage pip ` +
+          "examplepkg-neutral examplepkg-other` first",
+      );
+    });
+  }
+
+  it("passes once every requirement has a fresh receipt", async () => {
+    const dir = project(REQS);
+    receipt(dir, "examplepkg-neutral");
+    receipt(dir, "examplepkg-other");
+    for (const command of SYNCS) {
+      assert.equal((await decideBashGate(command, undefined, dir)).block, false, command);
+    }
+  });
+
+  it("reads every file it syncs, and a requirements file in another one", async () => {
+    const dir = project(REQS);
+    writeFileSync(join(dir, "dev.txt"), "examplepkg-third\n");
+    receipt(dir, "examplepkg-neutral");
+    receipt(dir, "examplepkg-other");
+    const verdict = await decideBashGate("uv pip sync requirements.txt dev.txt", undefined, dir);
+    assert.equal(verdict.block, true);
+    assert.match(verdict.reason, /for examplepkg-third\. Run/);
+  });
+});
+
+describe("pip-sync and uv pip sync: what the gate refuses and allows", () => {
+  it("refuses a sync it cannot see the source of", async () => {
+    const dir = project(REQS);
+    for (const command of [
+      "pip-sync -i https://example.invalid/simple requirements.txt",
+      "pip-sync --find-links ./wheels requirements.txt",
+      "pip-sync --pip-args '--index-url https://example.invalid' requirements.txt",
+      "uv pip sync --directory ./elsewhere requirements.txt",
+      "uv pip sync -",
+      "pip-sync r$X.txt",
+    ]) {
+      assert.equal((await decideBashGate(command, undefined, dir)).block, true, command);
+    }
+  });
+
+  it("refuses what the file says that a name receipt cannot cover", async () => {
+    const dir = project("-e ./local\nhttps://example.invalid/pkg.whl\n");
+    const verdict = await decideBashGate("pip-sync requirements.txt", undefined, dir);
+    assert.equal(verdict.block, true);
+    assert.match(verdict.reason, /cannot triage/);
+  });
+
+  it("allows a tracked file, a missing file and a call with no directory", async () => {
+    const dir = project(REQS);
+    assert.equal((await decideBashGate("uv pip sync missing.txt", undefined, dir)).block, false);
+    assert.equal((await decideBashGate("pip-sync requirements.txt")).block, false);
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["add", "requirements.txt"], { cwd: dir });
+    assert.equal((await decideBashGate("pip-sync", undefined, dir)).block, false);
+  });
+
+  it("does not take a constraints file or an option's value for a file to sync", () => {
+    assert.deepEqual(
+      syncFileValues(["-c", "c.txt", "--python", "3.12", "--strict", "a.txt", "--", "-b.txt"]),
+      ["a.txt", "-b.txt"],
+    );
+    assert.deepEqual(syncFileValues(["--dry-run"], "requirements.txt"), ["requirements.txt"]);
+    assert.deepEqual(syncFileValues([]), []);
+    assert.equal(parseInstallCommand("uv pip sync a.txt").requirementSegments.length, 1);
+    assert.equal(parseInstallCommand("uv sync").requirementSegments.length, 0);
   });
 });

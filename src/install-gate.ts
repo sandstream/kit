@@ -21,7 +21,11 @@
  */
 import { mayChangeDirectory } from "./install-gate-cwd.js";
 import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
-import { checkRequirementsInstall, requirementFileValues } from "./install-gate-requirements.js";
+import {
+  checkRequirementsInstall,
+  requirementFileValues,
+  syncSegment,
+} from "./install-gate-requirements.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -1159,10 +1163,26 @@ function isApprovalNoop(tokens: string[], pos: string[]): boolean {
   return false;
 }
 
-/** Record a pip-family install that reads a requirements file (`pip install -r <file>`). */
-function noteRequirementFiles(pos: string[], tokens: string[], probe: InstallProbe): void {
-  if (pipInstallerArgStart(pos) >= 0 && requirementFileValues(tokens).length > 0) {
-    probe.requirementSegments.push({ manager: tokens[0], tokens });
+/** Record a pip-family install that reads a requirements file (`pip install -r <file>`, a sync). */
+function noteRequirementFiles(
+  pos: string[],
+  tokens: string[],
+  raw: string[],
+  probe: InstallProbe,
+): void {
+  const sync = syncSegment(tokens);
+  if (sync === undefined) {
+    if (pipInstallerArgStart(pos) >= 0 && requirementFileValues(tokens).length > 0) {
+      probe.requirementSegments.push({ manager: tokens[0], tokens });
+    }
+    return;
+  }
+  // A sync whose source the gate cannot see is refused, as an index option on any install is.
+  const steer = typeof sync === "string" ? sync : sourceRedirect(raw, tokens);
+  if (!steer && typeof sync !== "string") probe.requirementSegments.push(sync);
+  else {
+    probe.isInstall = true;
+    probe.unverifiable.push(`requirements-sync:${steer}`);
   }
 }
 
@@ -1205,7 +1225,7 @@ function scanSegment(segment: string, probe: InstallProbe): void {
   // step would push an agent straight to `--all` — the opposite of what this gate wants — so
   // those faces are never an install.
   if (isApprovalNoop(tokens, pos)) return;
-  noteRequirementFiles(pos, tokens, probe);
+  noteRequirementFiles(pos, tokens, cmdRaw, probe);
 
   for (const m of MATCHERS) {
     if (applyMatcher(m, pos, tokens, cmdRaw, probe)) break; // one matcher per segment
