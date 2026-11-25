@@ -68,6 +68,8 @@ interface SarifResult {
   ruleId?: string;
   /** SARIF 2.1.0 `kind`; absent means `fail`. */
   kind?: string;
+  /** SARIF 2.1.0 `suppressions`; a suppression with no `status` is accepted. */
+  suppressions?: { status?: string }[];
   level?: string;
   message?: { text?: string };
   locations?: SarifLocation[];
@@ -92,6 +94,7 @@ function sarifFinding(
   tool: string,
   res: SarifResult,
   rulesById: Map<string, SarifRule>,
+  status: "fail" | "warn" = "fail",
 ): SecurityCheckResult {
   const ruleId = res.ruleId ?? "(rule)";
   const rule = rulesById.get(ruleId);
@@ -102,7 +105,7 @@ function sarifFinding(
   return {
     category: "exposure",
     name: `${tool}: ${ruleId}`,
-    status: "fail",
+    status,
     detail: `${res.message?.text ?? ruleId}${sarifLocation(res)}`,
     severity,
     rule: cweRuleFromTags(rule?.properties?.tags),
@@ -121,19 +124,34 @@ export function parseSarif(json: string): SecurityCheckResult[] {
 
 /**
  * SARIF kinds that say the rule was evaluated and nothing is wrong. A scanner such as Strix writes its
- * coverage rows this way. `open` (Nuclei marks every result open), `review`, `fail` and an absent kind
- * stay findings.
+ * coverage rows this way. `open` (Nuclei marks every result open), `fail` and an absent kind stay
+ * failures; `review` (a person must still look) is a warning.
  */
 const SARIF_NOT_FAILED = new Set(["pass", "notApplicable", "informational"]);
 
-function sarifFindings(log: SarifLog): SecurityCheckResult[] {
+/**
+ * SARIF 2.1.0 §3.27.23: a result is suppressed when it carries suppressions and each one is accepted
+ * (a missing `status` means accepted). An `underReview` or `rejected` suppression keeps it a finding.
+ */
+function sarifSuppressed(res: SarifResult): boolean {
+  const list: unknown = res.suppressions;
+  return (
+    Array.isArray(list) &&
+    list.length > 0 &&
+    list.every((s) => isRecord(s) && (s.status === undefined || s.status === "accepted"))
+  );
+}
+
+function sarifFindings(log: SarifLog, tally = { suppressed: 0 }): SecurityCheckResult[] {
   const out: SecurityCheckResult[] = [];
   for (const run of log.runs ?? []) {
     const tool = run.tool?.driver?.name ?? "sarif";
     const rulesById = new Map<string, SarifRule>();
     for (const r of run.tool?.driver?.rules ?? []) if (r.id) rulesById.set(r.id, r);
     for (const res of run.results ?? []) {
-      if (!SARIF_NOT_FAILED.has(String(res.kind))) out.push(sarifFinding(tool, res, rulesById));
+      if (SARIF_NOT_FAILED.has(String(res.kind))) continue;
+      if (sarifSuppressed(res)) tally.suppressed++;
+      else out.push(sarifFinding(tool, res, rulesById, res.kind === "review" ? "warn" : "fail"));
     }
   }
   return out;
@@ -265,6 +283,8 @@ export type IngestOutcome = (
       notes?: string[];
       coverage?: "partial";
       reportGap?: IngestGap;
+      /** SARIF results left out because every suppression on them is accepted. */
+      suppressed?: number;
     }
   | { ok: false; reason: string; reportGap?: IngestGap }
 ) & { scannerCoverage?: DeclaredScannerCoverage[] };
@@ -561,12 +581,14 @@ export function ingestSarifReport(parsed: unknown): IngestOutcome {
   if (runs.length === 0) return reportFailure("missing", "SARIF log contains no runs");
   const readable = runs.map(readableSarifRun).filter(isRecord);
   const normalized = readable as SarifRun[];
-  const findings = sarifFindings({ runs: normalized });
+  const tally = { suppressed: 0 };
+  const findings = sarifFindings({ runs: normalized }, tally);
   const declared = kitScanCoverage(normalized);
-  const outcome = sarifCoverage(readable, findings, {
+  const counted = sarifCoverage(readable, findings, {
     malformed: !runs.every(sarifRun) || declared.malformed,
     declaredPartial: declared.partial,
   });
+  const outcome = counted.ok && tally.suppressed ? { ...counted, ...tally } : counted;
   const scannerCoverage = declared.scanners;
   return scannerCoverage.length ? { ...outcome, scannerCoverage } : outcome;
 }
