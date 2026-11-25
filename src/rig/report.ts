@@ -2,8 +2,12 @@
  * The rig's report (ADR-0007): arithmetic over adjudicated runs, nothing more.
  *
  * Per config, and separately for the `tune` and `holdout` halves of the manifest:
- *  - recall per run (caught / defects reviewed in that run), as mean, min and max;
- *  - the false-positive rate per run (clean controls with any finding / controls reviewed);
+ *  - recall per run (caught / the manifest's defects in that half), as mean, min and max. A run
+ *    counts for a half once it has a row for any defect in it; a defect it has no row for, or a
+ *    `"failed"` row, is not caught, and the report names each one (`shortfall`). Dividing by the
+ *    defects reviewed instead let a run that failed or skipped the hard targets score 100%;
+ *  - the false-positive rate per run (controls flagged / the manifest's controls), where a control
+ *    the run failed on or has no row for is counted as flagged, never as clean, and named the same way;
  *  - how often each defect was caught across runs;
  *  - how many findings each run produced, and how many matched no defect. Unmatched findings on a
  *    defect target are not false positives, so volume (flag every changed line) would raise
@@ -38,12 +42,27 @@ export interface Spread {
   max: number;
 }
 
+/** The targets one run did not review: the ones it failed on, and the ones it has no row for. */
+export interface Shortfall {
+  run: string;
+  /** Targets the run reviewed, out of `of` in the manifest. */
+  reviewed: number;
+  of: number;
+  failed: { target: string; reason: string }[];
+  missing: string[];
+}
+
 export interface SplitStats {
   runs: number;
   recall: Spread | null;
   falsePositiveRate: Spread | null;
   /** defect id → runs that caught it / runs that reviewed it */
   perDefect: Record<string, { caught: number; reviewed: number }>;
+  /**
+   * Runs that did not review every defect in this half; each missing one counted as not caught.
+   * Absent in a result.json written before it existed.
+   */
+  shortfall?: Shortfall[];
 }
 
 export interface ConfigStats {
@@ -51,7 +70,7 @@ export interface ConfigStats {
   tune: SplitStats;
   holdout: SplitStats;
   /** Clean-control runs are not split: a control belongs to neither half. */
-  controls: { runs: number; falsePositiveRate: Spread | null };
+  controls: { runs: number; falsePositiveRate: Spread | null; shortfall?: Shortfall[] };
   /** Findings per run (all targets), and findings on defect targets that matched no defect. */
   volume?: { findingsPerRun: Spread | null; unmatched: number };
 }
@@ -72,41 +91,77 @@ function groupByRun(outcomes: RunOutcome[]): Map<string, RunOutcome[]> {
   return runs;
 }
 
-function splitStats(outcomes: RunOutcome[], splitOf: Map<string, Split>, split: Split): SplitStats {
-  const mine = outcomes.filter((o) => o.targetKind === "defect" && splitOf.get(o.target) === split);
-  const perDefect: SplitStats["perDefect"] = {};
-  const recalls: number[] = [];
-  for (const [, runOutcomes] of [...groupByRun(mine)].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    let caught = 0;
-    let reviewed = 0;
-    for (const o of runOutcomes) {
-      for (const id of [...o.caught, ...o.missed]) {
-        const entry = (perDefect[id] ??= { caught: 0, reviewed: 0 });
-        entry.reviewed++;
-        reviewed++;
-        if (o.caught.includes(id)) {
-          entry.caught++;
-          caught++;
-        }
+const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Which of `ids` one run reviewed, failed on, or has no row for. */
+function shortfallOf(run: string, runOutcomes: RunOutcome[], ids: string[]): Shortfall | null {
+  const failed = runOutcomes
+    .filter((o) => o.failed !== undefined)
+    .map((o) => ({ target: o.target, reason: o.failed as string }))
+    .sort((a, b) => byId(a.target, b.target));
+  const seen = new Set(runOutcomes.map((o) => o.target));
+  const missing = ids.filter((id) => !seen.has(id));
+  if (failed.length === 0 && missing.length === 0) return null;
+  const reviewed = ids.length - failed.length - missing.length;
+  return { run, reviewed, of: ids.length, failed, missing };
+}
+
+/** Count one run's reviewed defect outcomes into the per-defect tally; returns how many it caught. */
+function tally(runOutcomes: RunOutcome[], perDefect: SplitStats["perDefect"]): number {
+  let caught = 0;
+  for (const o of runOutcomes) {
+    if (o.failed !== undefined) continue;
+    for (const id of [...o.caught, ...o.missed]) {
+      const entry = (perDefect[id] ??= { caught: 0, reviewed: 0 });
+      entry.reviewed++;
+      if (o.caught.includes(id)) {
+        entry.caught++;
+        caught++;
       }
     }
-    if (reviewed > 0) recalls.push(caught / reviewed);
   }
-  const sorted = Object.fromEntries(Object.entries(perDefect).sort(([a], [b]) => (a < b ? -1 : 1)));
+  return caught;
+}
+
+function splitStats(outcomes: RunOutcome[], manifest: RigManifest, split: Split): SplitStats {
+  const ids = manifest.defects
+    .filter((d) => d.split === split)
+    .map((d) => d.id)
+    .sort(byId);
+  const inSplit = new Set(ids);
+  const mine = outcomes.filter((o) => o.targetKind === "defect" && inSplit.has(o.target));
+  const perDefect: SplitStats["perDefect"] = {};
+  const recalls: number[] = [];
+  const shortfall: Shortfall[] = [];
+  for (const [run, runOutcomes] of [...groupByRun(mine)].sort(([a], [b]) => byId(a, b))) {
+    recalls.push(tally(runOutcomes, perDefect) / ids.length);
+    const short = shortfallOf(run, runOutcomes, ids);
+    if (short) shortfall.push(short);
+  }
+  const sorted = Object.fromEntries(Object.entries(perDefect).sort(([a], [b]) => byId(a, b)));
   return {
     runs: recalls.length,
     recall: spread(recalls),
     falsePositiveRate: null,
     perDefect: sorted,
+    shortfall,
   };
 }
 
-function controlStats(outcomes: RunOutcome[]): ConfigStats["controls"] {
+function controlStats(outcomes: RunOutcome[], manifest: RigManifest): ConfigStats["controls"] {
+  const ids = manifest.controls.map((c) => c.id).sort(byId);
+  const known = new Set(ids);
+  const mine = outcomes.filter((o) => o.targetKind === "control" && known.has(o.target));
   const rates: number[] = [];
-  for (const [, runOutcomes] of groupByRun(outcomes.filter((o) => o.targetKind === "control"))) {
-    rates.push(runOutcomes.filter((o) => o.falsePositives > 0).length / runOutcomes.length);
+  const shortfall: Shortfall[] = [];
+  for (const [run, runOutcomes] of [...groupByRun(mine)].sort(([a], [b]) => byId(a, b))) {
+    const short = shortfallOf(run, runOutcomes, ids);
+    const flagged = runOutcomes.filter((o) => o.failed === undefined && o.falsePositives > 0);
+    const unreviewed = short ? short.failed.length + short.missing.length : 0;
+    rates.push((flagged.length + unreviewed) / ids.length);
+    if (short) shortfall.push(short);
   }
-  return { runs: rates.length, falsePositiveRate: spread(rates) };
+  return { runs: rates.length, falsePositiveRate: spread(rates), shortfall };
 }
 
 /** Every finding a run produced: caught, duplicates, unmatched, and false positives on controls. */
@@ -123,15 +178,14 @@ function volumeStats(outcomes: RunOutcome[]): NonNullable<ConfigStats["volume"]>
 
 /** Aggregate adjudicated runs per config. Configs and defects come out sorted. */
 export function aggregate(manifest: RigManifest, outcomes: RunOutcome[]): ConfigStats[] {
-  const splitOf = new Map(manifest.defects.map((d) => [d.id, d.split]));
   const configs = [...new Set(outcomes.map((o) => o.config))].sort();
   return configs.map((config) => {
     const mine = outcomes.filter((o) => o.config === config);
     return {
       config,
-      tune: splitStats(mine, splitOf, "tune"),
-      holdout: splitStats(mine, splitOf, "holdout"),
-      controls: controlStats(mine),
+      tune: splitStats(mine, manifest, "tune"),
+      holdout: splitStats(mine, manifest, "holdout"),
+      controls: controlStats(mine, manifest),
       volume: volumeStats(mine),
     };
   });

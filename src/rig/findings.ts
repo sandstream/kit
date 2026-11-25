@@ -13,6 +13,16 @@
  *   { "run": "r2", "config": "A", "target": "c1", "none": true,
  *     "model": "some-model", "model_version": "2026-10", "date": "2026-10-31" }
  *
+ * A run that did not complete (the reviewer crashed, timed out or refused the target) is written
+ * as one row with `"failed"` naming why, and no location. It is counted as a review that did not
+ * happen: a defect it should have caught is not caught, and a control is not called clean.
+ *
+ *   { "run": "r3", "config": "A", "target": "d2", "failed": "refused",
+ *     "model": "some-model", "model_version": "2026-10", "date": "2026-10-31" }
+ *
+ * One run of one target is either failed or reviewed: a row that contradicts an earlier one for
+ * the same (config, run, target) is reported as malformed.
+ *
  * kit never judges the claim text. It only needs the location to adjudicate (phase 2) and the
  * attribution to keep runs apart. A malformed row is reported with its line number and never
  * skipped silently; in strict mode one bad row refuses the whole file.
@@ -30,6 +40,8 @@ export interface RunMark {
   model: string;
   model_version: string;
   date: string;
+  /** Why the run did not complete, from a `"failed"` row. Absent for a completed review. */
+  failed?: string;
 }
 
 export interface Finding extends RunMark {
@@ -54,6 +66,7 @@ export interface IngestResult {
 const MARK_KEYS = ["run", "config", "target", "model", "model_version", "date"];
 const FINDING_KEYS = [...MARK_KEYS, "file", "line", "claim", "severity"];
 const NONE_KEYS = [...MARK_KEYS, "none"];
+const FAILED_KEYS = [...MARK_KEYS, "failed"];
 const MARK_STRINGS = ["run", "config", "target", "model", "model_version"] as const;
 
 function unknownKeys(r: Record<string, unknown>, allowed: string[]): string | null {
@@ -102,7 +115,7 @@ function rowFile(raw: unknown): { file: string } | string {
 }
 
 function markOf(r: Record<string, unknown>): RunMark {
-  return {
+  const mark: RunMark = {
     run: r.run as string,
     config: r.config as string,
     target: r.target as string,
@@ -110,23 +123,35 @@ function markOf(r: Record<string, unknown>): RunMark {
     model_version: r.model_version as string,
     date: r.date as string,
   };
+  if (typeof r.failed === "string") mark.failed = r.failed;
+  return mark;
+}
+
+/** The keys a row may carry, by its kind: a finding, a `"none"` row or a `"failed"` row. */
+function allowedKeys(r: Record<string, unknown>): string[] | string {
+  if (r.none !== undefined && r.failed !== undefined)
+    return `a row is "none" or "failed", not both`;
+  if (r.none !== undefined) return r.none === true ? NONE_KEYS : `"none" must be true when present`;
+  if (r.failed === undefined) return FINDING_KEYS;
+  const ok = typeof r.failed === "string" && r.failed.trim() !== "";
+  return ok
+    ? FAILED_KEYS
+    : `"failed" must be a non-empty string naming why the run did not complete`;
 }
 
 /**
- * Validate one parsed row. Returns a finding, a bare run mark for a `"none": true` row, or the
- * first problem as a message.
+ * Validate one parsed row. Returns a finding, a bare run mark for a `"none": true` or `"failed"`
+ * row, or the first problem as a message.
  */
 export function validateRow(row: unknown): Finding | RunMark | string {
   if (!row || typeof row !== "object" || Array.isArray(row)) return "row is not a JSON object";
   const r = row as Record<string, unknown>;
-  const none = r.none !== undefined;
-  if (none && r.none !== true) return `"none" must be true when present`;
-  const problem =
-    unknownKeys(r, none ? NONE_KEYS : FINDING_KEYS) ??
-    markProblem(r) ??
-    (none ? null : findingProblem(r));
+  const allowed = allowedKeys(r);
+  if (typeof allowed === "string") return allowed;
+  const bare = allowed !== FINDING_KEYS;
+  const problem = unknownKeys(r, allowed) ?? markProblem(r) ?? (bare ? null : findingProblem(r));
   if (problem) return problem;
-  if (none) return markOf(r);
+  if (bare) return markOf(r);
   const file = rowFile(r.file);
   if (typeof file === "string") return file;
   return {
@@ -141,6 +166,14 @@ export function validateRow(row: unknown): Finding | RunMark | string {
 /** The key that identifies one run of one config on one target. */
 export function runKey(m: Pick<RunMark, "config" | "run" | "target">): string {
   return JSON.stringify([m.config, m.run, m.target]);
+}
+
+/** Why a row contradicts the earlier row for the same run of the same target, or null. */
+function contradiction(seen: RunMark | undefined, row: RunMark): string | null {
+  if (!seen || (seen.failed === undefined) === (row.failed === undefined)) return null;
+  return `run ${row.run} of config ${row.config} on ${row.target} is already recorded as ${
+    seen.failed === undefined ? "reviewed" : "failed"
+  }; one run of a target is either failed or reviewed`;
 }
 
 /** Parse JSONL text. Blank lines are allowed; every other line must be a valid row. */
@@ -158,12 +191,15 @@ export function parseFindings(text: string): IngestResult {
       return;
     }
     const v = validateRow(row);
-    if (typeof v === "string") {
-      errors.push({ line: i + 1, message: v });
+    const seen = typeof v === "string" ? undefined : runs.get(runKey(v));
+    const problem = typeof v === "string" ? v : contradiction(seen, v);
+    if (problem) {
+      errors.push({ line: i + 1, message: problem });
       return;
     }
-    if ("file" in v) findings.push(v);
-    if (!runs.has(runKey(v))) runs.set(runKey(v), markOf({ ...v }));
+    const mark = v as Finding | RunMark;
+    if ("file" in mark) findings.push(mark);
+    if (!seen) runs.set(runKey(mark), markOf({ ...mark }));
   });
   return { findings, runs: [...runs.values()], errors };
 }
