@@ -94,3 +94,34 @@ describe("renderReport", () => {
     );
   });
 });
+
+describe("renderReport: runs that did not review every target", () => {
+  it("names each run's shortfall and how it was counted, and the plan names the failed row", () => {
+    const [a, b] = RESULT.stats;
+    const short = { run: "r1", reviewed: 1, of: 3 };
+    const result: RigResult = {
+      ...RESULT,
+      stats: [
+        {
+          ...a,
+          holdout: {
+            ...a.holdout,
+            shortfall: [
+              { ...short, failed: [{ target: "d9", reason: "refused" }], missing: ["d12"] },
+            ],
+          },
+          controls: { ...a.controls, shortfall: [{ ...short, failed: [], missing: ["c2", "c3"] }] },
+        },
+        b,
+      ],
+    };
+    const text = renderReport(result, []).join("\n");
+    assert.match(
+      text,
+      /holdout run r1: reviewed 1 of 3; failed d9 \(refused\); no row d12; counted as not caught/,
+    );
+    assert.match(text, /controls run r1: reviewed 1 of 3; no row c2, c3; counted as flagged/);
+    assert.doesNotMatch(renderReport(RESULT, []).join("\n"), /reviewed \d+ of/);
+    assert.match(renderPlan(MANIFEST, "1".repeat(64), "o.jsonl").join("\n"), /"failed": "<why>"/);
+  });
+});

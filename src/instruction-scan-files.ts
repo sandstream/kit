@@ -10,10 +10,15 @@ import {
 } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-const INSTRUCTION_NAMES = new Set([
+/**
+ * Files an agent reads as instructions wherever they sit. `AGENTS.override.md` is Codex's: it takes
+ * precedence over `AGENTS.md` in the same directory (developers.openai.com/codex/guides/agents-md).
+ */
+export const INSTRUCTION_NAMES: ReadonlySet<string> = new Set([
   "CLAUDE.md",
   "CLAUDE.local.md",
   "AGENTS.md",
+  "AGENTS.override.md",
   "GEMINI.md",
   "SKILL.md",
   ".cursorrules",
@@ -50,14 +55,20 @@ interface DiscoveryState {
 /** INSTRUCTION_NAMES lower-cased: macOS and Windows open `agents.md` when an agent asks for `AGENTS.md`. */
 const INSTRUCTION_NAMES_LOWER = new Set([...INSTRUCTION_NAMES].map((n) => n.toLowerCase()));
 
+/**
+ * Claude Code reads every `.md` under these `.claude/` dirs, recursively: rules
+ * (code.claude.com/docs/en/memory), slash commands and subagents. The user audit reads the same three
+ * under `~/.claude` (`agent-audit-user.ts`).
+ */
+const CLAUDE_MD_DIRS = new Set(["rules", "commands", "agents"]);
+
 export function isInstructionFile(relPath: string): boolean {
   const parts = relPath.split(/[\\/]+/);
   const name = parts.at(-1) ?? "";
   if (INSTRUCTION_NAMES_LOWER.has(name.toLowerCase())) return true;
   if (name.endsWith(".mdc") && parts.includes(".cursor") && parts.includes("rules")) return true;
-  // Claude Code loads every `.md` under `.claude/rules/`, recursively (code.claude.com/docs/en/memory).
   const claude = parts.indexOf(".claude");
-  return name.endsWith(".md") && claude !== -1 && parts[claude + 1] === "rules";
+  return name.endsWith(".md") && claude !== -1 && CLAUDE_MD_DIRS.has(parts[claude + 1] ?? "");
 }
 
 function relativePath(root: string, path: string): string {
