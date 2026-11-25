@@ -344,3 +344,66 @@ describe("standards-plugins — ReDoS-prone plugin rejected at load", () => {
     }
   });
 });
+
+describe("standards-plugins — dot-directories and an empty require scope", () => {
+  const pinRule = `[standard]\nid = "pin"\ntitle = "Pin actions"\nmatch = 'uses: [^@]+@v\\d'\nexts = [".yml"]\n`;
+
+  it("a rule reads .github/ but not .git/, .kit/ or node_modules/", () => {
+    const repo = tmpRepo();
+    try {
+      const line = "      - uses: actions/checkout@v4\n";
+      for (const dir of [".github/workflows", ".git/hooks", ".kit/state", "node_modules/x"]) {
+        mkdirSync(join(repo, dir), { recursive: true });
+        writeFileSync(join(repo, dir, "ci.yml"), line);
+      }
+      writePlugin(repo, "pin.toml", pinRule);
+      const { plugins } = loadStandardPlugins(repo, [DEFAULT_PLUGIN_DIR]);
+      const files = evaluatePluginFindings(repo, plugins[0]).map((f) => f.file);
+      assert.deepEqual(files, [".github/workflows/ci.yml"]);
+    } finally {
+      rmTemp(repo);
+    }
+  });
+
+  it("a require rule whose scope matches zero files is incomplete once, and fails under --enforce", () => {
+    const repo = tmpRepo();
+    try {
+      mkdirSync(join(repo, "src"), { recursive: true });
+      writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n");
+      writePlugin(
+        repo,
+        "perm.toml",
+        `[standard]\nid = "perm"\ntitle = "Callable permission docs"\nmode = "require"\nscope = 'export const \\w+ = onCall'\nmatch = '@apiPermission'\n`,
+      );
+      const rows = (enforce: boolean) =>
+        checkStandardsPlugins({ cwd: repo, language: "typescript", enforce }).filter(
+          (row) => row.name === "plugin: perm",
+        );
+      const [plain] = rows(false);
+      assert.equal(rows(false).length, 1, "reported once");
+      assert.equal(plain.status, "warn");
+      assert.equal(plain.didNotRun, true);
+      assert.match(plain.detail, /incomplete: scope regex .* matched zero files/);
+      assert.equal(rows(true)[0].status, "fail");
+    } finally {
+      rmTemp(repo);
+    }
+  });
+
+  it("a require rule with no file of its extensions is incomplete, not a pass", () => {
+    const repo = tmpRepo();
+    try {
+      writePlugin(
+        repo,
+        "req.toml",
+        `[standard]\nid = "req"\ntitle = "Header"\nmode = "require"\nmatch = 'SPDX'\nexts = [".proto"]\n`,
+      );
+      const r = checkStandardsPlugins({ cwd: repo, language: "typescript", enforce: true });
+      const row = r.find((x) => x.name === "plugin: req");
+      assert.equal(row?.status, "fail");
+      assert.match(row?.detail ?? "", /extension\(s\) \.proto matched zero files/);
+    } finally {
+      rmTemp(repo);
+    }
+  });
+});

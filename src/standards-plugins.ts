@@ -73,6 +73,11 @@ const DEFAULT_PLUGIN_EXTS = [
 /** Longest line a plugin regex is run against — bounds a pathological (ReDoS) pattern. */
 const MAX_LINE_LEN = 2000;
 
+/**
+ * Directories a plugin never scans. Other dot-directories (`.github/`, `.claude/`) are repository
+ * files a rule may be about, so they are walked; these are version control, dependency and build
+ * caches, and kit's own state.
+ */
 const PLUGIN_SKIP_DIRS = [
   "node_modules",
   "dist",
@@ -83,7 +88,25 @@ const PLUGIN_SKIP_DIRS = [
   "coverage",
   "vendor",
   "target",
+  ".kit",
+  ".venv",
+  ".tox",
+  ".cache",
+  ".yarn",
+  ".pnpm-store",
+  ".turbo",
+  ".nuxt",
+  ".svelte-kit",
+  ".gradle",
+  ".terraform",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
 ];
+
+/** The files a plugin walks: its extensions under the repository, dot-directories included. */
+const pluginFiles = (cwd: string, exts: string[], includeTests: boolean): string[] =>
+  walkSourceFiles(cwd, { exts, includeTests, skipDirs: PLUGIN_SKIP_DIRS, includeDotDirs: true });
 
 const pluginSchema = z
   .object({
@@ -356,6 +379,8 @@ export interface PluginFinding {
 export interface PluginEvaluation {
   findings: PluginFinding[];
   warnings: StandardsCheckResult[];
+  /** Require mode: files the scope selected. Zero means the rule checked nothing. */
+  scopedFiles: number;
 }
 
 function pluginWarn(spec: StandardPluginSpec, reason: string): StandardsCheckResult {
@@ -388,18 +413,10 @@ function evaluatePlugin(cwd: string, spec: StandardPluginSpec): PluginEvaluation
   }));
   const findings: PluginFinding[] = [];
   const warnings: StandardsCheckResult[] = [];
-  const files = walkSourceFiles(cwd, {
-    exts: spec.exts,
-    includeTests: spec.includeTests,
-    skipDirs: PLUGIN_SKIP_DIRS,
-  });
+  const files = pluginFiles(cwd, spec.exts, spec.includeTests);
 
   if (excludes.length > 0) {
-    const excludeUniverse = walkSourceFiles(cwd, {
-      exts: spec.exts,
-      includeTests: true,
-      skipDirs: PLUGIN_SKIP_DIRS,
-    });
+    const excludeUniverse = pluginFiles(cwd, spec.exts, true);
     for (const file of excludeUniverse) {
       const rel = pluginPath(cwd, file);
       for (const ex of excludes) {
@@ -440,16 +457,31 @@ function evaluatePlugin(cwd: string, spec: StandardPluginSpec): PluginEvaluation
       pluginWarn(spec, `exclude pattern(s) matched zero files: ${unmatchedExcludes.join(", ")}`),
     );
   }
-  if (spec.mode === "require" && scopeRe && files.length > 0 && scopedFiles === 0) {
-    warnings.push(pluginWarn(spec, `scope regex matched zero files: ${spec.scope}`));
-  }
-
-  return { findings, warnings };
+  return { findings, warnings, scopedFiles };
 }
 
 /** Back-compatible convenience wrapper used by tests and baseline collection. */
 export function evaluatePluginFindings(cwd: string, spec: StandardPluginSpec): PluginFinding[] {
   return evaluatePlugin(cwd, spec).findings;
+}
+
+/**
+ * A require rule whose scope selected no file checked nothing, so it cannot pass. It is reported
+ * once, as incomplete, and fails under `--enforce` like any other gate that did not run.
+ */
+function emptyScopeResult(spec: StandardPluginSpec, enforce: boolean): StandardsCheckResult {
+  const selector = spec.scope
+    ? `scope regex ${spec.scope}`
+    : `extension(s) ${spec.exts.join(", ")}`;
+  return {
+    category: "standards",
+    dimension: "plugin",
+    name: `plugin: ${spec.id}`,
+    status: enforce ? "fail" : "warn",
+    severity: enforce ? "high" : "low",
+    didNotRun: true,
+    detail: `${spec.title} — incomplete: ${selector} matched zero files, so nothing was checked`,
+  };
 }
 
 function pluginPassDetail(spec: StandardPluginSpec): string {
@@ -497,42 +529,42 @@ export function checkStandardsPlugins(opts: CheckPluginsOptions): StandardsCheck
       continue;
     }
     const evaluation = evaluatePlugin(cwd, spec);
-    results.push(...evaluation.warnings);
-    const findings = evaluation.findings;
-    const fresh = findings.filter((f) => !seen.has(pluginKey(spec.id, f.file, f.line)));
-    const name = `plugin: ${spec.id}`;
-    const gates = enforce || spec.severity === "fail";
-    if (findings.length === 0) {
-      results.push({
-        category: "standards",
-        dimension: "plugin",
-        name,
-        status: "pass",
-        detail: pluginPassDetail(spec),
-      });
-    } else if (fresh.length === 0) {
-      results.push({
-        category: "standards",
-        dimension: "plugin",
-        name,
-        status: "warn",
-        severity: "low",
-        detail: `${findings.length} pre-existing match(es) (baseline-frozen)`,
-      });
-    } else {
-      results.push({
-        category: "standards",
-        dimension: "plugin",
-        name,
-        status: gates ? "fail" : "warn",
-        severity: gates ? "high" : "medium",
-        detail: pluginFreshDetail(spec, fresh.length, findings.length),
-        files: fresh.slice(0, 10).map((f) => pluginFileLabel(spec, f)),
-      });
-    }
+    results.push(...evaluation.warnings, pluginResult(spec, evaluation, seen, enforce));
   }
   results.push(...skillRuleGateRows(cwd, plugins));
   return results;
+}
+
+/** One plugin's row: incomplete, pass, baseline-frozen, or net-new findings. */
+function pluginResult(
+  spec: StandardPluginSpec,
+  evaluation: PluginEvaluation,
+  seen: Set<string>,
+  enforce: boolean,
+): StandardsCheckResult {
+  if (spec.mode === "require" && evaluation.scopedFiles === 0) {
+    return emptyScopeResult(spec, enforce);
+  }
+  const findings = evaluation.findings;
+  const fresh = findings.filter((f) => !seen.has(pluginKey(spec.id, f.file, f.line)));
+  const row = { category: "standards", dimension: "plugin", name: `plugin: ${spec.id}` } as const;
+  if (findings.length === 0) return { ...row, status: "pass", detail: pluginPassDetail(spec) };
+  if (fresh.length === 0) {
+    return {
+      ...row,
+      status: "warn",
+      severity: "low",
+      detail: `${findings.length} pre-existing match(es) (baseline-frozen)`,
+    };
+  }
+  const gates = enforce || spec.severity === "fail";
+  return {
+    ...row,
+    status: gates ? "fail" : "warn",
+    severity: gates ? "high" : "medium",
+    detail: pluginFreshDetail(spec, fresh.length, findings.length),
+    files: fresh.slice(0, 10).map((f) => pluginFileLabel(spec, f)),
+  };
 }
 
 /** Snapshot current plugin matches for `kit baseline freeze` (net-new thereafter). */
