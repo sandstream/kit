@@ -21,6 +21,7 @@
  */
 import { mayChangeDirectory } from "./install-gate-cwd.js";
 import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
+import { checkRequirementsInstall, requirementFileValues } from "./install-gate-requirements.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -83,6 +84,8 @@ export interface InstallProbe {
   bareInstall: boolean;
   /** The parsed tokens of each bare install, so the directory comes from them and not from the text. */
   bareSegments: BareSegment[];
+  /** pip-family installs that read a requirements file (`-r <file>`), checked like a bare install. */
+  requirementSegments: BareSegment[];
 }
 
 // Leading shell keywords / grouping tokens that precede a real command without
@@ -705,6 +708,7 @@ export function parseInstallCommand(command: string): InstallProbe {
     runnerBinCandidates: [],
     bareInstall: false,
     bareSegments: [],
+    requirementSegments: [],
   };
   if (!command || typeof command !== "string") return probe;
   for (const ref of repoFetchToShellRefs(command)) {
@@ -1155,6 +1159,13 @@ function isApprovalNoop(tokens: string[], pos: string[]): boolean {
   return false;
 }
 
+/** Record a pip-family install that reads a requirements file (`pip install -r <file>`). */
+function noteRequirementFiles(pos: string[], tokens: string[], probe: InstallProbe): void {
+  if (pipInstallerArgStart(pos) >= 0 && requirementFileValues(tokens).length > 0) {
+    probe.requirementSegments.push({ manager: tokens[0], tokens });
+  }
+}
+
 /** Match one shell segment against the package-manager matchers, mutating `probe`. */
 function scanSegment(segment: string, probe: InstallProbe): void {
   const raw = stripRedirections(shellWords(stripInlineComment(segment))).map(dequote);
@@ -1194,6 +1205,7 @@ function scanSegment(segment: string, probe: InstallProbe): void {
   // step would push an agent straight to `--all` — the opposite of what this gate wants — so
   // those faces are never an install.
   if (isApprovalNoop(tokens, pos)) return;
+  noteRequirementFiles(pos, tokens, probe);
 
   for (const m of MATCHERS) {
     if (applyMatcher(m, pos, tokens, cmdRaw, probe)) break; // one matcher per segment
@@ -1248,6 +1260,17 @@ export async function decideBashGate(
   return withNotes(verdict, installNotes(command, cwd, parseInstallCommand(command).bareSegments));
 }
 
+/** Why a package-less install (`npm install`, `pip install -r <file>`) in `cwd` is refused, or undefined. */
+function bareRefusal(command: string, cwd: string, probe: InstallProbe): string | undefined {
+  const verdicts = [
+    probe.bareInstall ? checkBareInstall(command, cwd, probe.bareSegments) : undefined,
+    probe.requirementSegments.length > 0
+      ? checkRequirementsInstall(command, cwd, probe.requirementSegments)
+      : undefined,
+  ];
+  return verdicts.find((v) => v?.block)?.reason;
+}
+
 async function gateVerdict(
   command: string,
   deps?: GateDeps,
@@ -1256,7 +1279,7 @@ async function gateVerdict(
   const refused = policyRefusal(command, splitHeredocs(command));
   if (refused) return { block: true, reason: refused, checked: [] };
   const probe = parseInstallCommand(command);
-  if (!probe.isInstall && !probe.bareInstall) {
+  if (!probe.isInstall && !probe.bareInstall && probe.requirementSegments.length === 0) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };
   }
   if (probe.unverifiable.length > 0) {
@@ -1272,10 +1295,8 @@ async function gateVerdict(
       checked: [],
     };
   }
-  if (probe.bareInstall && cwd) {
-    const bare = checkBareInstall(command, cwd, probe.bareSegments);
-    if (bare.block) return { block: true, reason: bare.reason, checked: [] };
-  }
+  const bare = cwd ? bareRefusal(command, cwd, probe) : undefined;
+  if (bare) return { block: true, reason: bare, checked: [] };
   const shadowed = shadowedBins(command, probe.runnerBinCandidates, cwd);
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
   const checked: GateVerdict[] = [];

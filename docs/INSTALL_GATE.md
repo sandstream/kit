@@ -57,6 +57,12 @@ A tracked `package.json` stays allowed. That relies on `kit triage check-deps` r
 installed. A freshly cloned repository whose hooks are not installed is therefore not covered. Closing that would block `npm ci` in every
 checkout, so it is left as a policy decision for the maintainer.
 
+`pip install -r <file>` (also `pip3`, `python -m pip`, `uv pip install`, and the `--requirement` spellings) is held to the same rule.
+A requirements file that git does not track needs a `kit triage pip` receipt from the last 7 days for every requirement it names,
+matched by normalised PyPI name (`Example_Pkg` and `example-pkg` are one name). A nested `-r`, an index or find-links option,
+an editable, a URL or a `name @ url` reference blocks the install; a local path is skipped. A tracked file, or one that does not
+exist, stays allowed. `pip-sync` and `uv pip sync` are not read by the gate at all yet.
+
 The gate does not triage transitive dependencies, and a receipt matches a package by name, not by version.
 Receipts are per directory, so triage from the directory you install in.
 
