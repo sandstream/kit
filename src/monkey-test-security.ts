@@ -16,7 +16,7 @@ import {
   withoutMonkeySourceComments,
   type MonkeySourceScan,
 } from "./monkey-test-scan.js";
-import { findSecrets } from "./utils/redactSecrets.js";
+import { findSecrets, SECRET_PATTERNS } from "./utils/redactSecrets.js";
 
 interface SecurityContext {
   scan: MonkeySourceScan;
@@ -72,6 +72,26 @@ async function securityContext(cwd: string): Promise<SecurityContext> {
   };
 }
 
+/** A POSIX shell single-quoted word. */
+function shellQuote(text: string): string {
+  return `'${text.split("'").join(`'\\''`)}'`;
+}
+
+/**
+ * A command that shows the matching line: ripgrep with the shared pattern that matched, so the
+ * repro is the detector itself, not a second copy of it. No kit command scans one committed file
+ * for secret shapes (`scan-staged` reads staged changes, `scan-artifact` runs ClamAV).
+ */
+function secretRepro(file: string, text: string, labels: string[]): string {
+  const shape = SECRET_PATTERNS.find(
+    ({ re, label }) => labels.includes(label) && new RegExp(re.source, re.flags).test(text),
+  );
+  const shapes = labels.join(", ");
+  if (!shape) return `kit monkey-test plan  # ${file}: ${shapes}, no single-pattern repro`;
+  const pattern = (shape.re.flags.includes("i") ? "(?i)" : "") + shape.re.source;
+  return `rg -n -P ${shellQuote(pattern)} ${shellQuote(file)}  # ${shapes}`;
+}
+
 function committedSecretFindings(scan: MonkeySourceScan): MonkeyFinding[] {
   const findings: MonkeyFinding[] = [];
   const liveSecretFile = firstMonkeyFileMatching(
@@ -106,7 +126,7 @@ function committedSecretFindings(scan: MonkeySourceScan): MonkeyFinding[] {
         area: "security",
         title: "Secret-shaped value in runtime source",
         file,
-        repro: `kit security scan-artifact ${file} (${labels.join(", ")})`,
+        repro: secretRepro(file, text, labels),
         fix: "Remove and rotate the credential, then resolve it from the configured vault at runtime.",
       }),
     );
@@ -132,18 +152,87 @@ function livePaymentEnvironmentFindings(): MonkeyFinding[] {
   return findings;
 }
 
+const SQL_TABLE = String.raw`((?:"[^"]+"|[\w$]+)(?:\.(?:"[^"]+"|[\w$]+))?)`;
+const CREATE_TABLE_RE = new RegExp(
+  String.raw`create\s+table\s+(?:if\s+not\s+exists\s+)?${SQL_TABLE}`,
+  "gi",
+);
+const ENABLE_RLS_RE = new RegExp(
+  String.raw`alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?${SQL_TABLE}\s+enable\s+row\s+level\s+security`,
+  "gi",
+);
+const POLICY_ON_RE = new RegExp(
+  String.raw`create\s+policy\s+(?:"[^"]+"|\S+)\s+on\s+${SQL_TABLE}`,
+  "gi",
+);
+
+/** `public.Foo` and `"foo"` name the same table as `foo`; another schema keeps its prefix. */
+function sqlTableName(raw: string): string {
+  return raw
+    .split('"')
+    .join("")
+    .toLowerCase()
+    .replace(/^public\./, "");
+}
+
+function tablesIn(texts: string[], re: RegExp): Set<string> {
+  return new Set(texts.flatMap((t) => [...t.matchAll(re)].map((m) => sqlTableName(m[1]))));
+}
+
+/** Each table a SQL file creates, with the first file (by name) that creates it. */
+function createdTables(controlFiles: Record<string, string>): Map<string, string> {
+  const created = new Map<string, string>();
+  const sqlFiles = Object.keys(controlFiles)
+    .filter((f) => f.toLowerCase().endsWith(".sql"))
+    .sort();
+  for (const file of sqlFiles) {
+    for (const table of tablesIn([controlFiles[file]], CREATE_TABLE_RE)) {
+      if (!created.has(table)) created.set(table, file);
+    }
+  }
+  return created;
+}
+
+const RLS_FIX =
+  "Add RLS policies for tenant/customer/staff/owner/support paths and cover them with role-based tests.";
+
+/** Per table: each table a migration creates needs RLS enabled and a policy on it. */
 function rlsPolicyFindings(context: SecurityContext): MonkeyFinding[] {
+  const created = createdTables(context.controlFiles);
+  if (created.size === 0) return repoRlsFindings(context);
+  const texts = Object.values(context.controlFiles);
+  const rls = tablesIn(texts, ENABLE_RLS_RE);
+  const policies = tablesIn(texts, POLICY_ON_RE);
+  const missing = [...created.keys()].filter((t) => !rls.has(t) || !policies.has(t)).sort();
+  if (missing.length === 0) return [];
+  return [
+    monkeyFinding({
+      severity: "high",
+      area: "authz",
+      title: `Supabase tables without obvious RLS policy coverage: ${missing.join(", ")}`,
+      file: created.get(missing[0]),
+      repro: `rg -n -i "enable row level security|create policy" ${[...new Set(missing.map((t) => created.get(t)))].join(" ")}`,
+      fix: RLS_FIX,
+    }),
+  ];
+}
+
+/** No CREATE TABLE in the SQL files read: the repository-wide signal is all there is. */
+function repoRlsFindings(context: SecurityContext): MonkeyFinding[] {
   const hasRls = hasAnyMonkeyFile(context.controlFiles, SUPABASE_RLS_PATTERNS);
   const hasPolicy = hasAnyMonkeyFile(context.controlFiles, SUPABASE_POLICY_PATTERNS);
   if (hasRls && hasPolicy) return [];
+  const sql = Object.keys(context.controlFiles)
+    .filter((f) => f.toLowerCase().endsWith(".sql"))
+    .sort()[0];
   return [
     monkeyFinding({
       severity: "high",
       area: "authz",
       title: "Supabase detected without obvious RLS policy coverage",
-      file: firstMonkeyFileMatching(context.controlFiles, SUPABASE_CONTROL_FILE_PATTERN),
+      file: sql ?? firstMonkeyFileMatching(context.controlFiles, SUPABASE_CONTROL_FILE_PATTERN),
       repro: 'rg -n "enable row level security|create policy|auth.uid" supabase src',
-      fix: "Add RLS policies for tenant/customer/staff/owner/support paths and cover them with role-based tests.",
+      fix: RLS_FIX,
     }),
   ];
 }

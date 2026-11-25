@@ -503,14 +503,7 @@ export async function checkBuiltBundleSecrets(root: string): Promise<SecurityChe
   };
 
   const builds = await detectClientBuilds(root);
-  if (builds.length === 0) {
-    return {
-      ...base,
-      status: "skip",
-      detail:
-        "no client framework in package.json (or its workspaces) — nothing builds for a browser",
-    };
-  }
+  if (builds.length === 0) return undeclaredBuildResult(root, base);
   const framework = [...new Set(builds.map((b) => b.framework))].join("+");
 
   const present = await presentBuildDirs(root, builds);
@@ -521,7 +514,68 @@ export async function checkBuiltBundleSecrets(root: string): Promise<SecurityChe
       detail: `${framework} project(s) present but not built (no dist/, .next/, …) — run the build, then re-check`,
     };
   }
+  return scanPresentBuilds(root, base, present, framework);
+}
 
+const JS_FILE = /\.[cm]?js$/i;
+
+async function jsFilesIn(dir: string): Promise<boolean> {
+  try {
+    return (await readdir(dir)).some((name) => JS_FILE.test(name));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A root build directory that looks like it ships to a browser although no framework is declared:
+ * an `index.html`, or JavaScript under `assets/` or `static/`, which is what Vite, Rollup and
+ * webpack setups emit. A `dist/` with JavaScript only at its top is read as a server or CLI build.
+ */
+async function undeclaredBuildDirs(root: string): Promise<{ browser: string[]; js: string[] }> {
+  const browser: string[] = [];
+  const js: string[] = [];
+  for (const dir of BUILD_DIRS) {
+    const full = join(root, dir);
+    const html = await access(join(full, "index.html")).then(
+      () => true,
+      () => false,
+    );
+    const assets =
+      (await jsFilesIn(join(full, "assets"))) || (await jsFilesIn(join(full, "static")));
+    if (html || assets) browser.push(dir);
+    else if (await jsFilesIn(full)) js.push(dir);
+  }
+  return { browser, js };
+}
+
+/** No client framework is declared: scan browser-shaped output anyway, and name any other JS build. */
+async function undeclaredBuildResult(
+  root: string,
+  base: Omit<SecurityCheckResult, "status" | "detail">,
+): Promise<SecurityCheckResult> {
+  const found = await undeclaredBuildDirs(root);
+  if (found.browser.length) {
+    return scanPresentBuilds(root, base, found.browser, "no client framework declared");
+  }
+  const none = "no client framework in package.json (or its workspaces)";
+  if (found.js.length === 0) {
+    return { ...base, status: "skip", detail: `${none} — nothing builds for a browser` };
+  }
+  const dirs = found.js.map((d) => `${d}/`).join(", ");
+  return {
+    ...base,
+    status: "skip",
+    detail: `${none}; ${dirs} holds JavaScript but no index.html or assets/, read as a server or CLI build and not scanned. Run \`kit security scan-build\` if it ships to a browser`,
+  };
+}
+
+async function scanPresentBuilds(
+  root: string,
+  base: Omit<SecurityCheckResult, "status" | "detail">,
+  present: string[],
+  framework: string,
+): Promise<SecurityCheckResult> {
   const { scanBuildArtifacts, BuildScanIncompleteError } = await import("./scan-build.js");
   let hits: Awaited<ReturnType<typeof scanBuildArtifacts>>;
   let ignoredIncomplete: string[] = [];

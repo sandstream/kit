@@ -341,7 +341,9 @@ describe("checkBuiltBundleSecrets", () => {
     try {
       const r = await checkBuiltBundleSecrets(dir);
       assert.equal(r.status, "skip");
-      assert.match(r.detail, /nothing builds for a browser/);
+      // It says what it found instead of claiming nothing builds (kit-research#230).
+      assert.match(r.detail, /dist\/ holds JavaScript but no index\.html or assets\//);
+      assert.doesNotMatch(r.detail, /nothing builds for a browser/);
     } finally {
       rmTemp(dir);
     }
@@ -382,5 +384,43 @@ describe("checkBuiltBundleSecrets", () => {
     assert.equal(isTestArtifact("dist/assets/index-abc.js"), false);
     assert.equal(isTestArtifact("dist/latest.js"), false, "a name containing 'test' is not a test");
     assert.equal(isTestArtifact("dist/latest.js.map"), false);
+  });
+});
+
+describe("checkBuiltBundleSecrets without a declared framework (kit-research#230)", () => {
+  it("scans dist/assets JavaScript although only express is declared", async () => {
+    const dir = tree({
+      "package.json": JSON.stringify({ dependencies: { express: "4.21.2" } }),
+      "dist/assets/index-a1b2c3.js": 'const k="sk_test_0000FAKE0000NOTREAL0000KEY00";\n',
+    });
+    try {
+      const r = await checkBuiltBundleSecrets(dir);
+      assert.equal(r.status, "fail");
+      assert.equal(r.severity, "critical");
+      assert.match(r.detail, /dist\/assets\/index-a1b2c3\.js/);
+      assert.match(r.detail, /no client framework declared/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("passes a clean browser build, and keeps the old skip when there is no build at all", async () => {
+    const built = tree({
+      "package.json": "{}",
+      "build/index.html": "<script src=/static/main.js></script>",
+      "build/static/main.js": "console.log(1);\n",
+    });
+    const bare = tree({ "package.json": "{}" });
+    try {
+      const r = await checkBuiltBundleSecrets(built);
+      assert.equal(r.status, "pass");
+      assert.match(r.detail, /build/);
+      const s = await checkBuiltBundleSecrets(bare);
+      assert.equal(s.status, "skip");
+      assert.match(s.detail, /nothing builds for a browser/);
+    } finally {
+      rmTemp(built);
+      rmTemp(bare);
+    }
   });
 });
