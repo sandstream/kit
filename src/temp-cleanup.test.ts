@@ -1,6 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +48,37 @@ describe("rmTemp", () => {
     rmTemp(dir);
     assert.throws(() => readdirSync(dir), { code: "ENOENT" });
   });
+
+  it(
+    "waits for Windows to release an initially busy empty directory",
+    {
+      skip: process.platform !== "win32",
+      timeout: 30_000,
+    },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-rmtemp-busy-"));
+      const child = spawn(
+        process.execPath,
+        [
+          "-e",
+          'process.stdin.once("data", () => { process.stdin.pause(); setTimeout(() => process.exit(0), 1000); }); process.stdout.write("ready");',
+        ],
+        { cwd: dir, stdio: ["pipe", "pipe", "inherit"] },
+      );
+      const exited = once(child, "close");
+      try {
+        await once(child.stdout, "data");
+        assert.throws(() => rmdirSync(dir), { code: "EBUSY" });
+        child.stdin.end("release");
+        rmTemp(dir);
+        assert.throws(() => readdirSync(dir), { code: "ENOENT" });
+      } finally {
+        child.stdin.end();
+        await exited;
+        rmTemp(dir);
+      }
+    },
+  );
 
   it("is the only way tests remove a directory tree (no raw recursive rmSync without retries)", () => {
     const raw = /rmSync\([^;]*?\{\s*recursive: true,\s*force: true\s*\}\)/;
