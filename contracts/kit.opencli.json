@@ -1814,7 +1814,7 @@
         },
         "pal": {
           "kind": "command",
-          "summary": "Pending action ledger — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
+          "summary": "Pending action ledger: open work and its handoff between sessions (claim/renew/release/takeover) — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,

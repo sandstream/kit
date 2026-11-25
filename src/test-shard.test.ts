@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -149,5 +150,24 @@ describe("scripts/test.mjs", () => {
     });
     assert.equal(run.status, 2);
     assert.match(run.stderr, /KIT_TEST_TIMEOUT_MS must be a positive integer/);
+  });
+});
+
+describe("scripts/test-weights.json", () => {
+  // A weight for a deleted test file balances nothing and hides how stale the table is. The
+  // timings themselves come only from the Windows workflow (time_files=true); this checks names.
+  it("names only test files that exist in src/ or a package's src/", () => {
+    const table = JSON.parse(readFileSync(join(ROOT, "scripts", "test-weights.json"), "utf8")) as {
+      files: Record<string, number>;
+    };
+    const sourceOf = (compiled: string): string =>
+      compiled
+        .replace(/^dist\//, "src/")
+        .replace(/^(packages\/[^/]+\/)dist\//, "$1src/")
+        .replace(/\.js$/, ".ts");
+    const gone = Object.keys(table.files).filter(
+      (compiled) => !existsSync(join(ROOT, ...sourceOf(compiled).split("/"))),
+    );
+    assert.deepEqual(gone, [], "remove these entries from scripts/test-weights.json");
   });
 });

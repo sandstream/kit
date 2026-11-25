@@ -65,7 +65,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "memory context":
     "Push-surface active decisions for the area(s) whose files you're touching (deterministic, path→cluster)",
   "memory pal":
-    "Pending action ledger — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
+    "Pending action ledger: open work and its handoff between sessions (claim/renew/release/takeover) — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
   "memory pal claim":
     "Claim inspected work: kit memory pal claim <id> [label] --harness <name> --session <id> --expect <frontier>",
   "memory pal renew":
