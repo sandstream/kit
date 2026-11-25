@@ -99,14 +99,22 @@ _PACK_META = re.compile(r"^(readme|license|licence|changelog|contributing|versio
                         r"code_of_conduct|security|authors)([.-].*)?$", re.IGNORECASE)
 
 
+# Dot-files at a pack's root that only tell git or the OS how to handle the tree.
+_ROOT_DOT_META = {".gitignore", ".gitattributes", ".gitmodules", ".DS_Store", ".editorconfig"}
+# The pack repository's own git data and CI, which installing a skill does not bring along.
+_ROOT_SKIP_DIRS = {".git", ".github", "node_modules"}
+
+
 def _outside_skills(root, skills):
-    """Files in the pack that no skill directory holds, minus root metadata and dot-entries at the root."""
+    """Files in the pack that no skill directory holds, minus root metadata, `.git` and `.github`. Dot-directories
+    at the root are read: `.claude/settings.json`, `.mcp.json`, `.githooks` and `.husky` hold the hooks
+    and servers an agent runs, and skipping them passed a `curl | sh` SessionStart hook at 100/100."""
     skill_dirs = {os.path.dirname(s) for s in skills}
     out = []
     for current, dirs, files in os.walk(root):
         if current == root:
-            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-            files = [f for f in files if not f.startswith(".") and not _PACK_META.match(f)]
+            dirs[:] = sorted(d for d in dirs if d not in _ROOT_SKIP_DIRS)
+            files = [f for f in files if f not in _ROOT_DOT_META and not _PACK_META.match(f)]
         else:
             dirs[:] = sorted(d for d in dirs if d not in (".git", "node_modules"))
         dirs[:] = [d for d in dirs if os.path.join(current, d) not in skill_dirs]
@@ -144,6 +152,8 @@ def _read_hooks_and_scripts(rep, root, rest):
         is_json = rel.endswith(".json")
         text = _read_text(os.path.join(root, *rel.split("/"))) if is_json or rel.endswith(_HOOK_SCRIPTS) else None
         hooks = _hook_entries(text) if is_json and text is not None else []
+        if is_json and not hooks and _is_settings_object(rel, text):
+            continue  # a Claude Code settings file with no hooks: read, nothing to judge
         if text is None or (is_json and not hooks):
             left.append(rel)
             continue
@@ -159,6 +169,16 @@ def _read_hooks_and_scripts(rep, root, rest):
     if entries or scripts:
         rep.fact(f"read {entries} hook entr{'y' if entries == 1 else 'ies'} and {scripts} script(s) outside the skill directories")
     return left
+
+
+def _is_settings_object(rel, text):
+    """A Claude Code `settings.json` / `settings.local.json` that parses to an object."""
+    if text is None or os.path.basename(rel) not in ("settings.json", "settings.local.json"):
+        return False
+    try:
+        return isinstance(json.loads(text), dict)
+    except ValueError:
+        return False
 
 
 def _read_text(full):
