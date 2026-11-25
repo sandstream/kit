@@ -57,26 +57,32 @@ const IGNORED = new Set([
   "tmp",
 ]);
 
+/** The manifests present in a directory, in MANIFESTS order. */
+async function manifestsIn(dir: string): Promise<string[]> {
+  const present = await Promise.all(
+    MANIFESTS.map((m) =>
+      access(join(dir, m)).then(
+        () => true,
+        () => false,
+      ),
+    ),
+  );
+  return MANIFESTS.filter((_, i) => present[i]);
+}
+
 async function hasManifest(dir: string): Promise<boolean> {
-  for (const m of MANIFESTS) {
-    try {
-      await access(join(dir, m));
-      return true;
-    } catch {
-      /* keep looking */
-    }
-  }
-  return false;
+  return (await manifestsIn(dir)).length > 0;
 }
 
 /**
  * Immediate-child projects, plus one level deeper (a `packages/*` layout is the common case). Depth
  * is bounded at 2 on purpose: this is a "you are standing in the wrong directory" detector, not a
  * repository crawler, and an unbounded walk on a home directory would cost more than the check is
- * worth.
+ * worth. Each project keeps the manifests found in it, so a skip is escalated only toward projects
+ * its scanner would have read.
  */
-export async function findNestedProjects(root: string, maxDepth = 2): Promise<string[]> {
-  const found: string[] = [];
+async function findNestedManifests(root: string, maxDepth = 2): Promise<Record<string, string[]>> {
+  const found: Record<string, string[]> = {};
 
   const walk = async (dir: string, rel: string, depth: number): Promise<void> => {
     if (depth > maxDepth) return;
@@ -90,8 +96,9 @@ export async function findNestedProjects(root: string, maxDepth = 2): Promise<st
       if (!e.isDirectory() || e.name.startsWith(".") || IGNORED.has(e.name)) continue;
       const childRel = rel ? `${rel}/${e.name}` : e.name;
       const childAbs = join(dir, e.name);
-      if (await hasManifest(childAbs)) {
-        found.push(childRel);
+      const manifests = await manifestsIn(childAbs);
+      if (manifests.length) {
+        found[childRel] = manifests;
         // Do not descend into a project we already found: its own subpackages are that
         // project's business, and `kit check` there will enumerate them.
         continue;
@@ -101,7 +108,12 @@ export async function findNestedProjects(root: string, maxDepth = 2): Promise<st
   };
 
   await walk(root, "", 1);
-  return found.sort();
+  return found;
+}
+
+/** The nested project paths, sorted. */
+export async function findNestedProjects(root: string, maxDepth = 2): Promise<string[]> {
+  return Object.keys(await findNestedManifests(root, maxDepth)).sort();
 }
 
 /**
@@ -167,14 +179,21 @@ export interface ScanScope {
   workspaces: boolean;
   /** Nested paths a root Cargo workspace locks in its Cargo.lock, so the root scan reads them. */
   cargoMembers?: string[];
+  /** The manifests each nested project holds. Absent means unknown: every project counts. */
+  manifests?: Record<string, string[]>;
 }
 
 /** The facts, gathered once: the row below and the skip escalation both read them. */
 export async function scanScopeFacts(root: string): Promise<ScanScope> {
-  const [rootManifest, nested] = await Promise.all([hasManifest(root), findNestedProjects(root)]);
+  const [rootManifest, manifests] = await Promise.all([
+    hasManifest(root),
+    findNestedManifests(root),
+  ]);
+  const nested = Object.keys(manifests).sort();
   return {
     rootManifest,
     nested,
+    manifests,
     workspaces: rootManifest ? await declaresWorkspaces(root) : false,
     cargoMembers: rootManifest ? await cargoWorkspaceMembers(root, nested) : [],
   };
@@ -193,12 +212,32 @@ const MANIFEST_ABSENCE =
   /^no (package\.json|requirements\.txt|lockfiles|Maven\/Gradle|package\.json \/ requirements\.txt)/i;
 
 /**
+ * The manifests each skip reason is about, most specific first. A reason not listed here
+ * (`no lockfiles`: osv-scanner reads every ecosystem's lockfile) is about any manifest.
+ */
+const SKIP_READS: [RegExp, readonly string[]][] = [
+  [/^no package\.json (?:or|\/) requirements\.txt/i, ["package.json", "requirements.txt"]],
+  [/^no package\.json/i, ["package.json"]],
+  [/^no requirements\.txt/i, ["requirements.txt"]],
+  [/^no Maven\/Gradle/i, ["pom.xml", "build.gradle", "build.gradle.kts"]],
+];
+
+/** The nested projects a scanner that skipped with this reason would have read. */
+function projectsFor(detail: string, scope: ScanScope): string[] {
+  const reads = SKIP_READS.find(([re]) => re.test(detail))?.[1];
+  const { manifests } = scope;
+  if (!reads || !manifests) return scope.nested;
+  return scope.nested.filter((p) => manifests[p]?.some((m) => reads.includes(m)));
+}
+
+/**
  * Turn "nothing to scan" into "looked in the wrong place".
  *
  * A scanner that skips because this path has no manifest is telling the truth, and the sum of those
  * truths was a green verdict over a directory whose code lived one level down. When the scope facts
  * say kit is in the wrong place, those skips are no longer honest not-applicables: they are checks
- * that did not cover the code. They become warnings naming where the code is.
+ * that did not cover the code. They become warnings naming where the code is — the projects that
+ * hold a manifest that scanner reads. A skip for an ecosystem no project below uses stays a skip.
  *
  * Only in that case. In an ordinary project, or a workspace root that genuinely covers its
  * children, a manifest-absence skip stays a skip — a check that warns everywhere gets switched off,
@@ -209,17 +248,17 @@ export function escalateManifestSkips(
   scope: ScanScope,
 ): SecurityCheckResult[] {
   if (!lookedInTheWrongPlace(scope)) return results;
-  const where = scope.nested.slice(0, 3).join(", ");
-  return results.map((r) =>
-    r.status === "skip" && MANIFEST_ABSENCE.test(r.detail)
-      ? {
-          ...r,
-          status: "warn" as const,
-          severity: r.severity ?? ("medium" as const),
-          detail: `${r.detail} — but ${scope.nested.length} project(s) below do (${where}); this scan looked in the wrong place`,
-        }
-      : r,
-  );
+  return results.map((r) => {
+    if (r.status !== "skip" || !MANIFEST_ABSENCE.test(r.detail)) return r;
+    const projects = projectsFor(r.detail, scope);
+    if (!projects.length) return r;
+    return {
+      ...r,
+      status: "warn" as const,
+      severity: r.severity ?? ("medium" as const),
+      detail: `${r.detail} — but ${projects.length} project(s) below do (${projects.slice(0, 3).join(", ")}); this scan looked in the wrong place`,
+    };
+  });
 }
 
 const NAME = "scan scope";

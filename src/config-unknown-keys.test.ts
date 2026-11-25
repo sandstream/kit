@@ -87,9 +87,23 @@ ${JSON.stringify(browserKey)} = "retained-browser-value"
       );
       assert.equal(config.browser.port, 3107);
     }
-    assert.equal(warnings.filter((line) => line.startsWith("Warning: unknown section")).length, 2);
+    assert.equal(warnings.filter((line) => line.startsWith("Warning: unknown section")).length, 1);
     assert.equal(warnings.filter((line) => line.startsWith("Warning: unknown key")).length, 1);
     assert.doesNotMatch(warnings.join(""), /\x1b|\n|ghp_/);
     assert.deepEqual(fixture.snapshot(), before);
+  });
+});
+
+describe("an unknown section warns once per file", () => {
+  // Measured: a `.kit.toml` with an unknown [project] section printed the same warning 6-9 times
+  // in one `kit check`, because loadConfig runs several times per command.
+  it("repeated loads of one file warn once; another file warns again", () => {
+    for (let i = 0; i < 9; i++) {
+      warnUnknownConfigKeys("s/.kit.toml", { project: {}, tools: {} }, SECTIONS, undefined);
+    }
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /unknown section \[project\]/);
+    warnUnknownConfigKeys("t/.kit.toml", { project: {} }, SECTIONS, undefined);
+    assert.equal(warnings.length, 2);
   });
 });
