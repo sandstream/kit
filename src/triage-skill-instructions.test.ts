@@ -75,7 +75,7 @@ describe("kit triage skill (real CLI)", () => {
       return;
     }
     assert.match(r.stdout, /TRIAGE PASSED/, r.stdout + r.stderr);
-    assert.match(r.stdout, /Instruction rules \(the same files/);
+    assert.match(r.stdout, /Instruction rules \(SKILL.md, the .md files it links/);
     assert.match(r.stdout, /finding\(s\) in 1 of 1 file\(s\) read/);
   });
 });

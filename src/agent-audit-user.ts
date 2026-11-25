@@ -62,7 +62,7 @@ export function codexHome(
 }
 
 /** Every user-level agent directory kit reads, for Claude Code and Codex. Pure. */
-function userSurfaces(home: string, env: Record<string, unknown>): UserSurface[] {
+export function userSurfaces(home: string, env: Record<string, unknown>): UserSurface[] {
   const codex = codexHome(home, env);
   return [
     ...USER_AGENT_DIRS.map(({ dir, label }) => ({
@@ -168,6 +168,9 @@ function filesUnder(
 
 const MD = new Set([".md"]);
 
+/** Codex's instruction files in its home; it reads the override in preference to `AGENTS.md`. */
+export const CODEX_HOME_INSTRUCTIONS = ["AGENTS.override.md", "AGENTS.md"] as const;
+
 /**
  * The user-level instruction files, each with how it is shown: `~/.claude/CLAUDE.md`, Codex's
  * `AGENTS.override.md` and `AGENTS.md`, and every `.md` in the user dirs.
@@ -180,7 +183,7 @@ export function userInstructionFiles(
   const codex = codexHome(home, env);
   const tops = [
     ...(claude ? [{ abs: join(home, ".claude", "CLAUDE.md"), shown: "~/.claude/CLAUDE.md" }] : []),
-    ...["AGENTS.override.md", "AGENTS.md"].map((n) => ({
+    ...CODEX_HOME_INSTRUCTIONS.map((n) => ({
       abs: join(codex.dir, n),
       shown: `${codex.shown}/${n}`,
     })),
