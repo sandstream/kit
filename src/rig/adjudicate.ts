@@ -9,6 +9,8 @@
  *    matches nothing is **unmatched**: reported, but not a false positive, because it may be a
  *    real bug that was already in the code.
  *  - A **control** target (a clean diff): every finding is a **false positive**.
+ *  - A **failed** run (a `"failed"` row: the reviewer crashed, timed out or refused) reviewed
+ *    nothing: its planted defect is missed, and it carries the reason so the report can say so.
  *
  * Nothing here reads the claim text. Same input, same findings, same numbers.
  */
@@ -26,6 +28,8 @@ export interface RunOutcome {
   duplicates: number;
   falsePositives: number;
   unmatched: number;
+  /** Why the run did not complete, when it did not. */
+  failed?: string;
 }
 
 export interface Adjudication {
@@ -66,6 +70,11 @@ export function adjudicateRun(
   targetKind: "defect" | "control",
 ): RunOutcome {
   const base = { config: mark.config, run: mark.run, target: mark.target, targetKind };
+  if (mark.failed !== undefined) {
+    const missed = planted.map((d) => d.id).sort();
+    const none = { caught: [], duplicates: 0, falsePositives: 0, unmatched: 0 };
+    return { ...base, ...none, missed, failed: mark.failed };
+  }
   if (targetKind === "control") {
     return {
       ...base,

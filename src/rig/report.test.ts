@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { RunOutcome } from "./adjudicate.js";
+import { adjudicate, type RunOutcome } from "./adjudicate.js";
+import { parseFindings } from "./findings.js";
 import { parseManifest } from "./manifest.js";
 import { aggregate, compare, LIMITS, spread, splitWarnings } from "./report.js";
 
@@ -213,5 +214,47 @@ describe("a spent holdout", () => {
     assert.ok(
       splitWarnings(three).some((w) => w.startsWith("3 configs were scored on the same holdout")),
     );
+  });
+});
+
+describe("a run that did not review every target", () => {
+  const row = (o: Record<string, unknown>): string =>
+    JSON.stringify({
+      config: "A",
+      run: "r1",
+      model: "m",
+      model_version: "1",
+      date: "2026-11-25",
+      ...o,
+    });
+  const hit = (target: string, file: string, line: number) =>
+    row({ target, file, line, claim: "x", severity: "high" });
+  const statsOf = (...rows: string[]) =>
+    aggregate(MANIFEST, adjudicate(MANIFEST, parseFindings(rows.join("\n"))).outcomes)[0];
+
+  it("counts a defect with no row in that run as not caught", () => {
+    const a = statsOf(hit("d1", "a.ts", 1), hit("h1", "b.ts", 1));
+    assert.deepEqual(a.tune.recall, { mean: 0.5, min: 0.5, max: 0.5 });
+    assert.deepEqual(a.holdout.recall, { mean: 1, min: 1, max: 1 });
+    assert.deepEqual(a.tune.shortfall, [
+      { run: "r1", reviewed: 1, of: 2, failed: [], missing: ["d2"] },
+    ]);
+    assert.deepEqual(a.holdout.shortfall, []);
+  });
+
+  it("counts a failed or refused defect as not caught, and never as reviewed", () => {
+    const a = statsOf(hit("d1", "a.ts", 1), row({ target: "d2", failed: "timeout" }));
+    assert.deepEqual(a.tune.recall, { mean: 0.5, min: 0.5, max: 0.5 });
+    assert.deepEqual(a.tune.perDefect, { d1: { caught: 1, reviewed: 1 } });
+    assert.deepEqual(a.tune.shortfall, [
+      { run: "r1", reviewed: 1, of: 2, failed: [{ target: "d2", reason: "timeout" }], missing: [] },
+    ]);
+    assert.equal(a.holdout.runs, 0);
+  });
+
+  it("counts a failed control as flagged, never as clean", () => {
+    const a = statsOf(hit("d1", "a.ts", 1), row({ target: "c1", failed: "refused" }));
+    assert.deepEqual(a.controls.falsePositiveRate, { mean: 1, min: 1, max: 1 });
+    assert.equal(a.controls.shortfall?.[0].failed[0].reason, "refused");
   });
 });

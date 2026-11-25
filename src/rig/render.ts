@@ -3,7 +3,7 @@
  * with ADR-0007's three limits, verbatim, so the numbers never travel without them.
  */
 import type { RigManifest } from "./manifest.js";
-import { compare, LIMITS, type Spread } from "./report.js";
+import { compare, LIMITS, type Shortfall, type Spread } from "./report.js";
 import type { RigResult } from "./store.js";
 
 const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
@@ -19,7 +19,9 @@ export function renderPlan(m: RigManifest, inputId: string, findingsPath: string
     `tolerance ${m.input.tolerance} line(s)`,
     "",
     "For each target: check out the commit, apply its patch, run the reviewer with the prompt,",
-    `and append its findings as JSONL to ${findingsPath} (one "none": true row if it found nothing).`,
+    `and append its findings as JSONL to ${findingsPath} (one "none": true row if it found nothing,`,
+    `one "failed": "<why>" row if the reviewer crashed, timed out or refused; a target with no row`,
+    "in a run counts as not caught).",
     "",
   ];
   for (const d of m.defects)
@@ -55,6 +57,18 @@ function volumeLine(v: NonNullable<RigResult["stats"][number]["volume"]>): strin
   return `findings per run ${perRun}  unmatched ${v.unmatched}`;
 }
 
+/** One line per run that did not review every target of a half: the shortfall the numbers include. */
+function shortfallLines(what: string, shortfall: Shortfall[] | undefined): string[] {
+  return (shortfall ?? []).map((s) => {
+    const parts = [`  ${what} run ${s.run}: reviewed ${s.reviewed} of ${s.of}`];
+    if (s.failed.length > 0)
+      parts.push(`failed ${s.failed.map((f) => `${f.target} (${f.reason})`).join(", ")}`);
+    if (s.missing.length > 0) parts.push(`no row ${s.missing.join(", ")}`);
+    const counted = what === "controls" ? "counted as flagged" : "counted as not caught";
+    return `${parts.join("; ")}; ${counted}`;
+  });
+}
+
 /** The full report for one adjudicated input. */
 export function renderReport(result: RigResult, otherInputs: string[]): string[] {
   const lines = [
@@ -70,6 +84,11 @@ export function renderReport(result: RigResult, otherInputs: string[]): string[]
       `  controls ${s.controls.runs} run(s)  flagged ${range(s.controls.falsePositiveRate)}`,
     );
     if (s.volume) lines.push(`  volume   ${volumeLine(s.volume)}`);
+    lines.push(
+      ...shortfallLines("tune", s.tune.shortfall),
+      ...shortfallLines("holdout", s.holdout.shortfall),
+      ...shortfallLines("controls", s.controls.shortfall),
+    );
     for (const [id, f] of Object.entries({ ...s.tune.perDefect, ...s.holdout.perDefect })) {
       lines.push(`    ${id.padEnd(12)} caught ${f.caught}/${f.reviewed}`);
     }
