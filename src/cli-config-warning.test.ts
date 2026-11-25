@@ -14,9 +14,10 @@ ${JSON.stringify(browserKey)} = "future-browser-value"
 future = "future-root-value"
 `;
 
+// Each unknown key warns once per process, however often a command loads the config.
 for (const [args, rootWarnings] of [
   [["completions", "bash"], 1],
-  [["governance"], 2],
+  [["governance"], 1],
 ] as const) {
   it(`${args[0]} sanitizes configuration warnings without changing their frequency or files`, (t) => {
     const fixture = createCliContractFixture(config);
