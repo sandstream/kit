@@ -114,3 +114,41 @@ describe("stripComments", () => {
     assert.equal(stripComments("url: https://x.test/a#frag"), "url: https://x.test/a#frag");
   });
 });
+
+describe("pwnRequest: a workflow_run job guarded to push events", () => {
+  const wfRun = (cond: string) =>
+    `on:\n  workflow_run:\n    workflows: ["ci"]\n    types: [completed]\njobs:\n  cut:\n${cond}    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@${SHA}\n        with:\n          ref: \${{ github.event.workflow_run.head_sha }}\n      - run: ./scripts/tag.sh\n`;
+
+  it("passes a head checkout in a job that only runs for push (kit-research gha/fp-wfrun)", () => {
+    const cond =
+      "    if: >-\n      github.event.workflow_run.conclusion == 'success' &&\n      github.event.workflow_run.event == 'push' &&\n      github.event.workflow_run.head_branch == 'main'\n";
+    assert.equal(pwnRequest(wfRun(cond)), null);
+    assert.equal(
+      pwnRequest(wfRun('    if: ${{ github.event.workflow_run.event == "push" }}\n')),
+      null,
+    );
+  });
+
+  it("still flags the checkout when the guard is absent, or-ed, or not push", () => {
+    assert.ok(pwnRequest(wfRun("")));
+    const orGuard =
+      "    if: github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'pull_request'\n";
+    assert.ok(pwnRequest(wfRun(orGuard)));
+    assert.ok(pwnRequest(wfRun("    if: github.event.workflow_run.event == 'pull_request'\n")));
+  });
+
+  it("passes a guard or-ed only with a non-workflow_run event (codex-security node-release-cut)", () => {
+    const cond =
+      "    if: >-\n      github.repository == 'o/r' &&\n      (github.event_name == 'workflow_dispatch' ||\n      (github.event.workflow_run.conclusion == 'success' &&\n      github.event.workflow_run.event == 'push'))\n";
+    assert.equal(pwnRequest(wfRun(cond)), null);
+    const negated = "    if: \"!(github.event.workflow_run.event == 'push')\"\n";
+    assert.ok(pwnRequest(wfRun(negated)));
+  });
+
+  it("a guard on one job does not clear another job's head checkout", () => {
+    const wf =
+      wfRun("    if: github.event.workflow_run.event == 'push'\n") +
+      `  other:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@${SHA}\n        with:\n          ref: \${{ github.event.workflow_run.head_sha }}\n`;
+    assert.ok(pwnRequest(wf));
+  });
+});
