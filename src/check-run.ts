@@ -185,6 +185,29 @@ async function securityRows(cwd: string, online: boolean | undefined, config: ki
   ];
 }
 
+async function collectSecrets(config: kitConfig, cwd: string, verifyVercelToken?: boolean) {
+  if (!verifyVercelToken) return checkSecrets(config.secrets!, cwd);
+  const token = config.secrets?.keys?.VERCEL_TOKEN;
+  if (token?.source !== "env") {
+    return {
+      templateExists: null,
+      keys: [
+        {
+          name: "VERCEL_TOKEN",
+          source: "env",
+          available: false,
+          unverified: true,
+          detail: 'Unverified: VERCEL_TOKEN must be declared with source = "env"',
+        },
+      ],
+    };
+  }
+  return checkSecrets({ keys: { VERCEL_TOKEN: token } }, cwd, {
+    verifyVercelToken: true,
+    offline: resolveAirGap(config.air_gap).enabled,
+  });
+}
+
 export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRunResult> {
   const cwd = opts.cwd ?? process.cwd();
   const config = opts.config ?? (await loadConfig(resolve(cwd, KIT_FILE)));
@@ -208,12 +231,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       : [];
   const secrets =
     wants("secrets") && config.secrets
-      ? await step("secrets", () =>
-          checkSecrets(config.secrets!, cwd, {
-            verifyVercelToken: opts.verifyVercelToken,
-            offline: resolveAirGap(config.air_gap).enabled,
-          }),
-        )
+      ? await step("secrets", () => collectSecrets(config, cwd, opts.verifyVercelToken))
       : { templateExists: null, keys: [] };
   const skills =
     wants("skills") && config.skills ? await step("skills", () => checkSkills(config.skills!)) : [];
@@ -315,6 +333,17 @@ export function securityCheckToJson(s: SecurityCheckResult): JsonCheck {
   };
 }
 
+function secretCheckRow(s: SecretStatus): JsonCheck {
+  return {
+    name: s.name,
+    status: s.unverified ? "warn" : s.available ? "pass" : "fail",
+    detail: s.detail ?? (s.available ? "available" : "missing"),
+    category: "secrets",
+    ...(s.state && { secretState: s.state }),
+    ...(s.unverified && { didNotRun: true }),
+  };
+}
+
 export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
   return [
     ...r.tools.map((t) => ({
@@ -335,14 +364,7 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
         : (s.output ?? (s.authenticated ? "authenticated" : "not authenticated")),
       category: "services",
     })),
-    ...r.secrets.keys.map((s) => ({
-      name: s.name,
-      status: (s.unverified ? "warn" : s.available ? "pass" : "fail") as JsonCheck["status"],
-      detail: s.detail ?? (s.available ? "available" : "missing"),
-      category: "secrets",
-      ...(s.state && { secretState: s.state }),
-      ...(s.unverified && { didNotRun: true }),
-    })),
+    ...r.secrets.keys.map(secretCheckRow),
     ...r.skills.map((s) => ({
       name: s.name,
       status: (s.installed ? "pass" : s.required ? "fail" : "warn") as JsonCheck["status"],

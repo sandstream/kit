@@ -299,7 +299,7 @@ Add `--include-tests` to scan them. Directories named `test` or `tests` are stil
 
 ### Verify a Vercel token
 
-Run `kit check --category secrets --verify-vercel-token` when `VERCEL_TOKEN` is declared
+Run `kit check verify-vercel-token` when `VERCEL_TOKEN` is declared
 with `source = "env"`. Kit sends the token only to [Vercel's user endpoint](https://vercel.com/docs/rest-api/user/get-the-user).
 It follows no redirect and prints neither the token nor the response body.
 The JSON check uses `secretState` for a missing, unreadable, or rejected token.

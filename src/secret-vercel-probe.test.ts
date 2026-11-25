@@ -41,10 +41,8 @@ globalThis.fetch = async (url, options) => {
         preload,
         CLI_PATH,
         "check",
-        "--category",
-        "secrets",
+        ...(verify ? ["verify-vercel-token"] : ["--category", "secrets"]),
         "--json",
-        ...(verify ? ["--verify-vercel-token"] : []),
       ],
       {
         cwd,

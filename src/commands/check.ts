@@ -60,7 +60,6 @@ import { hitlBlocksFromCheckResults } from "../hitl.js";
 // `kit check --attest` (README "Opt-in signed receipt of which scanners ran + the verdict") exited
 // 1 with "unknown flag" and the check never ran. A false green's mirror image: a gate that refuses
 // to run at all. Anything added here must be verified against the literal the CALLEE reads.
-const VERCEL_VERIFY_FLAG = "--verify-vercel-token";
 export const CHECK_FLAGS = [
   "--json",
   "--strict",
@@ -69,7 +68,6 @@ export const CHECK_FLAGS = [
   "--fail-on-worse",
   "--enforce-tests",
   "--online", // check-run.ts: fetch release data for the runtime rows
-  VERCEL_VERIFY_FLAG,
   "--category",
   "--pin",
   "--key",
@@ -124,7 +122,11 @@ async function routeSubcommand(): Promise<boolean | undefined> {
   // to the default full-check-plus-flags action below. RO-3 found `check zzz --attest`
   // running the full check and minting an attestation key because argv[3] was simply
   // never inspected outside the two branches above.
-  if (process.argv[3] !== undefined && !process.argv[3].startsWith("-")) {
+  if (
+    process.argv[3] !== undefined &&
+    !process.argv[3].startsWith("-") &&
+    process.argv[3] !== "verify-vercel-token"
+  ) {
     console.error(`${c.red}Unknown check subcommand: ${process.argv[3]}${c.reset}`);
     console.error(
       `${c.dim}Usage: kit check [--category=...] [--json] [--attest] | kit check verify-attestation <file> | kit check compare <before.json> <after.json>${c.reset}`,
@@ -136,11 +138,17 @@ async function routeSubcommand(): Promise<boolean | undefined> {
 
 /** Reads the flags of the default check. Returns undefined after it has printed a refusal. */
 function parseRunOptions(): RunOptions | undefined {
-  if (rejectUnknownFlags("kit check", CHECK_FLAGS)) return undefined;
-  if (process.argv.some((arg) => arg.startsWith(`${VERCEL_VERIFY_FLAG}=`))) {
-    console.error(`${VERCEL_VERIFY_FLAG} does not accept a value.`);
-    return undefined;
+  if (process.argv[3] === "verify-vercel-token") {
+    if (rejectUnknownFlags("kit check verify-vercel-token", ["--json", ...GLOBAL_FLAGS]))
+      return undefined;
+    return {
+      categories: ["secrets"],
+      verifyVercelToken: true,
+      lenient: false,
+      failOnWarning: false,
+    };
   }
+  if (rejectUnknownFlags("kit check", CHECK_FLAGS)) return undefined;
 
   // --category narrows which dimensions run. An unrecognised value is an error, not
   // a silent full run — the previous behaviour, which made the flag a no-op wherever
@@ -160,7 +168,7 @@ function parseRunOptions(): RunOptions | undefined {
   // warnings unless --fail-on-warning / --strict / KIT_CI_STRICT.
   return {
     categories: parsed.categories,
-    verifyVercelToken: hasFlag(process.argv, VERCEL_VERIFY_FLAG),
+    verifyVercelToken: false,
     lenient: hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT),
     failOnWarning:
       hasFlag(process.argv, "--fail-on-warning") ||
@@ -176,14 +184,8 @@ export async function cmdCheck(): Promise<boolean> {
   const options = parseRunOptions();
   if (!options) return false;
   const config = await loadConfig(resolveConfigPath());
-  if (
-    options.verifyVercelToken &&
-    ((options.categories && !options.categories.includes("secrets")) ||
-      config.secrets?.keys?.VERCEL_TOKEN?.source !== "env")
-  ) {
-    console.error(
-      '--verify-vercel-token requires the secrets category and VERCEL_TOKEN with source = "env".',
-    );
+  if (options.verifyVercelToken && config.secrets?.keys?.VERCEL_TOKEN?.source !== "env") {
+    console.error('verify-vercel-token requires VERCEL_TOKEN with source = "env".');
     return false;
   }
 
@@ -208,7 +210,7 @@ async function runCheckAction(
   const step = <T>(label: string, fn: () => Promise<T>): Promise<T> =>
     live ? runStep(label, fn) : fn();
 
-  await autoInstallScanners(config, live); // self-heal missing scanners before scanning
+  if (!options.verifyVercelToken) await autoInstallScanners(config, live);
   // Collection and verdict live in the shared core (check-run.ts), the SAME path the MCP
   // `kit_check` tool and `kit review` use, so the surfaces never disagree on what runs or
   // what "green" means. The CLI adds spinners (step), PAL sync, attestation and hints.

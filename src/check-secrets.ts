@@ -361,23 +361,21 @@ async function checkAzureSecret(
   }
 }
 
+async function templateIsPresent(cwd: string, template: string): Promise<boolean> {
+  try {
+    await access(resolve(cwd, template));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function checkSecrets(
   secrets: SecretsConfig,
   cwd = process.cwd(),
   options: { verifyVercelToken?: boolean; offline?: boolean } = {},
 ): Promise<{ templateExists: boolean | null; keys: SecretStatus[] }> {
-  let templateExists: boolean | null = null;
-  if (secrets.template) {
-    try {
-      // `template` is a repo-relative path in .kit.toml, so it must resolve against the
-      // GOVERNED project. Bare `access(secrets.template)` resolved it against the calling
-      // process and reported the caller's .env.template as the target's.
-      await access(resolve(cwd, secrets.template));
-      templateExists = true;
-    } catch {
-      templateExists = false;
-    }
-  }
+  const templateExists = secrets.template ? await templateIsPresent(cwd, secrets.template) : null;
 
   const keys: SecretStatus[] = [];
   const opCache: OnePasswordCache = { status: null };
