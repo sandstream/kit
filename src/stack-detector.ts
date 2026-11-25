@@ -1,6 +1,7 @@
 import { readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { detectServices } from "./service-registry.js";
+import { npmRangeAdmits, pep440Admits, singleNpmMajor } from "./runtime-range.js";
 
 export interface DetectedStack {
   language: string;
@@ -9,6 +10,20 @@ export interface DetectedStack {
   tools: Record<string, string>;
   confidence: number; // 0.0–1.0
 }
+
+/** The installed version of a runtime (`node`, `python`), or null when it is not installed. */
+export type InstalledVersion = (tool: string) => Promise<string | null>;
+
+export interface DetectOptions {
+  /** Measures installed runtimes; injected so tests do not read the machine they run on. */
+  installedVersion?: InstalledVersion;
+}
+
+/** The version `kit lock` will compare a pin against: the same probe, the same binary. */
+const measureInstalled: InstalledVersion = async (tool) => {
+  const { describeTool } = await import("./tool-inventory.js");
+  return (await describeTool(tool)).installed;
+};
 
 interface PackageJson {
   dependencies?: Record<string, string>;
@@ -79,10 +94,26 @@ async function collectWorkspaceDeps(cwd: string, pkg: PackageJson): Promise<stri
   return [...deps];
 }
 
+/** The Node major an `engines.node` value pins. One major (`20`, `^20.1`) is that major. A
+ *  range (`>=20.0.0`) is not narrowed to its floor: the installed major when the range admits
+ *  it, so `kit lock` does not reject the Node the repo allows; the floor only when it does not. */
+async function nodeFromEngines(range: string, installed: InstalledVersion): Promise<string | null> {
+  const single = singleNpmMajor(range);
+  if (single) return single;
+  const floor = range.match(/(\d+)/)?.[1] ?? null;
+  const have = await installed("node");
+  const major = have?.match(/^v?(\d+)/)?.[1];
+  return major && npmRangeAdmits(range, have as string) ? major : floor;
+}
+
 /** Resolve the Node major to pin, respecting the repo's existing truth.
  *  Precedence: .tool-versions > Volta > .node-version / .nvmrc > engines.node > 22.
  *  (Respecting these avoids installing the wrong runtime, the #1 brownfield trap.) */
-async function resolveNodeVersion(cwd: string, pkg: PackageJson): Promise<string> {
+async function resolveNodeVersion(
+  cwd: string,
+  pkg: PackageJson,
+  installed: InstalledVersion,
+): Promise<string> {
   const toolVersions = await readFile(join(cwd, ".tool-versions"), "utf-8").catch(() => null);
   if (toolVersions) {
     const m = toolVersions.match(/^\s*nodejs?\s+v?(\d+)/m);
@@ -100,14 +131,33 @@ async function resolveNodeVersion(cwd: string, pkg: PackageJson): Promise<string
     }
   }
   if (pkg.engines?.node) {
-    const m = pkg.engines.node.match(/(\d+)/);
-    if (m) return m[1];
+    const fromEngines = await nodeFromEngines(pkg.engines.node, installed);
+    if (fromEngines) return fromEngines;
   }
   return "22";
 }
 
-/** Resolve the Python minor to pin: .python-version > .tool-versions > 3.12. */
-async function resolvePythonVersion(cwd: string): Promise<string> {
+/** The installed Python minor when `requires-python` admits it; null when it does not, or
+ *  when the pyproject declares no `requires-python`. */
+async function pythonFromRequires(
+  pyproject: string,
+  installed: InstalledVersion,
+): Promise<string | null> {
+  const spec = pyproject.match(/^\s*requires-python\s*=\s*["']([^"']+)["']/m)?.[1];
+  if (!spec) return null;
+  const have = await installed("python");
+  const minor = have?.match(/^(\d+\.\d+)/)?.[1];
+  return minor && pep440Admits(spec, have as string) ? minor : null;
+}
+
+/** Resolve the Python minor to pin: .python-version > .tool-versions > requires-python (the
+ *  installed minor it admits). Null when the repo declares none: a default such as 3.12 would
+ *  be a guess presented as detected, and the generator reports the gap instead. */
+async function resolvePythonVersion(
+  cwd: string,
+  pyproject: string,
+  installed: InstalledVersion,
+): Promise<string | null> {
   const pv = await readFile(join(cwd, ".python-version"), "utf-8").catch(() => null);
   if (pv) {
     const m = pv.match(/(\d+\.\d+)/);
@@ -118,7 +168,7 @@ async function resolvePythonVersion(cwd: string): Promise<string> {
     const m = tv.match(/^\s*python\s+v?(\d+\.\d+)/m);
     if (m) return m[1];
   }
-  return "3.12";
+  return pythonFromRequires(pyproject, installed);
 }
 
 function detectPackageManager(pkg: PackageJson, cwd: string): Promise<string> {
@@ -155,11 +205,14 @@ const FRAMEWORK_DETECTORS: { framework: string; deps: string[] }[] = [
   { framework: "vue", deps: ["vue"] },
 ];
 
-async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null> {
+async function detectFromPackageJson(
+  cwd: string,
+  installed: InstalledVersion,
+): Promise<DetectedStack | null> {
   const pkg = await readJson<PackageJson>(join(cwd, "package.json"));
   if (!pkg) return null;
 
-  const node = await resolveNodeVersion(cwd, pkg);
+  const node = await resolveNodeVersion(cwd, pkg, installed);
   const pm = await detectPackageManager(pkg, cwd);
   const tools: Record<string, string> = { node };
   if (pm !== "npm") tools[pm] = "latest";
@@ -208,9 +261,23 @@ async function pythonBuildsNativeExtension(cwd: string): Promise<boolean> {
   return /setuptools|maturin|scikit|mesonpy|meson_python|meson-python|pybind|cffi/.test(backend);
 }
 
-async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
+/** A pyproject that declares a project or a package manager's settings. One holding only
+ *  tool config (`[tool.pyright]`, `[tool.ruff]`) is common in repos that are not Python. */
+const PYPROJECT_PROJECT =
+  /^\s*\[(project|build-system|dependency-groups|tool\.(poetry|uv|pdm|hatch|flit|setuptools))\b/m;
+
+/** uv is the installer only when the repo says so: its lockfile or its own config table. */
+async function usesUv(cwd: string, pyproject: string): Promise<boolean> {
+  return /^\s*\[tool\.uv\b/m.test(pyproject) || (await fileExists(join(cwd, "uv.lock")));
+}
+
+async function detectFromPython(
+  cwd: string,
+  installed: InstalledVersion,
+): Promise<DetectedStack | null> {
   const hasRequirements = await fileExists(join(cwd, "requirements.txt"));
-  const hasPyproject = await fileExists(join(cwd, "pyproject.toml"));
+  const pyproject = await readFile(join(cwd, "pyproject.toml"), "utf-8").catch(() => "");
+  const hasPyproject = PYPROJECT_PROJECT.test(pyproject);
   // setup.py / setup.cfg are the legacy Python package markers — a repo can ship them with
   // no requirements.txt/pyproject (older libs, or native-extension packages).
   const hasSetup =
@@ -223,9 +290,7 @@ async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
   if (hasRequirements) {
     contents = await readFile(join(cwd, "requirements.txt"), "utf-8").catch(() => "");
   }
-  if (hasPyproject) {
-    contents += await readFile(join(cwd, "pyproject.toml"), "utf-8").catch(() => "");
-  }
+  if (hasPyproject) contents += pyproject;
 
   if (/fastapi/i.test(contents)) framework = "fastapi";
   else if (/django/i.test(contents)) framework = "django";
@@ -240,9 +305,21 @@ async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
     language: "python",
     framework,
     services,
-    tools: { python: await resolvePythonVersion(cwd), uv: "latest" },
+    tools: await pythonTools(cwd, pyproject, installed),
     confidence: framework ? 0.85 : 0.5,
   };
+}
+
+async function pythonTools(
+  cwd: string,
+  pyproject: string,
+  installed: InstalledVersion,
+): Promise<Record<string, string>> {
+  const tools: Record<string, string> = {};
+  const python = await resolvePythonVersion(cwd, pyproject, installed);
+  if (python) tools.python = python;
+  if (await usesUv(cwd, pyproject)) tools.uv = "latest";
+  return tools;
 }
 
 async function detectFromGo(cwd: string): Promise<DetectedStack | null> {
@@ -689,8 +766,9 @@ function isStrongBackend(s: DetectedStack): boolean {
  * the JS side declares a real app framework. Returns `unknown` only when nothing
  * recognizable is found.
  */
-export async function detectStack(cwd: string): Promise<DetectedStack> {
-  const js = await detectFromPackageJson(cwd);
+export async function detectStack(cwd: string, opts: DetectOptions = {}): Promise<DetectedStack> {
+  const installed = opts.installedVersion ?? measureInstalled;
+  const js = await detectFromPackageJson(cwd, installed);
 
   // Backends in priority order — first present wins as primary among backends (matters only
   // when a repo has NO package.json but several backend manifests). Ordering principle:
@@ -710,7 +788,7 @@ export async function detectStack(cwd: string): Promise<DetectedStack> {
       detectFromCpp(cwd),
       detectFromRust(cwd),
       detectFromDotnet(cwd),
-      detectFromPython(cwd),
+      detectFromPython(cwd, installed),
       detectFromPhp(cwd),
       detectFromRuby(cwd),
       detectFromFlutter(cwd),
