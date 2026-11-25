@@ -13,17 +13,24 @@
  *      flags (`-o out.txt`, `-H`, `-d @data.json`, …) are skipped so their arguments are never
  *      mistaken for hosts, and a token is only taken when it matches a strict domain shape.
  *
+ *   3. The host targets of network tools that take a bare host (`nc`, `ping`, `nmap`, `ssh`,
+ *      `dig`, `openssl s_client -connect`, `Test-NetConnection`, …), read only in the tool's target
+ *      position (broker/bare-hosts.ts).
+ *
  * Still an HONEST LIMITATION, not a complete boundary: implicit-registry tools (`git`, `npm`,
  * `pip`), non-http(s) schemes, and variable-expanded URLs (`curl $HOST`) remain out of reach —
  * command-string inspection is defense-in-depth, pair it with a network sandbox for a hard
  * boundary. Pure + deterministic: same command → same hosts (unique, sorted).
  */
 
+import { addBareToolHosts, addBareToolHostsFromArgs } from "./bare-hosts.js";
+
 const URL_RE = /https?:\/\/[^\s"'`<>\\)\];]+/gi;
 
 /** Tools whose bare positional argument is a URL/host even without a scheme. Registry/implicit-
- *  network tools (git/npm/pip/ssh/scp) are intentionally excluded — their targets are implicit
- *  and treating a bare arg as a host would over-block. */
+ *  network tools (git/npm/pip) are intentionally excluded — their targets are implicit and
+ *  treating a bare arg as a host would over-block. ssh/scp and the like are read by
+ *  broker/bare-hosts.ts, in their own target positions. */
 const FETCH_TOOLS = new Set(["curl", "wget"]);
 
 /** curl/wget flags that CONSUME the next token as a NON-host value, so it is never read as a
@@ -204,6 +211,7 @@ export function extractHostsFromCommand(command: string): string[] {
   const hosts = new Set<string>();
   for (const match of command.match(URL_RE) ?? []) addUrlHosts(match, hosts);
   extractFetchHosts(command, hosts);
+  addBareToolHosts(command, hosts);
   return [...hosts].sort();
 }
 
@@ -237,5 +245,6 @@ export function extractHostsFromArgs(args: readonly string[]): string[] {
       if (host) hosts.add(host);
     }
   }
+  addBareToolHostsFromArgs(args, hosts);
   return [...hosts].sort();
 }

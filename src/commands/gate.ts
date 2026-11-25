@@ -316,7 +316,8 @@ async function gitEgressTargets(command: string, hosts: string[]): Promise<strin
  * be inside the SIGNED [scope].egress (via the signed profile policy — fail-closed: a wired gate
  * with no verified scope grants nothing). Off-scope → exit 2 + audit. Under a verified scope,
  * git network commands are resolved to their remote's host too (broker/git-remote-hosts.ts).
- * Other commands without an unambiguous URL pass through (see broker/extract.ts).
+ * So are the host targets of bare-host network tools (`nc`, `ping`, `nmap`, `ssh`, …; see
+ * broker/bare-hosts.ts), denied like a URL with no verified scope. Other commands pass through.
  */
 export async function cmdGateEgress(): Promise<boolean> {
   const payload = await readHookPayload();
@@ -344,7 +345,8 @@ export async function cmdGateEgress(): Promise<boolean> {
   } else {
     const unknown = hasGit ? await gitEgressTargets(command, hosts) : [];
     denied = [
-      ...hosts.filter((h) => !checkEgress(h, { allow: policy.egress.allow }).ok),
+      // An address range (`nmap 10.0.0.0/24`) is never inside a host scope.
+      ...hosts.filter((h) => h.includes("/") || !checkEgress(h, { allow: policy.egress.allow }).ok),
       ...unknown,
     ];
     why = `host(s) outside the signed egress scope: ${denied.join(", ")}`;
