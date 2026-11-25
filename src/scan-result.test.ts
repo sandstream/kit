@@ -85,3 +85,20 @@ it("treats a Socket authentication refusal as a scanner failure as well as a fin
   assert.equal(merged.length, 1);
   assert.equal(scanHealthGate(runs, { requiredScanners: ["socket"] }).ok, false);
 });
+
+it("does not merge a SARIF result whose kind says it passed", async () => {
+  const { merged, runs } = await repoScan("snyk", {
+    ok: true,
+    stdout: reportWith([
+      { ruleId: "checked", kind: "pass", level: "none", message: { text: "ok" } },
+      { ruleId: "sample", kind: "fail", level: "warning", message: { text: "Example finding" } },
+    ]),
+    exitCode: 0,
+    evidence: { status: "complete", packageCount: 1 },
+  });
+  assert.deepEqual(
+    merged.map((f) => f.name),
+    ["fixture: sample"],
+  );
+  assert.equal(runs[0].status, "ran");
+});

@@ -66,6 +66,8 @@ interface SarifLocation {
 }
 interface SarifResult {
   ruleId?: string;
+  /** SARIF 2.1.0 `kind`; absent means `fail`. */
+  kind?: string;
   level?: string;
   message?: { text?: string };
   locations?: SarifLocation[];
@@ -117,13 +119,22 @@ export function parseSarif(json: string): SecurityCheckResult[] {
   return isRecord(log) ? sarifFindings(log as SarifLog) : [];
 }
 
+/**
+ * SARIF kinds that say the rule was evaluated and nothing is wrong. A scanner such as Strix writes its
+ * coverage rows this way. `open` (Nuclei marks every result open), `review`, `fail` and an absent kind
+ * stay findings.
+ */
+const SARIF_NOT_FAILED = new Set(["pass", "notApplicable", "informational"]);
+
 function sarifFindings(log: SarifLog): SecurityCheckResult[] {
   const out: SecurityCheckResult[] = [];
   for (const run of log.runs ?? []) {
     const tool = run.tool?.driver?.name ?? "sarif";
     const rulesById = new Map<string, SarifRule>();
     for (const r of run.tool?.driver?.rules ?? []) if (r.id) rulesById.set(r.id, r);
-    for (const res of run.results ?? []) out.push(sarifFinding(tool, res, rulesById));
+    for (const res of run.results ?? []) {
+      if (!SARIF_NOT_FAILED.has(String(res.kind))) out.push(sarifFinding(tool, res, rulesById));
+    }
   }
   return out;
 }
