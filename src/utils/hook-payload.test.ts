@@ -1,13 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { promptFromUser } from "./hook-payload.js";
 
 const source = import.meta.url.endsWith(".ts");
-const MODULE = fileURLToPath(
-  new URL(source ? "./hook-payload.ts" : "./hook-payload.js", import.meta.url),
-);
+const MODULE = new URL(source ? "./hook-payload.ts" : "./hook-payload.js", import.meta.url).href;
 const tsx = source ? ["--import", import.meta.resolve("tsx")] : [];
 
 /** Run `readHookPayload` in a child with `input` on stdin; print what it parsed. */
