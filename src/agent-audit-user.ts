@@ -18,6 +18,7 @@
  * Plugins (`~/.claude/plugins`) are left out: that directory holds marketplace caches of other
  * repositories, which `kit triage` covers when they are installed.
  */
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -28,6 +29,7 @@ import {
   auditSettingsCommands,
 } from "./agent-audit.js";
 import { hookScriptRows } from "./agent-hook-scripts.js";
+import { bundledTriageDigests } from "./triage.js";
 import { readInstructionFile, scanInstructionText } from "./instruction-scan.js";
 
 const USER_AGENT_DIRS = [
@@ -219,9 +221,21 @@ function isVendored(shown: string): boolean {
   return shown.split("/").includes("node_modules");
 }
 
-/** One file's rows from the project audit's analyzers. Pure. */
+/**
+ * The file is kit's own triage skill copy, byte for byte (`installBundledTriageSkill` writes it to
+ * `~/.claude/skills/triage`). Its scanners hold the patterns they detect, so the malware analyzer
+ * flagged `plugin_scan.py`. Re-encoding the text gives the original bytes only when the file was
+ * valid UTF-8, so a copy with any byte changed still gets every row.
+ */
+function isKitTriageCopy(body: string): boolean {
+  const digest = createHash("sha256").update(Buffer.from(body, "utf8")).digest("hex");
+  return bundledTriageDigests().has(digest);
+}
+
+/** One file's rows from the project audit's analyzers. Pure, apart from reading kit's own package. */
 export function surfaceRows(shown: string, label: string, body: string): SecurityCheckResult[] {
   const rows: SecurityCheckResult[] = [];
+  if (isKitTriageCopy(body)) return rows;
   const secrets = isVendored(shown) ? [] : auditConfigSecrets(body);
   if (secrets.length > 0) {
     const kinds = [...new Set(secrets.map((x) => x.label))].join(", ");
