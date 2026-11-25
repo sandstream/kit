@@ -45,13 +45,35 @@ function isPinnedSha(ref: string): boolean {
   return /^[0-9a-f]{40}$/i.test(ref);
 }
 
+/**
+ * The workflow text without the bodies of `|` / `>` block scalars (a `run:` script, a heredoc).
+ * Their lines are shell or data, so a `uses:` written there is not a step.
+ */
+function withoutBlockScalars(content: string): string {
+  const kept: string[] = [];
+  let scalarIndent = -1;
+  for (const line of content.split(/\r?\n/)) {
+    const indent = line.length - line.trimStart().length;
+    if (scalarIndent >= 0 && (line.trim() === "" || indent > scalarIndent)) continue;
+    scalarIndent = /:\s*[|>][-+0-9]*\s*(#.*)?$/.test(line) ? indent : -1;
+    kept.push(line);
+  }
+  return kept.join("\n");
+}
+
+/**
+ * A `uses:` key: at the start of a line (after an optional list dash) or inside a flow mapping
+ * (after `{` or `,`). A `uses:` inside a quoted `run:` value is neither.
+ */
+const USES_RE =
+  /(?:^[ \t]*(?:-[ \t]+)?|[{,][ \t]*)uses:\s*['"]?([A-Za-z0-9._\/-]+)@([^\s'"#,}]+)/gm;
+
 /** Lint one workflow file's text. Pure. */
 export function auditWorkflow(content: string, file: string): SecurityCheckResult[] {
   const out: SecurityCheckResult[] = [];
 
-  const usesRe = /uses:\s*['"]?([A-Za-z0-9._\/-]+)@([^\s'"#]+)/g;
   const seen = new Set<string>();
-  for (const m of content.matchAll(usesRe)) {
+  for (const m of withoutBlockScalars(content).matchAll(USES_RE)) {
     const action = m[1];
     const ref = m[2];
     if (action.startsWith("./") || action.startsWith("docker://")) continue; // local / docker exempt

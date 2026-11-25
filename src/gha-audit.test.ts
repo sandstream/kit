@@ -92,3 +92,52 @@ describe("runGhaAudit — unreadable workflow never yields a false-green pass", 
     }
   });
 });
+
+describe("auditWorkflow: `uses:` text inside a run step is not an action", () => {
+  const unpinned = (wf: string) =>
+    auditWorkflow(wf, "ci.yml")
+      .map((r) => r.name)
+      .filter((n) => n.startsWith("unpinned action"));
+
+  it("ignores `uses:` echoed in a run block scalar (kit-research gha/fp-echo)", () => {
+    const wf = [
+      "on: push",
+      "jobs:",
+      "  a:",
+      "    steps:",
+      "      - name: Explain usage",
+      "        run: |",
+      '          echo "Example usage:"',
+      '          echo "  - uses: h-example/some-action@main"',
+      "          - uses: h-example/heredoc-line@main",
+    ].join("\n");
+    assert.deepEqual(unpinned(wf), []);
+  });
+
+  it("ignores `uses:` in a one-line run value", () => {
+    const wf =
+      'on: push\njobs:\n  a:\n    steps:\n      - run: echo "  - uses: h-example/x@main"\n';
+    assert.deepEqual(unpinned(wf), []);
+  });
+
+  it("still flags a real step after a run block, and a flow-style step", () => {
+    const wf = [
+      "on: push",
+      "jobs:",
+      "  a:",
+      "    steps:",
+      "      - run: |",
+      "          echo hi",
+      "      - uses: owner/after-block@v1",
+      "  b:",
+      "    steps: [ { uses: owner/flow@v2 } ]",
+      "  c:",
+      "    uses: owner/repo/.github/workflows/w.yml@main",
+    ].join("\n");
+    assert.deepEqual(unpinned(wf), [
+      "unpinned action owner/after-block@v1 (ci.yml)",
+      "unpinned action owner/flow@v2 (ci.yml)",
+      "unpinned action owner/repo/.github/workflows/w.yml@main (ci.yml)",
+    ]);
+  });
+});

@@ -1,0 +1,3 @@
+### Fixed
+
+- **`kit triage skill <pack>` reads the hooks in the pack's root dot-directories.** Files outside the skill directories are judged as a plugin's hooks and scripts, but every dot-entry at the pack's root was skipped, so a `.claude/settings.json` beside `.claude/skills/` with a SessionStart hook running `curl … | sh` scored 100/100 and passed; the same JSON at `hooks/settings.json` got two warnings. Root dot-directories such as `.claude`, `.githooks`, `.husky` and `.mcp.json` are now read; `.git`, `.github` (the pack's own CI) and git metadata files stay out, and a settings file with no hooks counts as read. Found while measuring trycompai/comp.

@@ -59,6 +59,13 @@ export async function findIacFiles(root: string): Promise<string[]> {
   return found.sort();
 }
 
+/** Dockerfile paths within the same bounded discovery, so a root without one is not "none". */
+export async function findDockerfiles(root: string): Promise<string[]> {
+  return (await findIacFiles(root)).filter((path) =>
+    /^Dockerfile(?:\.|$)/.test(posix.basename(path)),
+  );
+}
+
 /** Directories (relative, "." for the root) that hold discovered IaC. */
 export async function findIac(root: string): Promise<string[]> {
   return [...new Set((await findIacFiles(root)).map((path) => posix.dirname(path)))].sort();
