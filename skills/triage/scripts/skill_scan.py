@@ -92,7 +92,9 @@ def triage_local_skill(rep):
         rel = os.path.relpath(os.path.dirname(skill_md), target).replace(os.sep, "/")
         _triage_skill_file(rep, skill_md, True, f"{rel}: ")
     if len(skills) > SKILL_PACK_LIMIT:
-        rep.warn(f"only the first {SKILL_PACK_LIMIT} of {len(skills)} skills were triaged")
+        rep.warn(f"only the first {SKILL_PACK_LIMIT} of {len(skills)} skills were triaged; "
+                 "triage the pack's subdirectories one by one to read the rest")
+        rep.incomplete(f"{len(skills) - SKILL_PACK_LIMIT} of {len(skills)} skill(s) not read")
     rep.fact(f"triaged {min(len(skills), SKILL_PACK_LIMIT)} skill(s) in the pack at {target}")
     _declare_outside_skills(rep, target, skills)
     return True

@@ -119,9 +119,24 @@ class Report:
         self.warnings = []
         self.facts = []
         self.notrun = []
+        self.unread = None
+        # True when the target was refused or its source answered nothing: no probe ran, so a
+        # number would be the penalty arithmetic alone (a local path printed 55/100).
+        self.unmeasured = False
+
+    def incomplete(self, why):
+        """Mark the triage as not having read its whole target (a pack over its read limit). The
+        verdict is then TRIAGE INCOMPLETE, never PASSED: a warning alone printed TRIAGE PASSED with
+        exit 0 over a pack whose unread skill failed on its own (kit-research `decepticon-vs-kit`)."""
+        self.unread = why
 
     def critical(self, m):
         self.criticals.append(m)
+
+    def measured(self, m):
+        """A fact from a probe that answered: the score now stands for something."""
+        self.unmeasured = False
+        self.fact(m)
 
     def warn(self, m):
         self.warnings.append(m)
@@ -167,7 +182,7 @@ class Report:
         for probe, why, _transient in self.notrun:
             print(f"  ~ NOT CHECKED: {probe} -- {why}")
         print()
-        print(f"Health score: {score}/100")
+        print("Health score: not measured (no probe ran)" if self.unmeasured else f"Health score: {score}/100")
         print(f"Critical issues: {len(self.criticals)}")
         print(f"Warnings: {len(self.warnings)}")
         # Counts only what this path DECLARED it cannot answer -- never a completeness
@@ -186,10 +201,12 @@ class Report:
             scope = "; ".join(f"{kind} ({probes})" for kind, probes in groups if probes)
             print(f"Coverage: PARTIAL -- {len(self.notrun)} probe(s) {scope}; "
                   "the score covers only what was checked")
-        if not self.criticals:
-            print("TRIAGE PASSED")
-        else:
+        if self.criticals:
             print("TRIAGE FAILED")
+        elif self.unread:
+            print(f"TRIAGE INCOMPLETE: {self.unread}")
+        else:
+            print("TRIAGE PASSED")
 
 
 def _split_npm_spec(target):
@@ -743,7 +760,7 @@ def triage_repo(rep):
         _declare_repo_probes_unavailable(rep)
         return
 
-    rep.fact(f"{or_}: {data.get('stargazers_count', 0)} stars, "
+    rep.measured(f"{or_}: {data.get('stargazers_count', 0)} stars, "
              f"license: {(data.get('license') or {}).get('spdx_id') or 'none'}")
     if data.get("archived"):
         rep.critical(f"repo '{or_}' is ARCHIVED (read-only / unmaintained)")
@@ -757,6 +774,12 @@ def triage_repo(rep):
         rep.warn(f"no push in {pushed_days} days -- possibly unmaintained")
     if not (data.get("license") or {}).get("spdx_id"):
         rep.warn("no detected license -- review terms before use")
+
+
+def _scored_repo(rep):
+    """Repo triage whose score is printed only once the GitHub API answered (`measured`)."""
+    rep.unmeasured = True
+    triage_repo(rep)
 
 
 def triage_docker(rep):
@@ -783,7 +806,7 @@ def triage_skill(rep):
     if _skill_scan().triage_local_skill(rep):
         return
     rep.fact("no local SKILL.md found; treating target as a repo")
-    triage_repo(rep)
+    _scored_repo(rep)
 
 
 def main(argv):
@@ -804,7 +827,7 @@ def main(argv):
     dispatch = {
         "npm": triage_npm_scripts,
         "pip": triage_pip,
-        "repo": triage_repo,
+        "repo": _scored_repo,
         "docker": triage_docker,
         "skill": triage_skill,
     }
