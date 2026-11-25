@@ -2,7 +2,7 @@ import { isReadOnlyMode } from "../read-only-mode.js";
 import type { IncomingTrustStore } from "./authority-store.js";
 import { incomingVerificationDigest } from "./decision-protocol.js";
 import { incomingVerification } from "./decision-schema.js";
-import { prepareLaunchPolicy } from "./launch-policy.js";
+import { prepareLaunchPolicy, type PreparedLaunchPolicy } from "./launch-policy.js";
 import { launchNodeOnMac, type IncomingRun } from "./launch-node-macos.js";
 import { withSealedCandidate, withSealedRuntime, withSealedRunTree } from "./sealed-candidate.js";
 import type { ImageCleanupStep } from "./sealed-image-owner.js";
@@ -20,6 +20,31 @@ interface LaunchRequest {
   policy: unknown;
 }
 
+interface RunObservation {
+  result?: IncomingRun;
+  requiredFiles?: ReadonlySet<string>;
+}
+
+function withApprovedRunTree(
+  mounted: string,
+  prepared: PreparedLaunchPolicy,
+  observation: RunObservation,
+  use: Parameters<typeof withSealedRunTree<IncomingRun>>[1],
+  host: Parameters<typeof withSealedRunTree<IncomingRun>>[2],
+) {
+  const approved = readApprovedRunTree(mounted, prepared.policy.npmArtifacts);
+  if (!approved.ok) return { ran: false, reason: approved.reason } as const;
+  if (prepared.policy.requiredCheck) {
+    observation.requiredFiles = requiredDockerfilePaths(
+      approved.tree.entries,
+      prepared.policy.entry,
+    );
+    if (!observation.requiredFiles)
+      return { ran: false, reason: "required-check-input-unverified" } as const;
+  }
+  return withSealedRunTree(approved.tree, use, host);
+}
+
 export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
   if (isReadOnlyMode()) return { ran: false, reason: "read-only" };
   const { store, repository, source, verification } = request;
@@ -30,15 +55,14 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
     return { ran: false, reason: "run-policy-mismatch" };
   const original = store.preflight(repository, source, verification);
   if (!original.verified) return { ran: false, reason: original.reason };
-  const observation: { result?: IncomingRun } = {};
-  let requiredFiles: ReadonlySet<string> | undefined;
+  const observation: RunObservation = {};
   const finish = (run: IncomingRun) =>
-    prepared.policy.requiredCheck ? finishRequiredDockerfileInspection(run, requiredFiles) : run;
+    prepared.policy.requiredCheck
+      ? finishRequiredDockerfileInspection(run, observation.requiredFiles)
+      : run;
   try {
     const verificationDigest = incomingVerificationDigest(verification);
-    const assertStableBuild = () => {
-      if (!prepared.checkRuntime()) throw new Error("Kit host runtime changed");
-    };
+    const assertStableBuild = () => assertStableRuntime(prepared);
     const result = withSealedRuntime(
       prepared.runtime,
       prepared.runtimeDigest,
@@ -53,19 +77,11 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
               repository,
               mounted,
               verification,
-              (deadline, authority) => {
-                const approved = readApprovedRunTree(mounted, prepared.policy.npmArtifacts);
-                if (!approved.ok) return { ran: false, reason: approved.reason } as const;
-                if (prepared.policy.requiredCheck) {
-                  requiredFiles = requiredDockerfilePaths(
-                    approved.tree.entries,
-                    prepared.policy.entry,
-                  );
-                  if (!requiredFiles)
-                    return { ran: false, reason: "required-check-input-unverified" } as const;
-                }
-                return withSealedRunTree(
-                  approved.tree,
+              (deadline, authority) =>
+                withApprovedRunTree(
+                  mounted,
+                  prepared,
+                  observation,
                   (input, inputDigest, assertRunTree) => {
                     const run = launchNodeOnMac({
                       prepared,
@@ -88,8 +104,7 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
                     return run;
                   },
                   imageOwnerHost,
-                );
-              },
+                ),
             );
           },
           imageOwnerHost,
@@ -108,6 +123,10 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
   } catch {
     return finish(boundaryFailure(observation.result, "run-state-unavailable"));
   }
+}
+
+function assertStableRuntime(prepared: PreparedLaunchPolicy): void {
+  if (!prepared.checkRuntime()) throw new Error("Kit host runtime changed");
 }
 
 function boundaryFailure(
