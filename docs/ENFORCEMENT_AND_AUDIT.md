@@ -121,6 +121,15 @@ CI compares the trailer with the committed tree and warns with the affected comm
 The trailer is advisory. A contributor can construct it, and commits from other tools
 can lack it. The required CI gates still judge the change.
 
+## Verify a Vercel token
+
+Run `kit check verify-vercel-token` when `VERCEL_TOKEN` is declared
+with `source = "env"`. Kit sends the token only to [Vercel's user endpoint](https://vercel.com/docs/rest-api/user/get-the-user).
+It follows no redirect and prints neither the token nor the response body.
+The JSON check uses `secretState` for a missing, unreadable, or rejected token.
+Air-gap mode and network errors report an unverified check. The ordinary
+`kit check --category secrets` reports whether the environment value is present.
+
 ## The formula
 
 > **kit = a deterministic grinder that forces the secure way of building — and prints a signed
