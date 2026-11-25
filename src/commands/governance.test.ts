@@ -293,7 +293,7 @@ id = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.doesNotMatch(result.stdout, /\u001b\[2J|\u202e|ghp_abcdefghijklmnopqrstuvwxyz0123456789/);
   const visible = stripVTControlCharacters(result.stdout);
-  assert.match(visible, /^Name: agentPermissions: all$/m);
+  assert.match(visible, /^Name: agent Permissions: all$/m);
   assert.match(visible, /^ID: \[REDACTED\]$/m);
   assert.doesNotMatch(visible, /^Permissions: all$/m);
   assert.deepEqual(fixture.snapshot(), before);

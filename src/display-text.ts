@@ -57,6 +57,20 @@ function maskJwtRun(run: string): string {
   return run;
 }
 
+/**
+ * Show each line break as a space, so the words on either side stay apart. A break that splits
+ * a credential is removed instead, so the masking after it still sees the whole credential.
+ */
+function joinDisplayLines(text: string): string {
+  return text.split(/\n+/).reduce((shown, line) => {
+    const tail = /\S*$/.exec(shown)?.[0] ?? "";
+    const head = /^\S*/.exec(line)?.[0] ?? "";
+    const splitsCredential =
+      maskDisplaySecrets(tail + head) !== maskDisplaySecrets(tail) + maskDisplaySecrets(head);
+    return shown + (splitsCredential ? "" : " ") + line;
+  });
+}
+
 /** Sanitize display text only. Callers must retain raw file identities separately. */
 export function sanitizeDisplayText(text: string): string {
   // Convert C1 sequence delimiters to the ESC forms understood by the Node helper.
@@ -66,8 +80,10 @@ export function sanitizeDisplayText(text: string): string {
       /[\u0090\u0098\u009b-\u009f]/g,
       (char) => "\x1b" + String.fromCharCode(char.charCodeAt(0) - 0x40),
     )
+    // A CR/LF run is one line break. It is kept as LF and shown as a space at the end.
+    .replace(/[\r\n]+/g, "\n")
     // Keep ESC and BEL until sequence removal. Other controls can obscure a VT sequence.
-    .replace(/[\u0000-\u0006\u0008-\u001a\u001c-\u001f\u007f-\u009f\u2028\u2029]/g, "");
+    .replace(/[\u0000-\u0006\u0008\u0009\u000b-\u001a\u001c-\u001f\u007f-\u009f\u2028\u2029]/g, "");
   // Discard complete or unterminated VT control strings, including APC, PM and SOS.
   const withoutStrings = visible.replace(
     /\x1b(?:\][\s\S]*?(?:\x07|\x1b\\|$)|[PX^_][\s\S]*?(?:\x1b\\|$)|\\)/g,
@@ -75,9 +91,9 @@ export function sanitizeDisplayText(text: string): string {
   );
   // BEL terminates OSC above. Elsewhere it can occur inside a CSI sequence.
   const clean = stripVTControlCharacters(withoutStrings.replace(/\x07/g, "")).replace(
-    /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g,
+    /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029]/g,
     "",
   );
   // Control removal can join the pieces of a credential. Mask again after that join.
-  return maskDisplaySecrets(clean).replace(/\s+/g, " ").trim();
+  return maskDisplaySecrets(joinDisplayLines(clean)).replace(/\s+/g, " ").trim();
 }
