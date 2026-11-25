@@ -132,3 +132,21 @@ describe("LLM06 describes the exec-broker kit ships", () => {
     assert.match(rationale, /declare/);
   });
 });
+
+describe("SSDF RV.2 names the remediation tracking kit ships", () => {
+  // kit-research decepticon-vs-kit: RV.2 said "GAP … not yet a check" although `kit check`
+  // tracks findings to closure (findings-track.ts) and `kit heal` re-scans until they clear.
+  const rv2 = SSDF_218A.mapping["RV.2"];
+
+  it("is not a GAP and cites the commands that back it", () => {
+    assert.equal(rv2?.bucket, "auto");
+    assert.deepEqual(rv2?.checks, ["kit check", "kit heal"]);
+  });
+
+  it("names the tracking and says what it does not cover", () => {
+    assert.match(rv2?.rationale ?? "", /track_findings/);
+    assert.match(rv2?.rationale ?? "", /kit heal/);
+    assert.match(rv2?.rationale ?? "", /^Partial/);
+    assert.doesNotMatch(rv2?.rationale ?? "", /not yet a check/);
+  });
+});

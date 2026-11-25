@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findDockerfiles, findIac } from "./check-iac-detect.js";
+import { findDockerfiles, findIac, findIacFiles } from "./check-iac-detect.js";
+import { expectedTrivyConfigKey } from "./trivy-report.js";
 import { runCli } from "./cli-run.test-support.js";
 import { makeFixture, toml } from "./commands/scan.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
@@ -122,4 +123,41 @@ describe("trivy container scan finds a Dockerfile below the root", () => {
       assert.doesNotMatch(JSON.stringify(row), /no Dockerfile found/);
     },
   );
+});
+
+describe("a Dockerfile named <name>.Dockerfile or Containerfile is found", () => {
+  // kit-research decepticon-vs-kit E3: a tree whose only Dockerfiles were `containers/*.Dockerfile`
+  // made both trivy rows skip with "no Dockerfile found". trivy itself reads that name.
+  it("findIacFiles and findDockerfiles return them, and the trivy coverage key is a Dockerfile", async () => {
+    const root = tree([
+      "containers/app.Dockerfile",
+      "svc/Containerfile",
+      "notes/Dockerfile.md.bak",
+    ]);
+    try {
+      const expected = [
+        "containers/app.Dockerfile",
+        "notes/Dockerfile.md.bak",
+        "svc/Containerfile",
+      ];
+      assert.deepEqual(await findIacFiles(root), expected);
+      assert.deepEqual(await findDockerfiles(root), expected);
+      assert.equal(
+        expectedTrivyConfigKey("containers/app.Dockerfile"),
+        "dockerfile:containers/app.Dockerfile",
+      );
+      assert.equal(expectedTrivyConfigKey("svc/Containerfile"), "dockerfile:svc/Containerfile");
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("does not take a name that only contains the word", async () => {
+    const root = tree(["Dockerfile-notes.txt", "x.dockerfile.txt", "MyContainerfile"]);
+    try {
+      assert.deepEqual(await findIacFiles(root), []);
+    } finally {
+      rmTemp(root);
+    }
+  });
 });

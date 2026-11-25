@@ -109,10 +109,10 @@ export const SSDF_218A: StandardDescriptor = {
         "kit runs dependency/vuln scanners (npm/pip audit, trivy), merges external scanners into one verdict, and can emit an SBOM of the resolved tree.",
     },
     "RV.2": {
-      bucket: "gap",
-      checks: [],
+      bucket: "auto",
+      checks: ["kit check", "kit heal"],
       rationale:
-        "kit surfaces severity and a unified verdict, but deterministic remediation/rotation TRACKING (a finding isn't 'handled' until fixed) is a planned follow-up, not yet a check.",
+        "Partial. kit gives each finding a severity and one verdict, and tracks it to closure: with `[memory] track_findings` (on by default) `kit check` records each actionable finding as an open ledger item and closes it only when a re-scan no longer reports it; `kit heal` applies the safe deterministic fixes, re-scans, and proposes the gated ones (secret rotation, history purge, dependency upgrades) for a person or agent to run. Not covered: kit fixes few findings itself, sets no remediation deadline, and tracks only what its own checks report.",
     },
   },
 };

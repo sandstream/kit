@@ -11,6 +11,7 @@
 import { sep } from "node:path";
 import { leaseActive, mutateRegistry, readRegistry, servicesFile } from "./registry.js";
 import { describeOwner } from "./owner.js";
+import { readHookPayload } from "../utils/hook-payload.js";
 
 const SOON_MS = 30 * 60 * 1000;
 
@@ -142,27 +143,7 @@ export async function hookSessionId(
     env.CODEX_SESSION_ID?.trim() ||
     env.CLAUDE_CODE_SESSION_ID?.trim() ||
     undefined;
-  if (process.stdin.isTTY) return fromEnv;
-  const raw = await new Promise<string>((resolve) => {
-    const chunks: Buffer[] = [];
-    const finish = () => {
-      clearTimeout(timer);
-      process.stdin.removeAllListeners("data");
-      process.stdin.removeAllListeners("end");
-      process.stdin.removeAllListeners("error");
-      process.stdin.destroy();
-      resolve(Buffer.concat(chunks).toString("utf8"));
-    };
-    const timer = setTimeout(finish, timeoutMs);
-    process.stdin.on("data", (c: Buffer) => chunks.push(c));
-    process.stdin.once("end", finish);
-    process.stdin.once("error", finish);
-  });
-  try {
-    const id = (JSON.parse(raw) as { session_id?: unknown }).session_id;
-    if (typeof id === "string" && id.trim()) return id.trim();
-  } catch {
-    /* no payload, or not JSON */
-  }
+  const id = (await readHookPayload(timeoutMs))?.session_id;
+  if (typeof id === "string" && id.trim()) return id.trim();
   return fromEnv;
 }

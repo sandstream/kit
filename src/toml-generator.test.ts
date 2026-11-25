@@ -350,3 +350,19 @@ describe("generateToml — refuses to guess", () => {
     assert.deepEqual(gaps, [], `expected a clean run, got: ${JSON.stringify(gaps)}`);
   });
 });
+
+describe("generateToml: an undeclared Python version is a gap, not a default", () => {
+  it("python with no pin and no uv leaves tools.python and setup.install as gaps", () => {
+    const { toml, gaps } = generateToml(stack({ language: "python", tools: {} }));
+    assert.doesNotMatch(toml, /^python = /m);
+    assert.doesNotMatch(toml, /uv sync/);
+    const paths = gaps.map((g: InitGap) => g.path);
+    assert.ok(paths.includes("tools.python"), `expected a tools.python gap: ${paths.join(", ")}`);
+    assert.ok(paths.includes("setup.install"), `expected a setup.install gap: ${paths.join(", ")}`);
+  });
+
+  it("a declared python pin leaves no tools.python gap", () => {
+    const { gaps } = generateToml(stack({ language: "python", tools: { python: "3.11" } }));
+    assert.ok(!gaps.some((g: InitGap) => g.path === "tools.python"));
+  });
+});

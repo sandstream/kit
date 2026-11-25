@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, realpathSync, statSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,17 +11,18 @@ import {
   recallRootVariants,
   resolveLocalProjectPath,
 } from "./project.js";
+import { identityOf, sameIdentity } from "../utils/same-file.js";
 import { rmTemp } from "../temp-cleanup.test-support.js";
 
-// Same directory under any spelling (slashes, case, 8.3 short names, inode).
+// Same directory under any spelling (slashes, case, 8.3 short names, file id). The file id is read
+// as bigint: on Windows a number `ino` is a 64-bit NTFS id rounded to a double, so two sibling
+// directories created a moment apart could compare equal and "repoXother" matched "repo_%".
 const same = (candidate: string, path: string) => {
   try {
     const normalize = (value: string) =>
       resolveLocalProjectPath(value).replaceAll("\\", "/").toLowerCase();
     if (normalize(candidate) === normalize(path)) return true;
-    const a = statSync(candidate);
-    const b = statSync(path);
-    return a.ino !== 0 && a.dev === b.dev && a.ino === b.ino;
+    return sameIdentity(identityOf(candidate), identityOf(path));
   } catch {
     return false;
   }
@@ -39,7 +40,7 @@ it("keeps non-repositories and explicit subdirectory scopes local", () => {
     execFileSync("git", ["init"], { cwd: root, stdio: "pipe" });
     const subdir = join(root, "src");
     mkdirSync(subdir);
-    assert.equal(statSync(getCurrentProjectRoot(subdir)).ino, statSync(root).ino);
+    assert.ok(sameIdentity(identityOf(getCurrentProjectRoot(subdir)), identityOf(root)));
     assert.deepEqual(getProjectRecallRoots(subdir), recallRootVariants(subdir));
     assert.ok(getProjectRecallRoots(root).includes(root));
   } finally {
