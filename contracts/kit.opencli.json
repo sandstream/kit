@@ -561,6 +561,15 @@
           "x-kit-flags-inherited": true,
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
+        },
+        "verify-vercel-token": {
+          "kind": "command",
+          "summary": "Verify an environment-provided Vercel token",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
         }
       },
       "kind": "group",
