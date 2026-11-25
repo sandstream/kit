@@ -163,6 +163,7 @@
     "check",
     "check compare",
     "check verify-attestation",
+    "check verify-vercel-token",
     "ci",
     "clone",
     "completions",
