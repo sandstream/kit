@@ -9,9 +9,9 @@
  * on purpose: all six test shards skipped and reported green.
  *
  * The safe shape is an aggregator: a job that `needs` the gated jobs, runs with `if: always()` (or
- * `!cancelled()`), and fails unless their `result` is what it should be. kit's own `windows-native`
- * job is that shape. This rule flags a computed-skip job in a pull-request workflow that no such
- * aggregator covers.
+ * `!cancelled()`), and fails unless their `result` is what it should be (read directly, or by a
+ * script given `toJSON(needs)`). kit's own `windows-native` job is that shape. This rule flags a
+ * computed-skip job in a pull-request workflow that no such aggregator covers.
  *
  * Deterministic line scan, no YAML dependency, like the rest of gha-audit. It does not know which
  * checks branch protection requires (that needs the API), so it warns rather than fails.
@@ -118,9 +118,15 @@ export function gatesPullRequests(content: string): boolean {
 /** A job-level condition computed by another job: the skip is decided at run time. */
 export const computedSkip = (cond: string): boolean => /\bneeds\.[\w-]+\.outputs\./.test(cond);
 
+/**
+ * The job reads its needs' results: `needs.<id>.result` / `needs.*.result`, or the whole `needs`
+ * context handed to a script as `toJSON(needs)` (expression function names are case-insensitive).
+ */
+const READS_RESULTS = /\.result\b|\btojson\(\s*needs\s*\)/i;
+
 function aggregates(job: WorkflowJob, target: string): boolean {
   const always = /\balways\(\)|!\s*cancelled\(\)/.test(job.cond);
-  return always && job.needs.includes(target) && /\.result\b/.test(job.body);
+  return always && job.needs.includes(target) && READS_RESULTS.test(job.body);
 }
 
 /** Flag computed-skip jobs no aggregator covers. Pure. */
