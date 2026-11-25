@@ -15,21 +15,13 @@ import { readSnapshotBytes } from "./snapshot-io.js";
 import { containsSnapshotPath, removeOwnedSnapshot } from "./snapshot-storage.js";
 
 function busyImage(error: unknown): boolean {
-  if (!error || typeof error !== "object" || !("stderr" in error)) return false;
-  return /busy|dissented|could not be unmounted/i.test(String(error.stderr));
-}
-
-async function releaseImage(image: string, workspace: string): Promise<void> {
-  for (const delay of [100, 200, 400, 800, 1600, 3200]) {
-    try {
-      ejectReadOnlyImage(image, workspace);
-      return;
-    } catch (error) {
-      if (!busyImage(error)) throw error;
-      await pause(delay);
-    }
-  }
-  ejectReadOnlyImage(image, workspace);
+  if (error instanceof Error && error.message === "Disk image is still attached") return true;
+  return (
+    !!error &&
+    typeof error === "object" &&
+    "stderr" in error &&
+    /busy|dissented|could not be unmounted/i.test(String(error.stderr))
+  );
 }
 
 async function waitForMountRequest(path: string, finished: () => boolean) {
@@ -80,18 +72,29 @@ async function cleanupFailureAt(
 ): Promise<ImageCleanupStep | undefined> {
   let step: ImageCleanupStep = "verify-workspace";
   try {
-    if (!ownedWorkspace(request)) return;
-    step = "detach-image";
-    if (existsSync(paths.image)) await releaseImage(paths.image, request.workspace);
-    step = "inspect-mount";
-    const mount = lstatSync(paths.mount, { bigint: true, throwIfNoEntry: false });
-    if (mount && mount.dev !== identity.dev) return step;
-    step = "remove-workspace";
-    removeOwnedSnapshot(request.workspace, identity);
-    if (ownedWorkspace(request)) return step;
+    for (const delay of [0, 100, 200, 400, 800, 1600, 3200]) {
+      if (delay) await pause(delay);
+      step = "verify-workspace";
+      if (!ownedWorkspace(request)) return;
+      step = "detach-image";
+      try {
+        if (existsSync(paths.image)) ejectReadOnlyImage(paths.image, request.workspace);
+      } catch (error) {
+        if (!busyImage(error)) throw error;
+        continue;
+      }
+      step = "inspect-mount";
+      const mount = lstatSync(paths.mount, { bigint: true, throwIfNoEntry: false });
+      // The attached image list can omit a volume that is still mounted.
+      if (mount && mount.dev !== identity.dev) continue;
+      step = "remove-workspace";
+      removeOwnedSnapshot(request.workspace, identity);
+      return ownedWorkspace(request) ? step : undefined;
+    }
   } catch {
     return step;
   }
+  return step;
 }
 
 async function ownImage(request: ImageOwnerRequest): Promise<void> {
