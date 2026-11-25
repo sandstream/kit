@@ -1069,8 +1069,10 @@ export async function installLimitsGate(cwd: string = process.cwd()): Promise<Ho
  * and `kit gate-fs` (matcher `Write|Edit|NotebookEdit`) blocks writes outside [scope].fs.
  *
  * Unlike the install/env gates this is OPT-IN (`kit agent-config --broker-gate`), NOT default:
- * the broker is fail-closed, so a wired egress-gate with no verified scope denies ALL network
- * — desirable only once the operator has declared + signed a `[scope]`/RoE. Wiring it is that
+ * the broker is fail-closed, so a wired egress-gate with no verified scope denies every network
+ * target it can read in a command (src/broker/extract.ts lists which; a tool it cannot read
+ * passes, so this is not a network boundary) — desirable only once the operator has declared +
+ * signed a `[scope]`/RoE. Wiring it is that
  * deliberate opt-in. Claude Code only today (the settings schema we know); idempotent (keyed on
  * each gate command); preserves other hooks.
  */
