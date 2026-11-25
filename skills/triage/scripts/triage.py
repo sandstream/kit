@@ -119,9 +119,21 @@ class Report:
         self.warnings = []
         self.facts = []
         self.notrun = []
+        self.unread = None
+        # A refused target or an unanswered source gives no measurement.
+        self.unmeasured = False
+
+    def incomplete(self, why):
+        """Require an incomplete verdict when part of the target was unread."""
+        self.unread = why
 
     def critical(self, m):
         self.criticals.append(m)
+
+    def measured(self, m):
+        """A fact from a probe that answered: the score now stands for something."""
+        self.unmeasured = False
+        self.fact(m)
 
     def warn(self, m):
         self.warnings.append(m)
@@ -130,31 +142,16 @@ class Report:
         self.facts.append(m)
 
     def notchecked(self, probe, why, transient=False):
-        """Record a probe that did not run.
+        """Record a probe that lacked support or whose source was unreachable in this run.
 
-        `transient=False` (the default) means this ecosystem's registry structurally cannot
-        answer it — a permanent property, which is the #489 case. `transient=True` means the
-        probe could normally run but its source was unreachable in THIS run. Collapsing the two
-        would tell a reader that a repo's popularity is never knowable, when the truth is that
-        the API was unreachable this time; the distinction is the whole point of declaring at
-        all, so it survives into the summary line.
-
-        The score is a flat penalty count (100 - 45*crit - 12*warn), so it falls out of how
-        many probes an ecosystem HAS, not out of how safe the package is: before this, a pip
-        package scored 100/100 while the npm path scored 88 for the same package shape, purely
-        because npm exposes maintainer count and PyPI does not. Rather than let a number that
-        ran fewer checks read as the cleaner one, absence is printed -- the same `didNotRun`
-        semantics kit uses everywhere else, where coverage that could not run is UNKNOWN, not
-        clean.
+        Use transient=True for an unreachable source. The report keeps these cases
+        distinct and lists every gap, because the score covers only completed probes.
         """
         self.notrun.append((probe, why, transient))
 
     def emit(self):
         score = max(0, 100 - 45 * len(self.criticals) - 12 * len(self.warnings))
-        # Sanitize the echoed target: it is attacker-influenceable, and a newline
-        # in it could otherwise forge a standalone "TRIAGE PASSED" verdict line. It
-        # may also carry embedded URL credentials (`repo` targets clone over https),
-        # which must not reach stdout/CI logs either.
+        # Remove line breaks and URL credentials before printing the target.
         safe_target = _strip_userinfo(str(self.target).replace("\n", " ").replace("\r", " "))
         print(f"Triage: {self.ttype} {safe_target}")
         print("-" * 50)
@@ -167,18 +164,13 @@ class Report:
         for probe, why, _transient in self.notrun:
             print(f"  ~ NOT CHECKED: {probe} -- {why}")
         print()
-        print(f"Health score: {score}/100")
+        print("Health score: not measured (no probe ran)" if self.unmeasured else f"Health score: {score}/100")
         print(f"Critical issues: {len(self.criticals)}")
         print(f"Warnings: {len(self.warnings)}")
-        # Counts only what this path DECLARED it cannot answer -- never a completeness
-        # claim about the probe set itself, which is documented per type above.
+        # Count the reported gaps. The probe set is documented above.
         print(f"Probes declared unavailable: {len(self.notrun)}")
         if self.notrun:
-            # Without this line a 100/100 with a skipped probe is indistinguishable from a
-            # 100/100 with everything green -- which is the defect (#489).
-            # "cannot run for this ecosystem" is a permanent claim. Do not make it about a
-            # source that merely happened to be unreachable — a retry may well fix that one.
-            # A mix names both groups, each with its own probes.
+            # List unsupported probes and unreachable sources separately (#489).
             groups = [(kind, ", ".join(p for p, _, tr in self.notrun if tr == transient))
                       for kind, transient in (("cannot run for this ecosystem", False),
                       ("could not run in this run (source unreachable; retrying may resolve them)",
@@ -186,10 +178,12 @@ class Report:
             scope = "; ".join(f"{kind} ({probes})" for kind, probes in groups if probes)
             print(f"Coverage: PARTIAL -- {len(self.notrun)} probe(s) {scope}; "
                   "the score covers only what was checked")
-        if not self.criticals:
-            print("TRIAGE PASSED")
-        else:
+        if self.criticals:
             print("TRIAGE FAILED")
+        elif self.unread:
+            print(f"TRIAGE INCOMPLETE: {self.unread}")
+        else:
+            print("TRIAGE PASSED")
 
 
 def _split_npm_spec(target):
@@ -743,7 +737,7 @@ def triage_repo(rep):
         _declare_repo_probes_unavailable(rep)
         return
 
-    rep.fact(f"{or_}: {data.get('stargazers_count', 0)} stars, "
+    rep.measured(f"{or_}: {data.get('stargazers_count', 0)} stars, "
              f"license: {(data.get('license') or {}).get('spdx_id') or 'none'}")
     if data.get("archived"):
         rep.critical(f"repo '{or_}' is ARCHIVED (read-only / unmaintained)")
@@ -757,6 +751,12 @@ def triage_repo(rep):
         rep.warn(f"no push in {pushed_days} days -- possibly unmaintained")
     if not (data.get("license") or {}).get("spdx_id"):
         rep.warn("no detected license -- review terms before use")
+
+
+def _scored_repo(rep):
+    """Repo triage whose score is printed only once the GitHub API answered (`measured`)."""
+    rep.unmeasured = True
+    triage_repo(rep)
 
 
 def triage_docker(rep):
@@ -783,7 +783,7 @@ def triage_skill(rep):
     if _skill_scan().triage_local_skill(rep):
         return
     rep.fact("no local SKILL.md found; treating target as a repo")
-    triage_repo(rep)
+    _scored_repo(rep)
 
 
 def main(argv):
@@ -804,7 +804,7 @@ def main(argv):
     dispatch = {
         "npm": triage_npm_scripts,
         "pip": triage_pip,
-        "repo": triage_repo,
+        "repo": _scored_repo,
         "docker": triage_docker,
         "skill": triage_skill,
     }

@@ -39,6 +39,7 @@ import {
 import { beginReviewTransaction, type ReviewTransaction } from "../review-receipt-transaction.js";
 import { isReadOnlyMode, refuseWrite } from "../read-only-mode.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
+import { cmdReviewGate } from "./review-gate.js";
 
 export type ReviewStageName = "check" | "design" | "standards" | "adr" | "skill";
 
@@ -322,6 +323,8 @@ function specialReviewCommand(cwd: string): Promise<boolean> | undefined {
       return recoverReceiptCommand(cwd);
     case "resolve-interruption":
       return resolveInterruptionCommand(cwd);
+    case "gate":
+      return cmdReviewGate(process.argv, { cwd });
   }
 }
 

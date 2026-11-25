@@ -1,6 +1,16 @@
 import { readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { detectServices } from "./service-registry.js";
+import {
+  measureInstalled,
+  PYPROJECT_PROJECT,
+  pythonTools,
+  resolveNodeVersion,
+  type DetectOptions,
+  type InstalledVersion,
+} from "./stack-runtime-pins.js";
+
+export type { DetectOptions, InstalledVersion } from "./stack-runtime-pins.js";
 
 export interface DetectedStack {
   language: string;
@@ -79,48 +89,6 @@ async function collectWorkspaceDeps(cwd: string, pkg: PackageJson): Promise<stri
   return [...deps];
 }
 
-/** Resolve the Node major to pin, respecting the repo's existing truth.
- *  Precedence: .tool-versions > Volta > .node-version / .nvmrc > engines.node > 22.
- *  (Respecting these avoids installing the wrong runtime, the #1 brownfield trap.) */
-async function resolveNodeVersion(cwd: string, pkg: PackageJson): Promise<string> {
-  const toolVersions = await readFile(join(cwd, ".tool-versions"), "utf-8").catch(() => null);
-  if (toolVersions) {
-    const m = toolVersions.match(/^\s*nodejs?\s+v?(\d+)/m);
-    if (m) return m[1];
-  }
-  if (pkg.volta?.node) {
-    const m = pkg.volta.node.match(/(\d+)/);
-    if (m) return m[1];
-  }
-  for (const f of [".node-version", ".nvmrc"]) {
-    const c = await readFile(join(cwd, f), "utf-8").catch(() => null);
-    if (c) {
-      const m = c.match(/v?(\d+)/);
-      if (m) return m[1];
-    }
-  }
-  if (pkg.engines?.node) {
-    const m = pkg.engines.node.match(/(\d+)/);
-    if (m) return m[1];
-  }
-  return "22";
-}
-
-/** Resolve the Python minor to pin: .python-version > .tool-versions > 3.12. */
-async function resolvePythonVersion(cwd: string): Promise<string> {
-  const pv = await readFile(join(cwd, ".python-version"), "utf-8").catch(() => null);
-  if (pv) {
-    const m = pv.match(/(\d+\.\d+)/);
-    if (m) return m[1];
-  }
-  const tv = await readFile(join(cwd, ".tool-versions"), "utf-8").catch(() => null);
-  if (tv) {
-    const m = tv.match(/^\s*python\s+v?(\d+\.\d+)/m);
-    if (m) return m[1];
-  }
-  return "3.12";
-}
-
 function detectPackageManager(pkg: PackageJson, cwd: string): Promise<string> {
   if (pkg.packageManager?.startsWith("pnpm")) return Promise.resolve("pnpm");
   if (pkg.packageManager?.startsWith("yarn")) return Promise.resolve("yarn");
@@ -155,11 +123,14 @@ const FRAMEWORK_DETECTORS: { framework: string; deps: string[] }[] = [
   { framework: "vue", deps: ["vue"] },
 ];
 
-async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null> {
+async function detectFromPackageJson(
+  cwd: string,
+  installed: InstalledVersion,
+): Promise<DetectedStack | null> {
   const pkg = await readJson<PackageJson>(join(cwd, "package.json"));
   if (!pkg) return null;
 
-  const node = await resolveNodeVersion(cwd, pkg);
+  const node = await resolveNodeVersion(cwd, pkg, installed);
   const pm = await detectPackageManager(pkg, cwd);
   const tools: Record<string, string> = { node };
   if (pm !== "npm") tools[pm] = "latest";
@@ -208,9 +179,13 @@ async function pythonBuildsNativeExtension(cwd: string): Promise<boolean> {
   return /setuptools|maturin|scikit|mesonpy|meson_python|meson-python|pybind|cffi/.test(backend);
 }
 
-async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
+async function detectFromPython(
+  cwd: string,
+  installed: InstalledVersion,
+): Promise<DetectedStack | null> {
   const hasRequirements = await fileExists(join(cwd, "requirements.txt"));
-  const hasPyproject = await fileExists(join(cwd, "pyproject.toml"));
+  const pyproject = await readFile(join(cwd, "pyproject.toml"), "utf-8").catch(() => "");
+  const hasPyproject = PYPROJECT_PROJECT.test(pyproject);
   // setup.py / setup.cfg are the legacy Python package markers — a repo can ship them with
   // no requirements.txt/pyproject (older libs, or native-extension packages).
   const hasSetup =
@@ -223,9 +198,7 @@ async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
   if (hasRequirements) {
     contents = await readFile(join(cwd, "requirements.txt"), "utf-8").catch(() => "");
   }
-  if (hasPyproject) {
-    contents += await readFile(join(cwd, "pyproject.toml"), "utf-8").catch(() => "");
-  }
+  if (hasPyproject) contents += pyproject;
 
   if (/fastapi/i.test(contents)) framework = "fastapi";
   else if (/django/i.test(contents)) framework = "django";
@@ -240,7 +213,7 @@ async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
     language: "python",
     framework,
     services,
-    tools: { python: await resolvePythonVersion(cwd), uv: "latest" },
+    tools: await pythonTools(cwd, pyproject, installed),
     confidence: framework ? 0.85 : 0.5,
   };
 }
@@ -689,8 +662,9 @@ function isStrongBackend(s: DetectedStack): boolean {
  * the JS side declares a real app framework. Returns `unknown` only when nothing
  * recognizable is found.
  */
-export async function detectStack(cwd: string): Promise<DetectedStack> {
-  const js = await detectFromPackageJson(cwd);
+export async function detectStack(cwd: string, opts: DetectOptions = {}): Promise<DetectedStack> {
+  const installed = opts.installedVersion ?? measureInstalled;
+  const js = await detectFromPackageJson(cwd, installed);
 
   // Backends in priority order — first present wins as primary among backends (matters only
   // when a repo has NO package.json but several backend manifests). Ordering principle:
@@ -710,7 +684,7 @@ export async function detectStack(cwd: string): Promise<DetectedStack> {
       detectFromCpp(cwd),
       detectFromRust(cwd),
       detectFromDotnet(cwd),
-      detectFromPython(cwd),
+      detectFromPython(cwd, installed),
       detectFromPhp(cwd),
       detectFromRuby(cwd),
       detectFromFlutter(cwd),

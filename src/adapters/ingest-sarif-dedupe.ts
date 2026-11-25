@@ -11,6 +11,8 @@ interface SarifLocation {
 }
 export interface SarifResult {
   ruleId?: string;
+  /** SARIF 2.1.0 kind. An absent kind represents a failure. */
+  kind?: string;
   level?: string;
   message?: { text?: string };
   locations?: SarifLocation[];

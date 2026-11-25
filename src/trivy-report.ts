@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { isDockerfileName } from "./check-iac-detect.js";
 import {
   isOtherScannerFormat,
   reportText,
@@ -97,7 +98,7 @@ export function trivyConfigKey(type: string, rawPath: string): string {
 export function expectedTrivyConfigKey(path: string): string {
   const name = posix.basename(path);
   if (name.endsWith(".tf")) return trivyConfigKey("terraform", path);
-  return trivyConfigKey(name.startsWith("Dockerfile") ? "dockerfile" : "compose", path);
+  return trivyConfigKey(isDockerfileName(name) ? "dockerfile" : "compose", path);
 }
 
 function applyConfigCoverage(
