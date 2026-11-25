@@ -2,6 +2,7 @@
 import { closeSync, constants, fstatSync, openSync, readSync, readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
+import { runRequiredInspection } from "./required-security-inspection.js";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -39,6 +40,13 @@ interface Hit {
   line: number;
   indicator: string;
 }
+
+interface DockerfileReport {
+  hits: Hit[];
+  errors: string[];
+}
+
+type DockerfileInspector = (root: string) => Promise<DockerfileReport | null>;
 
 function suppressed(lines: string[], line: number, rule: RuleId): boolean {
   const marker = new RegExp(`\\bkit-ignore\\s+${rule}:\\s*\\S`, "i");
@@ -214,8 +222,26 @@ function readCandidate(path: string, file: string, errors: string[]): string | n
   }
 }
 
+const dockerfileCheck = { name: "literal Dockerfile secret", category: "secrets" } as const;
+
+function unscannedDetail(errors: string[]): string {
+  return `${errors.length} source path(s) were not scanned: ${errors.slice(0, 3).join(", ")}`;
+}
+
+function dockerfileVerdict(report: DockerfileReport): SecurityCheckResult | null {
+  if (!Array.isArray(report.hits) || !Array.isArray(report.errors)) return null;
+  const row = result(dockerfileCheck.name, dockerfileCheck.category, report.hits, "high");
+  if (row.status === "pass" && report.errors.length) {
+    return { ...row, status: "warn", didNotRun: true, detail: unscannedDetail(report.errors) };
+  }
+  return row;
+}
+
 /** Scan the supplied project root without invoking shell commands or reading generated trees. */
-export async function checkCodeGuardrails(root: string): Promise<SecurityCheckResult[]> {
+export async function checkCodeGuardrails(
+  root: string,
+  inspectDockerfile?: DockerfileInspector | null,
+): Promise<SecurityCheckResult[]> {
   const cloud: Hit[] = [];
   const docker: Hit[] = [];
   const guards: Hit[] = [];
@@ -225,17 +251,29 @@ export async function checkCodeGuardrails(root: string): Promise<SecurityCheckRe
     if (content === null) continue;
     const lines = content.split(/\r?\n/);
     if (SHELL_FILE.test(file) || WORKFLOW_FILE.test(file)) scanCloud(lines, file, cloud);
-    if (/^Dockerfile(?:\..+)?$/i.test(basename(file))) scanDockerfile(lines, file, docker);
+    if (inspectDockerfile === undefined && /^Dockerfile(?:\..+)?$/i.test(basename(file))) {
+      scanDockerfile(lines, file, docker);
+    }
     if (SOURCE_FILE.test(file) && !TEST_DIR.test(file) && !TEST_FILE.test(file))
       scanGuards(lines, file, guards);
   }
+  const inspection =
+    inspectDockerfile === undefined
+      ? () => ({ hits: docker, errors })
+      : inspectDockerfile && (() => inspectDockerfile(root));
+  const dockerVerdict = await runRequiredInspection(inspection, dockerfileVerdict, (failure) => ({
+    ...dockerfileCheck,
+    status: "fail",
+    didNotRun: true,
+    detail: `Dockerfile inspection is ${failure.kind}`,
+  }));
   const results = [
     result("public cloud command", "exposure", cloud, "high"),
-    result("literal Dockerfile secret", "secrets", docker, "high"),
+    dockerVerdict,
     result("commented-out guard", "exposure", guards, "medium"),
   ];
   if (errors.length) {
-    const detail = `${errors.length} source path(s) were not scanned: ${errors.slice(0, 3).join(", ")}`;
+    const detail = unscannedDetail(errors);
     for (const row of results) {
       if (row.status !== "pass") continue;
       row.status = "warn";

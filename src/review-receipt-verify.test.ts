@@ -31,14 +31,14 @@ function setup() {
     "fixture",
   );
   const head = git("rev-parse", "HEAD").trim();
-  const state = { base: head };
+  const state = { base: head, head, policy: head, repository: "example/project" };
   const run: ReadCommand = (command, args, cwd) => {
     if (command === "git") return execFileSync(command, args, { cwd, encoding: "utf8" });
-    if (args[0] === "repo") return '{"nameWithOwner":"example/project"}';
+    if (args[0] === "repo") return JSON.stringify({ nameWithOwner: state.repository });
     if (args[0] === "pr")
       return JSON.stringify({
         number: 1,
-        headRefOid: head,
+        headRefOid: state.head,
         changedFiles: 0,
         files: [],
         statusCheckRollup: [],
@@ -47,10 +47,10 @@ function setup() {
       return JSON.stringify({
         data: {
           repository: {
-            defaultBranchRef: { name: "main", target: { oid: head } },
+            defaultBranchRef: { name: "main", target: { oid: state.policy } },
             pullRequest: {
               number: 1,
-              headRefOid: head,
+              headRefOid: state.head,
               baseRefName: "main",
               baseRef: { target: { oid: state.base } },
             },
@@ -152,14 +152,16 @@ describe("review receipt verification", () => {
     });
   });
 
-  it("rejects a changed base commit", async () => {
-    await withFixture(async ({ root, input, state, run }) => {
-      const signed = signReviewReceipt(buildReviewReceipt(input), await getAuditAnchorKey());
-      writeFileSync(join(root, ".kit-review-receipt.json"), JSON.stringify(signed));
-      state.base = "c".repeat(40);
-      const result = await verifyReviewReceiptFile(root, undefined, run);
-      assert.equal(result.ok, false);
-      assert.match(result.reason, /current PR base or head/);
+  for (const field of ["base", "head", "policy", "repository"] as const) {
+    it(`rejects a signed receipt after the current ${field} changes`, async () => {
+      await withFixture(async ({ root, input, state, run }) => {
+        const signed = signReviewReceipt(buildReviewReceipt(input), await getAuditAnchorKey());
+        writeFileSync(join(root, ".kit-review-receipt.json"), JSON.stringify(signed));
+        state[field] = field === "repository" ? "example/other" : "c".repeat(40);
+        const result = await verifyReviewReceiptFile(root, undefined, run);
+        assert.equal(result.ok, false);
+        assert.match(result.reason, /current pull request|current PR base or head/);
+      });
     });
-  });
+  }
 });
