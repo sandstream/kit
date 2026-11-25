@@ -7,12 +7,22 @@
  *
  * Static first: this reads `CREATE POLICY`, `GRANT` and `REVOKE` statements in file name order and
  * lists each table that anonymous readers can select from. A live check against a database needs a
- * read-only role and is deferred. Out of scope here: `ALTER DEFAULT PRIVILEGES`, roles other than
- * anon and public, and policies created outside the SQL files in the repository.
+ * read-only role and is deferred. Out of scope here: roles other than anon and public, and policies
+ * created outside the SQL files in the repository.
+ *
+ * On a Supabase project, a new table in `public` starts with every privilege granted to `anon` and
+ * `authenticated` through default privileges, so a `public` table without row level security is
+ * readable with the publishable key ("A table in an exposed schema without RLS is readable and
+ * writable by any role with a grant on it",
+ * https://supabase.com/docs/guides/database/postgres/row-level-security). There, a table created in
+ * `public` counts as granted to anon unless a `REVOKE … FROM anon` on it, on all tables in `public`,
+ * or an `ALTER DEFAULT PRIVILEGES … REVOKE … FROM anon` before it takes the grant away. Other
+ * schemas are not exposed by default and are skipped. `FORCE ROW LEVEL SECURITY` alone does not
+ * enable it.
  */
 
 import { constants } from "node:fs";
-import { open, readdir } from "node:fs/promises";
+import { access, open, readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 import { loadPublicTables, type PublicTables } from "./anon-public-tables.js";
@@ -244,6 +254,16 @@ interface State {
   /** Tables where REVOKE SELECT left anon only the columns granted afterwards. */
   columnLimit: Map<string, Set<string>>;
   wildcard: boolean;
+  /** Supabase only: public tables that still hold the default grant to anon. */
+  defaultGranted: Set<string>;
+  /** Supabase only: ALTER DEFAULT PRIVILEGES took select on new public tables away from anon. */
+  defaultsRevoked: boolean;
+  supabase: boolean;
+}
+
+export interface AnonAccessOptions {
+  /** Model Supabase's default grants: a public table without row level security is readable by anon. */
+  supabase?: boolean;
 }
 
 function addColumns(state: State, table: string, cols: string[]): void {
@@ -351,10 +371,55 @@ function applyAlter(state: State, table: string, action: string): void {
   }
 }
 
+/** A table name normTable left without a schema is in `public`, the only schema Supabase exposes by default. */
+function isPublicTable(table: string): boolean {
+  return !table.includes(".");
+}
+
+function createTable(state: State, table: string, cols: string[]): void {
+  addColumns(state, table, cols);
+  if (isPublicTable(table) && !state.defaultsRevoked) state.defaultGranted.add(table);
+}
+
+function namesAnon(roles: string): boolean {
+  return rolesOf(roles).includes("anon");
+}
+
+/** REVOKE SELECT or ALL … FROM anon removes the Supabase default grant; FROM public does not, anon holds its own. */
+function applyRevoke(state: State, stmt: string): void {
+  applyGrant(state, stmt, true);
+  const m = stmt.match(REVOKE_RE);
+  if (!m || !/\b(select|all)\b/i.test(m[1]) || !namesAnon(m[3])) return;
+  if (/^all\s+tables\s+in\s+schema\s+public$/i.test(m[2].trim())) {
+    state.defaultGranted.clear();
+    return;
+  }
+  for (const t of m[2].split(",")) state.defaultGranted.delete(normTable(t));
+}
+
+const DROP_TABLE_RE = /^drop\s+table\s+(?:if\s+exists\s+)?([^;]+?)(?:\s+(?:cascade|restrict))?$/i;
+
+function dropTables(state: State, stmt: string): void {
+  const m = stmt.match(DROP_TABLE_RE);
+  if (!m) return;
+  for (const t of m[1].split(",")) state.defaultGranted.delete(normTable(t));
+}
+
+const DEFAULT_PRIVILEGES_RE =
+  /^alter\s+default\s+privileges\s+(?:for\s+(?:role|user)\s+[\w\x22,\s]+?\s+)?(?:in\s+schema\s+([\w\x22,\s]+?)\s+)?(grant|revoke)\s+(?:grant\s+option\s+for\s+)?([\w\s,]+?)\s+on\s+tables\s+(?:to|from)\s+([\w\x22,\s]+)/i;
+
+/** ALTER DEFAULT PRIVILEGES [IN SCHEMA public] REVOKE SELECT|ALL ON TABLES FROM anon: later tables get no grant. */
+function applyDefaultPrivileges(state: State, stmt: string): void {
+  const m = stmt.match(DEFAULT_PRIVILEGES_RE);
+  if (!m || !/\b(select|all)\b/i.test(m[3]) || !namesAnon(m[4])) return;
+  if (m[1] !== undefined && !rolesOf(m[1]).includes("public")) return;
+  state.defaultsRevoked = m[2].toLowerCase() === "revoke";
+}
+
 function applyStatement(state: State, raw: string): void {
   const stmt = raw.trim().replace(/\s+/g, " ");
   const create = stmt.match(CREATE_TABLE_RE);
-  if (create) return addColumns(state, normTable(create[1]), columnsOf(create[2]));
+  if (create) return createTable(state, normTable(create[1]), columnsOf(create[2]));
   const alter = stmt.match(ALTER_TABLE_RE);
   if (alter) return applyAlter(state, normTable(alter[1]), alter[2]);
   const drop = stmt.match(DROP_POLICY_RE);
@@ -365,7 +430,9 @@ function applyStatement(state: State, raw: string): void {
   if (/^create\s+policy\b/i.test(stmt)) return applyPolicy(state, stmt);
   if (/^grant\b/i.test(stmt) && applyColumnGrant(state, stmt)) return;
   if (/^grant\b/i.test(stmt)) return applyGrant(state, stmt, false);
-  if (/^revoke\b/i.test(stmt)) applyGrant(state, stmt, true);
+  if (/^revoke\b/i.test(stmt)) return applyRevoke(state, stmt);
+  if (/^drop\s+table\b/i.test(stmt)) return dropTables(state, stmt);
+  if (/^alter\s+default\s+privileges\b/i.test(stmt)) applyDefaultPrivileges(state, stmt);
 }
 
 function personalOf(state: State, table: string): string[] {
@@ -385,6 +452,10 @@ function summarise(state: State): Omit<AnonAnalysis, "incomplete"> {
   for (const t of [...state.grants.keys(), ...grantedTables]) {
     if (!state.rls.has(t)) note(t, "GRANT SELECT to anon without row level security");
   }
+  for (const t of state.supabase ? state.defaultGranted : []) {
+    if (!state.rls.has(t))
+      note(t, "Supabase default grant to anon, row level security not enabled");
+  }
   const readable = [...via.entries()]
     .map(([table, how]) => ({
       table,
@@ -396,7 +467,10 @@ function summarise(state: State): Omit<AnonAnalysis, "incomplete"> {
 }
 
 /** Pure: apply the sources in the order given and list the tables anonymous readers can select from. */
-export function analyzeAnonAccess(sources: SqlSource[]): AnonAnalysis {
+export function analyzeAnonAccess(
+  sources: SqlSource[],
+  options: AnonAccessOptions = {},
+): AnonAnalysis {
   const state: State = {
     tables: new Map(),
     rls: new Set(),
@@ -404,6 +478,9 @@ export function analyzeAnonAccess(sources: SqlSource[]): AnonAnalysis {
     grants: new Map(),
     columnLimit: new Map(),
     wildcard: false,
+    defaultGranted: new Set(),
+    defaultsRevoked: false,
+    supabase: options.supabase === true,
   };
   const incomplete: string[] = [];
   for (const source of sources) {
@@ -476,6 +553,31 @@ async function collectSql(root: string): Promise<Collected> {
   return { sources, oversize, unreadable, truncated };
 }
 
+const SUPABASE_PACKAGES = ["@supabase/supabase-js", "supabase"];
+
+/**
+ * The signals `kit monkey-test` uses for Supabase, without its free-text match: a Supabase CLI
+ * project (`supabase/config.toml`) or a Supabase package in package.json.
+ */
+async function isSupabaseProject(root: string): Promise<boolean> {
+  try {
+    await access(join(root, "supabase", "config.toml"));
+    return true;
+  } catch {
+    // not a Supabase CLI project; fall through to package.json
+  }
+  try {
+    const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as Record<
+      string,
+      Record<string, string> | undefined
+    >;
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    return SUPABASE_PACKAGES.some((name) => name in deps);
+  } catch {
+    return false;
+  }
+}
+
 function describe(t: ReadableTable): string {
   const cols = t.personalColumns.length
     ? ` (personal columns: ${t.personalColumns.join(", ")})`
@@ -513,7 +615,7 @@ export async function checkAnonAccess(root: string): Promise<SecurityCheckResult
       detail: "no SQL files in the project, nothing to read policies from",
     };
   }
-  const analysis = analyzeAnonAccess(sources);
+  const analysis = analyzeAnonAccess(sources, { supabase: await isSupabaseProject(root) });
   const count = `${sources.length} SQL file${sources.length === 1 ? "" : "s"}`;
   const declared = await loadPublicTables(root, normTable);
   return withIncompleteNote(resultFor(analysis.readable, count, declared), analysis.incomplete);
@@ -521,7 +623,7 @@ export async function checkAnonAccess(root: string): Promise<SecurityCheckResult
 
 const BASE = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
 const SUGGESTION =
-  "Replace USING (true) with a row-scoped condition, or move personal columns to a table anon cannot read. If a table without personal columns is public on purpose, declare it under [anon_access.public] in .kit.toml with a reason. Run `kit check --category security` again after the migration.";
+  "Enable row level security on each listed table and replace USING (true) with a row-scoped condition, or move personal columns to a table anon cannot read. If a table without personal columns is public on purpose, declare it under [anon_access.public] in .kit.toml with a reason. Run `kit check --category security` again after the migration.";
 
 function resultFor(
   all: ReadableTable[],
