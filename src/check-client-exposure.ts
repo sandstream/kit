@@ -28,6 +28,7 @@
 import { readFile, readdir, access } from "node:fs/promises";
 import { join } from "node:path";
 
+import { undeclaredBuildDirs } from "./client-build-discovery.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 /**
@@ -517,44 +518,12 @@ export async function checkBuiltBundleSecrets(root: string): Promise<SecurityChe
   return scanPresentBuilds(root, base, present, framework);
 }
 
-const JS_FILE = /\.[cm]?js$/i;
-
-async function jsFilesIn(dir: string): Promise<boolean> {
-  try {
-    return (await readdir(dir)).some((name) => JS_FILE.test(name));
-  } catch {
-    return false;
-  }
-}
-
-/**
- * A root build directory that looks like it ships to a browser although no framework is declared:
- * an `index.html`, or JavaScript under `assets/` or `static/`, which is what Vite, Rollup and
- * webpack setups emit. A `dist/` with JavaScript only at its top is read as a server or CLI build.
- */
-async function undeclaredBuildDirs(root: string): Promise<{ browser: string[]; js: string[] }> {
-  const browser: string[] = [];
-  const js: string[] = [];
-  for (const dir of BUILD_DIRS) {
-    const full = join(root, dir);
-    const html = await access(join(full, "index.html")).then(
-      () => true,
-      () => false,
-    );
-    const assets =
-      (await jsFilesIn(join(full, "assets"))) || (await jsFilesIn(join(full, "static")));
-    if (html || assets) browser.push(dir);
-    else if (await jsFilesIn(full)) js.push(dir);
-  }
-  return { browser, js };
-}
-
 /** No client framework is declared: scan browser-shaped output anyway, and name any other JS build. */
 async function undeclaredBuildResult(
   root: string,
   base: Omit<SecurityCheckResult, "status" | "detail">,
 ): Promise<SecurityCheckResult> {
-  const found = await undeclaredBuildDirs(root);
+  const found = await undeclaredBuildDirs(root, BUILD_DIRS);
   if (found.browser.length) {
     return scanPresentBuilds(root, base, found.browser, "no client framework declared");
   }
