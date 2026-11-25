@@ -154,6 +154,32 @@ async function installedScriptMatchesBundled(targetDir: string): Promise<boolean
   }
 }
 
+let bundledDigests: ReadonlySet<string> | null = null;
+
+/**
+ * sha256 of every file `installBundledTriageSkill` writes, read from kit's own package. A user skill
+ * file with one of these digests is kit's copy byte for byte: its detection patterns look like what
+ * they detect, so the user-surface audit would otherwise report kit's scanner as malware. Empty when
+ * the package files cannot be read, so nothing is exempted.
+ */
+export function bundledTriageDigests(): ReadonlySet<string> {
+  if (bundledDigests) return bundledDigests;
+  const out = new Set<string>();
+  for (const rel of ["SKILL.md", ...TRIAGE_SCRIPTS]) {
+    try {
+      out.add(
+        createHash("sha256")
+          .update(readFileSync(resolve(BUNDLED_TRIAGE_SKILL, rel)))
+          .digest("hex"),
+      );
+    } catch {
+      // Not shipped: nothing to match.
+    }
+  }
+  bundledDigests = out;
+  return out;
+}
+
 export type TriageType =
   "docker" | "npm" | "pip" | "gem" | "cargo" | "go" | "repo" | "skill" | "brew" | "all" | "tools";
 
