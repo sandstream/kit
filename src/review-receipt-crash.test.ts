@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { captureChildStderr, requireChildExit } from "./review-child-process.test-support.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 const fixture = fileURLToPath(new URL("./review-receipt-process.test-support.js", import.meta.url));
 function setup() {
@@ -123,7 +124,9 @@ it("preserves both links when a process dies after publishing history", async ()
     const tempPath = join(test.root, temp);
     const fd = openSync(test.history, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
-      assert.equal(lstatSync(tempPath).ino, fstatSync(fd).ino);
+      assert.ok(
+        sameIdentity(lstatSync(tempPath, { bigint: true }), fstatSync(fd, { bigint: true })),
+      );
       assert.equal(fstatSync(fd).nlink, 2);
       const blocked = mustBlock(test, "recover");
       assert.ok(blocked.stderr.includes(tempPath), blocked.stderr || "(no stderr)");
@@ -136,7 +139,9 @@ it("preserves both links when a process dies after publishing history", async ()
       mustSucceed(test, "recover");
       assert.equal(fstatSync(fd).nlink, 1);
       assert.equal(readFileSync(fd, "utf8").trim().split("\n").length, 1);
-      assert.equal(lstatSync(test.history).ino, fstatSync(fd).ino);
+      assert.ok(
+        sameIdentity(lstatSync(test.history, { bigint: true }), fstatSync(fd, { bigint: true })),
+      );
     } finally {
       closeSync(fd);
     }

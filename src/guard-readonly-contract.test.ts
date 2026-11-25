@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { createCliContractFixture } from "./cli-contract.test-support.js";
 import { generateShim, SHIM_MARKER } from "./guard.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 let fixture: ReturnType<typeof createCliContractFixture>;
 let shims: string;
@@ -99,16 +100,16 @@ for (const mode of modes) {
     activate(mode);
     const shim = seedShim("git");
     const before = protectedState();
-    const identity = statSync(shim);
+    const identity = statSync(shim, { bigint: true });
     assert.equal(assertObservation(mode.args, clone).wouldBlock, false);
     assert.equal(
       readFileSync(shim, "utf8"),
       stale,
       "read-only must not refresh the installed shim",
     );
-    const after = statSync(shim);
-    assert.equal(after.ino, identity.ino, "read-only must not replace the shim inode");
-    assert.equal(after.mtimeMs, identity.mtimeMs);
+    const after = statSync(shim, { bigint: true });
+    assert.ok(sameIdentity(after, identity), "read-only must not replace the shim inode");
+    assert.equal(after.mtimeNs, identity.mtimeNs);
     assert.equal(after.mode, identity.mode);
     assert.deepEqual(protectedState(), before, "only observation and audit logs may change");
   });
