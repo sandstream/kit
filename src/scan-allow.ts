@@ -6,6 +6,11 @@
  * pattern. It lives in the repo, so a new exception shows up in review like code.
  */
 import type { StagedHit } from "./scan-staged.js";
+import {
+  falsePositiveMarkSchema,
+  type EvidencedSecret,
+  type FindingEvidence,
+} from "./finding-evidence.js";
 
 export interface AllowEntry {
   path: string;
@@ -25,6 +30,7 @@ export interface AllowUse {
   entry: AllowEntry;
   file: string;
   count: number;
+  evidence: FindingEvidence[];
 }
 
 export interface AllowStale {
@@ -33,8 +39,7 @@ export interface AllowStale {
 }
 
 const KNOWN = new Set(["path", "match", "reason", "preview", "reviewed"]);
-const MIN_REASON = 8;
-/** The fail-closed finding for a blob kit could not read. It is a gate failure, not a false positive. */
+/** A blob that Kit could not read cannot be allowed. */
 const UNSCANNABLE = "unscannable";
 
 function isText(value: unknown): value is string {
@@ -67,8 +72,8 @@ function entryProblem(raw: unknown): string | undefined {
   if (!isText(entry.match)) return 'missing "match": the finding label, for example "keyed-secret"';
   const match = badMatch(entry.match);
   if (match) return `"match" ${match}`;
-  if (!isText(entry.reason) || entry.reason.trim().length < MIN_REASON) {
-    return `missing "reason": add reason = "why this match is harmless" (at least ${MIN_REASON} characters)`;
+  if (!falsePositiveMarkSchema.safeParse({ reason: entry.reason }).success) {
+    return 'missing "reason": add reason = "why this match is harmless" (at least 8 characters)';
   }
   if (entry.preview !== undefined && !isText(entry.preview)) return '"preview" must be text';
   if (entry.reviewed !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(entry.reviewed))) {
@@ -99,9 +104,9 @@ export function parseScanAllow(raw: unknown): { entries: AllowEntry[]; problems:
 
 const same = (a: string, b: string): boolean => a.split("\\").join("/") === b.split("\\").join("/");
 
-function covers(entry: AllowEntry, hit: StagedHit, f: { label: string; preview: string }): boolean {
-  if (!same(entry.path, hit.file) || entry.match !== f.label) return false;
-  if (f.label.startsWith(UNSCANNABLE)) return false;
+function covers(entry: AllowEntry, f: EvidencedSecret): boolean {
+  const { file, pattern } = f.evidence;
+  if (!same(entry.path, file) || entry.match !== pattern) return false;
   return entry.preview === undefined || entry.preview === f.preview;
 }
 
@@ -116,24 +121,26 @@ export function applyAllow(
   staged: string[],
   exists: (path: string) => boolean,
 ): { hits: StagedHit[]; used: AllowUse[]; stale: AllowStale[] } {
-  const counts = new Map<AllowEntry, Map<string, number>>();
+  const matches = new Map<AllowEntry, Map<string, FindingEvidence[]>>();
   const remaining: StagedHit[] = [];
   for (const hit of hits) {
     const kept = hit.findings.filter((f) => {
-      const entry = entries.find((e) => covers(e, hit, f));
+      const entry = entries.find((e) => covers(e, f));
       if (!entry) return true;
-      const perFile = counts.get(entry) ?? new Map<string, number>();
-      perFile.set(hit.file, (perFile.get(hit.file) ?? 0) + 1);
-      counts.set(entry, perFile);
+      const perFile = matches.get(entry) ?? new Map<string, FindingEvidence[]>();
+      const evidence = perFile.get(hit.file) ?? [];
+      evidence.push(f.evidence);
+      perFile.set(hit.file, evidence);
+      matches.set(entry, perFile);
       return false;
     });
-    if (kept.length > 0) remaining.push({ ...hit, findings: kept });
+    if (kept.length > 0 || hit.gap) remaining.push({ ...hit, findings: kept });
   }
-  const used = [...counts].flatMap(([entry, files]) =>
-    [...files].map(([file, count]) => ({ entry, file, count })),
+  const used = [...matches].flatMap(([entry, files]) =>
+    [...files].map(([file, evidence]) => ({ entry, file, evidence, count: evidence.length })),
   );
   const stale = entries.flatMap((entry) => {
-    if (counts.has(entry)) return [];
+    if (matches.has(entry)) return [];
     if (!exists(entry.path)) return [{ entry, why: "its file no longer exists" }];
     const isStaged = staged.some((p) => same(p, entry.path));
     return isStaged ? [{ entry, why: "it matched nothing in this commit" }] : [];

@@ -106,3 +106,37 @@ describe("ingestFindings", () => {
     assert.equal(ingestFindings(jsonl(ROW), { strict: true }).errors.length, 0);
   });
 });
+
+describe("a failed run", () => {
+  const { none: _none, ...mark } = NONE;
+  const FAILED = { ...mark, target: "d2", failed: "refused" };
+
+  it("is a bare run mark that keeps the reason", () => {
+    const m = validateRow(FAILED);
+    assert.ok(typeof m !== "string" && !("file" in m));
+    assert.equal(m.failed, "refused");
+    assert.deepEqual(parseFindings(jsonl(FAILED)).runs[0].failed, "refused");
+  });
+
+  it("refuses a failed row with no reason, a location, or a none flag", () => {
+    assert.match(validateRow({ ...FAILED, failed: " " }) as string, /"failed" must be a non-empty/);
+    assert.match(
+      validateRow({ ...FAILED, failed: true }) as string,
+      /"failed" must be a non-empty/,
+    );
+    assert.equal(validateRow({ ...FAILED, file: "a.ts" }), "unknown key(s) file");
+    assert.match(validateRow({ ...FAILED, none: true }) as string, /"none" or "failed", not both/);
+  });
+
+  it("refuses a row that contradicts an earlier one for the same run and target", () => {
+    const finding = { ...ROW, run: FAILED.run, target: FAILED.target };
+    const { errors, runs } = parseFindings(jsonl(FAILED, finding, FAILED));
+    assert.equal(runs.length, 1);
+    assert.deepEqual(
+      errors.map((e) => e.line),
+      [2],
+    );
+    assert.match(errors[0].message, /already recorded as failed/);
+    assert.match(parseFindings(jsonl(finding, FAILED)).errors[0].message, /recorded as reviewed/);
+  });
+});

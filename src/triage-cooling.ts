@@ -13,7 +13,8 @@
  *
  * With no lockfile version, with OSV unreachable, or with air-gap on and no OSV mirror named, the
  * warning stays and says why. This runs after triage.py: the bundled script is a frozen, verified
- * asset and reads no project files. The warning does not change its health score.
+ * asset and reads no project files. The summary counts and the score take the cooling line, with
+ * triage.py's own penalties (`countCoolingWarnings`).
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -370,14 +371,27 @@ export function withCoolingLines(output: string, result: CoolingResult): string 
   return result.held ? counted.replace(/^TRIAGE PASSED$/m, "TRIAGE HELD: cooling period") : counted;
 }
 
+/** triage.py's flat penalties per critical and per warning (`100 - 45*crit - 12*warn`). */
+const CRITICAL_PENALTY = 45;
+const WARNING_PENALTY = 12;
+
 /**
- * The summary's `Warnings: N` is triage.py's count, made before the cooling lines were added, so a
- * cooling warning printed above `Warnings: 0` (kit-research `supply-chain-2026-fundamentals-vs-kit`).
+ * The summary is triage.py's, made before the cooling lines were added, so a cooling warning printed
+ * above `Warnings: 0` (kit-research `supply-chain-2026-fundamentals-vs-kit`), and a cooling CRITICAL
+ * above `Critical issues: 0` with the score untouched. Both counts and the score take what the cooling
+ * lines add, with triage.py's own penalties; a NOT CHECKED or waived line adds nothing.
  */
 function countCoolingWarnings(output: string, lines: string[]): string {
-  const added = lines.filter((l) => l.includes("! WARNING:")).length;
-  if (added === 0) return output;
-  return output.replace(/^Warnings: (\d+)$/m, (_, n: string) => `Warnings: ${Number(n) + added}`);
+  const crit = lines.filter((l) => l.includes("x CRITICAL:")).length;
+  const warn = lines.filter((l) => l.includes("! WARNING:")).length;
+  if (crit + warn === 0) return output;
+  const penalty = CRITICAL_PENALTY * crit + WARNING_PENALTY * warn;
+  return output
+    .replace(/^Critical issues: (\d+)$/m, (_, n: string) => `Critical issues: ${Number(n) + crit}`)
+    .replace(/^Warnings: (\d+)$/m, (_, n: string) => `Warnings: ${Number(n) + warn}`)
+    .replace(/^Health score: (\d+)\/100$/m, (_, n: string) => {
+      return `Health score: ${Math.max(0, Number(n) - penalty)}/100`;
+    });
 }
 
 /** The registry view the cooling check needs: published versions and their publish times. */
