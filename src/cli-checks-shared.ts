@@ -174,15 +174,22 @@ export async function maybeEmitCheckAttestation(
   overallOk: boolean,
   summary: { passed: number; failed: number; warnings: number; skipped: number },
   scannersRan: { id: string; status: string }[],
-  quiet: boolean,
+  out: { quiet: boolean; scope?: readonly string[] | null },
 ): Promise<void> {
   if (!hasFlag(process.argv, "--attest") && !envTruthy(process.env.KIT_ATTEST)) return;
   const { emitAttestation } = await import("./check-attestation.js");
   const res = await emitAttestation(
-    { command, kitVersion: KIT_VERSION, overallOk, results: summary, scannersRan },
+    {
+      command,
+      kitVersion: KIT_VERSION,
+      overallOk,
+      results: summary,
+      scannersRan,
+      scope: out.scope,
+    },
     process.cwd(),
   );
-  if (res && !quiet) {
+  if (res && !out.quiet) {
     const signedNote =
       res.att.sig_alg === "none"
         ? `${c.yellow}unsigned (${res.att.unsigned_reason})${c.reset}`

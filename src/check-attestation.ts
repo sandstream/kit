@@ -11,8 +11,8 @@
  *      AUTHORITATIVE. The verifier needs the same machine-local key, so a valid
  *      MAC genuinely binds the receipt to a key-holder (real authenticity).
  *   2. Ed25519 keypair (`~/.kit/attestation-ed25519.key`, PKCS8 PEM, 0600) -
- *      portable fallback used when the anchor key cannot be obtained, or when
- *      explicitly requested. The receipt embeds its SPKI public key, but that
+ *      portable fallback used when the anchor key cannot be obtained (or when a
+ *      caller passes `preferEd25519`; no CLI flag does). The receipt embeds its SPKI public key, but that
  *      embedded key is UNTRUSTED: anyone can mint a keypair and sign
  *      `overall_ok: true`. Authenticity therefore requires the verifier to PIN
  *      or pass the expected key (`--key`, or a TOFU pin in `~/.kit`). With no
@@ -68,6 +68,11 @@ export interface AttestationPayload {
   results: AttestationSummary;
   /** Scanner ids and whether each actually ran vs was skipped/errored. */
   scanners_ran: { id: string; status: string }[];
+  /**
+   * The check categories that ran, when the run was narrowed (`--category security`). Absent
+   * for a full run, so a full run's signed bytes are what receipts without the field carried.
+   */
+  scope?: string[];
 }
 
 export interface Attestation extends AttestationPayload {
@@ -85,6 +90,8 @@ export interface BuildAttestationInput {
   overallOk: boolean;
   results: AttestationSummary;
   scannersRan: { id: string; status: string }[];
+  /** Categories of a narrowed run; null or absent for a full run. */
+  scope?: readonly string[] | null;
   /** Override for deterministic tests. */
   timestamp?: string;
 }
@@ -99,6 +106,7 @@ export function buildAttestationPayload(input: BuildAttestationInput): Attestati
     overall_ok: input.overallOk,
     results: input.results,
     scanners_ran: input.scannersRan,
+    ...(input.scope ? { scope: [...input.scope] } : {}),
   };
 }
 
@@ -120,6 +128,8 @@ export function canonicalPayloadBytes(payload: AttestationPayload): Buffer {
       skipped: payload.results.skipped,
     },
     scanners_ran: payload.scanners_ran.map((s) => ({ id: s.id, status: s.status })),
+    // Signed as found, so a receipt with its scope removed or widened no longer verifies.
+    ...(payload.scope !== undefined ? { scope: payload.scope } : {}),
   };
   return Buffer.from(JSON.stringify(canonical), "utf-8");
 }
@@ -333,6 +343,7 @@ function splitEnvelope(att: Attestation): AttestationPayload {
     overall_ok: att.overall_ok,
     results: att.results,
     scanners_ran: att.scanners_ran,
+    ...(att.scope !== undefined ? { scope: att.scope } : {}),
   };
 }
 

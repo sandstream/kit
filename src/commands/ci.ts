@@ -287,7 +287,7 @@ export async function cmdCi(): Promise<boolean> {
         allOk,
         summary,
         securityResults.map((s) => ({ id: s.name, status: s.status })),
-        format !== "text",
+        { quiet: format !== "text" },
       );
 
       return allOk;
