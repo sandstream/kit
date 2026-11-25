@@ -46,6 +46,10 @@ export async function runCli(
       cwd,
       env: {
         ...outsideAgentSession(),
+        // Windows CLI fixtures use no host Docker inventory unless a test opts in.
+        ...(process.platform === "win32"
+          ? { DOCKER_HOST: `npipe:////./pipe/kit-cli-fixture-${process.pid}`, DOCKER_CONTEXT: "" }
+          : {}),
         // Disable governance to avoid budget state side-effects
         KIT_CLAUDE_SETTINGS: join(agentStateDir, "claude-settings.json"),
         KIT_CODEX_HOOKS: join(agentStateDir, "codex-hooks.json"),

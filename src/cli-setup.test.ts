@@ -1,7 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -26,10 +26,6 @@ describe("kit setup", () => {
       HOME: fixtureHome,
       USERPROFILE: fixtureHome,
       KIT_WRAPPER_ALLOW_DEV: "1",
-      // Setup can run without Docker. Keep the Windows fixture off the runner's daemon.
-      ...(process.platform === "win32"
-        ? { DOCKER_HOST: `npipe:////./pipe/${basename(tempDir)}`, DOCKER_CONTEXT: "" }
-        : {}),
     };
     await exec("git", ["init", "-q", tempDir]);
     await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
