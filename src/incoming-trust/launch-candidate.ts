@@ -7,6 +7,10 @@ import { launchNodeOnMac, type IncomingRun } from "./launch-node-macos.js";
 import { withSealedCandidate, withSealedRuntime, withSealedRunTree } from "./sealed-candidate.js";
 import type { ImageCleanupStep } from "./sealed-image-owner.js";
 import { readApprovedRunTree } from "./runtime-tree.js";
+import {
+  finishRequiredDockerfileInspection,
+  requiredDockerfilePaths,
+} from "./required-dockerfile-report.js";
 
 interface LaunchRequest {
   store: IncomingTrustStore;
@@ -27,6 +31,9 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
   const original = store.preflight(repository, source, verification);
   if (!original.verified) return { ran: false, reason: original.reason };
   const observation: { result?: IncomingRun } = {};
+  let requiredFiles: ReadonlySet<string> | undefined;
+  const finish = (run: IncomingRun) =>
+    prepared.policy.requiredCheck ? finishRequiredDockerfileInspection(run, requiredFiles) : run;
   try {
     const verificationDigest = incomingVerificationDigest(verification);
     const assertStableBuild = () => {
@@ -49,6 +56,14 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
               (deadline, authority) => {
                 const approved = readApprovedRunTree(mounted, prepared.policy.npmArtifacts);
                 if (!approved.ok) return { ran: false, reason: approved.reason } as const;
+                if (prepared.policy.requiredCheck) {
+                  requiredFiles = requiredDockerfilePaths(
+                    approved.tree.entries,
+                    prepared.policy.entry,
+                  );
+                  if (!requiredFiles)
+                    return { ran: false, reason: "required-check-input-unverified" } as const;
+                }
                 return withSealedRunTree(
                   approved.tree,
                   (input, inputDigest, assertRunTree) => {
@@ -82,14 +97,16 @@ export function launchIncomingCandidate(request: LaunchRequest): IncomingRun {
       },
       assertStableBuild,
     );
-    if ("ran" in result) return result;
-    return boundaryFailure(
-      observation.result,
-      result.reason,
-      "cleanupStep" in result ? result.cleanupStep : undefined,
+    if ("ran" in result) return finish(result);
+    return finish(
+      boundaryFailure(
+        observation.result,
+        result.reason,
+        "cleanupStep" in result ? result.cleanupStep : undefined,
+      ),
     );
   } catch {
-    return boundaryFailure(observation.result, "run-state-unavailable");
+    return finish(boundaryFailure(observation.result, "run-state-unavailable"));
   }
 }
 

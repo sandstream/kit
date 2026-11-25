@@ -1,6 +1,6 @@
 /** Static code checks for access grants, Dockerfile secrets and disabled guards. */
 import { closeSync, constants, fstatSync, openSync, readSync, readdirSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { runRequiredInspection } from "./required-security-inspection.js";
 
@@ -81,7 +81,7 @@ function candidates(root: string): { files: string[]; errors: string[] } {
         if (
           SHELL_FILE.test(name) ||
           WORKFLOW_FILE.test(name) ||
-          /^Dockerfile(?:\..+)?$/i.test(entry.name) ||
+          isInspectedDockerfile(name) ||
           SOURCE_FILE.test(name)
         )
           files.push(name);
@@ -224,11 +224,19 @@ function readCandidate(path: string, file: string, errors: string[]): string | n
 
 const dockerfileCheck = { name: "literal Dockerfile secret", category: "secrets" } as const;
 
+export function isInspectedDockerfile(path: string): boolean {
+  const segments = path.split("/");
+  return (
+    /^Dockerfile(?:\..+)?$/i.test(segments.pop() ?? "") &&
+    !segments.some((segment) => SKIP_DIRS.has(segment))
+  );
+}
+
 function unscannedDetail(errors: string[]): string {
   return `${errors.length} source path(s) were not scanned: ${errors.slice(0, 3).join(", ")}`;
 }
 
-function dockerfileVerdict(report: DockerfileReport): SecurityCheckResult | null {
+export function dockerfileVerdict(report: DockerfileReport): SecurityCheckResult | null {
   if (!Array.isArray(report.hits) || !Array.isArray(report.errors)) return null;
   const row = result(dockerfileCheck.name, dockerfileCheck.category, report.hits, "high");
   if (row.status === "pass" && report.errors.length) {
@@ -251,7 +259,7 @@ export async function checkCodeGuardrails(
     if (content === null) continue;
     const lines = content.split(/\r?\n/);
     if (SHELL_FILE.test(file) || WORKFLOW_FILE.test(file)) scanCloud(lines, file, cloud);
-    if (inspectDockerfile === undefined && /^Dockerfile(?:\..+)?$/i.test(basename(file))) {
+    if (inspectDockerfile === undefined && isInspectedDockerfile(file)) {
       scanDockerfile(lines, file, docker);
     }
     if (SOURCE_FILE.test(file) && !TEST_DIR.test(file) && !TEST_FILE.test(file))

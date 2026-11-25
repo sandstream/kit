@@ -129,7 +129,7 @@ it(
       5000,
       undefined,
       (source, destination) => capturePackages(source, destination, fixture),
-      fixture.expectations,
+      { npmArtifacts: fixture.expectations },
     );
     try {
       const cli = fileURLToPath(new URL("../cli.js", import.meta.url));
@@ -246,7 +246,7 @@ it(
       5000,
       undefined,
       (source, destination) => capturePackages(source, destination, alternate),
-      fixture.expectations,
+      { npmArtifacts: fixture.expectations },
     );
     try {
       assert.deepEqual(launchIncomingCandidate(f), {
