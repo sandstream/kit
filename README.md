@@ -346,7 +346,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template, declared deploy env) and print HITL blocks for auth / DSN setup
 - `kit review` / `kit heal`: One-gate repo audit (check + design + standards + ADR + skill discipline); bounded self-heal loop
 - `kit adr {check,list,freeze}`: Turn an Architecture Decision Record into a deterministic gate — enforce a `kit-enforce` block (`forbid_pattern` / `require_pattern` / `forbid_import`, incl. transitive and across npm package boundaries) cited back to the ADR. Zero-LLM (prose is never interpreted)
-- `.kit/standards.d/*.toml`: Declarative house-rule plugins support `mode = "forbid"` and `mode = "require"`; directory excludes like `scripts/` mean `scripts/**`, with zero-match warnings
+- `.kit/standards.d/*.toml`: Declarative house-rule plugins match one line at a time and support `mode = "forbid"` and `mode = "require"`; directory excludes like `scripts/` mean `scripts/**`, with zero-match warnings
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit`: Check install risks, dependencies, and GitHub Actions.
 - `kit agent-audit`: Check agent, MCP, and hook configuration. It warns about the lethal trifecta, writes without confirmation, and environment variables that load code into every process.
