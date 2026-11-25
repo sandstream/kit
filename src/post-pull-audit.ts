@@ -7,7 +7,8 @@
  */
 
 import { isUtf8 } from "node:buffer";
-import { findSecrets, redactSecrets, type SecretFinding } from "./utils/redactSecrets.js";
+import { redactSecrets } from "./utils/redactSecrets.js";
+import { locateSecretMatches, type EvidencedSecret } from "./finding-evidence.js";
 import { exec } from "./utils/exec.js";
 import { agentFilesIn } from "./pull-agent-files.js";
 
@@ -23,7 +24,7 @@ export interface PullAuditReport {
   /** Sensitivity is determined from original entries before report text is redacted. */
   gitignoreRemovals: { entry: string; sensitive: boolean }[];
   newGitignoreEntries: string[];
-  plaintextHits: { file: string; findings: SecretFinding[] }[];
+  plaintextHits: { file: string; findings: EvidencedSecret[] }[];
   allowlistChanged: boolean;
   policyChanged: boolean;
   kitTomlChanged: boolean;
@@ -398,7 +399,7 @@ async function plaintextHitsIn(
   for (const path of changed) {
     const content = await readFile(head, path, cwd, report);
     if (content.status !== "read") continue;
-    const findings = findSecrets(content.content);
+    const findings = locateSecretMatches(path, content.content);
     if (findings.length > 0) hits.push({ file: path, findings });
   }
   return hits;

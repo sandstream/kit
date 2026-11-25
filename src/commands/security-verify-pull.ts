@@ -8,6 +8,7 @@ import {
   type PullAuditReport,
 } from "../post-pull-audit.js";
 import { pulledAgentFileLines } from "../pull-agent-files.js";
+import { formatEvidencedSecret } from "../finding-evidence.js";
 
 /** An explicit flag without a value stays invalid instead of selecting a default. */
 function pullRefValue(args: string[], flag: "--base" | "--head"): string | undefined {
@@ -97,7 +98,7 @@ function printPullPlaintextHits(report: PullAuditReport): void {
       `${c.red}✗ ${total} plaintext secret(s) introduced in ${report.plaintextHits.length} file(s):${c.reset}`,
     );
     for (const hit of report.plaintextHits.slice(0, 20)) {
-      const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
+      const labels = hit.findings.map(formatEvidencedSecret).join(", ");
       console.log(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
     }
     if (report.plaintextHits.length > 20) {
