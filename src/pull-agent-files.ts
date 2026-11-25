@@ -8,18 +8,7 @@
  * the ones the agent audit and the instruction scan already read; this module only names them
  * for a pulled range. Paths are git paths, always `/`-separated. Pure.
  */
-
-/** Instruction files, read wherever they sit (the instruction scan's names). */
-const INSTRUCTION_NAMES = new Set([
-  "CLAUDE.md",
-  "CLAUDE.local.md",
-  "AGENTS.md",
-  "GEMINI.md",
-  "SKILL.md",
-  ".cursorrules",
-  ".windsurfrules",
-  "copilot-instructions.md",
-]);
+import { INSTRUCTION_NAMES } from "./instruction-scan-files.js";
 
 /** Exact paths and what running them means. */
 const EXACT: Record<string, string> = {
@@ -43,6 +32,7 @@ const EXACT: Record<string, string> = {
 const PREFIXES: [string, string][] = [
   [".claude/commands/", "agent command"],
   [".claude/agents/", "subagent"],
+  [".claude/rules/", "agent rules"],
   [".claude/skills/", "agent skill"],
   [".claude/hooks/", "agent hook script"],
   [".agents/", "agent skill"],
@@ -56,6 +46,7 @@ const PREFIXES: [string, string][] = [
 export function agentFileKind(path: string): string | null {
   if (EXACT[path]) return EXACT[path];
   const base = path.slice(path.lastIndexOf("/") + 1);
+  // The instruction scan's names, so a file it reads is never missing from a pulled range.
   if (INSTRUCTION_NAMES.has(base)) return "agent instructions";
   for (const [prefix, kind] of PREFIXES) if (path.startsWith(prefix)) return kind;
   return null;
