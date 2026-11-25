@@ -115,6 +115,12 @@ settings entry that points at any executable that exits 0 passes both rows), tha
 Claude Code is gated, that the settings file was not edited after the check, or what the gates allowed and blocked in real sessions (allowed calls are not
 logged). On Windows the two pre-commit hook controls are not run, and the row names them.
 
+Kit's own GitHub CI also lists pull request commits without a matching local hook marker.
+After the local pre-commit checks pass, the commit hook adds a `Kit-Hook-Tree` trailer.
+CI compares the trailer with the committed tree and warns with the affected commit IDs.
+The trailer is advisory. A contributor can construct it, and commits from other tools
+can lack it. The required CI gates still judge the change.
+
 ## The formula
 
 > **kit = a deterministic grinder that forces the secure way of building — and prints a signed
