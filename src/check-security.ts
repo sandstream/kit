@@ -28,7 +28,7 @@ import {
   isLocalSemgrepConfig,
   PROVIDER_GLOB,
 } from "./scanners.js";
-import { findIacFiles } from "./check-iac-detect.js";
+import { findDockerfiles, findIacFiles } from "./check-iac-detect.js";
 import { checkApkFloors } from "./check-apk-floors.js";
 import type { AlpineSourceEvidence } from "./check-apk-sources.js";
 import { checkMavenSbomCoverage } from "./maven-sbom.js";
@@ -1751,15 +1751,14 @@ export async function checkGuardDog(root: string): Promise<SecurityCheckResult> 
  * Catches OS-level vulnerabilities that npm audit misses.
  */
 async function checkTrivy(root: string): Promise<SecurityCheckResult> {
-  const hasDockerfile = await access(resolve(root, "Dockerfile"))
-    .then(() => true)
-    .catch(() => false);
-  if (!hasDockerfile) {
+  // `trivy fs .` reads the whole tree, so a Dockerfile in `app/` counts as much as one at the root
+  // (the same bounded discovery `trivy config` uses).
+  if ((await findDockerfiles(root)).length === 0) {
     return {
       category: "supply-chain",
       name: "trivy container scan",
       status: "skip",
-      detail: "no Dockerfile found",
+      detail: "no Dockerfile found in this tree (three levels)",
     };
   }
 
