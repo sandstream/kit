@@ -137,7 +137,7 @@ describe("runAgentAudit — git hook files", () => {
       mkdirSync(join(dir, ".husky"));
       writeFileSync(join(dir, ".husky", "pre-commit"), "npx lint-staged\n");
       const pass = runAgentAudit(dir).find((r) => r.name === "agent-audit");
-      assert.match(pass?.detail ?? "", /\+ 1 hook\(s\)/);
+      assert.match(pass?.detail ?? "", /\+ 1 git hook file\(s\)/);
     } finally {
       rmTemp(dir);
     }
