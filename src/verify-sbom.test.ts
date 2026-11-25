@@ -28,7 +28,9 @@ describe("verify-sbom", () => {
   });
 
   it("passes a small but complete SBOM: two runtime dependencies are enough (7.6.0)", () => {
-    const doc = { components: [{ name: "sandstream-kit" }, { name: "zod" }, { name: "smol-toml" }] };
+    const doc = {
+      components: [{ name: "sandstream-kit" }, { name: "zod" }, { name: "smol-toml" }],
+    };
     assert.deepEqual(judgeSbom("sbom.cyclonedx.json", doc, "sandstream-kit", DEPS), []);
   });
 
