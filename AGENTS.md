@@ -96,11 +96,11 @@ The rest are accepted but carry no `kit-enforce` block — ADR-0004 (workflow sk
 above kit), ADR-0005 (browser substrate), **ADR-0007** (kit may measure model + kit
 residual risk, but owns only the rig — the frozen input, ingest schema, deterministic
 adjudication and receipts — never the judgement), ADR-0008 (service passkeys and tokens
-have separate owners) and ADR-0009 (cloud evidence is ingested read-only; held by the tests
-its `enforced_by` names). ADR-0010 (a gate may ask a person, only through the agent harness;
-an unanswerable ask is a deny) and ADR-0011 (files and secrets may live in the repo as ciphertext
-per recipient, and no one may be locked out) are proposed and gate nothing until the owner
-accepts them.
+have separate owners), ADR-0009 (cloud evidence is ingested read-only; held by the tests
+its `enforced_by` names) and ADR-0010 (a gate may ask a person, only through the agent harness;
+an unanswerable ask is a deny; accepted, no gate asks yet). ADR-0011 (files and secrets may live
+in the repo as ciphertext per recipient, and no one may be locked out) is proposed and gates
+nothing until the owner accepts it.
 
 `node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
 does **not** include the ADR stage — only `kit review` (check + design + standards + adr + skill)

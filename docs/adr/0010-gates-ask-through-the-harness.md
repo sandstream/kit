@@ -1,7 +1,7 @@
 ---
 id: ADR-0010
 title: A gate may ask a person, only through the agent harness, and an unanswerable ask is a deny
-status: proposed
+status: accepted
 ---
 
 # ADR-0010: a gate may ask a person, only through the agent harness
@@ -68,6 +68,10 @@ kit's agent gates (`gate-bash`, `gate-env`, `gate-egress`) gain a third outcome,
   that hold it in `enforced_by:`, at least:
   - ask is deny without a channel;
   - project config cannot loosen deny to ask.
+
+The owner accepted this ADR on 2026-11-25. Accepting it changes no gate: today every command
+class is still `allow` or `deny`. The `ask` outcome, its tests (named in `enforced_by:` above when
+they exist) and each class that moves to `ask` come in their own pull requests.
 
 ## Sources
 

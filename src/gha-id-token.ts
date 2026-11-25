@@ -85,6 +85,27 @@ export function oidcUsers(jobLines: string[]): string[] | "unknown" {
   return found;
 }
 
+/**
+ * Third-party actions a job's steps call: not GitHub's own (`actions/*`, `github/*`), not local.
+ * kit does not read their code, so it cannot say they leave the OIDC token alone.
+ */
+function unreadActions(jobLines: string[]): string[] {
+  const text = jobLines.filter(isContent).map(stripComment).join("\n");
+  const refs = [...text.matchAll(/\buses\s*:\s*['"]?([A-Za-z0-9._-]+\/[A-Za-z0-9._/-]+)@/g)];
+  const third = refs.map((m) => m[1]).filter((a) => !/^(actions|github)\//i.test(a));
+  return [...new Set(third)];
+}
+
+function unusedDetail(jobId: string, unread: string[]): string {
+  const known = "none of the known OIDC actions or commands appear";
+  if (unread.length === 0)
+    return `job "${jobId}" grants id-token: write but no step uses an OIDC token (${known})`;
+  return (
+    `job "${jobId}" grants id-token: write and no step kit can read uses an OIDC token (${known}); ` +
+    `kit did not read the third-party action(s) ${unread.join(", ")}, which may use it`
+  );
+}
+
 /** Flag `id-token: write` at workflow level, and on a job that never uses it. Pure. */
 export function auditIdToken(content: string, file: string): SecurityCheckResult[] {
   const lines = content.split(/\r?\n/);
@@ -114,7 +135,7 @@ export function auditIdToken(content: string, file: string): SecurityCheckResult
       name: `unused id-token: write on job ${job.id} (${file})`,
       status: "warn",
       severity: "low",
-      detail: `job "${job.id}" grants id-token: write but no step uses an OIDC token (none of the known OIDC actions or commands appear)`,
+      detail: unusedDetail(job.id, unreadActions(body)),
       suggestion:
         "remove id-token: write from this job; if a step does need it, check that the step is one kit knows (src/gha-id-token.ts)",
       rule: ID_TOKEN_RULE,

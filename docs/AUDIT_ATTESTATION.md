@@ -210,9 +210,12 @@ express.
 
 With `--attest` (or `KIT_ATTEST=1`), `kit check` / `kit ci` writes
 `.kit-check-attestation.json`: `{ schema, command, timestamp, kit_version,
-overall_ok, results summary, scanners_ran[], signature }`. `scanners_ran`
+overall_ok, results summary, scanners_ran[], scope?, signature }`. `scanners_ran`
 records which security gates actually ran versus were skipped/errored, so the
-receipt proves which gates ran and that none failed open.
+receipt proves which gates ran and that none failed open. `scope` lists the
+categories of a narrowed run (`kit check --category security` writes
+`"scope": ["security"]`) and is signed with the rest; a full run has no `scope`.
+`verify-attestation` prints it next to the verdict.
 
 Emission is **opt-in** because writing a new file into the repo on every run
 would surprise scripted users. The sign step is fail-soft: a signing failure
@@ -225,10 +228,11 @@ Signing precedence:
    authoritative: the verifier needs the same machine-local key, so a valid MAC
    genuinely binds the receipt to a key-holder (real authenticity).
 2. **Ed25519** keypair at `~/.kit/attestation-ed25519.key` (portable fallback,
-   or when explicitly requested). The receipt embeds its SPKI public key, but
-   that embedded key is **UNTRUSTED**: anyone can mint a keypair, sign
-   `overall_ok: true`, and embed their own public key. Authenticity therefore
-   requires the verifier to authenticate the key.
+   used when the anchor key cannot be obtained; no CLI flag selects it). The
+   receipt embeds its SPKI public key, but that embedded key is **UNTRUSTED**:
+   anyone can mint a keypair, sign `overall_ok: true`, and embed their own
+   public key. Authenticity therefore requires the verifier to authenticate the
+   key.
 
 Verify with `kit check verify-attestation [file] [--key <spki|fingerprint>]
 [--pin]`.

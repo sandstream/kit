@@ -344,6 +344,10 @@ export interface SecretFinding {
   preview: string;
 }
 
+export interface SecretMatch extends SecretFinding {
+  offset: number;
+}
+
 /**
  * Scans `text` for the same SECRET_PATTERNS used by redactSecrets and
  * returns per-match labels + a short masked preview. Useful for warning
@@ -400,12 +404,16 @@ export function shannonEntropy(s: string): number {
 const ENTROPY_KV = /\b([A-Z][A-Z0-9_]{2,})\s*[:=]\s*["']?([A-Za-z0-9_\-+/.]{24,})/g;
 const ENTROPY_MIN_BITS = 4.2;
 
-function findEntropyKvSecrets(text: string): SecretFinding[] {
-  const out: SecretFinding[] = [];
+function findEntropyKvSecrets(text: string): SecretMatch[] {
+  const out: SecretMatch[] = [];
   for (const m of text.matchAll(ENTROPY_KV)) {
     const value = m[2];
     if (shannonEntropy(value) < ENTROPY_MIN_BITS) continue;
-    out.push({ label: "high-entropy-kv", preview: `${value.slice(0, 6)}…${value.slice(-4)}` });
+    out.push({
+      label: "high-entropy-kv",
+      preview: `${value.slice(0, 6)}…${value.slice(-4)}`,
+      offset: m.index,
+    });
   }
   return out;
 }
@@ -431,8 +439,8 @@ function personnummerLuhnValid(core10: string): boolean {
   return (10 - (sum % 10)) % 10 === core10.charCodeAt(9) - 48;
 }
 
-function findSwedishPersonnummer(text: string): SecretFinding[] {
-  const out: SecretFinding[] = [];
+function findSwedishPersonnummer(text: string): SecretMatch[] {
+  const out: SecretMatch[] = [];
   for (const m of text.matchAll(PERSONNUMMER_RE)) {
     const datePart = m[1];
     const last4 = m[2];
@@ -447,6 +455,7 @@ function findSwedishPersonnummer(text: string): SecretFinding[] {
     out.push({
       label: "swedish-personnummer",
       preview: `${core10.slice(0, 4)}…${core10.slice(-2)}`,
+      offset: m.index,
     });
   }
   return out;
@@ -480,12 +489,12 @@ function isBenignMatch(label: string, m: RegExpMatchArray): boolean {
   return false;
 }
 
-export function findSecrets(
+export function findSecretMatches(
   text: string,
   opts: { entropyBackstop?: boolean } = {},
-): SecretFinding[] {
+): SecretMatch[] {
   if (!text) return [];
-  const findings: SecretFinding[] = [];
+  const findings: SecretMatch[] = [];
   for (const { re, label } of SECRET_PATTERNS) {
     const matches = text.matchAll(new RegExp(re.source, re.flags));
     for (const m of matches) {
@@ -496,10 +505,18 @@ export function findSecrets(
       findings.push({
         label,
         preview: tail ? `${head}…${tail}` : `${head}…`,
+        offset: m.index,
       });
     }
   }
   findings.push(...findSwedishPersonnummer(text)); // PII-at-rest (Luhn-validated)
   if (opts.entropyBackstop) findings.push(...findEntropyKvSecrets(text));
   return findings;
+}
+
+export function findSecrets(
+  text: string,
+  opts: { entropyBackstop?: boolean } = {},
+): SecretFinding[] {
+  return findSecretMatches(text, opts).map(({ label, preview }) => ({ label, preview }));
 }

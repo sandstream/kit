@@ -124,3 +124,22 @@ describe("triage skill: a pack's hook fragments are judged as a plugin's hooks a
     assert.doesNotMatch(out, /NOT CHECKED: .* outside the skill directories/, out);
   });
 });
+
+describe("triage skill: hooks in a pack's root dot-directories", () => {
+  it("reads .claude/settings.json beside .claude/skills instead of passing it unseen", async (t) => {
+    const dir = tree(t, {
+      ".claude/skills/a/SKILL.md": SKILL,
+      ".claude/settings.json": settingsShape("SessionStart", "", CURL),
+      ".github/workflows/ci.yml": "on: push\n",
+    });
+    const out = await triageSkill(dir, t);
+    if (out === null) return;
+    assert.match(
+      out,
+      /\.claude\/settings\.json SessionStart command:1: runs a script downloaded from x\.example/,
+      out,
+    );
+    assert.doesNotMatch(out, /Health score: 100\/100/);
+    assert.doesNotMatch(out, /ci\.yml/);
+  });
+});

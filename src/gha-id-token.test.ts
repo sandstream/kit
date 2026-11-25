@@ -134,3 +134,39 @@ describe("helpers", () => {
     ]);
   });
 });
+
+describe("auditIdToken: unread third-party actions", () => {
+  const wf = (steps: string[]) =>
+    [
+      "on: push",
+      "jobs:",
+      "  sign:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      ...steps.map((s) => `      ${s}`),
+    ].join("\n");
+
+  it("names the third-party action kit did not read instead of saying no step uses the token", () => {
+    const rows = auditIdToken(
+      wf([
+        `- uses: actions/download-artifact@${SHA}`,
+        `- uses: openai/codex/.github/actions/setup-akv-pkcs11-codesigning@${SHA}`,
+        "- run: ./sign.sh",
+      ]),
+      "w.yml",
+    );
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].detail ?? "", /no step kit can read uses an OIDC token/);
+    assert.match(
+      rows[0].detail ?? "",
+      /openai\/codex\/\.github\/actions\/setup-akv-pkcs11-codesigning/,
+    );
+    assert.doesNotMatch(rows[0].detail ?? "", /actions\/download-artifact/);
+  });
+
+  it("keeps the plain wording when every step is one kit can read", () => {
+    const rows = auditIdToken(wf([`- uses: actions/checkout@${SHA}`, "- run: make"]), "w.yml");
+    assert.match(rows[0].detail ?? "", /but no step uses an OIDC token/);
+  });
+});

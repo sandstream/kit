@@ -11,9 +11,13 @@
  *
  * Now: comments are stripped, the `on:` triggers are read, and a finding needs a privileged
  * trigger (one that runs with the base repository's secrets and write token) AND a step that
- * brings pull-request code in. Each finding names the shape. No YAML dependency (ADR-0002): this
+ * brings pull-request code in. Each finding names the shape. A `workflow_run` head checkout in a
+ * job whose `if:` requires `github.event.workflow_run.event == 'push'` is not one: that job never
+ * runs for a pull request's run (kit-research gha/fp-wfrun). No YAML dependency (ADR-0002): this
  * reads the small subset of workflow syntax it needs, line by line. Pure.
  */
+
+import { parseJobs } from "./gha-skip-gate.js";
 
 /** Triggers that run in the base repository's context, with its secrets, for a PR's event. */
 const PRIVILEGED_TRIGGERS = ["pull_request_target", "workflow_run", "issue_comment"];
@@ -93,8 +97,12 @@ export function workflowTriggers(text: string): string[] {
   return events;
 }
 
-/** Ways a step brings pull-request code into a privileged run, each with what to call it. */
-const PR_CODE_SHAPES: { re: RegExp; shape: string }[] = [
+/**
+ * Ways a step brings pull-request code into a privileged run, each with what to call it. `wfRun`
+ * marks a shape that reads the triggering run (`github.event.workflow_run.*`): it brings in PR code
+ * only when that run was a pull request's, so a job guarded to push-triggered runs is clear of it.
+ */
+const PR_CODE_SHAPES: { re: RegExp; shape: string; wfRun?: true }[] = [
   {
     re: /allow-unsafe-pr-checkout:\s*['"]?true/,
     shape:
@@ -113,10 +121,12 @@ const PR_CODE_SHAPES: { re: RegExp; shape: string }[] = [
   {
     re: /^\s*ref:\s*.*github\.event\.workflow_run\.head_(?:sha|branch)/m,
     shape: "a checkout of the triggering run's head (workflow_run)",
+    wfRun: true,
   },
   {
     re: /^\s*repository:\s*.*github\.event\.workflow_run\.head_repository/m,
     shape: "a checkout of the triggering run's repository (workflow_run)",
+    wfRun: true,
   },
   {
     re: /\bgh\s+pr\s+checkout\b/,
@@ -127,10 +137,39 @@ const PR_CODE_SHAPES: { re: RegExp; shape: string }[] = [
     shape: "`git fetch …pull/N/head` in a run step (not covered by checkout v7)",
   },
   {
-    re: /\bgit\s+(?:checkout|switch|fetch)\b[^\n]*github\.event\.(?:pull_request\.head|workflow_run\.head)/,
+    re: /\bgit\s+(?:checkout|switch|fetch)\b[^\n]*github\.event\.pull_request\.head/,
     shape: "a git checkout of the pull request's head in a run step (not covered by checkout v7)",
   },
+  {
+    re: /\bgit\s+(?:checkout|switch|fetch)\b[^\n]*github\.event\.workflow_run\.head/,
+    shape:
+      "a git checkout of the triggering run's head in a run step (workflow_run; not covered by checkout v7)",
+    wfRun: true,
+  },
 ];
+
+const PUSH_GUARD = /\bgithub\.event\.workflow_run\.event\s*==\s*['"]push['"]/;
+/** An event other than workflow_run, where `github.event.workflow_run.*` is empty. */
+const OTHER_EVENT = /\bgithub\.event_name\s*==\s*['"](?!workflow_run['"])[\w-]+['"]/;
+
+/**
+ * A job-level `if:` that lets the job see a triggering run only when that run was a push:
+ * each `||` branch requires `github.event.workflow_run.event == 'push'`, or an event other than
+ * workflow_run (`github.event_name == 'workflow_dispatch'`). Parentheses are dropped first, which
+ * can only widen the branches, so this never clears a job it should not; a `!` gives up.
+ */
+function pushGuarded(cond: string): boolean {
+  if (!PUSH_GUARD.test(cond) || /!(?!=)/.test(cond)) return false;
+  const branches = cond.replace(/\$\{\{|\}\}|[()]/g, " ").split("||");
+  return branches.every((b) => PUSH_GUARD.test(b) || OTHER_EVENT.test(b));
+}
+
+/** The workflow text without the jobs guarded to push-triggered runs, for the `wfRun` shapes. */
+function withoutPushGuardedJobs(body: string): string {
+  let rest = body;
+  for (const job of parseJobs(body)) if (pushGuarded(job.cond)) rest = rest.replace(job.body, "");
+  return rest;
+}
 
 /**
  * An artifact from the run that triggered a `workflow_run`, followed by a `run:` step. When that
@@ -158,9 +197,12 @@ export interface PwnFinding {
 export function pwnRequest(text: string): PwnFinding | null {
   const triggers = workflowTriggers(text).filter((t) => PRIVILEGED_TRIGGERS.includes(t));
   if (triggers.length === 0) return null;
-  const body = stripComments(text);
-  const shapes = PR_CODE_SHAPES.filter((s) => s.re.test(body)).map((s) => s.shape);
-  const artifact = triggeringArtifactShape(triggers, body);
+  const body = stripComments(text.replace(/\r\n/g, "\n"));
+  const unguarded = withoutPushGuardedJobs(body);
+  const shapes = PR_CODE_SHAPES.filter((s) => s.re.test(s.wfRun ? unguarded : body)).map(
+    (s) => s.shape,
+  );
+  const artifact = triggeringArtifactShape(triggers, unguarded);
   if (artifact) shapes.push(artifact);
   return shapes.length ? { trigger: triggers.join(", "), shapes } : null;
 }
