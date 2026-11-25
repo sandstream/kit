@@ -8,7 +8,7 @@
 // --allow  a `kit review` check that fails for a reason outside the change (an expired login, a
 //          worktree without gates). Exact name only. Printed, so it stays visible.
 // --skip   one of: tools, build, format, lint, review, tests, coverage, test-growth, semgrep,
-//          self-audit, pr-text.
+//          self-audit, commit-text, pr-text.
 // --strict a branch that is behind origin/main, or a Semgrep that is not the CI version, fails
 //          instead of warning.
 import { existsSync, readFileSync } from "node:fs";
@@ -16,14 +16,18 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
+  COMMIT_LOG_FORMAT,
+  commitsWithSessionUrl,
   failedChecks,
+  githubRepo,
+  openPrArgs,
   parseArgs,
   parseReviewJson,
   pinnedSemgrepVersion,
   semgrepPacks,
   selfAuditErrors,
   semgrepVersionFrom,
-  sessionUrlIn,
+  prTextVerdict,
   testsForChanged,
   untestedFiles,
   versionMismatches,
@@ -172,16 +176,38 @@ function selfAudit() {
   return { ok: false, detail };
 }
 
+// git without a shell: on Windows `cmd` would read the `%h%` in a log format as a variable.
+function git(args) {
+  const r = spawnSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return { ok: r.status === 0, stdout: r.stdout ?? "" };
+}
+
+// The branch's own commits, origin/main..HEAD. Commits already on main stay as they are.
+function commitText() {
+  const r = git(["log", `--format=${COMMIT_LOG_FORMAT}`, "origin/main..HEAD"]);
+  if (!r.ok) {
+    const warn = "  could not list origin/main..HEAD: the commit messages were not checked";
+    return { ok: !opts.strict, notRun: true, warn };
+  }
+  const hits = commitsWithSessionUrl(r.stdout);
+  if (hits.length === 0) return { ok: true };
+  return {
+    ok: false,
+    detail: `  commit(s) ${hits.join(", ")} hold a session URL in the message: reword them before you push (CLAUDE.md, Public artifacts)`,
+  };
+}
+
+// REST, not `gh pr view`: GraphQL is refused in agent sessions, and that refusal used to read as
+// "no open PR" and pass.
 function prText() {
-  const r = run("gh", ["pr", "view", "--json", "title,body"]);
-  if (!r.ok) return { ok: true, warn: "  no open PR for this branch, or gh is not available" };
-  return sessionUrlIn(r.out)
-    ? {
-        ok: false,
-        detail:
-          "  the PR title or body holds a session URL: remove it (CLAUDE.md, Public artifacts)",
-      }
-    : { ok: true };
+  const repo = githubRepo(git(["remote", "get-url", "origin"]).stdout);
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
+  const lookup =
+    repo && branch && branch !== "HEAD"
+      ? run("gh", openPrArgs(repo, branch))
+      : { ok: false, stdout: "" };
+  const verdict = prTextVerdict({ ok: lookup.ok, stdout: lookup.stdout });
+  return verdict.notRun ? { ...verdict, ok: !opts.strict } : verdict;
 }
 
 const npm = (script) => () => {
@@ -201,6 +227,7 @@ const steps = [
   ["test-growth", "net new test lines within the cap, or a stated reason", testGrowth],
   ["self-audit", "kit self-audit (CI's self-audit job)", selfAudit],
   ["semgrep", "Semgrep at the CI version and packs", semgrep],
+  ["commit-text", "commit messages on the branch have no session URL", commitText],
   ["pr-text", "PR text has no session URL", prText],
 ];
 

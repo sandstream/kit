@@ -53,9 +53,64 @@ export function parseArgs(argv) {
   return out;
 }
 
-/** CLAUDE.md forbids a session URL in public PR text. */
+/** CLAUDE.md forbids a session URL in public PR text and in commit messages. */
 export function sessionUrlIn(text) {
   return /claude\.ai\/code\/session_/.test(text);
+}
+
+/** The `git log` format {@link commitsWithSessionUrl} reads: short hash, NUL, message, RS. */
+export const COMMIT_LOG_FORMAT = "%h%x00%B%x1e";
+
+/** Short hashes of the commits in `git log --format=COMMIT_LOG_FORMAT` output whose message holds a session URL. */
+export function commitsWithSessionUrl(log) {
+  const out = [];
+  for (const record of log.split("\x1e")) {
+    const at = record.indexOf("\0");
+    if (at < 0) continue;
+    if (sessionUrlIn(record.slice(at + 1))) out.push(record.slice(0, at).trim());
+  }
+  return out;
+}
+
+/** `owner/repo` of a GitHub remote: https, ssh, or a proxy URL whose path ends in owner/repo. */
+export function githubRepo(remoteUrl) {
+  const m = /[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(remoteUrl.trim());
+  return m ? { owner: m[1], repo: m[2] } : undefined;
+}
+
+/**
+ * `gh api` arguments that list the open PRs from `branch` over REST (GraphQL, behind `gh pr view`,
+ * can be refused). The query goes in `-f` fields, so no `&` reaches a Windows shell.
+ */
+export function openPrArgs({ owner, repo }, branch) {
+  const fields = ["-f", "state=open", "-f", `head=${owner}:${branch}`];
+  return ["api", "-X", "GET", `repos/${owner}/${repo}/pulls`, ...fields];
+}
+
+/**
+ * The PR-text verdict from that lookup. A lookup that failed or returned something other than a
+ * list did not check anything, so it is "not run", never a pass.
+ */
+export function prTextVerdict(lookup) {
+  const notRun = {
+    notRun: true,
+    warn: "  could not look up this branch's PR with `gh api`: the PR text was not checked",
+  };
+  if (!lookup.ok) return notRun;
+  let prs;
+  try {
+    prs = JSON.parse(lookup.stdout);
+  } catch {
+    return notRun;
+  }
+  if (!Array.isArray(prs)) return notRun;
+  if (prs.length === 0) return { ok: true, warn: "  no open PR for this branch" };
+  const hit = prs.some((pr) => sessionUrlIn(`${pr?.title ?? ""}\n${pr?.body ?? ""}`));
+  if (!hit) return { ok: true };
+  return {
+    ok: false,
+    detail: "  the PR title or body holds a session URL: remove it (CLAUDE.md, Public artifacts)",
+  };
 }
 
 /** The report in `kit review --json` output, which may carry a banner before it and warnings after it. */

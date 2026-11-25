@@ -1,13 +1,17 @@
 name: PR hygiene
 
-# kit is a public repository, and CLAUDE.md forbids internal session URLs in PR text. A rule that
-# depends on being remembered was broken twice in one week, so it is a check.
+# kit is a public repository, and CLAUDE.md forbids internal session URLs in PR text and in commit
+# messages. A rule that depends on being remembered was broken twice in one week, so it is a check.
 #
 # It checks the PR text as it is now, read from the API, not the snapshot in the event: some PR
 # tools add a session footer on creation that their caller replaces seconds later, and the
 # snapshot then failed a PR whose text was already clean. On `opened` it waits 30 s first, so
 # that replacement lands. Every later edit runs the check again. The text reaches the script
 # through the environment and is never interpolated into it.
+#
+# The PR's commits are read from the REST API too (the commits the PR adds, not main's). Commits
+# already on main stay as they are: history is not rewritten. A lookup that fails fails the step,
+# so an unread commit list never passes.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
@@ -34,5 +38,20 @@ jobs:
           text="$(gh api "repos/$REPO/pulls/$PR" --jq '.title + "\n" + (.body // "")')"
           if printf '%s' "$text" | grep -Eq 'claude\.ai/code/session_'; then
             echo "::error title=Session URL in the PR text::The PR title or body contains a claude.ai/code/session_ URL. Remove it. It is internal session metadata and this repository is public (CLAUDE.md, Public artifacts)."
+            exit 1
+          fi
+      - name: Check the PR's commit messages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          commits="$(gh api --paginate "repos/$REPO/pulls/$PR/commits?per_page=100" --jq '.[] | .sha[0:12] + " " + (.commit.message | gsub("[\r\n]"; " "))')" || {
+            echo "::error title=PR commits not read::Could not read this PR's commits, so their messages were not checked."
+            exit 1
+          }
+          found="$(printf '%s\n' "$commits" | grep -E 'claude\.ai/code/session_' | cut -d' ' -f1 | tr '\n' ' ')"
+          if [ -n "$found" ]; then
+            echo "::error title=Session URL in a commit message::Commit(s) $found contain a claude.ai/code/session_ URL. Reword them (git rebase, then force-push the branch). It is internal session metadata and this repository is public (CLAUDE.md, Public artifacts)."
             exit 1
           fi
