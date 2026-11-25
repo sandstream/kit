@@ -98,6 +98,7 @@ type Counted = { passed: number; failed: number; warnings: number; skipped: numb
 /** What the flags ask for: the dimensions to run and how strict the verdict is. */
 interface RunOptions {
   categories: ReturnType<typeof parseCategoryFlag>["categories"];
+  verifyVercelToken: boolean;
   lenient: boolean;
   failOnWarning: boolean;
 }
@@ -121,7 +122,11 @@ async function routeSubcommand(): Promise<boolean | undefined> {
   // to the default full-check-plus-flags action below. RO-3 found `check zzz --attest`
   // running the full check and minting an attestation key because argv[3] was simply
   // never inspected outside the two branches above.
-  if (process.argv[3] !== undefined && !process.argv[3].startsWith("-")) {
+  if (
+    process.argv[3] !== undefined &&
+    !process.argv[3].startsWith("-") &&
+    process.argv[3] !== "verify-vercel-token"
+  ) {
     console.error(`${c.red}Unknown check subcommand: ${process.argv[3]}${c.reset}`);
     console.error(
       `${c.dim}Usage: kit check [--category=...] [--json] [--attest] | kit check verify-attestation <file> | kit check compare <before.json> <after.json>${c.reset}`,
@@ -133,6 +138,16 @@ async function routeSubcommand(): Promise<boolean | undefined> {
 
 /** Reads the flags of the default check. Returns undefined after it has printed a refusal. */
 function parseRunOptions(): RunOptions | undefined {
+  if (process.argv[3] === "verify-vercel-token") {
+    if (rejectUnknownFlags("kit check verify-vercel-token", ["--json", ...GLOBAL_FLAGS]))
+      return undefined;
+    return {
+      categories: ["secrets"],
+      verifyVercelToken: true,
+      lenient: false,
+      failOnWarning: false,
+    };
+  }
   if (rejectUnknownFlags("kit check", CHECK_FLAGS)) return undefined;
 
   // --category narrows which dimensions run. An unrecognised value is an error, not
@@ -153,6 +168,7 @@ function parseRunOptions(): RunOptions | undefined {
   // warnings unless --fail-on-warning / --strict / KIT_CI_STRICT.
   return {
     categories: parsed.categories,
+    verifyVercelToken: false,
     lenient: hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT),
     failOnWarning:
       hasFlag(process.argv, "--fail-on-warning") ||
@@ -168,6 +184,10 @@ export async function cmdCheck(): Promise<boolean> {
   const options = parseRunOptions();
   if (!options) return false;
   const config = await loadConfig(resolveConfigPath());
+  if (options.verifyVercelToken && config.secrets?.keys?.VERCEL_TOKEN?.source !== "env") {
+    console.error('verify-vercel-token requires VERCEL_TOKEN with source = "env".');
+    return false;
+  }
 
   return await withGovernance(
     config,
@@ -190,7 +210,7 @@ async function runCheckAction(
   const step = <T>(label: string, fn: () => Promise<T>): Promise<T> =>
     live ? runStep(label, fn) : fn();
 
-  await autoInstallScanners(config, live); // self-heal missing scanners before scanning
+  if (!options.verifyVercelToken) await autoInstallScanners(config, live);
   // Collection and verdict live in the shared core (check-run.ts), the SAME path the MCP
   // `kit_check` tool and `kit review` use, so the surfaces never disagree on what runs or
   // what "green" means. The CLI adds spinners (step), PAL sync, attestation and hints.
@@ -198,6 +218,7 @@ async function runCheckAction(
     config,
     enforceTests: hasFlag(process.argv, "--enforce-tests"),
     online: hasFlag(process.argv, "--online"),
+    verifyVercelToken: options.verifyVercelToken,
     categories: options.categories,
     gate: { lenient: options.lenient, failOnWarning: options.failOnWarning },
     step,

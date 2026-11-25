@@ -95,6 +95,10 @@ def _report_hooks(rep, plugin_dir, manifest):
             rep.warn(f"hook registrations in {source} could not be read -- not inspected")
             continue
         for event, groups in events.items():
+            if event == "modules":
+                registered_modules = _report_modules(rep, plugin_dir, source, groups)
+                rep.fact(f"plugin registers {registered_modules} hook module(s)")
+                continue
             for group in groups if isinstance(groups, list) else []:
                 matcher = str(group.get("matcher", "*")) if isinstance(group, dict) else "*"
                 cmds = group.get("hooks", []) if isinstance(group, dict) else []
@@ -102,6 +106,61 @@ def _report_hooks(rep, plugin_dir, manifest):
                 _judge_hook(rep, source, event, matcher)
                 _scan_hook_commands(rep, f"{source} {event} command", cmds)
     rep.fact(f"plugin registers {registered} hook command(s)")
+
+
+# A Claude Code mod: hooks.json names JavaScript modules (`{"modules": ["./x.mjs"]}`) that Claude
+# Code loads in its own process. The host reads `on("<event>", {tool: "<Tool>"}, ...)` from the
+# source, so kit reads the same calls as text; it never runs the module.
+MODULE_ON = re.compile(r"""\bon\(\s*["']([\w.]+)["']\s*(?:,\s*\{([^}]*)\})?""")
+MODULE_TOOL = re.compile(r"""\btools?\s*:\s*(\[[^\]]*\]|["'][^"']+["'])""")
+MODULE_PROCESS = re.compile(r"\$\.process\.run\s*\(")
+
+
+def _module_tools(options):
+    m = MODULE_TOOL.search(options or "")
+    return re.findall(r"""["']([^"']+)["']""", m.group(1)) if m else []
+
+
+def _report_modules(rep, plugin_dir, source, modules):
+    """Each module of a mod: where it hooks in, read from its `on(...)` calls. A `tool.call` handler
+    runs before the agent's tool call and can deny or rewrite it, as a PreToolUse hook can."""
+    base = os.path.realpath(plugin_dir)
+    hooks_dir = os.path.dirname(os.path.join(plugin_dir, source))
+    count = 0
+    for rel in modules if isinstance(modules, list) else []:
+        if not isinstance(rel, str):
+            continue
+        full = os.path.realpath(os.path.join(hooks_dir, rel))
+        label = os.path.relpath(full, base).replace(os.sep, "/")
+        if not full.startswith(base + os.sep):
+            rep.critical(f"hook module {rel} in {source} lies outside the plugin directory -- not read")
+            continue
+        try:
+            with open(full, "r", encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            rep.warn(f"hook module {label} named in {source} could not be read -- not inspected")
+            continue
+        count += 1
+        seen = set()
+        for event, options in MODULE_ON.findall(text):
+            key = (event, tuple(_module_tools(options)))
+            if key in seen:
+                continue
+            seen.add(key)
+            if event == "tool.call":
+                tools = _module_tools(options)
+                hit = [t for t in SENSITIVE_TOOLS if not tools or t in tools]
+                scope = ", ".join(tools) if tools else "every tool"
+                if hit:
+                    rep.warn(f"{label}: tool.call hook on {scope} -- runs inside Claude Code before the agent's {', '.join(hit)} calls and can deny or rewrite them")
+                else:
+                    rep.fact(f"{label}: tool.call hook on {scope}")
+            else:
+                rep.fact(f"{label}: {event} hook")
+        if MODULE_PROCESS.search(text):
+            rep.fact(f"{label}: starts processes ($.process.run)")
+    return count
 
 
 def _scan_hook_commands(rep, label, cmds):
