@@ -153,11 +153,11 @@ function worker(f: ReturnType<typeof fixture>, mode: string, id = mode) {
   return {
     resume: () => child.stdin.write("x"),
     closed,
-    wait: (event: string): Promise<WorkerEvent> =>
+    wait: (event: string, timeoutMs = 10_000): Promise<WorkerEvent> =>
       new Promise((resolve, reject) => {
         const timer = setTimeout(
           () => finish(new Error(`waiting for ${event}: ${stderr}`)),
-          10_000,
+          timeoutMs,
         );
         const finish = (error?: Error, value?: WorkerEvent) => {
           clearTimeout(timer);
@@ -369,6 +369,8 @@ it("rolls back a failed migration, closes its connection, and allows a later sta
 });
 
 it("two simultaneous openers retain both writes on fresh databases", async (t) => {
+  // Windows also runs file permission commands before each worker reports its write.
+  const resultTimeoutMs = process.platform === "win32" ? 30_000 : 10_000;
   for (let attempt = 0; attempt < 8; attempt++) {
     await t.test(`fresh database ${attempt + 1}`, async (t) => {
       const f = fixture(t);
@@ -377,7 +379,10 @@ it("two simultaneous openers retain both writes on fresh databases", async (t) =
       await Promise.all([first.wait("ready"), second.wait("ready")]);
       first.resume();
       second.resume();
-      const results = await Promise.all([first.wait("result"), second.wait("result")]);
+      const results = await Promise.all([
+        first.wait("result", resultTimeoutMs),
+        second.wait("result", resultTimeoutMs),
+      ]);
       results.forEach(assertOpened);
       await Promise.all([first.closed, second.closed]);
       const db = new DatabaseSync(join(f.dir, "memory.db"));
