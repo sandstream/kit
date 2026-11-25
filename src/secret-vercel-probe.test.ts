@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
+import { pathToFileURL } from "node:url";
 import { CLI_PATH, outsideAgentSession } from "./cli-run.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -38,7 +39,7 @@ globalThis.fetch = async (url, options) => {
       process.execPath,
       [
         "--import",
-        preload,
+        pathToFileURL(preload).href,
         CLI_PATH,
         "check",
         ...(verify ? ["verify-vercel-token"] : ["--category", "secrets"]),
