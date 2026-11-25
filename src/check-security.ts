@@ -16,7 +16,8 @@ import {
   staleCatalogDetail,
   staleCatalogStatus,
 } from "./bumblebee-age.js";
-import { checkEnvIgnoreProtection } from "./check-gitignore.js";
+import { checkEnvGitignored } from "./check-env-gitignore.js";
+export { checkEnvGitignored } from "./check-env-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog, guardDogScope, GUARDDOG_CHECK } from "./guarddog.js";
@@ -544,46 +545,6 @@ export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> 
           detail: "no high or critical findings in the npm audit report",
         };
   return scannerEvidence(row, report.count, gap);
-}
-
-/**
- * Verify effective dotenv ignore rules and reject secrets already in Git's index.
- */
-export async function checkEnvGitignored(root: string): Promise<SecurityCheckResult> {
-  try {
-    const result = await checkEnvIgnoreProtection(root);
-    if (result.missingPatterns.length === 0) {
-      return {
-        category: "secrets",
-        name: ".env gitignored",
-        status: "pass",
-        detail: "Git ignores dotenv probe paths; no exposed or tracked dotenv secret files",
-      };
-    }
-
-    return {
-      category: "secrets",
-      name: ".env gitignored",
-      status: "fail",
-      detail: result.missingPatterns
-        .map((entry) => `${JSON.stringify(entry.pattern)}: ${entry.reason}`)
-        .join("; "),
-      files: [...new Set([...result.trackedFiles, ...result.unignoredFiles])],
-      severity: "high",
-      suggestion:
-        "Run kit fix for ignore rules. Review already tracked files separately; ignore rules cannot untrack them.",
-    };
-  } catch (error) {
-    return {
-      category: "secrets",
-      name: ".env gitignored",
-      status: "warn",
-      detail:
-        error instanceof Error ? error.message : "Git ignore protection could not be verified",
-      didNotRun: true,
-      severity: "medium",
-    };
-  }
 }
 
 /**

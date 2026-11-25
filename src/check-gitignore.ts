@@ -235,6 +235,17 @@ export async function checkEnvIgnoreProtection(cwd: string): Promise<IgnoreCheck
   return inspectPatterns(cwd, ENV_PATTERNS, isEnvSecret);
 }
 
+export function confirmsEnvIgnoreProtection(report: IgnoreCheckResult): boolean {
+  return (
+    Array.isArray(report.presentPatterns) &&
+    Array.isArray(report.trackedFiles) &&
+    Array.isArray(report.unignoredFiles) &&
+    report.trackedFiles.length === 0 &&
+    report.unignoredFiles.length === 0 &&
+    ENV_PATTERNS.every(({ pattern }) => report.presentPatterns.includes(pattern))
+  );
+}
+
 /**
  * Appends the missing patterns to `.gitignore`, creating the file if needed.
  * Adds a single kit-managed block at the bottom so we can recognize it on
