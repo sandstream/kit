@@ -3,14 +3,13 @@ import { lstatSync } from "node:fs";
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
-import { scanInstructions, type InstructionScan } from "../instruction-scan.js";
+import { filesReadPhrase, scanInstructions, type InstructionScan } from "../instruction-scan.js";
 import { INSTRUCTION_SCAN_FLOOR, sanitizeInstructionDisplay } from "../instruction-scan-text.js";
 
 const NOT_READ =
   "README files are not read: install lines written for people (`curl … | sh`) would be false positives.";
 
 function render(scan: InstructionScan): void {
-  const read = scan.files.length - scan.unread.length;
   console.log(`${c.bold}kit triage instructions${c.reset}: ${scan.root}`);
   if (scan.files.length === 0 && scan.complete) {
     console.log(
@@ -30,7 +29,7 @@ function render(scan: InstructionScan): void {
     : scan.findings.length
       ? `${c.red}${scan.findings.length} finding(s)${c.reset}`
       : `${c.green}no finding${c.reset}`;
-  console.log(`\n  ${read} instruction file(s) read: ${verdict}.`);
+  console.log(`\n  ${filesReadPhrase(scan, "instruction file(s)")}: ${verdict}.`);
   console.log(`  ${c.dim}${INSTRUCTION_SCAN_FLOOR} ${NOT_READ}${c.reset}`);
 }
 
@@ -39,6 +38,7 @@ function displayScan(scan: InstructionScan): InstructionScan {
     ...scan,
     root: sanitizeInstructionDisplay(scan.root),
     files: scan.files.map(sanitizeInstructionDisplay),
+    companions: scan.companions.map(sanitizeInstructionDisplay),
     unread: scan.unread.map(sanitizeInstructionDisplay),
     findings: scan.findings.map((finding) => ({
       ...finding,
