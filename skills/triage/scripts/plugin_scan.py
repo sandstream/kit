@@ -232,3 +232,58 @@ def triage_local_plugin(rep, secrets_in):
     if unread:
         more = f" and {len(unread) - 10} more" if len(unread) > 10 else ""
         rep.warn(f"not scanned (binary, symlink or over 1 MB): {', '.join(unread[:10])}{more}")
+
+
+class _InPlugin:
+    """The report seen from one plugin of a marketplace: same lists, each line prefixed."""
+
+    def __init__(self, rep, target, prefix):
+        self._rep, self.target, self._prefix = rep, target, prefix
+
+    def critical(self, m):
+        self._rep.critical(self._prefix + m)
+
+    def warn(self, m):
+        self._rep.warn(self._prefix + m)
+
+    def fact(self, m):
+        self._rep.fact(self._prefix + m)
+
+
+MARKETPLACE_LIMIT = 100
+
+
+def _marketplace_plugin(rep, base, entry, secrets_in):
+    """Triage one marketplace entry when its source is a folder inside the marketplace."""
+    name = str(entry.get("name", "?"))
+    source = entry.get("source")
+    if not isinstance(source, str):
+        rep.warn(f"plugin {name!r}: source is not a local folder ({json.dumps(source)[:80]}) -- triage it on its own")
+        return False
+    full = os.path.realpath(os.path.join(base, source))
+    if not full.startswith(base + os.sep):
+        rep.critical(f"plugin {name!r}: source {source} lies outside the marketplace -- not read")
+        return False
+    if not os.path.isfile(os.path.join(full, ".claude-plugin", "plugin.json")):
+        rep.warn(f"plugin {name!r}: {source} has no .claude-plugin/plugin.json -- not triaged")
+        return False
+    triage_local_plugin(_InPlugin(rep, full, f"{name}: "), secrets_in)
+    return True
+
+
+def triage_local_marketplace(rep, secrets_in):
+    """Triage every local plugin a marketplace lists (`.claude-plugin/marketplace.json`). Without
+    this a marketplace folder was triaged as a skill pack and failed with "no SKILL.md", although
+    `claude plugin marketplace add ./` is how such a folder is installed."""
+    base = os.path.realpath(rep.target)
+    data = _load_json(rep, os.path.join(rep.target, ".claude-plugin", "marketplace.json"), "marketplace.json")
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, list):
+        if data is not None:
+            rep.critical("marketplace.json lists no plugins")
+        return
+    entries = [p for p in plugins if isinstance(p, dict)]
+    done = sum(_marketplace_plugin(rep, base, e, secrets_in) for e in entries[:MARKETPLACE_LIMIT])
+    if len(entries) > MARKETPLACE_LIMIT:
+        rep.warn(f"only the first {MARKETPLACE_LIMIT} of {len(entries)} plugins were triaged")
+    rep.fact(f"marketplace {data.get('name', '?')}: triaged {done} of {len(entries)} plugin(s)")

@@ -1,0 +1,3 @@
+### Fixed
+
+- **`kit triage skill <folder>` triages a Claude Code plugin marketplace plugin by plugin.** A folder with `.claude-plugin/marketplace.json` holds plugins, and `claude plugin marketplace add ./` installs it; kit triaged it as a skill pack and failed it with "no SKILL.md in '…' or the 4 directory levels below it", so none of its plugins was read. Each plugin the marketplace lists as a folder inside it is now triaged as a plugin, its lines prefixed with its name; a source that is not a local folder is named so it can be triaged on its own, and one that leaves the marketplace is refused. Found on Anthropic's claude-code-playground `claude-code/mods`.
