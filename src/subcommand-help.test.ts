@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,5 +40,24 @@ describe("subcommand help", () => {
       assert.ok(text.trim().length > 0, key);
       assert.ok(!text.includes("\n"), `${key} must be one line`);
     }
+  });
+});
+
+describe("kit memory pal help", () => {
+  // docs/MEMORY.md documents session handoff through pal (claims, takeover); the help said only
+  // "Pending action ledger", so an agent looking for handoff never found it there.
+  it("names handoff in the pal summary and in the kit memory usage line", () => {
+    assert.match(SUBCOMMAND_HELP["memory pal"]!, /handoff/);
+    const cli = fileURLToPath(
+      new URL(import.meta.url.endsWith(".ts") ? "./cli.ts" : "./cli.js", import.meta.url),
+    );
+    const tsx = import.meta.url.endsWith(".ts") ? ["--import", import.meta.resolve("tsx")] : [];
+    const out = spawnSync(process.execPath, [...tsx, cli, "memory"], {
+      encoding: "utf8",
+      env: { ...process.env, KIT_NO_UPDATE_CHECK: "1", NO_COLOR: "1" },
+      timeout: 30_000,
+    }).stdout;
+    const usage = out.split("\n").find((line) => line.trim().startsWith("kit memory pal [list|"));
+    assert.match(usage ?? "(no pal usage line)", /handoff/);
   });
 });
