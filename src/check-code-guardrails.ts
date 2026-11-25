@@ -198,8 +198,12 @@ function readCandidate(path: string, file: string, errors: string[]): string | n
   }
   try {
     const stats = fstatSync(fd);
-    if (!stats.isFile() || stats.size > MAX_FILE_BYTES) {
-      errors.push(`file too large or not regular: ${file}`);
+    if (!stats.isFile()) {
+      errors.push(`not a regular file: ${file}`);
+      return null;
+    }
+    if (stats.size > MAX_FILE_BYTES) {
+      errors.push(`skipped ${file} (over ${MAX_FILE_BYTES / 1024} KB)`);
       return null;
     }
     const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
@@ -245,29 +249,60 @@ export function dockerfileVerdict(report: DockerfileReport): SecurityCheckResult
   return row;
 }
 
+type Scan = "cloud" | "docker" | "guards";
+const SCANNERS: Record<Scan, (lines: string[], file: string, hits: Hit[]) => void> = {
+  cloud: scanCloud,
+  docker: scanDockerfile,
+  guards: scanGuards,
+};
+
+/** The scans that read this file. A file no scan reads is never opened. */
+function scansFor(file: string, inlineDocker: boolean): Scan[] {
+  const scans: Scan[] = [];
+  if (SHELL_FILE.test(file) || WORKFLOW_FILE.test(file)) scans.push("cloud");
+  if (inlineDocker && isInspectedDockerfile(file)) scans.push("docker");
+  if (SOURCE_FILE.test(file) && !TEST_DIR.test(file) && !TEST_FILE.test(file)) scans.push("guards");
+  return scans;
+}
+
+/**
+ * Read each candidate once and run the scans that apply to it. A file that cannot be read
+ * (too large, not regular, unreadable) is charged to the scans that needed it, not to every
+ * row: a 300 KB `.tsx` is no reason to call the Dockerfile scan unrun. A walk error (a directory
+ * that could not be listed, the file limit) could have hidden input of any kind, so it is charged
+ * to all three.
+ */
+function scanCandidates(root: string, inlineDocker: boolean) {
+  const { files, errors: walk } = candidates(root);
+  const hits: Record<Scan, Hit[]> = { cloud: [], docker: [], guards: [] };
+  const errors: Record<Scan, string[]> = { cloud: [...walk], docker: [...walk], guards: [...walk] };
+  for (const file of files) {
+    const scans = scansFor(file, inlineDocker);
+    if (!scans.length) continue;
+    const unread: string[] = [];
+    const content = readCandidate(join(root, file), file, unread);
+    for (const scan of scans) errors[scan].push(...unread);
+    if (content === null) continue;
+    const lines = content.split(/\r?\n/);
+    for (const scan of scans) SCANNERS[scan](lines, file, hits[scan]);
+  }
+  return { hits, errors };
+}
+
+function markUnscanned(row: SecurityCheckResult, errors: string[]): SecurityCheckResult {
+  if (row.status !== "pass" || !errors.length) return row;
+  return { ...row, status: "warn", didNotRun: true, detail: unscannedDetail(errors) };
+}
+
 /** Scan the supplied project root without invoking shell commands or reading generated trees. */
 export async function checkCodeGuardrails(
   root: string,
   inspectDockerfile?: DockerfileInspector | null,
 ): Promise<SecurityCheckResult[]> {
-  const cloud: Hit[] = [];
-  const docker: Hit[] = [];
-  const guards: Hit[] = [];
-  const { files, errors } = candidates(root);
-  for (const file of files) {
-    const content = readCandidate(join(root, file), file, errors);
-    if (content === null) continue;
-    const lines = content.split(/\r?\n/);
-    if (SHELL_FILE.test(file) || WORKFLOW_FILE.test(file)) scanCloud(lines, file, cloud);
-    if (inspectDockerfile === undefined && isInspectedDockerfile(file)) {
-      scanDockerfile(lines, file, docker);
-    }
-    if (SOURCE_FILE.test(file) && !TEST_DIR.test(file) && !TEST_FILE.test(file))
-      scanGuards(lines, file, guards);
-  }
+  const { hits, errors } = scanCandidates(root, inspectDockerfile === undefined);
   const inspection =
     inspectDockerfile === undefined
-      ? () => ({ hits: docker, errors })
+      ? () => ({ hits: hits.docker, errors: errors.docker })
       : inspectDockerfile && (() => inspectDockerfile(root));
   const dockerVerdict = await runRequiredInspection(inspection, dockerfileVerdict, (failure) => ({
     ...dockerfileCheck,
@@ -275,19 +310,9 @@ export async function checkCodeGuardrails(
     didNotRun: true,
     detail: `Dockerfile inspection is ${failure.kind}`,
   }));
-  const results = [
-    result("public cloud command", "exposure", cloud, "high"),
-    dockerVerdict,
-    result("commented-out guard", "exposure", guards, "medium"),
+  return [
+    markUnscanned(result("public cloud command", "exposure", hits.cloud, "high"), errors.cloud),
+    markUnscanned(dockerVerdict, errors.docker),
+    markUnscanned(result("commented-out guard", "exposure", hits.guards, "medium"), errors.guards),
   ];
-  if (errors.length) {
-    const detail = unscannedDetail(errors);
-    for (const row of results) {
-      if (row.status !== "pass") continue;
-      row.status = "warn";
-      row.didNotRun = true;
-      row.detail = detail;
-    }
-  }
-  return results;
 }

@@ -583,7 +583,8 @@ def _owner_repo(target):
     # unsupported-host, spelling of a private clone target).
     safe = _strip_userinfo(target)
     if _skill_scan().is_local_path(t):  # `/home/user/kit` once became the repo `home/user`
-        return None, f"'{safe}' is a local path, not a GitHub repo -- use `kit triage skill <dir>`"
+        return None, (f"'{safe}' is a local path, not a GitHub repo -- for a skill, skill pack, plugin or "
+                      "marketplace use `kit triage skill <dir>`; for a project use `kit check --category security` in it")
     # scp-style `git@host:owner/repo` -> `host/owner/repo`, so one path below fits both.
     scp = re.match(r"^[\w.+-]+@([\w.-]+):(.+)$", t)
     if scp:

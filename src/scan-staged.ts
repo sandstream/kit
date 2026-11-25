@@ -1,10 +1,12 @@
-import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
+import { findSecrets, findSecretMatches } from "./utils/redactSecrets.js";
+import { locateSecretMatches, type EvidencedSecret } from "./finding-evidence.js";
 import { isTestOrFixturePath } from "./utils/test-paths.js";
 import { exec } from "./utils/exec.js";
 
 export interface StagedHit {
   file: string;
-  findings: SecretFinding[];
+  findings: EvidencedSecret[];
+  gap?: string;
   /**
    * True when the file is test/fixture material. Fake credentials live there by design —
    * kit's own audit-redaction test MUST contain a secret-shaped key to prove the
@@ -83,18 +85,13 @@ export async function scanStagedFiles(cwd: string = process.cwd()): Promise<Stag
       // exists to prevent. Fail closed: flag it so the commit is blocked and handled explicitly.
       hits.push({
         file: path,
-        findings: [
-          {
-            label: "unscannable staged blob (fail-closed)",
-            preview: "staged content could not be read to scan for secrets — verify manually",
-          },
-        ],
+        findings: [],
+        gap: "unscannable staged blob (fail-closed)",
       });
       continue;
     }
-    const findings = hasHead
-      ? await netNewFindings(cwd, path, findSecrets(content))
-      : findSecrets(content);
+    const located = locateSecretMatches(path, content, findSecretMatches(content));
+    const findings = hasHead ? await netNewFindings(cwd, path, located) : located;
     if (findings.length > 0) {
       hits.push({ file: path, findings, ...(isTestOrFixturePath(path) ? { advisory: true } : {}) });
     }
@@ -131,8 +128,8 @@ async function stagedGitlinks(cwd: string): Promise<Set<string>> {
 async function netNewFindings(
   cwd: string,
   path: string,
-  staged: SecretFinding[],
-): Promise<SecretFinding[]> {
+  staged: EvidencedSecret[],
+): Promise<EvidencedSecret[]> {
   if (staged.length === 0) return staged;
   let before: string;
   try {

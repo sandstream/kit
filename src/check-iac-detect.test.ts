@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findIac } from "./check-iac-detect.js";
+import { findDockerfiles, findIac } from "./check-iac-detect.js";
+import { runCli } from "./cli-run.test-support.js";
+import { makeFixture, toml } from "./commands/scan.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tree(files: string[]): string {
@@ -81,4 +83,43 @@ describe("findIac", () => {
   it("is empty for an unreadable or missing root", async () => {
     assert.deepEqual(await findIac(join(tmpdir(), "kit-iac-does-not-exist")), []);
   });
+});
+
+describe("trivy container scan finds a Dockerfile below the root", () => {
+  // Measured: with only `app/Dockerfile`, `trivy config (IaC)` found it and `trivy container
+  // scan` said "no Dockerfile found", although it runs `trivy fs .` over the whole tree.
+  it("findDockerfiles returns nested Dockerfiles and leaves out other IaC", async () => {
+    const root = tree(["app/Dockerfile", "svc/x/Dockerfile.prod", "infra/main.tf", "compose.yaml"]);
+    try {
+      assert.deepEqual(await findDockerfiles(root), ["app/Dockerfile", "svc/x/Dockerfile.prod"]);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it(
+    "kit check does not skip the container scan when the Dockerfile is in a subdirectory",
+    { skip: process.platform === "win32" ? "the fixture's fake `which` is a POSIX shell" : false },
+    async (t) => {
+      const fixture = makeFixture();
+      t.after(() => rmTemp(fixture.dir));
+      toml(fixture, "version = 1\n[memory]\ntrack_findings = false\n");
+      mkdirSync(join(fixture.dir, "app"));
+      writeFileSync(join(fixture.dir, "app", "Dockerfile"), "FROM scratch\n");
+      const run = await runCli(["check", "--category", "security", "--json"], fixture.dir, {
+        PATH: fixture.bin,
+        KIT_NO_UPDATE_CHECK: "1",
+        KIT_AUDIT_ANCHOR: "0",
+        KIT_ADVISORIES: "0",
+        KIT_BUMBLEBEE: "0",
+        KIT_SEMGREP_CONFIG: "",
+      });
+      const rows = (JSON.parse(run.stdout) as { checks: { name: string; status: string }[] })
+        .checks;
+      const row = rows.find((r) => r.name === "trivy container scan");
+      assert.ok(row, run.stdout);
+      assert.notEqual(row.status, "skip", JSON.stringify(row));
+      assert.doesNotMatch(JSON.stringify(row), /no Dockerfile found/);
+    },
+  );
 });
