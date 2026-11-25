@@ -289,3 +289,61 @@ describe("escalateManifestSkips", () => {
     assert.equal(escalateManifestSkips([pass], wrongPlace)[0].status, "pass");
   });
 });
+
+describe("escalateManifestSkips names only the projects a scanner would read", () => {
+  // Measured: with only `sub/requirements.txt`, npm audit, license check, install-script grants
+  // and trivy fs (jvm) all said "no package.json found — but 1 project(s) below do (sub)".
+  const skip = (name: string, detail: string): SecurityCheckResult => ({
+    category: "dependency",
+    name,
+    status: "skip",
+    detail,
+  });
+  const input = [
+    skip("npm audit", "no package.json found"),
+    skip("install-script grants", "no package.json"),
+    skip("license check", "no package.json found"),
+    skip("trivy fs (jvm)", "no Maven/Gradle project found"),
+    skip("pip-audit", "no requirements.txt found"),
+    skip("pinned versions", "no package.json or requirements.txt to check"),
+    skip("osv-scanner", "no lockfiles to scan"),
+  ];
+
+  it("escalates only the skips whose manifest a nested project has", async () => {
+    const dir = tree({ "sub/requirements.txt": "requests==2.0\n" });
+    try {
+      const facts = await scanScopeFacts(dir);
+      const out = escalateManifestSkips(input, facts);
+      assert.deepEqual(
+        out.map((r) => [r.name, r.status]),
+        [
+          ["npm audit", "skip"],
+          ["install-script grants", "skip"],
+          ["license check", "skip"],
+          ["trivy fs (jvm)", "skip"],
+          ["pip-audit", "warn"],
+          ["pinned versions", "warn"],
+          ["osv-scanner", "warn"],
+        ],
+      );
+      assert.match(out[4].detail, /1 project\(s\) below do \(sub\)/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("lists, per scanner, only the projects holding its manifest", async () => {
+    const dir = tree({ "py/requirements.txt": "", "web/package.json": "{}", "jvm/pom.xml": "" });
+    try {
+      const out = escalateManifestSkips(input, await scanScopeFacts(dir));
+      const detail = (name: string) => out.find((r) => r.name === name)?.detail ?? "";
+      assert.match(detail("npm audit"), /1 project\(s\) below do \(web\)/);
+      assert.match(detail("trivy fs (jvm)"), /1 project\(s\) below do \(jvm\)/);
+      assert.match(detail("pip-audit"), /1 project\(s\) below do \(py\)/);
+      assert.match(detail("pinned versions"), /2 project\(s\) below do \(py, web\)/);
+      assert.match(detail("osv-scanner"), /3 project\(s\) below do/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});

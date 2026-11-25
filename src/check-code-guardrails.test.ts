@@ -178,11 +178,38 @@ it("does not report a pass when a candidate source file cannot be scanned", asyn
   const f = fixture(t);
   f.put("src/large.ts", "x".repeat(256 * 1024 + 1));
   const results = await checkCodeGuardrails(f.root);
-  assert.deepEqual(
-    results.map((row) => row.status),
-    ["warn", "warn", "warn"],
-  );
-  assert.ok(results.every((row) => row.didNotRun === true));
+  const guard = results.find((row) => row.name === "commented-out guard");
+  assert.equal(guard?.status, "warn");
+  assert.equal(guard?.didNotRun, true);
+  assert.match(guard?.detail ?? "", /src\/large\.ts/);
+});
+
+it("an oversized source file marks only the row that reads it, and is named as skipped", async (t) => {
+  // Measured: one 300 KB .tsx beside a Dockerfile made all three rows didNotRun, although
+  // neither the cloud-command scan nor the Dockerfile scan reads a .tsx.
+  const f = fixture(t);
+  f.put("Dockerfile", "FROM alpine\n");
+  f.put("src/logos.tsx", "A".repeat(300_000));
+  const rows = await checkCodeGuardrails(f.root);
+  const by = (name: string) => rows.find((row) => row.name === name);
+  assert.equal(by("public cloud command")?.status, "pass");
+  assert.equal(by("public cloud command")?.didNotRun, undefined);
+  assert.equal(by("literal Dockerfile secret")?.status, "pass");
+  assert.equal(by("literal Dockerfile secret")?.didNotRun, undefined);
+  assert.equal(by("commented-out guard")?.status, "warn");
+  assert.match(by("commented-out guard")?.detail ?? "", /skipped src\/logos\.tsx \(over 256 KB\)/);
+});
+
+it("an unreadable test file or Dockerfile marks only its own row", async (t) => {
+  const f = fixture(t);
+  f.put("src/big.test.ts", "x".repeat(256 * 1024 + 1));
+  f.put("Dockerfile", "FROM alpine\n" + "#".repeat(256 * 1024 + 1));
+  const rows = await checkCodeGuardrails(f.root);
+  const by = (name: string) => rows.find((row) => row.name === name);
+  assert.equal(by("literal Dockerfile secret")?.status, "warn");
+  assert.equal(by("literal Dockerfile secret")?.didNotRun, true);
+  assert.equal(by("public cloud command")?.status, "pass");
+  assert.equal(by("commented-out guard")?.status, "pass", "the guard scan skips test files");
 });
 
 it("skips generated test-report trees instead of warning that they were not scanned", async (t) => {

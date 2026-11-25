@@ -242,7 +242,7 @@ async function runCheckAction(
     run.ok,
     countStatuses(run.security),
     run.security.map((s) => ({ id: s.name, status: s.status })),
-    false,
+    { quiet: false, scope: run.scope },
   );
   await noticeStaleKit(config);
   return run.ok;
@@ -289,7 +289,7 @@ async function printJsonRun(run: CheckRun): Promise<boolean> {
     run.ok,
     summary,
     run.security.map((s) => ({ id: s.name, status: s.status })),
-    true, // quiet: never print to stdout in --json mode
+    { quiet: true, scope: run.scope }, // quiet: never print to stdout in --json mode
   );
   console.log(JSON.stringify(output, null, 2));
   return run.ok;
@@ -487,6 +487,11 @@ async function cmdCompare(): Promise<boolean> {
   return failOnWorse ? !diff.worseThanBefore : true;
 }
 
+/** ` (only security)` for a narrowed run's receipt, so its green is not read as a full run's. */
+function receiptScope(att: { scope?: unknown }): string {
+  return Array.isArray(att.scope) ? ` (only ${att.scope.join(", ")})` : "";
+}
+
 async function cmdVerifyAttestation(): Promise<boolean> {
   // kit check verify-attestation [file] [--key <spki|fingerprint>] [--pin]
   const args = process.argv.slice(4);
@@ -520,7 +525,7 @@ async function cmdVerifyAttestation(): Promise<boolean> {
 
   if (r.status === "ok") {
     console.log(
-      `${c.green}✓ attestation verified${c.reset}  ${c.dim}${r.sig_alg}: ${att.command} on kit ${att.kit_version}, overall_ok=${att.overall_ok}${c.reset}${fpNote}`,
+      `${c.green}✓ attestation verified${c.reset}  ${c.dim}${r.sig_alg}: ${att.command}${receiptScope(att)} on kit ${att.kit_version}, overall_ok=${att.overall_ok}${c.reset}${fpNote}`,
     );
     if (r.sig_alg === "hmac-sha256") {
       console.log(

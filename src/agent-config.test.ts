@@ -87,7 +87,7 @@ describe("upsertKitBlock", () => {
 
   it("appends after existing content without clobbering it", () => {
     const { next, action } = upsertKitBlock("# My Project\n\nExisting rules.\n");
-    assert.equal(action, "created");
+    assert.equal(action, "appended");
     assert.ok(next.startsWith("# My Project\n\nExisting rules.\n"));
     assert.ok(next.includes(KIT_BLOCK_BEGIN));
   });
@@ -1474,5 +1474,36 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
       markGatesInstalled(dir);
       assert.equal(gateLiveness(dir).everInstalled, true);
     });
+  });
+});
+
+describe("writeAgentConfig labels an append as an append", () => {
+  const claude = [{ agent: "Claude Code", file: "CLAUDE.md" }];
+
+  it("says appended, not created, when CLAUDE.md already existed", async () => {
+    // `kit agent-config` printed `Claude Code → CLAUDE.md (created)` after appending to the
+    // user's own CLAUDE.md, which reads as if a file the user wrote had been replaced.
+    const dir = mkdtempSync(join(tmpdir(), "kit-agentcfg-append-"));
+    try {
+      writeFileSync(join(dir, "CLAUDE.md"), "# Mine\n\nOwn rules.\n");
+      const [r] = await writeAgentConfig(dir, claude);
+      assert.equal(r.action, "appended");
+      assert.equal(r.detail, "appended kit block to CLAUDE.md");
+      const text = readFileSync(join(dir, "CLAUDE.md"), "utf-8");
+      assert.ok(text.startsWith("# Mine\n\nOwn rules.\n"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("says created when there was no file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-agentcfg-create-"));
+    try {
+      const [r] = await writeAgentConfig(dir, claude);
+      assert.equal(r.action, "created");
+      assert.equal(r.detail, "wrote kit block to CLAUDE.md");
+    } finally {
+      rmTemp(dir);
+    }
   });
 });

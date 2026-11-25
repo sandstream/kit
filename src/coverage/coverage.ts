@@ -34,9 +34,11 @@ export type Bucket = "auto" | "gap" | "manual" | "na";
 /**
  * Live evidence state for an AUTO control, bound to the ACTUAL latest result of its
  * backing checks (only set when `kit coverage --verify` passes results in):
- *   verified - a backing check actually ran and passed
+ *   verified - a backing check actually ran and passed, and none failed, did not run, or
+ *              stopped with findings
  *   failing  - a backing check ran and FAILED (the control is NOT covered this run)
- *   unrun    - no backing check produced a pass/fail this run (skipped / absent)
+ *   unrun    - no backing check produced a pass this run (skipped / absent), or one of them did
+ *              not run or did not finish and reported findings
  * Without results the field is undefined and AUTO means only "a check is mapped".
  */
 export type EvidenceState = "verified" | "failing" | "unrun";
@@ -52,18 +54,30 @@ export const CHECK_ID_ALIASES: Record<string, string> = {
   "scan-transcripts": "agent transcripts",
 };
 
+/**
+ * A backing row's status as evidence: its own status, or "incomplete" when it did not run or
+ * reported findings it could not finish checking. An incomplete row cannot vouch for a control,
+ * and it stops another backing row's pass from vouching for it either.
+ */
+export type EvidenceStatus = SecurityCheckResult["status"] | "incomplete";
+
 /** Fold a control's backing-check statuses into one evidence state. */
-export function evidenceFor(
-  checks: string[],
-  byKey: Map<string, SecurityCheckResult["status"]>,
-): EvidenceState {
+export function evidenceFor(checks: string[], byKey: Map<string, EvidenceStatus>): EvidenceState {
   let sawPass = false;
+  let sawIncomplete = false;
   for (const c of checks) {
     const st = byKey.get(c) ?? byKey.get(CHECK_ID_ALIASES[c] ?? "");
     if (st === "fail") return "failing"; // any failing backing check ⇒ not covered
     if (st === "pass") sawPass = true;
+    if (st === "incomplete") sawIncomplete = true;
   }
-  return sawPass ? "verified" : "unrun";
+  return sawPass && !sawIncomplete ? "verified" : "unrun";
+}
+
+/** A fail stays a fail; a row that did not run or did not finish with findings is incomplete. */
+function evidenceStatus(r: SecurityCheckResult): EvidenceStatus {
+  if (r.status === "fail") return "fail";
+  return r.didNotRun || r.hasFindings ? "incomplete" : r.status;
 }
 
 /**
@@ -71,13 +85,12 @@ export function evidenceFor(
  * (e.g. "R2-secret-argv"), so the mapping can cite stable rule ids. Last write
  * wins per key.
  */
-export function indexResults(
-  results: SecurityCheckResult[],
-): Map<string, SecurityCheckResult["status"]> {
-  const byKey = new Map<string, SecurityCheckResult["status"]>();
+export function indexResults(results: SecurityCheckResult[]): Map<string, EvidenceStatus> {
+  const byKey = new Map<string, EvidenceStatus>();
   for (const r of results) {
-    byKey.set(r.name, r.status);
-    if (r.ruleId) byKey.set(r.ruleId, r.status);
+    const st = evidenceStatus(r);
+    byKey.set(r.name, st);
+    if (r.ruleId) byKey.set(r.ruleId, st);
   }
   return byKey;
 }
@@ -256,7 +269,7 @@ export function citationsFor(checks: string[]): RuleRef[] {
  * control from the evidence map.
  */
 export function buildCoverageEntries(
-  byName?: Map<string, SecurityCheckResult["status"]>,
+  byName?: Map<string, EvidenceStatus>,
 ): CoverageEntry[] {
   return ASVS_L2_SUBSET.map((requirement) => {
     const mapping = MAPPING[requirement.id];

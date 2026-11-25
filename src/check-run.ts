@@ -330,6 +330,11 @@ export function securityCheckToJson(s: SecurityCheckResult): JsonCheck {
     ...(s.scanIncomplete ? { scanIncomplete: true } : {}),
     ...(s.evidenceStatus ? { evidenceStatus: s.evidenceStatus } : {}),
     ...(s.evidenceSources ? { evidenceSources: s.evidenceSources } : {}),
+    // The text table prints these three; a JSON consumer (CI annotations, a GRC importer) must
+    // get the same citation, affected files and remediation instead of a poorer copy.
+    ...(s.rule ? { rule: s.rule } : {}),
+    ...(s.files?.length ? { files: s.files } : {}),
+    ...(s.suggestion ? { suggestion: s.suggestion } : {}),
   };
 }
 

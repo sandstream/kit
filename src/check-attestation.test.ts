@@ -201,3 +201,38 @@ describe("check-attestation - emit writes the receipt file", () => {
     }
   });
 });
+
+describe("check-attestation - a narrowed run records its scope", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "kit-att-scope-"));
+  });
+  afterEach(() => rmTemp(dir));
+
+  it("`--category security` writes scope into the signed receipt", async () => {
+    // A security-only green receipt read exactly like a full run: command "check", no scope.
+    const res = await emitAttestation({ ...SAMPLE, scope: ["security"] }, dir, dir);
+    assert.ok(res);
+    const onDisk = JSON.parse(await readFile(join(dir, ATTESTATION_FILE), "utf-8")) as Attestation;
+    assert.deepEqual(onDisk.scope, ["security"]);
+    assert.equal((await verifyAttestation(onDisk, { dir })).status, "ok");
+  });
+
+  it("stripping the scope from a signed receipt fails verification", async () => {
+    const att = await signAttestation(buildAttestationPayload({ ...SAMPLE, scope: ["security"] }), {
+      dir,
+    });
+    const { scope: _dropped, ...widened } = att;
+    assert.equal((await verifyAttestation(widened as Attestation, { dir })).status, "failed");
+  });
+
+  it("a full run has no scope, and its canonical bytes are what older kits signed", () => {
+    const full = buildAttestationPayload({ ...SAMPLE, scope: null });
+    assert.equal("scope" in full, false);
+    const legacy =
+      '{"schema":"kit-check-attestation/v1","command":"check","timestamp":"2026-06-26T00:00:00.000Z",' +
+      '"kit_version":"1.39.0","overall_ok":true,"results":{"passed":10,"failed":0,"warnings":1,"skipped":2},' +
+      '"scanners_ran":[{"id":"gitleaks","status":"ran"},{"id":"semgrep","status":"not-installed"}]}';
+    assert.equal(canonicalPayloadBytes(full).toString("utf-8"), legacy);
+  });
+});

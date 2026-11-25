@@ -127,3 +127,40 @@ describe("auditSkippableGates", () => {
     }
   });
 });
+
+describe("auditSkippableGates: an aggregator that reads toJSON(needs)", () => {
+  const wf = (step: string) =>
+    [
+      "on: pull_request",
+      "jobs:",
+      "  changes:",
+      "    runs-on: ubuntu-latest",
+      '    steps: [ { id: c, run: "true" } ]',
+      "  test:",
+      "    needs: changes",
+      "    if: needs.changes.outputs.t == 'true'",
+      "    runs-on: ubuntu-latest",
+      '    steps: [ { run: "true" } ]',
+      "  ci:",
+      "    needs: [changes, test]",
+      "    if: always()",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      ...step.split("\n"),
+    ].join("\n");
+
+  it("counts a job passing toJSON(needs) to a script as the aggregator (kit-research gha/skip-a)", () => {
+    const step =
+      "      - env:\n          CI_RESULTS: ${{ toJSON(needs) }}\n        run: node scripts/check.mjs";
+    assert.deepEqual(auditSkippableGates(wf(step), "ci.yml"), []);
+    assert.deepEqual(auditSkippableGates(wf(step.replace("toJSON", "toJson")), "ci.yml"), []);
+  });
+
+  it("still flags an always() job that reads neither result nor toJSON(needs)", () => {
+    const rows = auditSkippableGates(wf("      - run: echo done"), "ci.yml");
+    assert.deepEqual(
+      rows.map((r) => r.name),
+      ["skippable gate test (ci.yml)"],
+    );
+  });
+});
