@@ -6,7 +6,7 @@
  */
 
 /** Payloads above this are not parsed. A UserPromptSubmit payload carries the whole prompt. */
-export const HOOK_PAYLOAD_MAX_BYTES = 8 * 1024 * 1024;
+const HOOK_PAYLOAD_MAX_BYTES = 8 * 1024 * 1024;
 
 export type HookPayload = Record<string, unknown>;
 
