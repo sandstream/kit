@@ -7,6 +7,7 @@ import {
   enabledCoverageStandards,
   isCoverageStandardEnabled,
 } from "./registry.js";
+import { COMMAND_HELP } from "../cli.js";
 
 describe("coverage standards registry", () => {
   it("registers the expected standards, asvs first (the default)", () => {
@@ -93,5 +94,14 @@ describe("coverage standards registry", () => {
     );
     assert.equal(isCoverageStandardEnabled("asvs", ["mcp-top10", "asvs"]), true);
     assert.equal(isCoverageStandardEnabled("llm-top10", ["mcp-top10", "asvs"]), false);
+  });
+});
+
+describe("kit coverage --help names every registered standard", () => {
+  it("the --standard list in the help holds each key --list-standards prints", () => {
+    const list = /--standard=([a-z0-9|-]+)/.exec(COMMAND_HELP.coverage ?? "")?.[1]?.split("|");
+    assert.ok(list, "the help shows a --standard=<a|b|…> list");
+    for (const key of COVERAGE_STANDARD_KEYS) assert.ok(list.includes(key), `help omits ${key}`);
+    assert.ok(list.includes("all"));
   });
 });
