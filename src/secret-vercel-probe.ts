@@ -12,7 +12,7 @@ export async function verifyVercelToken(token: string, offline: boolean): Promis
       redirect: "error",
       signal: AbortSignal.timeout(5_000),
     });
-    void response.body?.cancel().catch(() => undefined);
+    await response.body?.cancel();
     if (response.status === 200) return { available: true, detail: "Vercel accepted the token" };
     if (response.status === 401 || response.status === 403)
       return { available: false, state: "invalid", detail: "Vercel refused the token" };
