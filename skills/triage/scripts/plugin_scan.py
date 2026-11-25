@@ -82,7 +82,18 @@ def _hook_sources(plugin_dir, manifest):
         except (OSError, ValueError):
             yield label, None
             continue
-        yield label, data.get("hooks", data) if isinstance(data, dict) else {}
+        yield label, _events_of(data)
+
+
+def _events_of(data):
+    """The hook events a hooks file declares. A mod can name `modules` beside its `hooks`
+    (claude-plugins-official `claude-security`), so the modules are kept rather than dropped."""
+    if not isinstance(data, dict):
+        return {}
+    events = data.get("hooks", data)
+    if isinstance(events, dict) and "hooks" in data and "modules" in data:
+        events = {**events, "modules": data["modules"]}
+    return events
 
 
 def _report_hooks(rep, plugin_dir, manifest):
@@ -116,9 +127,39 @@ MODULE_TOOL = re.compile(r"""\btools?\s*:\s*(\[[^\]]*\]|["'][^"']+["'])""")
 MODULE_PROCESS = re.compile(r"\$\.process\.run\s*\(")
 
 
+MODULE_TOOL_NAME = re.compile(r"""\btools?\s*:\s*([A-Za-z_$][\w$.]*)""")
+
+
 def _module_tools(options):
+    """The tools a handler filters on: quoted names, or `(name,)` for a variable kit does not
+    evaluate (`{tool: TOOLS}`), which must not read as "every tool"."""
     m = MODULE_TOOL.search(options or "")
-    return re.findall(r"""["']([^"']+)["']""", m.group(1)) if m else []
+    if m:
+        return re.findall(r"""["']([^"']+)["']""", m.group(1))
+    named = MODULE_TOOL_NAME.search(options or "")
+    return [f"`{named.group(1)}`"] if named else []
+
+
+def _report_module_events(rep, label, text):
+    """One line per distinct `on(event, filter)` call of a module."""
+    seen = set()
+    for event, options in MODULE_ON.findall(text):
+        key = (event, tuple(_module_tools(options)))
+        if key in seen:
+            continue
+        seen.add(key)
+        if event == "tool.call":
+            tools = _module_tools(options)
+            unread = any(t.startswith("`") for t in tools)
+            hit = [t for t in SENSITIVE_TOOLS if not tools or unread or t in tools]
+            scope = (f"the tools in {tools[0]} (a value kit does not evaluate)" if unread
+                     else ", ".join(tools) if tools else "every tool")
+            if hit:
+                rep.warn(f"{label}: tool.call hook on {scope} -- runs inside Claude Code before the agent's {', '.join(hit)} calls and can deny or rewrite them")
+            else:
+                rep.fact(f"{label}: tool.call hook on {scope}")
+        else:
+            rep.fact(f"{label}: {event} hook")
 
 
 def _report_modules(rep, plugin_dir, source, modules):
@@ -142,22 +183,7 @@ def _report_modules(rep, plugin_dir, source, modules):
             rep.warn(f"hook module {label} named in {source} could not be read -- not inspected")
             continue
         count += 1
-        seen = set()
-        for event, options in MODULE_ON.findall(text):
-            key = (event, tuple(_module_tools(options)))
-            if key in seen:
-                continue
-            seen.add(key)
-            if event == "tool.call":
-                tools = _module_tools(options)
-                hit = [t for t in SENSITIVE_TOOLS if not tools or t in tools]
-                scope = ", ".join(tools) if tools else "every tool"
-                if hit:
-                    rep.warn(f"{label}: tool.call hook on {scope} -- runs inside Claude Code before the agent's {', '.join(hit)} calls and can deny or rewrite them")
-                else:
-                    rep.fact(f"{label}: tool.call hook on {scope}")
-            else:
-                rep.fact(f"{label}: {event} hook")
+        _report_module_events(rep, label, text)
         if MODULE_PROCESS.search(text):
             rep.fact(f"{label}: starts processes ($.process.run)")
     return count

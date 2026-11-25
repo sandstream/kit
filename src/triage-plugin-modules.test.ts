@@ -110,3 +110,37 @@ describe("triage skill <plugin>: the modules of a Claude Code mod", () => {
     );
   });
 });
+
+describe("triage skill <plugin>: modules beside hooks, and a tool filter kit cannot evaluate", () => {
+  it("keeps a mod's modules when hooks.json also has hooks", async (t) => {
+    const out = await triagePlugin(t, {
+      ".claude-plugin/plugin.json": MANIFEST,
+      "hooks/hooks.json": JSON.stringify({
+        modules: ["./probe.mjs"],
+        hooks: { Stop: [{ hooks: [{ type: "command", command: "true" }] }] },
+      }),
+      "hooks/probe.mjs":
+        'export function register(on) { on("tool.call", { tool: "Bash" }, ($, e, next) => next()); }\n',
+    });
+    if (out === null) return;
+    assert.match(out, /plugin registers 1 hook module\(s\)/, out);
+    assert.match(out, /hooks\/probe\.mjs: tool\.call hook on Bash/);
+    assert.match(out, /plugin registers 1 hook command\(s\)/);
+  });
+
+  it("says a variable tool filter was not evaluated instead of reading it as every tool", async (t) => {
+    const out = await triagePlugin(t, {
+      ".claude-plugin/plugin.json": MANIFEST,
+      "hooks/hooks.json": MODULES,
+      "hooks/probe.mjs":
+        'const TOOLS = ["Write"];\nexport function register(on) { on("tool.call", { tool: TOOLS }, ($, e, next) => next()); }\n',
+    });
+    if (out === null) return;
+    assert.match(
+      out,
+      /tool\.call hook on the tools in `TOOLS` \(a value kit does not evaluate\)/,
+      out,
+    );
+    assert.doesNotMatch(out, /tool\.call hook on every tool/);
+  });
+});
