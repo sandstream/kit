@@ -11,6 +11,7 @@
  *   title = "No console.* in shipped code"
  *   applies_to = ["typescript"]     # language gate (omit ⇒ all languages)
  *   severity = "warn"               # warn | fail  (fail = author opts into gating)
+ *   because = "console output leaks into the CLI's JSON mode; use the logger"   # printed on failure
  *   mode = "forbid"                 # forbid | require  (omit ⇒ forbid)
  *   match = 'console\.(log|debug)\('
  *   exclude = ["scripts/", "fixtures/**"]     # glob patterns; trailing / means subtree
@@ -39,6 +40,7 @@ import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import { walkSourceFiles } from "./source-walk.js";
 import type { StandardsCheckResult } from "./check-standards.js";
+import { skillRuleGateRows } from "./skill-rule-gates.js";
 
 /** Default discovery directory (overridable via [standards.plugins].dirs). */
 export const DEFAULT_PLUGIN_DIR = ".kit/standards.d";
@@ -92,6 +94,7 @@ const pluginSchema = z
           .min(1)
           .regex(/^[a-z0-9][a-z0-9-]*$/, "id must be kebab-case (a-z, 0-9, -)"),
         title: z.string().min(1),
+        because: z.string().min(1).optional(),
         applies_to: z.array(z.string()).optional(),
         kind: z.enum(["general", "specific"]).optional(),
         severity: z.enum(["warn", "fail"]).optional(),
@@ -109,6 +112,8 @@ const pluginSchema = z
 export interface StandardPluginSpec {
   id: string;
   title: string;
+  /** Why the rule exists and how to fix a violation, printed with each failure (the agent reads it). */
+  because?: string;
   appliesTo?: string[];
   severity: "warn" | "fail";
   mode: "forbid" | "require";
@@ -211,19 +216,7 @@ export function loadStandardPlugins(cwd: string, dirs: string[]): LoadPluginsRes
           continue;
         }
       }
-      plugins.push({
-        id: s.id,
-        title: s.title,
-        appliesTo: s.applies_to,
-        severity: s.severity ?? "warn",
-        mode: s.mode ?? "forbid",
-        scope: s.scope,
-        match: s.match,
-        exclude: (s.exclude ?? []).map(normalizeGlobPattern),
-        includeTests: s.include_tests ?? false,
-        exts: s.exts ?? DEFAULT_PLUGIN_EXTS,
-        source: rel,
-      });
+      plugins.push(toSpec(s, rel));
     }
   }
   // Reject duplicate ids (two plugins with the same id → ambiguous baseline keys).
@@ -242,6 +235,24 @@ export function loadStandardPlugins(cwd: string, dirs: string[]): LoadPluginsRes
     byId.set(p.id, p);
   }
   return { plugins: [...byId.values()], integrity };
+}
+
+/** A validated `[standard]` table as the spec the evaluator runs, with defaults filled in. */
+function toSpec(s: z.infer<typeof pluginSchema>["standard"], rel: string): StandardPluginSpec {
+  return {
+    id: s.id,
+    title: s.title,
+    because: s.because,
+    appliesTo: s.applies_to,
+    severity: s.severity ?? "warn",
+    mode: s.mode ?? "forbid",
+    scope: s.scope,
+    match: s.match,
+    exclude: (s.exclude ?? []).map(normalizeGlobPattern),
+    includeTests: s.include_tests ?? false,
+    exts: s.exts ?? DEFAULT_PLUGIN_EXTS,
+    source: rel,
+  };
 }
 
 function normalizeGlobPattern(glob: string): string {
@@ -448,9 +459,11 @@ function pluginPassDetail(spec: StandardPluginSpec): string {
 }
 
 function pluginFreshDetail(spec: StandardPluginSpec, fresh: number, total: number): string {
-  return spec.mode === "require"
-    ? `${spec.title} — ${fresh} file(s) missing required pattern (${total} total)`
-    : `${spec.title} — ${fresh} new match(es) (${total} total)`;
+  const counted =
+    spec.mode === "require"
+      ? `${spec.title} — ${fresh} file(s) missing required pattern (${total} total)`
+      : `${spec.title} — ${fresh} new match(es) (${total} total)`;
+  return spec.because ? `${counted}. Because: ${spec.because}` : counted;
 }
 
 function pluginFileLabel(spec: StandardPluginSpec, f: PluginFinding): string {
@@ -518,6 +531,7 @@ export function checkStandardsPlugins(opts: CheckPluginsOptions): StandardsCheck
       });
     }
   }
+  results.push(...skillRuleGateRows(cwd, plugins));
   return results;
 }
 
