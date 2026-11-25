@@ -271,6 +271,7 @@ def _triage_skill_file(rep, path, scan_dir, label):
     if "description" not in keys:
         rep.warn(f"{label}frontmatter missing 'description:'")
     _secrets_in(rep, f"{label}skill body", text)
+    _plugin_scan().frontmatter_hooks(rep, f"{label}SKILL.md", text)
     if scan_dir:
         _scan_other_files(rep, os.path.dirname(path), path, label)
     rep.fact(f"validated local skill at {path} ({len(text)} bytes)")
@@ -303,6 +304,8 @@ def _scan_other_files(rep, skill_dir, skill_md, label=""):
                 continue
             read += 1
             _secrets_in(rep, f"{label}{rel}", body)
+            if not rel.endswith((".md", ".json")):
+                _plugin_scan()._scan_script(rep, f"{label}{rel}", body)
     rep.fact(f"{label}scanned {read} other file(s) in the skill directory")
     if unread:
         more = f" and {len(unread) - 10} more" if len(unread) > 10 else ""
