@@ -18,7 +18,8 @@
  *                        declared inline rather than as a hook file.
  *  - agent-surface     : secrets / inline-MCP / malware shapes in Claude's other
  *                        code surfaces — `.claude/commands`, `.claude/agents`,
- *                        `.claude/skills`, `.claude/plugins`.
+ *                        `.claude/skills`, `.claude/plugins`, and Codex's
+ *                        `.agents/skills` and `.codex/skills`.
  *
  * Pure analyzers (string in → findings out); `runAgentAudit` is the file-reading wrapper.
  */
@@ -295,8 +296,8 @@ const CONFIG_FILES = [
   ".claude/settings.json",
   ".claude/settings.local.json",
   // OpenCode (project config carries an `mcp` block) + Codex CLI. secrets-in-config
-  // is format-agnostic (findSecrets reads raw text); the JSON-shaped MCP checks
-  // simply no-op on the TOML files.
+  // is format-agnostic (findSecrets reads raw text); the MCP checks read Codex's
+  // `[mcp_servers.<name>]` tables through configView.
   "opencode.json",
   "opencode.jsonc",
   ".codex/config.toml",
@@ -315,14 +316,17 @@ const CONFIG_FILES = [
 ];
 
 /**
- * The text the hook and status-line checks read. Codex keeps hooks in `.codex/config.toml` too
- * (`[[hooks.SessionStart]]`, where kit writes its own gate), and the JSON-only checks never saw
- * them; the parsed TOML is handed over as JSON. A file that does not parse is read as text.
+ * The text the MCP, hook and status-line checks read. Codex keeps hooks in `.codex/config.toml`
+ * too (`[[hooks.SessionStart]]`, where kit writes its own gate) and its MCP servers in
+ * `[mcp_servers.<name>]`, and the JSON-only checks never saw either (kit-research
+ * `uber-skills-at-scale-vs-kit`); the parsed TOML is handed over as JSON, with `mcp_servers` also
+ * under `mcpServers`. A file that does not parse is read as text.
  */
-function hookView(rel: string, content: string): string {
+function configView(rel: string, content: string): string {
   if (!rel.endsWith(".toml")) return content;
   try {
-    return JSON.stringify(parseToml(content));
+    const parsed = parseToml(content);
+    return JSON.stringify({ ...parsed, mcpServers: parsed.mcp_servers });
   } catch {
     return content;
   }
@@ -340,6 +344,9 @@ const AGENT_DIRS: { dir: string; label: string }[] = [
   { dir: ".claude/commands", label: "slash-command" },
   { dir: ".claude/agents", label: "subagent" },
   { dir: ".claude/skills", label: "skill" },
+  // Codex's project skills: `.agents/skills`, and `.codex/skills` where older versions put them.
+  { dir: ".agents/skills", label: "Codex skill" },
+  { dir: ".codex/skills", label: "Codex skill" },
   { dir: ".claude/plugins", label: "plugin" },
   // OpenCode plugins are JS/TS that run on load and can hook tool execution
   // (`tool.execute.before`) — an unwatched code-execution surface, same class as
@@ -407,7 +414,7 @@ function scanAgentDirs(cwd: string): { results: SecurityCheckResult[]; scanned: 
           result(
             `secret in ${label} ${rel}`,
             "fail",
-            `${secrets.length} plaintext secret(s) (${kinds}) in a Claude ${label} — e.g. ${secrets[0].preview}`,
+            `${secrets.length} plaintext secret(s) (${kinds}) in an agent ${label} — e.g. ${secrets[0].preview}`,
             "secrets",
             "critical",
             `move it to a vault/env and gitignore ${rel}`,
@@ -435,7 +442,7 @@ function scanAgentDirs(cwd: string): { results: SecurityCheckResult[]; scanned: 
           result(
             `malware-shaped ${label} ${rel}`,
             "warn",
-            `a Claude ${label} contains a command that ${reasons.join("; ")} — verify it is intentional`,
+            `an agent ${label} contains a command that ${reasons.join("; ")} — verify it is intentional`,
             "exposure",
             "medium",
             `review ${rel}; a ${label} can run shell when invoked`,
@@ -530,8 +537,9 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
         ),
       );
     }
-    out.push(...cleartextMcpRows(rel, auditMcpServers(content)));
-    for (const s of auditMcpStdio(content)) {
+    const view = configView(rel, content);
+    out.push(...cleartextMcpRows(rel, auditMcpServers(view)));
+    for (const s of auditMcpStdio(view)) {
       out.push(
         result(
           `risky MCP server "${s.server}" in ${rel}`,
@@ -543,7 +551,6 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
         ),
       );
     }
-    const view = hookView(rel, content);
     out.push(...hookScriptRows(view, cwd, rel));
     for (const c of auditSettingsCommands(view)) {
       out.push(
