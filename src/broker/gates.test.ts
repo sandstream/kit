@@ -164,3 +164,51 @@ describe("kit gate-fs (subprocess)", () => {
     assert.match(r.stderr, /outside the signed fs scope/);
   });
 });
+
+describe("kit gate-egress: bare-host network tools (subprocess)", () => {
+  // kit-research decepticon-vs-kit E4; owner decision 2026-11-25: these passed with no verified
+  // scope, where `curl https://…` was denied.
+  const unsigned = () => rmSync(join(proj, ".kit-profile.sig"), { force: true });
+
+  it("denies nc, ping and nmap with no verified scope, as it denies a URL", () => {
+    unsigned();
+    for (const command of ["nc h.example 443", "ping h.example", "nmap -sS 10.0.0.5"]) {
+      const r = runGate("gate-egress", bash(command));
+      assert.equal(r.status, 2, command);
+      assert.match(r.stderr, /network egress to .+ denied — no verified scope\/RoE/);
+    }
+  });
+
+  it("treats loopback as the URL path does: denied with no verified scope", () => {
+    unsigned();
+    assert.equal(runGate("gate-egress", bash("curl http://127.0.0.1:5432/")).status, 2);
+    assert.equal(runGate("gate-egress", bash("nc 127.0.0.1 5432")).status, 2);
+  });
+
+  it("allows an in-scope host and denies an off-scope one under a verified scope", () => {
+    assert.equal(runGate("gate-egress", bash("nc api.acme.com 443")).status, 0);
+    assert.equal(runGate("gate-egress", bash("ssh -p 22 deploy@api.acme.com uptime")).status, 0);
+    const r = runGate("gate-egress", bash("ssh deploy@h.example"));
+    assert.equal(r.status, 2);
+    assert.ok(r.stderr.includes("outside the signed egress scope: h.example"), r.stderr);
+  });
+
+  it("never matches an address range to a scope entry", () => {
+    const r = runGate("gate-egress", bash("nmap 10.0.0.0/24"));
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /10\.0\.0\.0\/24/);
+  });
+
+  it("passes a hostname that is not in a tool's target position", () => {
+    unsigned();
+    for (const command of [
+      'git commit -m "ping h.example"',
+      'git commit -m "fix; nc h.example 443"',
+      "echo nc h.example 443",
+      "grep nmap notes.txt",
+      "grep -r 'ssh h.example' docs",
+    ]) {
+      assert.equal(runGate("gate-egress", bash(command)).status, 0, command);
+    }
+  });
+});

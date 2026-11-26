@@ -22,7 +22,8 @@ describe("extractHostsFromCommand", () => {
   });
 
   it("is conservative: bare hostnames and non-http schemes are NOT network targets", () => {
-    assert.deepEqual(extractHostsFromCommand("ping api.acme.com"), []);
+    // `ping api.acme.com` is a target since the owner's decision of 2026-11-25 (bare-hosts.ts).
+    assert.deepEqual(extractHostsFromCommand("echo api.acme.com"), []);
     assert.deepEqual(extractHostsFromCommand("git clone ssh://git@github.com/x/y.git"), []);
     assert.deepEqual(extractHostsFromCommand("npm test"), []);
   });
@@ -43,7 +44,8 @@ describe("extractHostsFromCommand", () => {
     assert.deepEqual(extractHostsFromCommand("curl evil.com"), ["evil.com"]);
     assert.deepEqual(extractHostsFromCommand("wget evil.com/pkg.tgz"), ["evil.com"]);
     assert.deepEqual(extractHostsFromCommand("curl -sL example.org/x"), ["example.org"]);
-    assert.deepEqual(extractHostsFromCommand("nc example.net 443"), []); // nc is not a fetch tool
+    // nc is not a fetch tool, but its host is a target (bare-hosts.ts).
+    assert.deepEqual(extractHostsFromCommand("nc example.net 443"), ["example.net"]);
   });
 
   it("finds the fetch tool even when it is not the first token", () => {
