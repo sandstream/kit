@@ -73,6 +73,7 @@ import {
   cmdGateFs,
   cmdGateLimits,
   runGateFailClosed,
+  denyGateFault,
 } from "./commands/gate.js";
 import { cmdGuard, cmdGuardObserve } from "./commands/guard.js";
 import { cmdCi } from "./commands/ci.js";
@@ -539,6 +540,7 @@ export async function main(): Promise<void> {
   process.argv = [...process.argv.slice(0, 2), ...args];
   if (answeredBeforePolicy(command, ownArgs, args)) return;
   const flagCommand = command ?? "check";
+  dispatchedVerb = flagCommand;
   const nonInteractive =
     hasFlag(ownArgs, "--non-interactive") ||
     process.env.CI === "true" ||
@@ -573,8 +575,24 @@ export async function main(): Promise<void> {
       startPostCommandNotices();
     }
   } catch (err: unknown) {
-    reportMainError(err, ownArgs);
+    // A gate's handler faults are denied inside runGateFailClosed; this catches the dispatch
+    // steps around it (the read-only floor's imports), which must not exit 1 = allow either.
+    if (GATE_VERBS.has(flagCommand)) denyGateFault(flagCommand, err);
+    else reportMainError(err, ownArgs);
   }
+}
+
+/** The verb main() is dispatching, for a rejection that escapes it. */
+let dispatchedVerb: string | undefined;
+
+/**
+ * Last resort for a rejection outside main()'s try (policy load, the skipped-commit banner). For
+ * a gate verb that is still an internal fault, so it denies with exit 2 instead of exit 1.
+ */
+function reportMainRejection(err: unknown): void {
+  if (dispatchedVerb !== undefined && GATE_VERBS.has(dispatchedVerb)) {
+    denyGateFault(dispatchedVerb, err);
+  } else reportUnexpectedCliError(err);
 }
 
 /**
@@ -1140,4 +1158,4 @@ function isCliEntry(): boolean {
   }
 }
 
-if (isCliEntry()) void main().catch(reportUnexpectedCliError);
+if (isCliEntry()) void main().catch(reportMainRejection);
