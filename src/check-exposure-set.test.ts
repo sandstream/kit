@@ -1,4 +1,7 @@
-/** The exposure checks run as one set: client env names, built bundle, anonymous database access, Firebase rules. */
+/**
+ * The exposure checks run as one set: client env names, built bundle, anonymous and signed-in
+ * database access, Firebase rules.
+ */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -19,13 +22,14 @@ function tree(spec: Record<string, string>): string {
 }
 
 describe("checkExposureSet", () => {
-  it("returns the four exposure rows in a fixed order", async () => {
+  it("returns the five exposure rows in a fixed order", async () => {
     const dir = tree({ "package.json": "{}" });
     try {
       const rows = await checkExposureSet(dir, null);
-      assert.equal(rows.length, 4);
+      assert.equal(rows.length, 5);
       assert.match(rows[2].name, /anonymous database access/);
-      assert.equal(rows[3].name, "firebase security rules");
+      assert.match(rows[3].name, /signed-in database access/);
+      assert.equal(rows[4].name, "firebase security rules");
       assert.ok(rows.every((r) => r.category === "exposure"));
     } finally {
       rmTemp(dir);
