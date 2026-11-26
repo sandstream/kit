@@ -233,6 +233,21 @@ function secretsSection(
   };
 }
 
+/** A Python project with no declared version gets no `python` pin, reported with the setup gaps
+ *  because the runtime is provisioned with the install command: 3.12 was written for
+ *  every Python repo and then failed `kit lock` on any other installed Python. */
+function runtimeGaps(stack: DetectedStack): InitGap[] {
+  if (stack.language !== "python" || stack.tools.python) return [];
+  return [
+    {
+      path: "tools.python",
+      owner: "agent",
+      why: "nothing in the repo pins a Python version (.python-version, .tool-versions, or a requires-python the installed Python satisfies)",
+      fix: `echo "<3.x>" > .python-version, then re-run kit init`,
+    },
+  ];
+}
+
 /**
  * Render `[setup]`, plus a gap for every command kit refuses to invent.
  *
@@ -246,7 +261,7 @@ function setupSection(
   stack: DetectedStack,
   opts: { verify?: string; install?: string; packageScripts?: string[] },
 ): { section: string; gaps: InitGap[] } {
-  const gaps: InitGap[] = [];
+  const gaps: InitGap[] = runtimeGaps(stack);
 
   let installCmd: string | null = opts.install ?? null;
   if (!installCmd) {

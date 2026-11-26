@@ -8,7 +8,8 @@
  * Defaults:
  *   - exts:     ['.ts']
  *   - skipDirs: ['node_modules','dist','.next','.git','coverage']
- *   - dotdirs (any directory starting with '.') are skipped
+ *   - dotdirs (any directory starting with '.') are skipped unless `includeDotDirs` is set;
+ *     dotfiles are always skipped
  *   - `*.test.ts` and `*.test-support.ts` are excluded unless `includeTests` is set
  */
 
@@ -22,6 +23,8 @@ export interface WalkOpts {
   skipDirs?: string[];
   /** When true, include tests and test-support modules (excluded by default). */
   includeTests?: boolean;
+  /** When true, walk directories whose name starts with '.' (`.github/`) unless `skipDirs` names them. */
+  includeDotDirs?: boolean;
 }
 
 const DEFAULT_EXTS = [".ts"];
@@ -40,6 +43,7 @@ export function walkSourceFiles(root: string, opts: WalkOpts = {}): string[] {
   const exts = opts.exts ?? DEFAULT_EXTS;
   const skipDirs = opts.skipDirs ?? DEFAULT_SKIP_DIRS;
   const includeTests = opts.includeTests ?? false;
+  const includeDotDirs = opts.includeDotDirs ?? false;
   const skip = new Set(skipDirs);
   const out: string[] = [];
 
@@ -56,7 +60,7 @@ export function walkSourceFiles(root: string, opts: WalkOpts = {}): string[] {
     for (const e of entries) {
       const full = join(dir, e.name);
       if (e.isDirectory()) {
-        if (e.name.startsWith(".")) continue;
+        if (e.name.startsWith(".") && !includeDotDirs) continue;
         if (skip.has(e.name)) continue;
         visit(full);
         continue;

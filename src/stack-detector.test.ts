@@ -87,7 +87,7 @@ describe("detectStack", () => {
       const stack = await detectStack(dir);
       assert.equal(stack.language, "python");
       assert.equal(stack.framework, "fastapi");
-      assert.ok(stack.tools.python, "expected python in tools");
+      assert.equal(stack.tools.python, undefined, "no declared version, no invented 3.12 pin");
       assert.ok(stack.confidence >= 0.8);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -299,7 +299,7 @@ describe("detectStack", () => {
     const dir = join(tmpdir(), `kit-detect-${process.pid}-node-version`);
     await makeProject(dir, {
       "package.json": JSON.stringify({
-        engines: { node: ">=20.0.0" },
+        engines: { node: "^20.0.0" },
         dependencies: { next: "14.0.0" },
       }),
     });

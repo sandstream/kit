@@ -22,7 +22,7 @@ import {
   withCoolingLines,
   type CoolingDeps,
 } from "./triage-cooling.js";
-import { verdictPassed } from "./triage.js";
+import { parseTriageOutput, verdictPassed } from "./triage.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 import { iso, localServices, lock, report, tree, vuln } from "./triage-cooling.test-support.js";
 
@@ -438,5 +438,47 @@ describe("air-gap state is read so that doubt means on", () => {
     } finally {
       rmTemp(dir);
     }
+  });
+});
+
+describe("withCoolingLines: the summary counts what the cooling lines add", () => {
+  it("counts a cooling CRITICAL in `Critical issues` and in the score, as triage.py would", () => {
+    const out = withCoolingLines(report("1.0.1"), {
+      lines: ["  x CRITICAL: cooling: 1.0.1 was published 2 days ago, limit 14"],
+      held: true,
+    });
+    assert.match(out, /^Critical issues: 1$/m);
+    assert.match(out, /^Warnings: 0$/m);
+    assert.match(out, /^Health score: 55\/100$/m);
+    assert.deepEqual(parseTriageOutput(out), {
+      healthScore: "55/100",
+      criticalIssues: 1,
+      warnings: 0,
+      sections: parseTriageOutput(out).sections,
+    });
+  });
+
+  it("counts a cooling WARNING in `Warnings` and takes triage.py's warning penalty off the score", () => {
+    const out = withCoolingLines(report("1.0.1"), {
+      lines: ["  ! WARNING: cooling: 1.0.1 was published 2 days ago, limit 14"],
+      held: false,
+    });
+    assert.match(out, /^Warnings: 1$/m);
+    assert.match(out, /^Critical issues: 0$/m);
+    assert.match(out, /^Health score: 88\/100$/m);
+    assert.match(out, /^TRIAGE PASSED$/m);
+  });
+
+  it("never takes the score below zero, and leaves a NOT CHECKED or waived line out of the counts", () => {
+    const low = report("1.0.1").replace("Health score: 100/100", "Health score: 10/100");
+    const held = withCoolingLines(low, { lines: ["  x CRITICAL: cooling: x"], held: true });
+    assert.match(held, /^Health score: 0\/100$/m);
+    const notes = withCoolingLines(report("1.0.1"), {
+      lines: ["  ~ NOT CHECKED: cooling -- why", "  . cooling: waived, 1.0.1 fixes GHSA-x"],
+      held: false,
+    });
+    assert.match(notes, /^Health score: 100\/100$/m);
+    assert.match(notes, /^Critical issues: 0$/m);
+    assert.match(notes, /^Warnings: 0$/m);
   });
 });
