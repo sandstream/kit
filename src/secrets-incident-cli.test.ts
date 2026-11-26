@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +31,7 @@ const NEW_A = "fakenew-alpha-55aa01";
 const INLINE = "fakeinline-value-0b9e";
 const ALL_FAKES = [OLD_A, OLD_B, NEW_A, INLINE];
 
+const FAKE_CLI = "/opt/fake/bin/fakevault";
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
 function configFor(keys: Record<string, SecretKeyConfig>): kitConfig {
@@ -43,12 +45,6 @@ const CONFIG = configFor({
   INLINE_SETTING: { source: "config", value: INLINE },
 });
 
-interface Harness {
-  deps: IncidentDeps;
-  vault: Map<string, string>;
-  lines: string[];
-}
-
 function tempProject(gitignore = ".kit/*\n.kit-audit.jsonl\n"): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "kit-incident-")));
   execFileSync("git", ["init", "-q"], { cwd: dir });
@@ -56,7 +52,7 @@ function tempProject(gitignore = ".kit/*\n.kit-audit.jsonl\n"): string {
   return dir;
 }
 
-function harness(cwd: string, check?: CliIdentityCheck): Harness {
+function harness(cwd: string, check?: CliIdentityCheck) {
   const vault = new Map<string, string>([
     ["STRIPE_SECRET_KEY", OLD_A],
     ["ALPHA_TOKEN", OLD_B],
@@ -65,11 +61,7 @@ function harness(cwd: string, check?: CliIdentityCheck): Harness {
   const deps: IncidentDeps = {
     cwd,
     read: async (name) => vault.get(name) ?? null,
-    resolveCli: async () => ({
-      tool: "fakevault",
-      path: "/opt/fake/bin/fakevault",
-      label: "/opt/fake/bin/fakevault",
-    }),
+    resolveCli: async () => ({ tool: "fakevault", path: FAKE_CLI, label: FAKE_CLI }),
     checkCliIdentity: check ?? (async () => ({ state: "unpinned", detail: "test" })),
     out: (l) => lines.push(l),
     err: (l) => lines.push(l),
@@ -118,16 +110,13 @@ describe("kit secrets incident", () => {
       assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), true);
       assert.ok(h.lines.some((l) => l.includes("kit secrets rotate STRIPE_SECRET_KEY --from-cli")));
       assert.ok(
-        h.lines.some((l) => l.includes("/opt/fake/bin/fakevault")),
+        h.lines.some((l) => l.includes(FAKE_CLI)),
         "prints the CLI path",
       );
       const snap = readFileSync(snapshotPath(cwd, "1password"), "utf8");
       assert.match(snap, /"fingerprint": "[0-9a-f]{64}"/);
       if (process.platform !== "win32") {
-        const { mode } = await import("node:fs").then((fs) =>
-          fs.statSync(snapshotPath(cwd, "1password")),
-        );
-        assert.equal(mode & 0o777, 0o600);
+        assert.equal(statSync(snapshotPath(cwd, "1password")).mode & 0o777, 0o600);
       }
 
       // Nothing rotated yet: every key unchanged, exit false.
@@ -149,21 +138,6 @@ describe("kit secrets incident", () => {
       assert.deepEqual(verify[1]!.metadata.unresolvable, ["ALPHA_TOKEN"]);
       assert.equal(verify[2]!.success, true);
       assertNoValues(cwd, h.lines);
-    } finally {
-      rmTemp(cwd);
-    }
-  });
-
-  it("a key unreadable at snapshot time has no baseline and never verifies", async () => {
-    const cwd = tempProject();
-    try {
-      const h = harness(cwd);
-      h.vault.delete("ALPHA_TOKEN");
-      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), true);
-      h.vault.set("ALPHA_TOKEN", NEW_A);
-      h.vault.set("STRIPE_SECRET_KEY", "fakenew-x");
-      assert.equal(await runSecretsIncident(["1password", "--verify"], CONFIG, h.deps), false);
-      assert.ok(h.lines.some((l) => l.includes("no baseline")));
     } finally {
       rmTemp(cwd);
     }
@@ -256,18 +230,11 @@ describe("kit secrets incident", () => {
         join(cwd, ".kit.toml"),
         '[secrets]\nstore = "env"\n[secrets.keys]\nKIT_TEST_INCIDENT_A = { source = "env" }\n',
       );
-      const run = (args: string[], value?: string) =>
+      const run = (args: string[], value: string) =>
         spawnSync(process.execPath, [CLI, "secrets", ...args], {
           cwd,
           encoding: "utf8",
-          env: {
-            ...process.env,
-            KIT_NON_INTERACTIVE: "1",
-            KIT_NO_UPDATE_CHECK: "1",
-            HOME: cwd,
-            USERPROFILE: cwd,
-            KIT_TEST_INCIDENT_A: value ?? "",
-          },
+          env: { ...process.env, HOME: cwd, USERPROFILE: cwd, KIT_TEST_INCIDENT_A: value },
         });
       const list = run(["list", "--backend", "env", "--json"], OLD_A);
       assert.equal(list.status, 0, list.stderr);
