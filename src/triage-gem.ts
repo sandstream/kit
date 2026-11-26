@@ -24,6 +24,7 @@ import {
   releaseVerdict,
   type ReleaseTriageResult,
 } from "./triage-registry.js";
+import { gemProbes, resolveCurrent, type CurrentVersion } from "./triage-current-version.js";
 import { readRegularFileIfPresent } from "./upstream-safe-read.js";
 
 const GEM_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -135,6 +136,22 @@ export const defaultGemDeps: GemTriageDeps = {
 
 export type GemTriageResult = ReleaseTriageResult;
 
+/**
+ * The gem version in use: Gemfile.lock's pin, else the newest published version installed under
+ * GEM_HOME or GEM_PATH (read from gemspec file names, without running Ruby). `gem install` has no
+ * lockfile, so without the second source a security fix for an installed gem was never recognised.
+ */
+export function currentGem(
+  cwd: string,
+  deps: GemTriageDeps,
+  name: string,
+  published: readonly string[],
+): Promise<CurrentVersion> {
+  const locked = { label: "Gemfile.lock", version: lockedGemVersion(deps.lockfile(cwd), name) };
+  const platform = deps.locator?.platform ?? process.platform;
+  return resolveCurrent(locked, gemProbes(name, deps.env, platform, published), published);
+}
+
 function ageDays(iso: string, now: number): number {
   return Math.floor((now - Date.parse(iso)) / DAY_MS);
 }
@@ -187,12 +204,16 @@ export async function triageGem(
     );
 
   const osv = osvLookup(deps, air.enabled, "RubyGems");
+  const current = await currentGem(cwd, deps, parsed.name, view.versions);
   const cooling = await releaseCooling(cwd, deps, {
     pkg: parsed.name,
     version,
     versions: view.versions,
     times: view.times,
-    current: lockedGemVersion(deps.lockfile(cwd), parsed.name),
+    current: current.version,
+    currentFrom: current.from,
+    currentInstalled: current.installed,
+    currentNote: current.note,
     osv,
   });
   const lines = [

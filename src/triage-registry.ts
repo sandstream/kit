@@ -104,8 +104,14 @@ export interface ReleaseCooling {
   versions: string[];
   times: Record<string, string>;
   osv: Osv;
-  /** The version the project's lockfile pins now, when kit reads one. */
+  /** The version in use now: the lockfile's pin, or a published version an installed copy has. */
   current?: string;
+  /** Where `current` came from, printed on the cooling line. */
+  currentFrom?: string;
+  /** True when `current` came from an installed copy: it feeds the waiver only. */
+  currentInstalled?: boolean;
+  /** Why no current version is known, naming the sources checked. */
+  currentNote?: string;
 }
 
 /** The cooling check with the limit and enforcement npm and pip use: `[supply_chain]`, then the environment. */

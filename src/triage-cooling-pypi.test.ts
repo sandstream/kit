@@ -89,6 +89,13 @@ describe("applyCooling for pip", () => {
       },
       postJson: async () => ({ vulns: [] }),
       airGap: async () => ({ enabled: airGap, mirrors: {} }),
+      // No interpreter is run: nothing is installed.
+      locator: {
+        platform: process.platform,
+        execPath: join(tmpdir(), "kit-cooling-no-node", "node"),
+        home: join(tmpdir(), "kit-cooling-no-home"),
+        sitePackages: async () => [],
+      },
     };
   }
 

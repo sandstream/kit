@@ -132,6 +132,13 @@ export function localServices() {
       ...defaultCoolingDeps,
       env: { KIT_NPM_REGISTRY: base, KIT_OSV_API: base, ...env },
       airGap: async () => ({ enabled: airGap, mirrors: {} }),
+      // No global install and no Python: only the fixture project's own files are read.
+      locator: {
+        platform: process.platform,
+        execPath: join(tmpdir(), "kit-cooling-no-node", "bin", "node"),
+        home: join(tmpdir(), "kit-cooling-no-home"),
+        sitePackages: async () => [],
+      },
     };
     return applyCooling(cwd, "npm", "fixture", { passed: true, output: report(version) }, deps);
   };
