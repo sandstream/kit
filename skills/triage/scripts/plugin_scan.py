@@ -372,19 +372,25 @@ def _report_mcp_servers(rep, plugin_dir, manifest):
     servers = _mcp_servers(plugin_dir, manifest)
     rep.fact(f"plugin registers {len(servers)} MCP server(s)")
     for source, name, server in servers:
-        if isinstance(server.get("url"), str):
-            _report_mcp_url(rep, source, name, server["url"])
-            continue
-        command = str(server.get("command", ""))
-        args = [str(a) for a in server.get("args", [])] if isinstance(server.get("args"), list) else []
-        line = " ".join([command] + args)
-        _scan_script(rep, f"{source} MCP server {name!r}", line)
-        local = command.startswith(("./", "${CLAUDE_PLUGIN_ROOT}", "$CLAUDE_PLUGIN_ROOT")) or any(
-            "CLAUDE_PLUGIN_ROOT" in a for a in args)
-        if RUNNER.search(line) or local:
-            rep.fact(f"{source}: MCP server {name!r} runs `{line[:120]}`")
-        else:
-            rep.warn(f"{source}: MCP server {name!r} runs `{command}` from PATH on every session -- the plugin does not ship it; triage how that program is installed")
+        judge_mcp_server(rep, source, name, server, "plugin")
+
+
+def judge_mcp_server(rep, source, name, server, owner):
+    """One MCP server entry (`url`, or `command` + `args`), registered by a plugin or a skill pack
+    (`owner`): a remote host, an unpinned package runner, or a program run from PATH."""
+    if isinstance(server.get("url"), str):
+        _report_mcp_url(rep, source, name, server["url"])
+        return
+    command = str(server.get("command", ""))
+    args = [str(a) for a in server.get("args", [])] if isinstance(server.get("args"), list) else []
+    line = " ".join([command] + args)
+    _scan_script(rep, f"{source} MCP server {name!r}", line)
+    local = command.startswith(("./", "${CLAUDE_PLUGIN_ROOT}", "$CLAUDE_PLUGIN_ROOT")) or any(
+        "CLAUDE_PLUGIN_ROOT" in a for a in args)
+    if RUNNER.search(line) or local:
+        rep.fact(f"{source}: MCP server {name!r} runs `{line[:120]}`")
+    else:
+        rep.warn(f"{source}: MCP server {name!r} runs `{command}` from PATH on every session -- the {owner} does not ship it; triage how that program is installed")
 
 
 def _plugin_manifest(rep, plugin_dir, manifest):
