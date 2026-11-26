@@ -648,7 +648,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--role",
     "--user",
   ],
-  tools: ["--auth", "--json", "--latest"],
+  tools: ["--accept", "--auth", "--json", "--latest"],
   triage: [
     "--checksum",
     "--deep",

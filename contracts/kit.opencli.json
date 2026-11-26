@@ -3387,11 +3387,21 @@
           "x-kit-flags-inherited": true,
           "x-kit-mcp": false,
           "x-kit-stability": "experimental"
+        },
+        "pin": {
+          "kind": "command",
+          "summary": "Pin the vault/cloud CLIs (op, infisical, bw, doppler, vault, aws, gcloud, az, gh) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
         }
       },
       "kind": "group",
       "summary": "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is, and (with --auth) whether it is logged in",
       "x-kit-accepted-flags": [
+        "--accept",
         "--auth",
         "--env",
         "--help",
