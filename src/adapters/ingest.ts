@@ -144,6 +144,8 @@ export type IngestOutcome = (
       notes?: string[];
       coverage?: "partial";
       reportGap?: IngestGap;
+      /** SARIF results left out because every suppression on them is accepted. */
+      suppressed?: number;
     }
   | { ok: false; reason: string; reportGap?: IngestGap }
 ) & { scannerCoverage?: DeclaredScannerCoverage[] };
@@ -440,12 +442,14 @@ export function ingestSarifReport(parsed: unknown): IngestOutcome {
   if (runs.length === 0) return reportFailure("missing", "SARIF log contains no runs");
   const readable = runs.map(readableSarifRun).filter(isRecord);
   const normalized = readable as SarifRun[];
-  const findings = sarifFindings({ runs: normalized });
+  const tally = { suppressed: 0 };
+  const findings = sarifFindings({ runs: normalized }, tally);
   const declared = kitScanCoverage(normalized);
-  const outcome = sarifCoverage(readable, findings, {
+  const counted = sarifCoverage(readable, findings, {
     malformed: !runs.every(sarifRun) || declared.malformed,
     declaredPartial: declared.partial,
   });
+  const outcome = counted.ok && tally.suppressed ? { ...counted, ...tally } : counted;
   const scannerCoverage = declared.scanners;
   return scannerCoverage.length ? { ...outcome, scannerCoverage } : outcome;
 }
