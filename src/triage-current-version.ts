@@ -107,7 +107,7 @@ function npmrcPrefix(text: string, home: string): string | null {
  * `~/.nvm/versions/node/vX` included; `<prefix>\node.exe` on Windows). Null when an npmrc names a
  * prefix kit cannot resolve.
  */
-export function npmGlobalPrefix(env: NodeJS.ProcessEnv, loc: InstallLocator): string | null {
+function npmGlobalPrefix(env: NodeJS.ProcessEnv, loc: InstallLocator): string | null {
   const fromEnv = env.npm_config_prefix || env.NPM_CONFIG_PREFIX || env.PREFIX;
   if (fromEnv?.trim()) return fromEnv.trim();
   try {

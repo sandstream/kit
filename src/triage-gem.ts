@@ -141,7 +141,7 @@ export type GemTriageResult = ReleaseTriageResult;
  * GEM_HOME or GEM_PATH (read from gemspec file names, without running Ruby). `gem install` has no
  * lockfile, so without the second source a security fix for an installed gem was never recognised.
  */
-export function currentGem(
+function currentGem(
   cwd: string,
   deps: GemTriageDeps,
   name: string,
