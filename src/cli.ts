@@ -534,6 +534,39 @@ function reportMainError(err: unknown, ownArgs: string[]): void {
   }
 }
 
+/** Runs the dispatched command and sets the exit code; main() owns the fault handling. */
+async function dispatch(
+  command: string | undefined,
+  flagCommand: string,
+  ownArgs: string[],
+  nonInteractive: boolean,
+): Promise<void> {
+  let ok: boolean | undefined;
+  if (command === "completions") {
+    ok = runCompletions(ownArgs);
+    if (!ok) return;
+  } else {
+    // No command means `check` (the prior `case undefined` behaviour).
+    // COMMANDS is the module-scope dispatch table (single source of truth for the
+    // command surface; help coverage is verified against it in command-surface.test.ts).
+    const handler = Object.hasOwn(COMMANDS, flagCommand) ? COMMANDS[flagCommand] : undefined;
+    if (!handler) {
+      await reportUnknownCommand(flagCommand);
+      return;
+    }
+    ok = await runRegisteredHandler(flagCommand, handler);
+    if (ok === undefined) return;
+  }
+
+  process.exitCode = ok ? 0 : process.exitCode || 1;
+
+  // Non-interactive / CI / --json / local-only commands: no update check.
+  // See postCommandNoticesAllowed.
+  if (postCommandNoticesAllowed(command, hasFlag(ownArgs, "--json"), nonInteractive)) {
+    startPostCommandNotices();
+  }
+}
+
 export async function main(): Promise<void> {
   // Normalize leading Kit flags without moving them into the child's arguments.
   const { args, ownArgs, command } = normalizeCommandArgs(process.argv.slice(2));
@@ -550,30 +583,7 @@ export async function main(): Promise<void> {
   await showSkippedCommitBanner();
 
   try {
-    let ok: boolean | undefined;
-    if (command === "completions") {
-      ok = runCompletions(ownArgs);
-      if (!ok) return;
-    } else {
-      // No command means `check` (the prior `case undefined` behaviour).
-      // COMMANDS is the module-scope dispatch table (single source of truth for the
-      // command surface; help coverage is verified against it in command-surface.test.ts).
-      const handler = Object.hasOwn(COMMANDS, flagCommand) ? COMMANDS[flagCommand] : undefined;
-      if (!handler) {
-        await reportUnknownCommand(flagCommand);
-        return;
-      }
-      ok = await runRegisteredHandler(flagCommand, handler);
-      if (ok === undefined) return;
-    }
-
-    process.exitCode = ok ? 0 : process.exitCode || 1;
-
-    // Non-interactive / CI / --json / local-only commands: no update check.
-    // See postCommandNoticesAllowed.
-    if (postCommandNoticesAllowed(command, hasFlag(ownArgs, "--json"), nonInteractive)) {
-      startPostCommandNotices();
-    }
+    await dispatch(command, flagCommand, ownArgs, nonInteractive);
   } catch (err: unknown) {
     // A gate's handler faults are denied inside runGateFailClosed; this catches the dispatch
     // steps around it (the read-only floor's imports), which must not exit 1 = allow either.
