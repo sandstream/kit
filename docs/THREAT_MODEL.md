@@ -203,9 +203,18 @@ yours — kit ships no default value.
 
 kit pins and triages what **it** manages: mise-installed tools (versioned in
 `.kit.toml`), project dependencies (`kit triage` before install, bumblebee per
-release), and its own actions (SHA-pinned in CI). It does **not** verify CLIs you
-install or update **outside** kit, and those are a separate supply chain worth
-understanding:
+release), and its own actions (SHA-pinned in CI). For the vault and cloud CLIs it
+hands secrets through (`op`, `infisical`, `bw`, `doppler`, `vault`, `aws`,
+`gcloud`, `az`, `gh`), `kit tools pin` records the resolved realpath, SHA-256 and
+reported version in `.kit/cli-lock.json`. From then on kit verifies that **the
+binary is the one your team accepted**: `kit check` fails a hash change without a
+version change and warns on a new version or a different resolved file, and kit
+refuses to run a pinned CLI that does not match (re-trust is only
+`kit tools pin --accept <tool>`, audited). It still does **not** verify that the
+vendor built that binary, nor the first binary you pin, nor any CLI you leave
+unpinned (`kit check` warns about those), nor what a pinned CLI loads at run time
+(its libraries, plugins, or the interpreter behind a script such as `gcloud`).
+Those are a separate supply chain worth understanding:
 
 - **`gcloud components update`** rests on TLS to Google's servers plus checksums
   in Google's own component manifest. That blocks an in-transit MITM and a
@@ -228,9 +237,14 @@ understanding:
 
 How to harden host CLIs (kit cannot do this for you):
 
-1. **Verify the first install.** Vendors publish a SHA256 for the initial
-   download (Google for the gcloud SDK tarball, etc.). Verify it once; every
-   later self-update inherits that binary's trust.
+1. **Verify the first install, then pin it.** Vendors publish a SHA256 for the
+   initial download (Google for the gcloud SDK tarball, etc.), and some publish
+   signatures: 1Password's `https://1password.dev/cli/verify/` gives a GPG key for
+   the macOS ZIP, the Developer ID Installer signer (`pkgutil --check-signature`)
+   and the Windows Authenticode subject (`Get-AuthenticodeSignature`), and no
+   Linux method. kit does not check signatures (they differ per OS and are missing
+   on some), so verify by hand before `kit tools pin` and before each
+   `kit tools pin --accept`; the pin then holds that verified binary in place.
 2. **Pin versions and keep rollback.** e.g. `gcloud components update --version X`
    is revertible. Reproducibility over "always latest".
 3. **In CI, prefer the official container pinned by digest** (e.g.

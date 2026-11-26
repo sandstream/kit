@@ -1,4 +1,4 @@
-import { exec } from "./utils/exec.js";
+import { execPinned, VendorCliPinRefusal } from "./vendor-cli-pin.js";
 
 export interface OnePasswordStatus {
   installed: boolean;
@@ -25,7 +25,7 @@ export interface OnePasswordItem {
 export async function check1PasswordStatus(): Promise<OnePasswordStatus> {
   try {
     // Test if op CLI is available
-    const { stdout: versionOutput } = await exec("op", ["--version"], {
+    const { stdout: versionOutput } = await execPinned("op", ["--version"], {
       timeout: 5000,
     });
 
@@ -39,7 +39,7 @@ export async function check1PasswordStatus(): Promise<OnePasswordStatus> {
 
     // Test if user is authenticated
     try {
-      await exec("op", ["whoami"], { timeout: 5000 });
+      await execPinned("op", ["whoami"], { timeout: 5000 });
       return {
         installed: true,
         authenticated: true,
@@ -51,7 +51,14 @@ export async function check1PasswordStatus(): Promise<OnePasswordStatus> {
         error: "op CLI is installed but you are not signed in. Run 'op signin' to authenticate.",
       };
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof VendorCliPinRefusal) {
+      return {
+        installed: false,
+        authenticated: false,
+        error: "op refused by the vendor-CLI pin (see above; kit check --category security)",
+      };
+    }
     return {
       installed: false,
       authenticated: false,
@@ -78,7 +85,7 @@ export interface OnePasswordAccount {
  */
 async function list1PasswordAccounts(): Promise<OnePasswordAccount[]> {
   try {
-    const { stdout } = await exec("op", ["account", "list", "--format=json"], {
+    const { stdout } = await execPinned("op", ["account", "list", "--format=json"], {
       timeout: 5000,
     });
     if (!stdout.trim()) return [];

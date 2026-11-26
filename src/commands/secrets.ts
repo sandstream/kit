@@ -4,7 +4,7 @@
  * `cmdSecrets` is the single top-level entry (registered in the COMMANDS dispatch
  * table in cli.ts); it routes `kit secrets <sub>` to the module-private handlers
  * below via process.argv[3]. Subcommands: validate, onecli, revoke-old, set,
- * propagate, purge-history, migrate, vault-migrate, sync, rotate.
+ * propagate, purge-history, migrate, vault-migrate, sync, rotate, list, incident.
  *
  * `ensureSecretsBackend` intentionally stays in cli.ts (cmdLogin uses it).
  * Mirrors the scan.ts/security.ts extraction pattern: imports only sibling core
@@ -52,6 +52,7 @@ import { withGovernance } from "../governance-middleware.js";
 import { vaultMeta } from "../vault-meta.js";
 import { vaultCliInstalled, resolveViaBackend } from "../secret-backends.js";
 import { writeOneCliPlaceholder } from "./onecli-env-file.js";
+import { cmdSecretsInventory } from "../secrets-incident-cli.js";
 
 /**
  * `kit secrets validate [--fix] [--auto]` — verify every declared key resolves
@@ -121,42 +122,31 @@ async function cmdSecretsValidate(): Promise<boolean> {
   }
 }
 
+/** `kit secrets <sub>` routes. One table instead of a chain of ifs keeps cmdSecrets' CCN flat. */
+const SECRETS_SUBCOMMANDS: Record<string, () => Promise<boolean>> = {
+  sync: () => cmdSecretsSync(),
+  validate: () => cmdSecretsValidate(),
+  list: () => cmdSecretsInventory("list"),
+  incident: () => cmdSecretsInventory("incident"),
+  migrate: () => cmdSecretsMigrate(),
+  "vault-migrate": () => cmdSecretsVaultMigrate(),
+  rotate: () => cmdSecretsRotate(),
+  onecli: () => cmdSecretsOneCli(),
+  "purge-history": () => cmdSecretsPurgeHistory(),
+  propagate: () => cmdSecretsPropagateStandalone(),
+  set: () => cmdSecretsSet(),
+  "revoke-old": () => cmdSecretsRevokeOld(),
+};
+
 export async function cmdSecrets(): Promise<boolean> {
-  // Route subcommand: kit secrets sync [--target=...] [--dry-run]
-  if (process.argv[3] === "sync") {
-    return cmdSecretsSync();
-  }
-  if (process.argv[3] === "validate") {
-    return cmdSecretsValidate();
-  }
-  if (process.argv[3] === "migrate") {
-    return cmdSecretsMigrate();
-  }
-  if (process.argv[3] === "vault-migrate") {
-    return cmdSecretsVaultMigrate();
-  }
-  if (process.argv[3] === "rotate") {
-    return cmdSecretsRotate();
-  }
-  if (process.argv[3] === "onecli") {
-    return cmdSecretsOneCli();
-  }
-  if (process.argv[3] === "purge-history") {
-    return cmdSecretsPurgeHistory();
-  }
-  if (process.argv[3] === "propagate") {
-    return cmdSecretsPropagateStandalone();
-  }
-  if (process.argv[3] === "set") {
-    return cmdSecretsSet();
-  }
-  if (process.argv[3] === "revoke-old") {
-    return cmdSecretsRevokeOld();
+  const sub = process.argv[3];
+  if (sub !== undefined && Object.hasOwn(SECRETS_SUBCOMMANDS, sub)) {
+    return SECRETS_SUBCOMMANDS[sub]!();
   }
   if (process.argv[3] !== undefined && !process.argv[3].startsWith("-")) {
     console.error(`Unknown secrets subcommand: ${process.argv[3]}`);
     console.error(
-      `Usage: kit secrets [sync|validate|migrate|vault-migrate|rotate|onecli|purge-history|propagate|set|revoke-old]`,
+      `Usage: kit secrets [sync|validate|list|incident|migrate|vault-migrate|rotate|onecli|purge-history|propagate|set|revoke-old]`,
     );
     return false;
   }

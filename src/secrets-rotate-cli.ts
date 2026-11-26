@@ -44,24 +44,30 @@ export function identifyProvider(keyName: string): RotationPlaybook["provider"] 
   return "unknown";
 }
 
-export function buildPlaybook(keyName: string): RotationPlaybook {
+// Stripe keys are managed on the Dashboard API keys page (https://docs.stripe.com/keys); the CLI
+// (https://docs.stripe.com/cli) has no key command. kit stamps the name, so no shell expands it.
+export function stripePlaybook(now: Date = new Date()): RotationPlaybook {
+  const stamp = `${now.toISOString().slice(0, 19)}Z`;
+  return {
+    provider: "stripe",
+    steps: [
+      "# Stripe has no CLI or API command that mints an account key; use the Dashboard:",
+      "#   https://dashboard.stripe.com/apikeys",
+      "# ⋯ → Rotate key (old key may keep working up to 7 days), or create a restricted",
+      `# key with the same permissions named kit-rotated-${stamp}. Copy it when shown.`,
+    ],
+    newValueSource: "Stripe Dashboard, API keys page (copy it when shown)",
+    revokeStep:
+      "Dashboard → API keys → ⋯ → Expire key on the old key (this revokes it), after a smoke-test confirms the new key works",
+    docsUrl: "https://docs.stripe.com/keys#rotate-an-api-key",
+  };
+}
+
+export function buildPlaybook(keyName: string, now: Date = new Date()): RotationPlaybook {
   const provider = identifyProvider(keyName);
   switch (provider) {
     case "stripe":
-      return {
-        provider,
-        steps: [
-          "# Use Stripe Dashboard or API to roll a restricted key:",
-          "#   https://dashboard.stripe.com/apikeys",
-          "# Programmatic (requires platform/account API key):",
-          "stripe api_keys create --restricted --description 'kit-rotated $(date +%FT%T)' --livemode false",
-          "# Capture the returned 'secret' field; that is the new value.",
-        ],
-        newValueSource: "Stripe API response.secret",
-        revokeStep:
-          "stripe api_keys revoke <old-key-id>   # after smoke-test confirms the new key works",
-        docsUrl: "https://docs.stripe.com/keys-best-practices",
-      };
+      return stripePlaybook(now);
     case "aws-iam":
       return {
         provider,

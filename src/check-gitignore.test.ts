@@ -265,7 +265,9 @@ describe("patchGitignore", () => {
       rmTemp(dir);
     }
   });
+});
 
+describe("patchGitignore: Kit state", () => {
   it("ignores .kit contents via .kit/* and re-includes the curated shared tier", async () => {
     const dir = tmpRepo();
     try {
@@ -282,6 +284,21 @@ describe("patchGitignore", () => {
         lines.indexOf("!.kit/shared/") > lines.indexOf(".kit/*"),
         "negation must follow .kit/*",
       );
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("requires the incident fingerprint snapshot under .kit/incident/ to stay ignored", async () => {
+    const dir = tmpRepo();
+    try {
+      // `kit secrets incident` keeps keyed hashes there (kit-research#232).
+      writeFileSync(join(dir, ".gitignore"), ".kit/*\n!.kit/shared/\n!.kit/incident/\n");
+      const reopened = await checkGitignore(dir);
+      assert.ok(reopened.missingPatterns.some((m) => m.pattern === ".kit/*"));
+      writeFileSync(join(dir, ".gitignore"), ".kit/*\n!.kit/shared/\n");
+      const covered = await checkGitignore(dir);
+      assert.ok(covered.presentPatterns.includes(".kit/*"));
     } finally {
       rmTemp(dir);
     }

@@ -29,6 +29,15 @@ describe("planRotation", () => {
     assert.ok("error" in result);
   });
 
+  it("points a bare rotate at --from-cli, not at an unshipped PR (kit-research#232)", () => {
+    const result = planRotation("API_KEY", baseConfig, {});
+    assert.ok("error" in result);
+    if ("error" in result) {
+      assert.match(result.error, /kit secrets rotate API_KEY --from-cli/);
+      assert.doesNotMatch(result.error, /coming in|PR R3/);
+    }
+  });
+
   it("errors when neither --value nor --random is provided", () => {
     const result = planRotation("API_KEY", baseConfig, {});
     assert.ok("error" in result);

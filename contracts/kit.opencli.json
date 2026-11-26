@@ -2603,6 +2603,24 @@
     },
     "secrets": {
       "commands": {
+        "incident": {
+          "kind": "command",
+          "summary": "Vendor incident: rotation plan per key + keyed-hash snapshot; --verify reports changed/unchanged/unresolvable",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "list": {
+          "kind": "command",
+          "summary": "List key names by backend with expiry/rotation metadata; never values (--backend, --json)",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "migrate": {
           "kind": "command",
           "summary": "Migrate plaintext secrets in .env* → configured vault",
@@ -2699,6 +2717,7 @@
       "x-kit-accepted-flags": [
         "--auto",
         "--aws-region",
+        "--backend",
         "--cf-worker",
         "--dry-run",
         "--env",
@@ -2711,9 +2730,11 @@
         "--github-repo",
         "--help",
         "--host",
+        "--json",
         "--keep-commented",
         "--key-id",
         "--mode",
+        "--new-snapshot",
         "--no-clean",
         "--non-interactive",
         "--path",
@@ -2735,6 +2756,7 @@
         "--vercel-project",
         "--vercel-scope",
         "--vercel-team",
+        "--verify",
         "--version",
         "--via",
         "--yes"
@@ -3387,11 +3409,21 @@
           "x-kit-flags-inherited": true,
           "x-kit-mcp": false,
           "x-kit-stability": "experimental"
+        },
+        "pin": {
+          "kind": "command",
+          "summary": "Pin the vault/cloud CLIs (op, infisical, bw, doppler, vault, aws, gcloud, az, gh) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
         }
       },
       "kind": "group",
       "summary": "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is, and (with --auth) whether it is logged in",
       "x-kit-accepted-flags": [
+        "--accept",
         "--auth",
         "--env",
         "--help",

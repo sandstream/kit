@@ -160,6 +160,10 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Module-discipline linter for a SKILL.md: contract shape within the agentskills.io specification limits (the SKILL.md format Claude Code, Codex and other harnesses share: name 1-64 lowercase alphanumerics and hyphens matching its folder, description 1-1024 characters, compatibility 1-500), trigger and sibling collision, declared least-privilege scope, CI regression drift. --runtime audits recorded runs for scope adherence from the transcript index (zero-LLM)",
   "standards freeze": "Snapshot only the standards dimensions into .kit-baseline.json",
   "secrets vault-migrate": "Cross-vault key transfer (1Password → Infisical, etc.)",
+  "secrets list":
+    "List key names by backend with expiry/rotation metadata; never values (--backend, --json)",
+  "secrets incident":
+    "Vendor incident: rotation plan per key + keyed-hash snapshot; --verify reports changed/unchanged/unresolvable",
   "secrets validate":
     "Verify every declared key resolves in vault. --auto pulls from .env.template",
   "env list": "List configured environments ([env.<name>])",
@@ -252,6 +256,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "decisions verify": "The gate's verdict on its own exit code — the same function kit check calls",
   "tools list":
     "Inventory the CLIs on this machine: resolved path, the installer that owns it (measured from the path, never assumed), installed version, and — with --latest — how far behind each one is",
+  "tools pin":
+    "Pin the vault/cloud CLIs (op, infisical, bw, doppler, vault, aws, gcloud, az, gh) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
   "memory keygen":
     "X25519 recipient keypair: ephemeral sessions push encrypted with NO secret; only holders of the private key decrypt",
   "memory push":
