@@ -532,7 +532,9 @@ revocation_endpoint = "https://audit.example.com/agents/{agent_id}/status"
 - **Budget limits**: Token (daily) and operation (hourly) tracking
 - **Approval gates**: Interactive prompts for destructive operations
 - **Revocation**: Remote status checking via API
-- **Secret expiration**: Monitoring with warnings for expiring secrets
+- **Secret expiration**: warns within 30 days of a secret's expiry date and blocks once it has passed.
+  The date comes from a 1Password item's `DATE` field labelled expires/expiry/expiration/valid until,
+  or, for any store, from a `<KEY>_EXPIRES_AT` environment variable. Other stores expose no expiry.
 
 ### Environment Detection
 

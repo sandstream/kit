@@ -1,0 +1,3 @@
+### Fixed
+
+- **The 1Password expiry check now reads the item's expiry `DATE` field, so it can fire on a real item.** It read a top-level `expires` key, which `op item get --format json` never emits (1Password puts dates in `fields[]` entries with `type: "DATE"`), so an item that expired in 2020 passed `kit check` with `[governance] enabled = true`. kit now takes the `DATE` fields whose label or id names an expiry (expires, expiry, expiration, valid until), reads `YYYY-MM-DD` or unix epoch seconds, treats an empty or epoch-0 value as no date, and uses the earliest when several match. The `<KEY>_EXPIRES_AT` fallback is unchanged, and the README now says where the date comes from. Found by kit-research#232.

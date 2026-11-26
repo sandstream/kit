@@ -117,15 +117,80 @@ export function getEnvExpirationHint(key: string): string | null {
   return date.toISOString();
 }
 
+/** One `fields[]` entry of `op item get --format json` (only what expiry needs). */
+interface OnePasswordField {
+  id?: unknown;
+  label?: unknown;
+  type?: unknown;
+  value?: unknown;
+}
+
+/** True when a field's label or id names an expiry: expires, expiry, expiration, valid until. */
+function namesExpiry(field: OnePasswordField): boolean {
+  return [field.label, field.id].some((name) => {
+    if (typeof name !== "string") return false;
+    const n = name.toLowerCase().replace(/[^a-z]/g, "");
+    return n.includes("expir") || n.includes("validuntil");
+  });
+}
+
+/**
+ * Turn a 1Password DATE value into a timestamp (ms), or null.
+ *
+ * 1Password documents DATE input as `YYYY-MM-DD`; JSON output has been seen as
+ * unix epoch seconds. Both are read. An empty value, epoch 0 (what an empty
+ * date is coerced to) and anything unparseable mean "no date".
+ */
+function parse1PasswordDate(value: unknown): number | null {
+  if (typeof value === "number") return value > 0 ? value * 1000 : null;
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  if (/^\d+$/.test(v)) {
+    const secs = Number(v);
+    return secs > 0 ? secs * 1000 : null;
+  }
+  const ms = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00Z` : v);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Read the expiry from `op item get --format json` output.
+ *
+ * 1Password items have no top-level expiry key; a date is a `fields[]` entry
+ * with `type: "DATE"`. This takes the DATE fields whose label or id names an
+ * expiry (see `namesExpiry`). When several match, the earliest wins, so the
+ * gate warns about the soonest deadline rather than the latest.
+ *
+ * Returns an ISO string, or null when no such field holds a usable date.
+ */
+export function parse1PasswordExpiry(json: string): string | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  const fields = (data as { fields?: unknown } | null)?.fields;
+  if (!Array.isArray(fields)) return null;
+  let earliest: number | null = null;
+  for (const field of fields as OnePasswordField[]) {
+    if (!field || field.type !== "DATE" || !namesExpiry(field)) continue;
+    const ms = parse1PasswordDate(field.value);
+    if (ms !== null && (earliest === null || ms < earliest)) earliest = ms;
+  }
+  return earliest === null ? null : new Date(earliest).toISOString();
+}
+
 /**
  * Fetch expiration date from a 1Password item.
  *
- * Parses refs in the format `op://vault/item/field` or `vault/item`.
- * Calls `op item get <item> --vault <vault> --format json` and returns
- * the `expires` field if present.
+ * Parses refs in the format `op://vault/item/field` or `vault/item`, calls
+ * `op item get <item> --vault <vault> --format json` and reads the expiry
+ * from the item's DATE fields (`parse1PasswordExpiry`). This costs one
+ * `op item get` per 1Password key on every governed command; nothing caches it.
  *
- * Returns null if the item has no expiry, if op is unavailable, or if
- * the ref cannot be parsed.
+ * Returns null if the item has no expiry field, if op is unavailable, or if
+ * the ref cannot be parsed. The caller then falls back to `<KEY>_EXPIRES_AT`.
  */
 export async function get1PasswordExpiration(ref: string): Promise<string | null> {
   try {
@@ -143,10 +208,9 @@ export async function get1PasswordExpiration(ref: string): Promise<string | null
       { timeout: 10_000 },
     );
 
-    const data = JSON.parse(stdout) as { expires?: string };
-    return data.expires ?? null;
+    return parse1PasswordExpiry(stdout);
   } catch {
-    // op CLI not available, not signed in, or item has no expiry field
+    // op CLI not available or not signed in
     return null;
   }
 }
