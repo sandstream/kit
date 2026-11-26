@@ -4,12 +4,12 @@ import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import type { ScannerEvidenceStatus } from "./check-scanner-evidence.js";
-import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
+import { locateSecretMatches, type EvidencedSecret } from "./finding-evidence.js";
 import { sameIdentity } from "./utils/same-file.js";
 
 export interface TranscriptHit {
   file: string;
-  findings: SecretFinding[];
+  findings: EvidencedSecret[];
 }
 
 type TranscriptGap =
@@ -67,7 +67,7 @@ async function scanOpenedFile(path: string, handle: FileHandle, scan: Transcript
   if (before.size > BigInt(MAX_BYTES)) return markGap(scan, "oversized");
 
   const bytes = await sampleBytes(handle, Number(before.size));
-  const findings = findSecrets(bytes.toString("utf8"));
+  const findings = locateSecretMatches(path, bytes.toString("utf8"));
   if (findings.length > 0) scan.hits.push({ file: path, findings });
   scan.filesScanned++;
   if (!isUtf8(bytes)) markGap(scan, "malformed");

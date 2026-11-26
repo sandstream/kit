@@ -125,3 +125,40 @@ describe("renderReport: runs that did not review every target", () => {
     assert.match(renderPlan(MANIFEST, "1".repeat(64), "o.jsonl").join("\n"), /"failed": "<why>"/);
   });
 });
+
+describe("renderReport: volume beside recall", () => {
+  const volume = (findings: number, duplicates: number, precision: number) => ({
+    findingsPerRun: { mean: findings, min: findings, max: findings },
+    unmatched: findings - 1 - duplicates,
+    duplicatesPerRun: { mean: duplicates, min: duplicates, max: duplicates },
+    precision: { mean: precision, min: precision, max: precision },
+  });
+  const tune = {
+    runs: 3,
+    recall: { mean: 1, min: 1, max: 1 },
+    falsePositiveRate: null,
+    perDefect: { d1: { caught: 3, reviewed: 3 } },
+  };
+  const holdout = { runs: 0, recall: null, falsePositiveRate: null, perDefect: {} };
+  const controls = { runs: 3, falsePositiveRate: { mean: 0, min: 0, max: 0 } };
+  const result: RigResult = {
+    ...RESULT,
+    unknownTargets: [],
+    stats: [
+      { config: "FLOOD", tune, holdout, controls, volume: volume(2000, 9, 0.002) },
+      { config: "PRECISE", tune, holdout, controls, volume: volume(1, 0, 1) },
+    ],
+  };
+
+  it("prints duplicates and precision per run and does not call a 2000x flood within spread", () => {
+    const text = renderReport(result, []).join("\n");
+    assert.match(text, /duplicates per run 9\.0 \(9–9\)/);
+    assert.match(text, /precision 0\.2% \(min 0\.2%, max 0\.2%\)/);
+    assert.match(text, /precision 100\.0%/);
+    assert.match(
+      text,
+      /FLOOD vs PRECISE \(tune\): recall overlaps, but findings per run differ 2000x/,
+    );
+    assert.doesNotMatch(text, /FLOOD vs PRECISE \(tune\): within spread/);
+  });
+});

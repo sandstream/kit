@@ -14,6 +14,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import type { Component } from "./sbom.js";
 
 export type AgentComponentKind = "skill" | "mcp-server" | "plugin";
@@ -88,43 +89,68 @@ export function mcpServersFromConfig(json: unknown): AgentComponentInput[] {
 }
 
 /**
+ * Where a project's skills live, per harness: Claude Code's `.claude/skills`, then Codex's
+ * `.agents/skills` and `.codex/skills` (where older Codex versions installed them). Reading only
+ * the first left every Codex skill out of `kit insight` and `kit profile freeze` (kit-research
+ * `uber-skills-at-scale-vs-kit`).
+ */
+export const PROJECT_SKILL_DIRS = [".claude/skills", ".agents/skills", ".codex/skills"] as const;
+
+/** JSON MCP configs: Claude Code, Cursor and VS Code nest servers under `mcpServers`/`servers`. */
+const MCP_JSON_CONFIGS = [".mcp.json", ".claude.json", ".cursor/mcp.json", ".vscode/mcp.json"];
+
+/** Codex's project MCP servers: the `[mcp_servers.<name>]` tables in `.codex/config.toml`. */
+function codexMcpServers(cwd: string): AgentComponentInput[] {
+  try {
+    const parsed = parseToml(readFileSync(resolve(cwd, ".codex", "config.toml"), "utf8"));
+    return mcpServersFromConfig({ mcpServers: parsed.mcp_servers });
+  } catch {
+    return []; // missing/malformed config — skip
+  }
+}
+
+function jsonMcpServers(cwd: string, rel: string): AgentComponentInput[] {
+  try {
+    return mcpServersFromConfig(JSON.parse(readFileSync(resolve(cwd, rel), "utf8")));
+  } catch {
+    return []; // missing/malformed config — skip
+  }
+}
+
+/** The skill directories under `cwd/<rel>` that hold a SKILL.md. Missing dir → []. */
+function skillsIn(cwd: string, rel: string): AgentComponentInput[] {
+  const dir = resolve(cwd, rel);
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && existsSync(resolve(dir, e.name, "SKILL.md")))
+      .map((e) => ({ name: e.name, source: `${rel}/${e.name}` }));
+  } catch {
+    return []; // no skills dir — fine
+  }
+}
+
+/** The first entry for each name, in order. */
+function firstByName(items: AgentComponentInput[]): AgentComponentInput[] {
+  const seen = new Set<string>();
+  return items.filter((it) => !seen.has(it.name) && seen.add(it.name));
+}
+
+/**
  * Best-effort, defensive discovery of the agent-toolchain pieces loaded under
- * `cwd` — skills (each `.claude/skills/<name>/SKILL.md`) and MCP servers (union
- * across the common config locations, via mcpServersFromConfig). Pure filesystem
- * read; missing/malformed inputs are skipped, never thrown. Shared by
- * `kit sbom --agent` and `kit insight` so both see the SAME loaded set.
+ * `cwd` — skills (each `<dir>/<name>/SKILL.md` for every PROJECT_SKILL_DIRS entry) and MCP
+ * servers (union across the JSON configs and Codex's `.codex/config.toml`), each name once,
+ * the first harness's entry kept. Pure filesystem read; missing/malformed inputs are skipped,
+ * never thrown. Shared by `kit sbom --agent` and `kit insight` so both see the SAME loaded set.
  */
 export function discoverAgentToolchain(cwd: string): {
   skills: AgentComponentInput[];
   mcpServers: AgentComponentInput[];
 } {
-  const skills: AgentComponentInput[] = [];
-  const skillsDir = resolve(cwd, ".claude/skills");
-  try {
-    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
-      if (entry.isDirectory() && existsSync(resolve(skillsDir, entry.name, "SKILL.md"))) {
-        skills.push({ name: entry.name, source: `.claude/skills/${entry.name}` });
-      }
-    }
-  } catch {
-    /* no skills dir — fine */
-  }
-
-  const mcpServers: AgentComponentInput[] = [];
-  const seen = new Set<string>();
-  for (const rel of [".mcp.json", ".claude.json", ".cursor/mcp.json", ".vscode/mcp.json"]) {
-    try {
-      const parsed = JSON.parse(readFileSync(resolve(cwd, rel), "utf8"));
-      for (const s of mcpServersFromConfig(parsed)) {
-        if (!seen.has(s.name)) {
-          seen.add(s.name);
-          mcpServers.push(s);
-        }
-      }
-    } catch {
-      /* missing/malformed config — skip */
-    }
-  }
+  const skills = firstByName(PROJECT_SKILL_DIRS.flatMap((rel) => skillsIn(cwd, rel)));
+  const mcpServers = firstByName([
+    ...MCP_JSON_CONFIGS.flatMap((rel) => jsonMcpServers(cwd, rel)),
+    ...codexMcpServers(cwd),
+  ]);
   return { skills, mcpServers };
 }
 

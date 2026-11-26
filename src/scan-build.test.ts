@@ -39,12 +39,16 @@ describe("scanBuildArtifacts", () => {
       mkdirSync(join(dir, ".next", "static", "chunks"), { recursive: true });
       writeFileSync(
         join(dir, ".next", "static", "chunks", "page.js"),
-        'const k="' + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + '";\n',
+        '// Built output\r\nconst k="' + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + '";\r\n',
       );
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 1);
       assert.ok(hits[0].file.includes("page.js"));
-      assert.ok(hits[0].findings.some((f) => f.label === "stripe-key"));
+      assert.deepEqual(hits[0].findings.find((f) => f.label === "stripe-key")?.evidence, {
+        file: ".next/static/chunks/page.js",
+        line: 2,
+        pattern: "stripe-key",
+      });
     } finally {
       rmTemp(dir);
     }

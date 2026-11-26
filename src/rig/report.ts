@@ -16,6 +16,9 @@
  * Comparing two configs is deliberately blunt and deterministic: a difference is called
  * "outside run-to-run spread" only when their [min, max] recall ranges do not overlap, and the
  * comparison is refused below three runs per config. No statistics the reader has to trust.
+ * Recall alone cannot tell a reviewer that flags everything from one that flags the defect, so
+ * when two configs' findings per run differ by ten times or more, the comparison says so instead
+ * of calling them "within spread". That is a count, not a judgement of either reviewer.
  */
 import type { RunOutcome } from "./adjudicate.js";
 import type { RigManifest, Split } from "./manifest.js";
@@ -28,6 +31,9 @@ export const LIMITS = [
 ] as const;
 
 const MIN_RUNS_TO_COMPARE = 3;
+
+/** From this ratio of mean findings per run (an order of magnitude), recall alone is not a comparison. */
+export const VOLUME_RATIO_LIMIT = 10;
 
 /**
  * A loop that proposes several candidates per round and keeps the one with the best holdout score
@@ -72,12 +78,19 @@ export interface ConfigStats {
   /** Clean-control runs are not split: a control belongs to neither half. */
   controls: { runs: number; falsePositiveRate: Spread | null; shortfall?: Shortfall[] };
   /** Findings per run (all targets), and findings on defect targets that matched no defect. */
-  volume?: { findingsPerRun: Spread | null; unmatched: number };
+  volume?: {
+    findingsPerRun: Spread | null;
+    unmatched: number;
+    /** Further findings on a defect already caught in that run. Absent in older results. */
+    duplicatesPerRun?: Spread | null;
+    /** Per run: defects caught / findings produced. Null when no run produced a finding. */
+    precision?: Spread | null;
+  };
 }
 
 export type Comparison =
   | { verdict: "refused"; reason: string }
-  | { verdict: "outside spread" | "within spread"; a: Spread; b: Spread };
+  | { verdict: "outside spread" | "within spread"; a: Spread; b: Spread; volumeRatio?: number };
 
 export function spread(values: number[]): Spread | null {
   if (values.length === 0) return null;
@@ -166,14 +179,29 @@ function controlStats(outcomes: RunOutcome[], manifest: RigManifest): ConfigStat
 
 /** Every finding a run produced: caught, duplicates, unmatched, and false positives on controls. */
 function volumeStats(outcomes: RunOutcome[]): NonNullable<ConfigStats["volume"]> {
-  const perRun = [...groupByRun(outcomes).values()].map((runOutcomes) =>
-    runOutcomes.reduce(
-      (n, o) => n + o.caught.length + o.duplicates + o.unmatched + o.falsePositives,
-      0,
-    ),
-  );
+  const perRun: number[] = [];
+  const duplicates: number[] = [];
+  const precision: number[] = [];
+  for (const runOutcomes of groupByRun(outcomes).values()) {
+    let findings = 0;
+    let caught = 0;
+    let repeated = 0;
+    for (const o of runOutcomes) {
+      caught += o.caught.length;
+      repeated += o.duplicates;
+      findings += o.caught.length + o.duplicates + o.unmatched + o.falsePositives;
+    }
+    perRun.push(findings);
+    duplicates.push(repeated);
+    if (findings > 0) precision.push(caught / findings);
+  }
   const unmatched = outcomes.reduce((n, o) => n + o.unmatched, 0);
-  return { findingsPerRun: spread(perRun), unmatched };
+  return {
+    findingsPerRun: spread(perRun),
+    unmatched,
+    duplicatesPerRun: spread(duplicates),
+    precision: spread(precision),
+  };
 }
 
 /** Aggregate adjudicated runs per config. Configs and defects come out sorted. */
@@ -201,6 +229,26 @@ export function compare(a: SplitStats, b: SplitStats): Comparison {
   }
   const apart = a.recall.max < b.recall.min || b.recall.max < a.recall.min;
   return { verdict: apart ? "outside spread" : "within spread", a: a.recall, b: b.recall };
+}
+
+/**
+ * How many times more findings per run one config produced than the other, when that is at least
+ * {@link VOLUME_RATIO_LIMIT}. A config with no findings counts as one, so the ratio stays finite.
+ */
+function volumeRatio(a: ConfigStats, b: ConfigStats): number | undefined {
+  const x = a.volume?.findingsPerRun?.mean;
+  const y = b.volume?.findingsPerRun?.mean;
+  if (x === undefined || y === undefined) return undefined;
+  const ratio = Math.max(x, y) / Math.max(Math.min(x, y), 1);
+  return ratio >= VOLUME_RATIO_LIMIT ? ratio : undefined;
+}
+
+/** {@link compare} on one split, carrying the volume ratio when it is an order of magnitude. */
+export function compareConfigs(a: ConfigStats, b: ConfigStats, split: Split): Comparison {
+  const c = compare(a[split], b[split]);
+  if (c.verdict === "refused") return c;
+  const ratio = volumeRatio(a, b);
+  return ratio === undefined ? c : { ...c, volumeRatio: ratio };
 }
 
 /**

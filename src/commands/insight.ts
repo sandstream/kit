@@ -87,7 +87,7 @@ function printUnusedReport(
   );
   if (report.loaded.skills === 0 && report.loaded.mcpServers === 0) {
     console.log(
-      `  ${c.dim}No agent toolchain detected (.claude/skills, .mcp.json). Nothing to correlate.${c.reset}`,
+      `  ${c.dim}No agent toolchain detected (.claude/skills, .agents/skills, .codex/skills, .mcp.json, .codex/config.toml). Nothing to correlate.${c.reset}`,
     );
   }
   if (report.pruneCandidates.length > 0) {

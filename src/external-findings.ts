@@ -2,7 +2,7 @@
  * Third-party scanners can add findings to the `kit check` verdict.
  *
  * Contract: a tool appends one JSON object per line to `.kit-scan-results.jsonl`
- * in the project root. Kit groups findings by source.
+ * in the project root. Kit groups findings by source and counts each `(source, id)` once.
  *
  * Example finding
  *   {"source":"snyk","severity":"high","id":"SNYK-1","title":"Vulnerability","package":"lodash"}
@@ -138,7 +138,27 @@ export function externalFindingResults(parsed: ParsedExternalFindings): Security
   return out;
 }
 
-function findingResult(source: string, findings: ExternalFinding[]): SecurityCheckResult {
+/**
+ * One finding per `id`, carrying the worst severity any of its records had. A record without an
+ * `id` stands for itself. A tool that appends the same finding on every run is counted once.
+ */
+function distinctFindings(findings: ExternalFinding[]): ExternalFinding[] {
+  const byId = new Map<string, ExternalFinding>();
+  const out: ExternalFinding[] = [];
+  for (const finding of findings) {
+    if (finding.id === undefined) {
+      out.push(finding);
+      continue;
+    }
+    const seen = byId.get(finding.id);
+    if (!seen) byId.set(finding.id, { ...finding });
+    else if (RANK[finding.severity] > RANK[seen.severity]) seen.severity = finding.severity;
+  }
+  return [...byId.values(), ...out];
+}
+
+function findingResult(source: string, records: ExternalFinding[]): SecurityCheckResult {
+  const findings = distinctFindings(records);
   const counts: Record<ExternalSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0 };
   let worst: ExternalSeverity = "low";
   for (const finding of findings) {
@@ -150,11 +170,13 @@ function findingResult(source: string, findings: ExternalFinding[]): SecurityChe
     .map((severity) => `${counts[severity]} ${severity}`)
     .join(", ");
   const label = sourceLabel(source);
+  const repeats = records.length - findings.length;
+  const repeated = repeats > 0 ? `, ${records.length} records with ${repeats} repeated id(s)` : "";
   return {
     category: "supply-chain",
     name: `external: ${label}`,
     status: RANK[worst] >= RANK.high ? "fail" : "warn",
-    detail: `${findings.length} finding(s) from ${label} (${summary}). Legacy JSONL cannot establish scanner completeness and freshness.`,
+    detail: `${findings.length} finding(s) from ${label} (${summary}${repeated}). Legacy JSONL cannot establish scanner completeness and freshness.`,
     severity: worst,
     hasFindings: true,
     scanIncomplete: true,

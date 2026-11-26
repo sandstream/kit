@@ -84,3 +84,28 @@ describe("hookCommands", () => {
     ]);
   });
 });
+
+describe("Droid's hooks file and the pass row's count", () => {
+  it("fails a startup hook in Factory Droid's .factory/hooks.json", (t) => {
+    const dir = project(
+      t,
+      ".factory/hooks.json",
+      JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: "command", command: PIPE }] }] },
+      }),
+    );
+    assert.ok(failsOn(dir, ".factory/hooks.json"));
+  });
+
+  it("says the hook count is git hook files, beside an agent config holding a hook", (t) => {
+    const dir = project(
+      t,
+      ".claude/settings.json",
+      JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo ready" }] }] },
+      }),
+    );
+    const pass = runAgentAudit(dir).find((r) => r.name === "agent-audit");
+    assert.match(pass?.detail ?? "", /1 agent config\(s\) \+ 0 git hook file\(s\)/);
+  });
+});

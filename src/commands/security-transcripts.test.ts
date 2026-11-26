@@ -59,11 +59,11 @@ test("kit security scan-transcripts requires complete evidence for a clean resul
   assert.doesNotMatch(partial.stdout, /No credentials found/);
 
   const credential = ["AKIA", "0123456789ABCDEF"].join("");
-  writeFileSync(session, JSON.stringify({ text: credential }));
+  writeFileSync(session, `{}\n${JSON.stringify({ text: credential })}\n`);
   const finding = run();
   assert.ifError(finding.error);
   assert.equal(finding.status, 1);
   assert.match(finding.stderr, /Coverage unverified.*oversized/);
-  assert.match(finding.stderr, /session\.jsonl.*aws-access-key/);
+  assert.match(finding.stderr, /session\.jsonl.*line 2 aws-access-key/);
   assert.ok(!finding.stderr.includes(credential));
 });
