@@ -9,7 +9,7 @@
  * This module is the DECISION half — pure, no I/O, no spawning — for the four checks
  * that are a pure function of the manifest (+ its sibling skills, + a committed
  * snapshot):
- *   contract    — required frontmatter present + shaped        (definition of done)
+ *   contract    — required frontmatter present + within the agentskills.io limits (definition of done)
  *   trigger     — a trigger is declared + no sibling collision  (trigger tests, det. half)
  *   scope       — least-privilege manifest declared (bounded)   (least-privilege, declared half)
  *   regression  — contract+trigger+scope fingerprint vs snapshot (CI regression)
@@ -31,6 +31,8 @@ export interface SkillManifest {
   name?: string;
   /** Frontmatter `description` — in the Claude skill format this IS the trigger. */
   description?: string;
+  /** Frontmatter `compatibility` (agentskills.io, optional). `""` when the key is present but empty. */
+  compatibility?: string;
   /**
    * `allowed-tools` / `allowed_tools`, normalized to a list:
    *   - `undefined` → the key was absent (skill implicitly claims ALL tools — not least-privilege)
@@ -112,6 +114,11 @@ function readBlockScalar(lines: string[], start: number): string {
   return out.join(" ").trim();
 }
 
+/** A free-text frontmatter value at line `i`: a block scalar's joined lines, else the unquoted scalar. */
+function readTextValue(lines: string[], i: number, value: string): string {
+  return isBlockScalar(value) ? readBlockScalar(lines, i) : unquote(value);
+}
+
 /**
  * Minimal, dependency-free `SKILL.md` parser. Handles a leading `---` frontmatter block with
  * `key: value` scalars, `description` in inline OR YAML block-scalar (`>` / `|`) form, and
@@ -138,12 +145,12 @@ export function parseSkillManifest(raw: string): SkillManifest {
     const value = kv[2];
 
     if (key === "name") manifest.name = unquote(value);
-    else if (key === "description")
+    else if (key === "description" || key === "compatibility")
       // A description is routinely written as a YAML block scalar (`description: >` folded,
       // or `|` literal) because it is the longest field. Reading only the same-line value
       // reported "description missing" for a skill that declared a perfectly good one —
       // a FALSE finding in a gate, which erodes trust exactly like a missed one.
-      manifest.description = isBlockScalar(value) ? readBlockScalar(lines, i) : unquote(value);
+      manifest[key] = readTextValue(lines, i, value);
     else if (/^user[-_]invo[ck]able$/.test(key)) manifest.userInvokable = parseBool(value);
     else if (key === "disable-model-invocation" || key === "disable_model_invocation")
       manifest.disableModelInvocation = parseBool(value);
@@ -178,16 +185,81 @@ export interface SiblingSkill {
   triggerKey: string;
 }
 
-const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const MIN_DESCRIPTION = 12;
 
 /**
- * Contract — required frontmatter present + shaped. A skill must DECLARE its identity and
- * purpose: a `---` block, a slug-shaped `name`, a non-trivial `description` (this is the
- * when/purpose in the Claude format), and a non-empty body. Presence + shape only — no
- * judgement of whether the declared purpose is any good. Pure.
+ * The Agent Skills specification — the `SKILL.md` format that Claude Code, OpenAI Codex and the
+ * other harnesses that adopted it all read. Its limits, as the spec states them:
+ *   - `name`: 1-64 characters; lowercase alphanumerics and hyphens only; must not start or end
+ *     with a hyphen; no consecutive hyphens; must match the parent directory name.
+ *   - `description`: 1-1024 characters, non-empty.
+ *   - `compatibility` (optional): 1-500 characters if provided.
+ * The spec says "unicode lowercase alphanumeric characters", and its reference validator
+ * (skills-ref) accepts any character that is alphanumeric and unchanged by lowercasing, after NFKC
+ * normalization of both the name and the folder. kit follows that, so a lowercase non-ASCII name
+ * passes here as it does there. Lengths are counted in code points, as Python's `len` counts them.
  */
-export function checkContract(m: SkillManifest): CheckResult {
+const AGENT_SKILLS_SPEC = "https://agentskills.io/specification";
+const SPEC_LIMITS = { name: 64, description: 1024, compatibility: 500 } as const;
+
+const codePoints = (s: string): number => [...s].length;
+
+/** A length outside `1..max`, as a message naming the field and the actual length; else null. */
+function lengthViolation(field: keyof typeof SPEC_LIMITS, value: string): string | null {
+  const n = codePoints(value);
+  const max = SPEC_LIMITS[field];
+  return n >= 1 && n <= max ? null : `${field} is ${n} characters; the spec allows 1-${max}`;
+}
+
+/** The first character the spec does not allow in a name, or undefined. */
+function badNameChar(name: string): string | undefined {
+  return [...name].find(
+    (ch) => ch !== "-" && !(/[\p{L}\p{N}]/u.test(ch) && ch === ch.toLowerCase()),
+  );
+}
+
+const codePoint = (ch: string): string =>
+  "U+" + ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0");
+
+/** Every agentskills.io rule `name` breaks, each naming the actual value. */
+function nameViolations(raw: string, dirName?: string): string[] {
+  const name = raw.normalize("NFKC");
+  const out: string[] = [];
+  const len = lengthViolation("name", name);
+  if (len) out.push(len);
+  const bad = badNameChar(name);
+  if (bad)
+    out.push(
+      `name "${raw}" contains ${JSON.stringify(bad)} (${codePoint(bad)}); the spec allows lowercase letters, digits and hyphens only`,
+    );
+  if (name.startsWith("-") || name.endsWith("-"))
+    out.push(`name "${raw}" starts or ends with a hyphen`);
+  if (name.includes("--")) out.push(`name "${raw}" contains consecutive hyphens`);
+  if (dirName !== undefined && dirName.normalize("NFKC") !== name)
+    out.push(`name "${raw}" does not match its folder "${dirName}"`);
+  return out;
+}
+
+/** Every agentskills.io limit the manifest breaks (name, description, compatibility). */
+function specViolations(m: SkillManifest, dirName?: string): string[] {
+  const out = m.name ? nameViolations(m.name, dirName) : [];
+  const desc = m.description === undefined ? null : lengthViolation("description", m.description);
+  if (desc) out.push(desc);
+  const compat =
+    m.compatibility === undefined ? null : lengthViolation("compatibility", m.compatibility);
+  if (compat) out.push(compat);
+  return out;
+}
+
+/**
+ * Contract — required frontmatter present, shaped, and within the agentskills.io limits
+ * (`AGENT_SKILLS_SPEC`). A skill must DECLARE its identity and purpose: a `---` block, a `name`
+ * the spec allows (and that matches its folder, when `dirName` is given), a `description` of
+ * at least kit's floor and at most the spec's ceiling, and a non-empty body. Every spec
+ * violation is listed in one detail, so an author fixes them in one pass. Presence + shape
+ * only — no judgement of whether the declared purpose is any good. Pure.
+ */
+export function checkContract(m: SkillManifest, opts: { dirName?: string } = {}): CheckResult {
   const c = (status: CheckStatus, detail: string): CheckResult => ({
     id: "contract",
     status,
@@ -196,12 +268,12 @@ export function checkContract(m: SkillManifest): CheckResult {
   if (!m.hasFrontmatter)
     return c("fail", "no --- frontmatter block (a module must declare its contract)");
   if (!m.name) return c("fail", "frontmatter has no name");
-  if (!SLUG_RE.test(m.name))
-    return c("fail", `name "${m.name}" is not slug-shaped (lowercase, digits, dashes)`);
+  const spec = specViolations(m, opts.dirName);
+  if (spec.length > 0) return c("fail", `${spec.join("; ")} (${AGENT_SKILLS_SPEC})`);
   if (!m.description || m.description.trim().length < MIN_DESCRIPTION)
     return c("fail", "description missing or too short to declare when/why the skill applies");
   if (m.body.length === 0) return c("fail", "empty body — no declared steps / definition of done");
-  return c("pass", `name + description + body declared (${m.name})`);
+  return c("pass", `name + description + body declared, within agentskills.io limits (${m.name})`);
 }
 
 /**
@@ -440,10 +512,10 @@ export interface SkillTestReport {
 /** Run the four deterministic module checks and fold them into one honest report. Pure. */
 export function testSkill(
   m: SkillManifest,
-  opts: { siblings?: SiblingSkill[]; snapshot?: SkillSnapshot | null } = {},
+  opts: { siblings?: SiblingSkill[]; snapshot?: SkillSnapshot | null; dirName?: string } = {},
 ): SkillTestReport {
   const checks: CheckResult[] = [
-    checkContract(m),
+    checkContract(m, { dirName: opts.dirName }),
     checkTrigger(m, opts.siblings ?? []),
     checkScope(m),
     checkRegression(m, opts.snapshot ?? null),

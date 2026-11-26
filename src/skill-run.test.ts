@@ -161,3 +161,17 @@ describe("runSkillGate", () => {
     assert.equal(r.checks.find((c) => c.name === "beta: scope")?.status, "fail");
   });
 });
+
+describe("runSkillGate: agentskills.io folder rule", () => {
+  it("fails a skill whose name does not match its folder, naming both", () => {
+    const root = repo();
+    writeSkill(root, "skills", "renamed-folder", GOOD("original-name"));
+    const r = runSkillGate(root);
+    const contract = r.checks.find((c) => c.name === "original-name: contract");
+    assert.equal(contract?.status, "fail");
+    assert.match(
+      contract!.detail,
+      /name "original-name" does not match its folder "renamed-folder"/,
+    );
+  });
+});
