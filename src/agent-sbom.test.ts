@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentToolchainComponents, mcpServersFromConfig, discoverPlugins } from "./agent-sbom.js";
+import {
+  agentToolchainComponents,
+  mcpServersFromConfig,
+  discoverAgentToolchain,
+  discoverPlugins,
+} from "./agent-sbom.js";
 import { toCycloneDX, toSpdx, type Component } from "./sbom.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -135,5 +140,59 @@ describe("SBOM emitters honor Component.type / purl (backward-compatible)", () =
       doc.packages[0].externalRefs[0].referenceLocator,
       "pkg:generic/skill/triage@1.0.0",
     );
+  });
+});
+
+describe("discoverAgentToolchain: Codex skills and MCP servers", () => {
+  function write(root: string, rel: string, body: string): void {
+    const full = join(root, ...rel.split("/"));
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, body);
+  }
+
+  it("reads .agents/skills, .codex/skills and [mcp_servers] in .codex/config.toml", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-agent-sbom-codex-"));
+    try {
+      const md = "---\nname: x\ndescription: d\n---\nbody\n";
+      write(dir, ".claude/skills/pr-open/SKILL.md", md);
+      write(dir, ".agents/skills/lookup/SKILL.md", md);
+      write(dir, ".agents/skills/pr-open/SKILL.md", md);
+      write(dir, ".codex/skills/fmt/SKILL.md", md);
+      write(
+        dir,
+        ".mcp.json",
+        JSON.stringify({ mcpServers: { remote: { url: "https://h.example/mcp" } } }),
+      );
+      write(
+        dir,
+        ".codex/config.toml",
+        'model = "m"\n[mcp_servers.lookup]\ncommand = "npx"\nargs = ["-y", "lookup@1.0.0"]\n' +
+          '[mcp_servers.remote]\nurl = "https://other.example/mcp"\n',
+      );
+      const { skills, mcpServers } = discoverAgentToolchain(dir);
+      assert.deepEqual(
+        skills.map((s) => s.source),
+        [".claude/skills/pr-open", ".agents/skills/lookup", ".codex/skills/fmt"],
+      );
+      assert.deepEqual(
+        mcpServers.map((s) => [s.name, s.source]),
+        [
+          ["remote", "https://h.example/mcp"],
+          ["lookup", "npx"],
+        ],
+      );
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("skips a malformed .codex/config.toml", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-agent-sbom-codex-"));
+    try {
+      write(dir, ".codex/config.toml", "[mcp_servers.lookup\ncommand = ");
+      assert.deepEqual(discoverAgentToolchain(dir), { skills: [], mcpServers: [] });
+    } finally {
+      rmTemp(dir);
+    }
   });
 });
