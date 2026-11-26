@@ -11,7 +11,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -20,6 +19,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { getAuditAnchorKey } from "./audit-anchor.js";
 import { privateFileIsControlled } from "./utils/secure-perms.js";
+import { identityOf, sameIdentity } from "./utils/same-file.js";
 
 async function waitFor(path: string, child: ChildProcess): Promise<void> {
   const deadline = Date.now() + 120_000;
@@ -50,7 +50,7 @@ it("keeps a secured key after the creator is killed between link and cleanup", a
     const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     let legacyReader: Buffer;
     try {
-      assert.equal(fstatSync(fd).ino, statSync(temporary).ino);
+      assert.ok(sameIdentity(fstatSync(fd, { bigint: true }), identityOf(temporary)));
       assert.equal(fstatSync(fd).nlink, 2);
       assert.equal(privateFileIsControlled(path), true);
       const exited = new Promise<void>((done) => child.once("exit", () => done()));

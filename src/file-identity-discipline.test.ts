@@ -12,6 +12,12 @@
  * Tests are scanned too. A helper in src/memory/project.test.ts compared `statSync().ino` as a
  * number, and on Windows CI two sibling directories compared equal (kit#1057). A test may compare
  * `ino` directly only when every operand was bound in that file from a `{ bigint: true }` stat.
+ *
+ * Assertions are comparisons too. `assert.equal(statSync(a).ino, statSync(b).ino)` passes for two
+ * different files whose ids differ only in the bits a double drops, and a strict `notEqual` of a
+ * number `ino` against a bigint (`0n`, or a bigint stat's field) passes whatever the file is. An
+ * assert call that compares values and reads an `ino` follows the same rule: every `ino` comes
+ * from a bigint stat, bound by name or read inline.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -37,15 +43,44 @@ function bigintNames(text: string): Set<string> {
   return names;
 }
 
+/** An assert call that compares its arguments: `equal`, `notStrictEqual`, `deepEqual`, … */
+const ASSERT_COMPARISON =
+  /\bassert\.(?:equal|notEqual|strictEqual|notStrictEqual|deepEqual|notDeepEqual|deepStrictEqual|notDeepStrictEqual)\s*\(/;
+
+/** The stat call that ends at `close` (a `)`), when it passes `{ bigint: true }`. */
+function inlineBigintStat(line: string, close: number): boolean {
+  let depth = 0;
+  for (let i = close; i >= 0; i--) {
+    if (line[i] === ")") depth++;
+    else if (line[i] === "(" && --depth === 0) {
+      const call = /[\w.]*stat(?:Sync)?\s*$/.test(line.slice(0, i));
+      return call && /\{[^}]*\bbigint:\s*true\b/.test(line.slice(i, close));
+    }
+  }
+  return false;
+}
+
+/** True when every `.ino` on `line` reads a bigint stat: a name in `bigint`, or an inline call. */
+function everyInoBigint(line: string, bigint: ReadonlySet<string>): boolean {
+  return [...line.matchAll(/\.ino\b/g)].every((m) => {
+    const before = line.slice(0, m.index);
+    if (before.endsWith(")")) return inlineBigintStat(line, m.index - 1);
+    const receiver = /([\w.?!]+)$/.exec(before);
+    return !!receiver && bigint.has(receiver[1]);
+  });
+}
+
 /**
- * A line that compares an `ino` field with `===`/`!==`, other than against the bigint zero or
- * between fields of names in `bigint` (stats read with `{ bigint: true }`).
+ * A line that compares an `ino` field with `===`/`!==` or inside an assert comparison call, other
+ * than `=== 0n` or, when `bigint` is given (tests only), over bigint stats: fields of names in
+ * `bigint` or stat calls that pass `{ bigint: true }` inline.
  */
-function comparesIno(line: string, bigint: ReadonlySet<string> = new Set()): boolean {
-  if (!/\.ino\s*[!=]==|[!=]==\s*[\w.?!]+\.ino\b/.test(line)) return false;
-  if (/\.ino\s*[!=]==\s*0n\b/.test(line)) return false;
-  const receivers = [...line.matchAll(/([\w.?!]+)\.ino\b/g)].map((m) => m[1]);
-  return !receivers.every((name) => bigint.has(name));
+function comparesIno(line: string, bigint?: ReadonlySet<string>): boolean {
+  const strict = /\.ino\s*[!=]==|[!=]==\s*[\w.?!]+\.ino\b/.test(line);
+  const asserted = ASSERT_COMPARISON.test(line) && /\.ino\b/.test(line);
+  if (!strict && !asserted) return false;
+  if (strict && !asserted && /\.ino\s*[!=]==\s*0n\b/.test(line)) return false;
+  return !bigint || !everyInoBigint(line, bigint);
 }
 
 /** The files the scan reads: src/**\/*.ts, tests included, declarations excluded. */
@@ -63,7 +98,7 @@ const TEST = /\.(test|test-support)\.ts$/;
 
 /** `file:line` for each offending comparison in `text`; only tests get the bigint exception. */
 function offendersIn(rel: string, text: string): string[] {
-  const bigint = TEST.test(rel) ? bigintNames(text) : new Set<string>();
+  const bigint = TEST.test(rel) ? bigintNames(text) : undefined;
   const out: string[] = [];
   text.split(/\r?\n/).forEach((line, i) => {
     if (comparesIno(line, bigint)) out.push(`${rel.split(sep).join("/")}:${i + 1}`);
@@ -101,6 +136,42 @@ describe("comparesIno with bigint stats", () => {
       true,
     );
     assert.equal(comparesIno("ok(original.ino === other.ino);", bigint), true);
+  });
+});
+
+describe("comparesIno in assert calls", () => {
+  const bigint = new Set(["first", "second"]);
+
+  it("flags equality and inequality asserts over number stats", () => {
+    assert.equal(
+      comparesIno("assert.equal(statSync(path).ino, statSync(temp).ino);", bigint),
+      true,
+    );
+    assert.equal(comparesIno("  assert.strictEqual(a.ino, b.ino);", bigint), true);
+    assert.equal(comparesIno("assert.notEqual(info.ino, 0n);", bigint), true);
+    assert.equal(comparesIno("assert.deepEqual(after.ino, identity.ino, 'kept');", bigint), true);
+  });
+
+  it("flags a number stat beside a bigint one, inline or bound", () => {
+    const line = "assert.equal(lstatSync(p, { bigint: true }).ino, fstatSync(fd).ino);";
+    assert.equal(comparesIno(line, bigint), true);
+    assert.equal(comparesIno("assert.equal(first.ino, other.ino);", bigint), true);
+  });
+
+  it("allows asserts over bigint stats, bound by name or read inline", () => {
+    assert.equal(comparesIno("assert.notEqual(first.ino, 0n);", bigint), false);
+    assert.equal(comparesIno("assert.equal(second.ino, first.ino);", bigint), false);
+    const inline = "assert.equal(lstatSync(join(cwd, F), { bigint: true }).ino, inode);";
+    assert.equal(comparesIno(inline, bigint), false);
+  });
+
+  it("gives source files no exception, and leaves non-comparing asserts alone", () => {
+    assert.equal(comparesIno("assert.equal(first.ino, second.ino);"), true);
+    assert.equal(
+      comparesIno("assert.ok(sameIdentity(identityOf(a), identityOf(b)));", bigint),
+      false,
+    );
+    assert.equal(comparesIno("assert.equal(statSync(p).nlink, 2);", bigint), false);
   });
 });
 

@@ -23,6 +23,7 @@ import { assertReviewWritable, withReviewWrite } from "./review-receipt-write-gu
 import { assessUnknownPending } from "./review-receipt-pending.js";
 import { persistHistory } from "./review-receipt-history-io.js";
 import { privateFileIsControlled } from "./utils/secure-perms.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 it("does not claim a completed audit when a synchronous caller exits immediately", () => {
   const root = mkdtempSync(join(tmpdir(), "kit-refusal-exit-"));
@@ -258,7 +259,12 @@ it("preserves both history links when read-only mode starts after publication", 
     assert.equal(readFileSync(path, "utf8"), "");
     const temp = readdirSync(root).find((name) => /^\.kit-receipt-.*\.tmp$/.test(name));
     assert.ok(temp);
-    assert.equal(lstatSync(path).ino, lstatSync(join(root, temp)).ino);
+    assert.ok(
+      sameIdentity(
+        lstatSync(path, { bigint: true }),
+        lstatSync(join(root, temp), { bigint: true }),
+      ),
+    );
     assert.equal(lstatSync(path).nlink, 2);
     await waitForAudit(root, ["review-history"]);
   } finally {
