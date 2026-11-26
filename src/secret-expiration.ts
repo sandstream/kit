@@ -1,6 +1,6 @@
 import type { GovernanceConfig, SecretsConfig, SecretKeyConfig } from "./config.js";
 import { mergeGovernanceConfig } from "./governance.js";
-import { exec } from "./utils/exec.js";
+import { execPinned } from "./vendor-cli-pin.js";
 
 export interface SecretExpiration {
   key: string;
@@ -137,7 +137,7 @@ export async function get1PasswordExpiration(ref: string): Promise<string | null
     const [vault, item] = parts;
     if (!vault || !item) return null;
 
-    const { stdout } = await exec(
+    const { stdout } = await execPinned(
       "op",
       ["item", "get", item, "--vault", vault, "--format", "json"],
       { timeout: 10_000 },
