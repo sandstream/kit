@@ -130,6 +130,8 @@ migration, to deploy-platform propagation, to destructive history cleanup.
 - `kit secrets propagate <KEY> --to vercel,github,...`: Push value to deploy targets (stdin-safe via `--stdin`)
 - `kit secrets revoke-old --via supabase-mgmt-api --key-id <id>`: Revoke a previously-minted scoped key
 - `kit secrets onecli register <KEY> --host <pattern>`: Register with the OneCLI gateway so the agent process never sees the real value
+- `kit secrets list [--backend <name>] [--json]`: Key names per backend, with the `<KEY>_EXPIRES_AT` hint and the last rotation kit recorded. Never reads a value
+- `kit secrets incident <backend> [--verify] [--new-snapshot]`: Vendor-incident response. Prints each key's rotation command (`--from-cli`, Supabase, or manual), names the CLI binary the values are read through, and writes a fingerprint snapshot (HMAC-SHA256 under a random per-snapshot key, owner-only, in gitignored `.kit/incident/<backend>.json`). `--verify` re-reads every value: exit 0 only when every key changed. A value it cannot re-read is "not verified", never "changed", and a missing, widened, corrupt or re-keyed snapshot is an error, not a silent re-snapshot. kit does not rotate remote credentials in a batch: minting and revoking stay a person's step. It is a plain CLI, so it works the same from Claude Code, Codex or a terminal
 - `kit secrets purge-history <pattern> --force-history`: Destructive: rewrite git history to scrub a leaked value (wraps `git filter-repo` / `bfg`). Requires elevation + explicit flag.
 
 ### Deploy env matrix

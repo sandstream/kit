@@ -234,6 +234,12 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   { command: "run", operation: "run" },
   { command: "scan", anyFlags: ["--update-baseline"], operation: "scan-update-baseline" },
   { command: "secrets", subcommand: null, operation: "secrets-generate" },
+  {
+    command: "secrets",
+    subcommand: "incident",
+    unlessFlags: ["--verify"],
+    operation: "secrets-incident-snapshot",
+  },
   { command: "secrets", subcommand: "migrate", operation: "secrets-migrate" },
   {
     command: "secrets",
@@ -382,9 +388,18 @@ function matchesFlagValues(
   );
 }
 
-/** Every subcommand value this command declares a rule for (null excluded). */
+/**
+ * Subcommands that only read and so have no rule above, but must still count as subcommands:
+ * otherwise RO-3 below folds them into the command's default action and read-only mode refuses a
+ * read (`kit secrets list` would be refused as `secrets-generate`).
+ */
+const READ_ONLY_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = {
+  secrets: ["list"],
+};
+
+/** Every subcommand value this command declares a rule for, plus its read-only ones (null excluded). */
 function knownSubcommands(command: string): Set<string> {
-  const known = new Set<string>();
+  const known = new Set<string>(READ_ONLY_SUBCOMMANDS[command] ?? []);
   for (const entry of WRITE_SURFACE) {
     if (entry.command !== command) continue;
     if (typeof entry.subcommand === "string") known.add(entry.subcommand);

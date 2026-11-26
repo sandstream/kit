@@ -300,6 +300,8 @@
     "sbom",
     "scan",
     "secrets",
+    "secrets incident",
+    "secrets list",
     "secrets migrate",
     "secrets onecli",
     "secrets propagate",
