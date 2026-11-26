@@ -1,10 +1,11 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const source = import.meta.url.endsWith(".ts");
 const tsx = source ? ["--import", import.meta.resolve("tsx")] : [];
@@ -15,7 +16,7 @@ describe("kit memory hook user-prompt-submit and the payload source", () => {
   before(() => {
     tmp = realpathSync(mkdtempSync(join(tmpdir(), "kit-hook-source-")));
   });
-  after(() => rmSync(tmp, { recursive: true, force: true }));
+  after(() => rmTemp(tmp));
 
   function hook(payload: object): { status: number | null; stdout: string } {
     const r = spawnSync(process.execPath, [...tsx, cli, "memory", "hook", "user-prompt-submit"], {

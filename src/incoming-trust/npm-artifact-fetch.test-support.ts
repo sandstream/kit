@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:https";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { NpmArtifactFetchPolicy } from "./npm-artifact-fetch.js";
+
+const runFile = promisify(execFile);
 
 export const gzipBytes = Buffer.from("1f8b08000000000002ff4b4c4a0600c241243503000000", "hex");
 
@@ -23,7 +25,7 @@ export async function fetchInUnsafeEnvironment(
   `;
   // Built at run time so no credential-shaped literal sits in the source. The proxy is a fake that nothing listens on.
   const fakeProxy = ["http://fake-proxy-user", "fake-proxy-password"].join(":") + "@127.0.0.1:1";
-  const { stdout } = await promisify(execFile)(
+  const { stdout } = await runFile(
     process.execPath,
     [...process.execArgv, "--input-type=module", "--eval", script],
     {
@@ -65,8 +67,8 @@ async function makeCertificate(
     `subjectAltName=${hostMatches ? "IP:127.0.0.1" : "DNS:wrong.invalid"}`,
   ].join("\n");
   await writeFile(join(dir, "openssl.cnf"), config, { mode: 0o600 });
-  // Generate a test-only P-256 key. RSA generation timed out under Windows suite load.
-  execFileSync(
+  // Windows runners can take more than ten seconds to launch OpenSSL under suite load.
+  await runFile(
     "openssl",
     [
       "req",
@@ -86,8 +88,7 @@ async function makeCertificate(
       join(dir, "cert.pem"),
     ],
     {
-      stdio: "pipe",
-      timeout: 10000,
+      timeout: 60_000,
       env: { ...process.env, OPENSSL_CONF: join(dir, "openssl.cnf") },
     },
   );
