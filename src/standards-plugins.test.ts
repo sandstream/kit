@@ -407,3 +407,48 @@ describe("standards-plugins — dot-directories and an empty require scope", () 
     }
   });
 });
+
+describe("standards-plugins — a forbid rule that read zero files", () => {
+  it("is incomplete, not 'no matches', and fails under --enforce", () => {
+    const repo = tmpRepo();
+    try {
+      mkdirSync(join(repo, ".claude", "skills", "pr-bad"), { recursive: true });
+      writeFileSync(join(repo, ".claude", "skills", "pr-bad", "SKILL.md"), "try again\n");
+      // No `exts`: the default extensions do not include `.md`, so nothing is read.
+      writePlugin(
+        repo,
+        "again.toml",
+        `[standard]\nid = "again"\ntitle = "No try again"\nmatch = '[Tt]ry again'\n`,
+      );
+      const row = (enforce: boolean) =>
+        checkStandardsPlugins({ cwd: repo, language: "typescript", enforce }).find(
+          (x) => x.name === "plugin: again",
+        );
+      assert.equal(row(false)?.status, "warn");
+      assert.equal(row(false)?.didNotRun, true);
+      assert.match(row(false)?.detail ?? "", /incomplete: extension\(s\) .* matched zero files/);
+      assert.equal(row(true)?.status, "fail");
+    } finally {
+      rmTemp(repo);
+    }
+  });
+
+  it("still passes with 'no matches' when it read a file", () => {
+    const repo = tmpRepo();
+    try {
+      mkdirSync(join(repo, ".claude", "skills", "pr-good"), { recursive: true });
+      writeFileSync(join(repo, ".claude", "skills", "pr-good", "SKILL.md"), "1. run\n");
+      writePlugin(
+        repo,
+        "again.toml",
+        `[standard]\nid = "again"\ntitle = "No try again"\nmatch = '[Tt]ry again'\nexts = [".md"]\n`,
+      );
+      const r = checkStandardsPlugins({ cwd: repo, language: "typescript", enforce: true });
+      const row = r.find((x) => x.name === "plugin: again");
+      assert.equal(row?.status, "pass");
+      assert.match(row?.detail ?? "", /no matches/);
+    } finally {
+      rmTemp(repo);
+    }
+  });
+});

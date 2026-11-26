@@ -41,6 +41,8 @@ const MOVES_NPM =
 export interface BareSegment {
   manager: string;
   tokens: string[];
+  /** The requirements files a sync command reads, when they are operands and not `-r` values. */
+  files?: string[];
 }
 
 const EQUALS_FLAGS = ["--prefix", "-C", "--dir", "--cwd"];
@@ -148,7 +150,10 @@ export function freshReceipts(
     try {
       const entry = JSON.parse(line) as { type?: unknown; target?: unknown; timestamp?: unknown };
       if (entry.type !== type || typeof entry.target !== "string") continue;
-      if (typeof entry.timestamp !== "string" || Date.parse(entry.timestamp) < cutoff) continue;
+      // As in `check-deps`: an unparseable timestamp is NaN, and `NaN < cutoff` is false, so
+      // reject a non-finite one, or a garbage timestamp would count as a fresh triage.
+      const at = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
+      if (!Number.isFinite(at) || at < cutoff) continue;
       names.add(nameOf(entry.target));
     } catch {
       /* a line that is not a receipt proves nothing */

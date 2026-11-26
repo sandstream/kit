@@ -41,12 +41,13 @@ export interface SkillManifest {
    */
   allowedTools?: string[];
   /**
-   * agentskills.io invocation control — whether a human may trigger the skill via a
-   * slash command. `undefined` → field absent (spec default: user-invokable).
+   * Claude Code invocation control (`user-invocable`; the agentskills.io spec does not define
+   * it) — whether a human may trigger the skill via a slash command. kit also reads the
+   * `user-invokable` spelling it used to require. `undefined` → field absent (default: true).
    */
   userInvokable?: boolean;
   /**
-   * agentskills.io invocation control — whether the AGENT may autonomously invoke the
+   * Claude Code invocation control — whether the AGENT may autonomously invoke the
    * skill. `undefined` → field absent (spec default: model MAY invoke). `true` means the
    * model is forbidden from auto-invoking (restrict sensitive ops to user-only).
    */
@@ -150,8 +151,7 @@ export function parseSkillManifest(raw: string): SkillManifest {
       // reported "description missing" for a skill that declared a perfectly good one —
       // a FALSE finding in a gate, which erodes trust exactly like a missed one.
       manifest[key] = readTextValue(lines, i, value);
-    else if (key === "user-invokable" || key === "user_invokable")
-      manifest.userInvokable = parseBool(value);
+    else if (/^user[-_]invo[ck]able$/.test(key)) manifest.userInvokable = parseBool(value);
     else if (key === "disable-model-invocation" || key === "disable_model_invocation")
       manifest.disableModelInvocation = parseBool(value);
     else if (key === "allowed-tools" || key === "allowed_tools") {
@@ -381,7 +381,7 @@ export function checkScope(m: SkillManifest): CheckResult {
 }
 
 /**
- * agentskills.io invocation posture — a short, deterministic description of who may
+ * Claude Code invocation posture — a short, deterministic description of who may
  * trigger the skill, derived from the `user-invokable` / `disable-model-invocation`
  * fields. `null` when neither field is present (nothing to report). Advisory: it
  * enriches the scope detail; it does not change the pass/fail verdict. The higher-risk
