@@ -333,8 +333,8 @@ describe("monkey-test security pack", () => {
         "create table orders (id uuid primary key, tenant_id uuid references tenants(id));",
         "alter table orders enable row level security;",
         "create policy tenant_orders on orders using (tenant_id = auth.uid());",
-        "create table webhook_events (event_id text unique);",
-        "create table journal (id uuid primary key, event jsonb not null);",
+        "create table webhook_events (event_id text unique); alter table webhook_events enable row level security; create policy service_only on webhook_events using (false);",
+        "create table journal (id uuid primary key, event jsonb not null); alter table journal enable row level security; create policy tenant_journal on journal for select using (auth.uid() is not null);",
         "revoke update, delete on table journal from authenticated;",
       ].join("\n"),
     );

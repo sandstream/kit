@@ -73,6 +73,7 @@ import {
   trufflehogHistoryGap,
   type BasicSecretMatch,
 } from "./history-secret-evidence.js";
+import { scanTrackedProviderSecrets, type ProviderSecretHit } from "./tracked-secret-shapes.js";
 
 const exec = promisify(execFile);
 
@@ -1508,22 +1509,21 @@ async function checkBasicSecretScan(
     ],
     { timeout: 10_000, cwd: root },
   );
-  const { matches, gap } = readBasicSecretGrep(process);
-  const files = basicSecretFiles(matches);
+  const { matches, gap: grepGap } = readBasicSecretGrep(process);
+  const provider = await scanTrackedProviderSecrets(root);
+  const gap = grepGap ?? provider.gap;
+  const files = [...new Set([...provider.hits.map((h) => h.file), ...basicSecretFiles(matches)])];
   if (!gap && !scopeLimit && !hasHistory && files.length === 0) return NO_HISTORY_SECRET_SCOPE;
 
   const limitation =
     "the Git grep fallback covers tracked working-tree text only. Install TruffleHog to scan Git history";
-  const detail = files.length
-    ? `${files.length} file(s) with unverified secret-shaped strings in the working tree`
-    : matches.length
-      ? "all Git grep matches were excluded by the basic scan filters"
-      : "Git grep found no matches";
+  const detail = basicScanDetail(files.length, matches.length, provider.hits);
   return scannerEvidence(
     {
       ...HISTORY_SECRET_SCAN,
-      status: "warn",
-      severity: "medium",
+      // A provider-shaped key is the shape scan-staged blocks at commit time, so it fails here too.
+      status: provider.hits.length ? "fail" : "warn",
+      severity: provider.hits.length ? "high" : "medium",
       detail,
       ...(files.length ? { files } : {}),
     },
@@ -1537,6 +1537,19 @@ async function checkBasicSecretScan(
       scopeLimit,
     ),
   );
+}
+
+function basicScanDetail(files: number, matches: number, provider: ProviderSecretHit[]): string {
+  if (provider.length) {
+    const list = provider.map((h) => `${h.file} (${h.labels.join(", ")})`).join("; ");
+    const others = files - provider.length;
+    const rest = others > 0 ? `, and ${others} other file(s) with unverified matches` : "";
+    return `${provider.length} tracked file(s) with provider-shaped keys that kit's secret patterns match: ${list}${rest}`;
+  }
+  if (files) return `${files} file(s) with unverified secret-shaped strings in the working tree`;
+  return matches
+    ? "all Git grep matches were excluded by the basic scan filters"
+    : "Git grep found no matches";
 }
 
 function mergeHistoryLimits(gap?: ScannerGap, scopeLimit?: ScannerGap): ScannerGap | undefined {

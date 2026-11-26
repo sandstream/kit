@@ -311,7 +311,7 @@ Kit ignores a match only when the comment includes a reason.
 ### Secret findings: what is classified, and what you accept
 
 `kit check --category security` uses TruffleHog on history reachable from local refs. Kit checks the exit status, summary, and finding counts.
-Shallow clones and Git grep fallback give partial coverage. Git grep checks tracked working-tree text only.
+Shallow clones and Git grep fallback give partial coverage. Git grep checks tracked working-tree text only. Without TruffleHog, the fallback also applies kit's shared secret patterns to tracked files (test and fixture paths excluded) and fails on a provider-shaped key, such as `sk_live_`, `sk-proj-`, `ghp_` or `AKIA`, which is what `kit security scan-staged` blocks at commit time. Coverage stays unverified until TruffleHog runs.
 
 | Bucket                          | Meaning                                                                                                                                                                                               | Your action                                               |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |

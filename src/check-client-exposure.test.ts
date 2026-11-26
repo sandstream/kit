@@ -341,7 +341,9 @@ describe("checkBuiltBundleSecrets", () => {
     try {
       const r = await checkBuiltBundleSecrets(dir);
       assert.equal(r.status, "skip");
-      assert.match(r.detail, /nothing builds for a browser/);
+      // It says what it found instead of claiming nothing builds (kit-research#230).
+      assert.match(r.detail, /dist\/ holds JavaScript but no index\.html or assets\//);
+      assert.doesNotMatch(r.detail, /nothing builds for a browser/);
     } finally {
       rmTemp(dir);
     }
