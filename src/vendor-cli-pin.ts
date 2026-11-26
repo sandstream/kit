@@ -291,7 +291,8 @@ export function refusalMessage(
 const announced = new Set<string>();
 
 /**
- * The file to run for `tool`, or a `VendorCliPinRefusal`. A refusal is printed to stderr once per
+ * The verified file to run for a pinned `tool`, null when `tool` is unpinned (the caller keeps
+ * its own resolution), or a `VendorCliPinRefusal`. A refusal is printed to stderr once per
  * process and sets a non-zero exit code, so a caller that swallows the throw (most backends turn
  * errors into "not found") still exits non-zero with the reason on screen.
  */
@@ -302,7 +303,7 @@ export async function assertPinnedCli(
   const pin = await readPin(tool, deps);
   const m = pin ? await measureCli(tool, deps) : null;
   const v = judgeUse(pin, m, deps);
-  if (v.ok) return v.pinned ? v.bin : await resolveVendorCli(tool, deps);
+  if (v.ok) return v.pinned ? v.bin : null;
   const msg = refusalMessage(tool, v, platformKey(deps));
   const once = `${tool}\0${v.measured?.realpath ?? ""}\0${v.measured?.sha256 ?? ""}`;
   if (!announced.has(once)) {
@@ -315,14 +316,18 @@ export async function assertPinnedCli(
 
 /**
  * `exec(tool, args, opts)` behind the pin. Pinned: runs the verified realpath, never the bare name.
- * Unpinned: runs what it always ran (the resolved file, or the bare name when unresolved).
+ * Unpinned: runs exactly what the caller ran before — `unpinned(tool)` when given (the backends'
+ * mise-first resolver), else the bare name — so adding the pin changes nothing until a tool is
+ * pinned.
  */
 export async function execPinned(
   tool: string,
   args: string[],
   opts?: Parameters<typeof exec>[2],
+  unpinned?: (tool: string) => Promise<string | null>,
 ): Promise<{ stdout: string; stderr: string }> {
   const cwd = typeof opts?.cwd === "string" ? opts.cwd : process.cwd();
-  const bin = (await assertPinnedCli(tool, defaultPinDeps(cwd))) ?? tool;
+  const pinned = await assertPinnedCli(tool, defaultPinDeps(cwd));
+  const bin = pinned ?? (unpinned ? await unpinned(tool) : null) ?? tool;
   return exec(bin, args, opts) as Promise<{ stdout: string; stderr: string }>;
 }

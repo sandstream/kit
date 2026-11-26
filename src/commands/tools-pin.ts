@@ -75,6 +75,11 @@ export async function pinOne(
       result: "error",
       detail: `${tool} is not installed (not found via mise or PATH)`,
     };
+  // kit runs a pinned CLI by its path with no shell, and Node refuses to start a .cmd/.bat that
+  // way; pinning the shim would also pin its text, not the program it starts.
+  if (deps.platform === "win32" && /\.(cmd|bat)$/i.test(m.realpath)) {
+    return { tool, result: "error", detail: `${m.realpath} is a batch shim; pin the .exe it runs` };
+  }
   const existing = await readPin(tool, deps);
   if (existing && matches(existing, m, deps)) {
     return {
