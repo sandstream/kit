@@ -72,8 +72,13 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
   // dir descendable, so the negation below works.
   {
     pattern: ".kit/*",
-    reason: "kit local state (elevation, env, runtime)",
-    paths: [".kit/elevation.json", ".kit/env/local", ".kit/runtime/state"],
+    reason: "kit local state (elevation, env, runtime, incident fingerprints)",
+    paths: [
+      ".kit/elevation.json",
+      ".kit/env/local",
+      ".kit/runtime/state",
+      ".kit/incident/1password.json",
+    ],
   },
   {
     pattern: "!.kit/shared/",
