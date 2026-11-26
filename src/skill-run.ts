@@ -21,7 +21,7 @@
  * Deterministic and offline: parse, compare, hash. Pure except for reading the repo.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { join, dirname, relative, posix } from "node:path";
 import { walkSourceFiles } from "./source-walk.js";
 import {
   parseSkillManifest,
@@ -123,7 +123,12 @@ export function runSkillGate(cwd: string = process.cwd()): SkillGateResult {
     const siblings: SiblingSkill[] = skills
       .filter((s) => s !== skill && s.manifest.name)
       .map((s) => ({ name: s.manifest.name!, triggerKey: triggerKey(s.manifest) }));
-    const report = testSkill(skill.manifest, { siblings, snapshot: skill.snapshot });
+    const report = testSkill(skill.manifest, {
+      siblings,
+      snapshot: skill.snapshot,
+      // `path` is repo-relative with `/` separators, so its folder is read with `posix`.
+      dirName: posix.basename(posix.dirname(skill.path)),
+    });
     if (!report.ok) ok = false;
     for (const c of report.checks) {
       checks.push({

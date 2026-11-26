@@ -4,7 +4,8 @@
  * A thin executor over the pure core in `../skill/test.ts`: it reads the target
  * `SKILL.md`, discovers sibling skills (for trigger-collision detection) and a committed
  * snapshot (for regression), runs the four deterministic checks, and prints a human or
- * `--json` report. `--update-snapshot` pins the current module surface; `--gate` turns any
+ * `--json` report. The contract check is given the skill's folder name, because the agentskills.io
+ * specification (https://agentskills.io/specification) requires `name` to match it. `--update-snapshot` pins the current module surface; `--gate` turns any
  * failure into a non-zero exit for CI.
  *
  * This is the module-discipline sibling of `kit triage skill` (which answers "safe to
@@ -73,6 +74,26 @@ function discoverSiblings(skillPath: string): SiblingSkill[] {
     }
   }
   return siblings;
+}
+
+/**
+ * The skill's folder name, for the agentskills.io rule that `name` matches it — or undefined when
+ * the target is not a `SKILL.md` (a loose markdown file has no skill folder to match). The name is
+ * read back from the parent's listing, so a path typed in another case on a case-insensitive
+ * filesystem (Windows, usually macOS) is compared as it is on disk. Symlinks are not resolved: a
+ * harness sees the link's name, not its target's.
+ */
+export function skillDirName(skillPath: string): string | undefined {
+  if (basename(skillPath).toLowerCase() !== "skill.md") return undefined;
+  const dir = dirname(skillPath);
+  const typed = basename(dir);
+  try {
+    const entries = readdirSync(dirname(dir));
+    if (entries.includes(typed)) return typed;
+    return entries.find((e) => e.toLowerCase() === typed.toLowerCase()) ?? typed;
+  } catch {
+    return typed;
+  }
 }
 
 /** Load a committed snapshot next to the SKILL.md, or null when absent/malformed. */
@@ -274,6 +295,7 @@ async function runSkillTest(
   const report = testSkill(manifest, {
     siblings: discoverSiblings(skillPath),
     snapshot: loadSnapshot(skillPath),
+    dirName: skillDirName(skillPath),
   });
 
   // --runtime opts into the recorded-run audit; it upgrades the adherence + negative-control

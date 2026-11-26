@@ -155,7 +155,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "monkey-test desktop":
     "Drive the real desktop app (Tauri, Electron) through a debug-only eval hook on a temporary data folder: seeded random clicks, and long operations interrupted by close-window, quit, kill, reload, or restart, with data, restart, and lost-work checks after each",
   "skill test":
-    "Module-discipline linter for a SKILL.md: contract shape, trigger and sibling collision, declared least-privilege scope, CI regression drift. --runtime audits recorded runs for scope adherence from the transcript index (zero-LLM)",
+    "Module-discipline linter for a SKILL.md: contract shape within the agentskills.io specification limits (the SKILL.md format Claude Code, Codex and other harnesses share: name 1-64 lowercase alphanumerics and hyphens matching its folder, description 1-1024 characters, compatibility 1-500), trigger and sibling collision, declared least-privilege scope, CI regression drift. --runtime audits recorded runs for scope adherence from the transcript index (zero-LLM)",
   "standards freeze": "Snapshot only the standards dimensions into .kit-baseline.json",
   "secrets vault-migrate": "Cross-vault key transfer (1Password → Infisical, etc.)",
   "secrets validate":
