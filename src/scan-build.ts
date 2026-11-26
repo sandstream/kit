@@ -1,8 +1,8 @@
 import { open, readdir, stat } from "node:fs/promises";
 import { resolve, join, relative, sep } from "node:path";
-import type { SecretFinding } from "./utils/redactSecrets.js";
+import type { EvidencedSecret } from "./finding-evidence.js";
 import { ArtifactIncompleteError, findArtifactSecrets, MAX_BYTES } from "./scan-build-sourcemap.js";
-import { findAsarSecrets } from "./scan-build-asar.js";
+import { findAsarSecrets, type ArchiveSecret } from "./scan-build-asar.js";
 
 /**
  * Walks built-artifact directories looking for leaked credentials. The
@@ -18,7 +18,7 @@ import { findAsarSecrets } from "./scan-build-asar.js";
  */
 export interface BuildHit {
   file: string;
-  findings: SecretFinding[];
+  findings: (EvidencedSecret | ArchiveSecret)[];
 }
 
 export interface BuildScanIssue {
@@ -184,7 +184,7 @@ export async function scanBuildArtifacts(
       incomplete.push({ file: rel, detail: `${rel}: ${kind} exceeds 5 MiB` });
       continue;
     }
-    let findings: SecretFinding[];
+    let findings: EvidencedSecret[];
     try {
       findings = findArtifactSecrets(content, rel);
     } catch (error) {
@@ -210,7 +210,7 @@ async function scanAsar(
   hits: BuildHit[],
   incomplete: BuildScanIssue[],
 ): Promise<void> {
-  let found: SecretFinding[] | "too-large";
+  let found: ArchiveSecret[] | "too-large";
   try {
     found = await findAsarSecrets(path, rel);
   } catch {

@@ -47,10 +47,17 @@ describe("scanBuildArtifacts source maps", () => {
         ],
         mappings: "",
       };
-      writeFileSync(join(dir, "build", "client.js.map"), JSON.stringify(map));
+      writeFileSync(join(dir, "build", "client.js.map"), JSON.stringify(map, null, 2));
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 1);
-      assert.ok(hits[0].findings.some((finding) => finding.label === "keyed-secret"));
+      assert.deepEqual(
+        hits[0].findings.find((finding) => finding.label === "keyed-secret")?.evidence,
+        {
+          file: "build/client.js.map",
+          line: 9,
+          pattern: "keyed-secret",
+        },
+      );
     } finally {
       rmTemp(dir);
     }
@@ -65,20 +72,25 @@ describe("scanBuildArtifacts source map fields", () => {
       const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
       writeFileSync(
         join(dir, "build", "valid.js.map"),
-        JSON.stringify({ api_key: opaque, sourcesContent: ["safe"] }),
+        JSON.stringify({ sourcesContent: ["safe"], api_key: opaque }, null, 2),
       );
-      writeFileSync(join(dir, "build", "broken.js.map"), `{"api_key":"${opaque}"`);
+      writeFileSync(join(dir, "build", "broken.js.map"), `{\n"api_key":"${opaque}"`);
       await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
         assert.ok(error instanceof BuildScanIncompleteError);
         assert.deepEqual(error.hits.map((hit) => hit.file).sort(), [
           "build/broken.js.map",
           "build/valid.js.map",
         ]);
-        assert.ok(
-          error.hits.every((hit) =>
-            hit.findings.some((finding) => finding.label === "keyed-secret"),
-          ),
-        );
+        for (const hit of error.hits) {
+          assert.deepEqual(
+            hit.findings.find((finding) => finding.label === "keyed-secret")?.evidence,
+            {
+              file: hit.file,
+              line: hit.file.includes("broken") ? 2 : 5,
+              pattern: "keyed-secret",
+            },
+          );
+        }
         return true;
       });
     } finally {

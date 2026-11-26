@@ -5,6 +5,14 @@
 import type { SecurityCheckResult } from "../check-security.js";
 import type { RuleRef } from "../rules/catalog.js";
 
+import {
+  collapseDuplicates,
+  sarifFingerprint,
+  sarifLocation,
+  type SarifFinding,
+  type SarifResult,
+} from "./ingest-sarif-dedupe.js";
+
 type Severity = NonNullable<SecurityCheckResult["severity"]>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -56,20 +64,6 @@ interface SarifRule {
   defaultConfiguration?: { level?: string };
   properties?: { tags?: string[]; "security-severity"?: string };
 }
-interface SarifLocation {
-  physicalLocation?: { artifactLocation?: { uri?: string }; region?: { startLine?: number } };
-}
-interface SarifResult {
-  ruleId?: string;
-  /** SARIF 2.1.0 `kind`; absent means `fail`. */
-  kind?: string;
-  /** A suppression with no status is accepted. */
-  suppressions?: { status?: string }[];
-  level?: string;
-  message?: { text?: string };
-  locations?: SarifLocation[];
-  properties?: { "security-severity"?: string };
-}
 export interface SarifRun {
   properties?: Record<string, unknown>;
   tool?: { driver?: { name?: string; rules?: SarifRule[] } };
@@ -79,18 +73,12 @@ export interface SarifLog {
   runs?: SarifRun[];
 }
 
-function sarifLocation(res: SarifResult): string {
-  const { artifactLocation, region } = res.locations?.[0]?.physicalLocation ?? {};
-  const uri = artifactLocation?.uri;
-  return uri ? ` (${uri}${region?.startLine ? `:${region.startLine}` : ""})` : "";
-}
-
 function sarifFinding(
   tool: string,
   res: SarifResult,
   rulesById: Map<string, SarifRule>,
   status: "fail" | "warn",
-): SecurityCheckResult {
+): SarifFinding {
   const ruleId = res.ruleId ?? "(rule)";
   const rule = rulesById.get(ruleId);
   const severity =
@@ -104,6 +92,8 @@ function sarifFinding(
     detail: `${res.message?.text ?? ruleId}${sarifLocation(res)}`,
     severity,
     rule: cweRuleFromTags(rule?.properties?.tags),
+    fingerprint: sarifFingerprint(res),
+    occurrences: 1,
   };
 }
 
@@ -143,8 +133,8 @@ function sarifRules(run: SarifRun): Map<string, SarifRule> {
   return rules;
 }
 
-export function sarifFindings(log: SarifLog, tally = { suppressed: 0 }): SecurityCheckResult[] {
-  const out: SecurityCheckResult[] = [];
+export function sarifFindings(log: SarifLog, tally = { suppressed: 0 }): SarifFinding[] {
+  const out: SarifFinding[] = [];
   for (const run of log.runs ?? []) {
     const tool = run.tool?.driver?.name ?? "sarif";
     const rulesById = sarifRules(run);
@@ -154,5 +144,5 @@ export function sarifFindings(log: SarifLog, tally = { suppressed: 0 }): Securit
       else out.push(sarifFinding(tool, res, rulesById, res.kind === "review" ? "warn" : "fail"));
     }
   }
-  return out;
+  return collapseDuplicates(out);
 }

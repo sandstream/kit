@@ -318,6 +318,7 @@
     "security policy",
     "security prescan",
     "security prescan-diff",
+    "security routes",
     "security scan-artifact",
     "security scan-build",
     "security scan-outbound",

@@ -21,7 +21,7 @@ Append one JSON object per line to **`.kit-scan-results.jsonl`** in the project 
 | `source`   | **yes**  | Non-empty tool name. Findings are grouped and reported per source (`external: <source>`).                                                                                                                                 |
 | `severity` | **yes**  | `critical` \| `high` \| `medium` \| `low` (case-insensitive). Common aliases fold in: `moderate` → `medium`; `info` / `informational` → `low`. Unrecognized values are surfaced as a parse warning, not silently dropped. |
 | `title`    | no       | Short description (used in the detail line).                                                                                                                                                                              |
-| `id`       | no       | Stable finding id (for your own dedupe/tracking).                                                                                                                                                                         |
+| `id`       | no       | Stable finding id. kit counts each `(source, id)` pair once, with the worst severity its records carry; records without an `id` each count.                                                                               |
 | `package`  | no       | Affected package, if applicable.                                                                                                                                                                                          |
 
 Extra keys are ignored, so you can carry your own metadata on the same line.
@@ -31,6 +31,8 @@ Extra keys are ignored, so you can carry your own metadata on the same line.
 - **`critical` / `high` → FAIL** the security gate (same policy as `npm audit` high/critical).
 - **`medium` / `low` → WARN** (surfaced, non-blocking by default).
 - Findings are grouped per `source`; the summary reports the counts and the worst severity.
+- Repeated records collapse: 1,000 lines over 250 `(source, id)` pairs report 250 findings and
+  say how many records repeated an id. Records without an `id` are not collapsed.
 - **No file → no-op.** An existing file with no records shows a skip with missing evidence.
 - Use a regular UTF-8 file of up to 8 MiB. Kit reports a coverage gap if it cannot read the file.
 
@@ -49,8 +51,9 @@ Extra keys are ignored, so you can carry your own metadata on the same line.
 
 kit ingests exactly what the file says — it does not second-guess it. If your tool
 blindly **appends** every run, stale (already-fixed) findings will keep failing the
-gate. Emit findings so the file reflects the **current** state: rewrite it per scan,
-or dedupe by your own `id`. (The existing `kit-plugin-snyk` / `-wiz` / `-sentrux`
+gate. Emit findings so the file reflects the **current** state: rewrite it per scan.
+kit collapses records that repeat a `(source, id)`, so an appended duplicate is counted
+once, but a fixed finding still in the file still fails the gate. (The existing `kit-plugin-snyk` / `-wiz` / `-sentrux`
 append to this same file — manage rotation accordingly.)
 
 ## Minimal example
