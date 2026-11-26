@@ -58,21 +58,24 @@ It checks, in one pass: that the installed tools match `package-lock.json` (a st
 false green format check), that the branch is current with `origin/main` (CI tests the merge), build,
 format, lint, `kit review --enforce` over **all** stages, the tests of the changed files, that every
 new source file has a test (CI's coverage gate, which `kit review` does not run), `kit self-audit` (CI's self-audit job, which also fails on rules `kit review` does not run, such as an export no other file names), Semgrep at the
-version and with the rule packs `.github/workflows/security.yml` names, and that the PR text holds no
-session URL. A Semgrep of another version does not run: the line shows `!` and `--strict` fails it. It lists every problem, then exits non-zero if there is one.
+version and with the rule packs `.github/workflows/security.yml` names, and that neither the branch's
+commit messages (`origin/main..HEAD`) nor the PR text hold a session URL. The PR is looked up over REST
+(`gh api`); a lookup that fails shows `!`, not a pass. A Semgrep of another version does not run: the line shows `!` and `--strict` fails it. It lists every problem, then exits non-zero if there is one.
 
 `--allow "<check name>"` names a `kit review` check that fails for a reason outside your change, for
 example `enforcement gate liveness` in a worktree. It must be the exact name, and it is printed.
 
-## Public artifacts — issue & PR hygiene
+## Public artifacts — issue, PR & commit hygiene
 
-`sandstream/kit` is a **public** repository. When opening issues or PRs here:
+`sandstream/kit` is a **public** repository. When opening issues or PRs or writing commits here:
 
-- **Never put an agent session URL in an issue or PR body**: a `claude.ai/code/session_…`
-  link, or a link to another agent's session or task. It is internal session metadata,
-  not useful to readers, and it clutters the public record (it accumulated on ~160
-  existing artifacts). The only footer is the tool's generic line with no session
-  link, such as `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+- **Never put an agent session URL in an issue or PR body, or in a commit message**: a
+  `claude.ai/code/session_…` link, or a link to another agent's session or task. It is internal
+  session metadata, not useful to readers, and it clutters the public record (it accumulated on
+  ~160 existing artifacts). The only footer is the tool's generic line with no session
+  link, such as `🤖 Generated with [Claude Code](https://claude.com/claude-code)`; the only
+  commit trailer is `Co-Authored-By:` (no `Claude-Session:` line). CI (`pr-hygiene.yml`) checks
+  the PR text and the PR's commits; commits already on `main` stay as they are.
 - No internal session IDs, private dashboard/console links, or paths under
   another customer's project in public bodies.
 - Findings that could be a real security leak in a named third-party repo go to
@@ -86,7 +89,7 @@ rules — not prose:
 
 - **ADR-0001** no model-client import anywhere in `src/**` (the zero-LLM core).
 - **ADR-0002** no new runtime dependency from the forbidden list — stdlib otherwise.
-  The *floor itself* (exactly two runtime deps, all pinned) is **not** expressible in the
+  The _floor itself_ (exactly two runtime deps, all pinned) is **not** expressible in the
   `kit-enforce` grammar and is enforced by `src/dependency-floor.test.ts`; the ADR says why.
 - **ADR-0003** the check path imports no coverage-framework mappings.
 - **ADR-0006** `src/utils/**` imports nothing from the repo — derived by `kit adr derive`

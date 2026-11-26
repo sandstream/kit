@@ -20,6 +20,16 @@ interface Lib {
   ): { stage: string; name: string; detail: string }[];
   parseArgs(argv: string[]): { allow: string[]; strict: boolean; skip: string[] };
   sessionUrlIn(text: string): boolean;
+  COMMIT_LOG_FORMAT: string;
+  commitsWithSessionUrl(log: string): string[];
+  githubRepo(remoteUrl: string): { owner: string; repo: string } | undefined;
+  openPrArgs(repo: { owner: string; repo: string }, branch: string): string[];
+  prTextVerdict(lookup: { ok: boolean; stdout: string }): {
+    ok?: boolean;
+    notRun?: boolean;
+    warn?: string;
+    detail?: string;
+  };
   parseReviewJson(text: string): { stages?: unknown[] } | undefined;
   pinnedSemgrepVersion(workflow: string): string | undefined;
   semgrepPacks(workflow: string): string[];
@@ -245,5 +255,55 @@ describe("selfAuditErrors", () => {
     const { selfAuditErrors } = await lib();
     assert.deepEqual(selfAuditErrors("19 rules, 0 fail, 0 warn, 228 advisory\n"), []);
     assert.deepEqual(selfAuditErrors(""), []);
+  });
+});
+
+describe("session URLs in commit messages and the REST PR lookup", () => {
+  const SESSION = "https://claude.ai/code/session_" + "01AbCd";
+
+  it("names the branch commits whose message holds a session URL", async () => {
+    const { commitsWithSessionUrl, COMMIT_LOG_FORMAT } = await lib();
+    assert.equal(COMMIT_LOG_FORMAT, "%h%x00%B%x1e");
+    const log =
+      "abc1234\0fix: a\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n\x1e\n" +
+      `def5678\0feat: b\n\nClaude-Session: ${SESSION}\n\x1e\n`;
+    assert.deepEqual(commitsWithSessionUrl(log), ["def5678"]);
+    assert.deepEqual(commitsWithSessionUrl(""), []);
+  });
+
+  it("reads owner/repo from https, ssh and proxy remotes, and asks REST for the branch's PRs", async () => {
+    const { githubRepo, openPrArgs } = await lib();
+    const want = { owner: "sandstream", repo: "kit" };
+    assert.deepEqual(githubRepo("https://github.com/sandstream/kit.git\n"), want);
+    assert.deepEqual(githubRepo("git@github.com:sandstream/kit.git"), want);
+    assert.deepEqual(githubRepo("http://proxy@127.0.0.1:9/git/sandstream/kit"), want);
+    const args = openPrArgs(want, "claude/x");
+    assert.deepEqual(args.slice(0, 4), ["api", "-X", "GET", "repos/sandstream/kit/pulls"]);
+    assert.ok(args.includes("head=sandstream:claude/x"));
+    assert.ok(!args.some((a) => a.includes("&")), "no & for a Windows shell to split on");
+  });
+
+  it("reports a failed lookup as not run, never as a pass", async () => {
+    const { prTextVerdict } = await lib();
+    for (const lookup of [
+      { ok: false, stdout: "" },
+      { ok: true, stdout: "GraphQL: refused" },
+      { ok: true, stdout: '{"message":"Not Found"}' },
+    ]) {
+      const v = prTextVerdict(lookup);
+      assert.equal(v.notRun, true, lookup.stdout);
+      assert.notEqual(v.ok, true, lookup.stdout);
+    }
+  });
+
+  it("passes no PR or a clean PR, and fails a session URL in the title or body", async () => {
+    const { prTextVerdict } = await lib();
+    assert.equal(prTextVerdict({ ok: true, stdout: "[]" }).ok, true);
+    const clean = JSON.stringify([{ title: "fix", body: "Generated with Claude Code" }]);
+    assert.equal(prTextVerdict({ ok: true, stdout: clean }).ok, true);
+    const dirty = JSON.stringify([{ title: "fix", body: `x\n${SESSION}` }]);
+    assert.equal(prTextVerdict({ ok: true, stdout: dirty }).ok, false);
+    const nullBody = JSON.stringify([{ title: `t ${SESSION}`, body: null }]);
+    assert.equal(prTextVerdict({ ok: true, stdout: nullBody }).ok, false);
   });
 });
