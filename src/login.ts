@@ -5,7 +5,7 @@ import { checkServices, type ServiceStatus } from "./check-services.js";
 import { isNonInteractive } from "./environment.js";
 import { parseCommand } from "./utils/parseCommand.js";
 import { safeStatusLine } from "./utils/redactSecrets.js";
-import { resolvePinnedCli } from "./vendor-cli-pin.js";
+import { resolvePinnedLaunch, type Launch } from "./vendor-cli-pin.js";
 import { c } from "./utils/colors.js";
 
 const exec = promisify(execFile);
@@ -38,14 +38,14 @@ async function runInteractive(command: string): Promise<{ ok: boolean; detail: s
   // Resolve the CLI mise-first so a `mise use -g`-installed tool is found even
   // when mise isn't activated, behind the vendor-CLI pin: a login never types
   // credentials into a pinned CLI that changed.
-  let bin: string;
+  let bin: Launch;
   try {
-    bin = await resolvePinnedCli(parsed.cmd);
+    bin = await resolvePinnedLaunch(parsed.cmd);
   } catch (err) {
     return { ok: false, detail: (err as Error).message.split("\n")[0]! };
   }
   return new Promise((resolve) => {
-    const child = spawn(bin, parsed.args, {
+    const child = spawn(bin.file, [...bin.prefix, ...parsed.args], {
       stdio: "inherit",
       env: { ...process.env },
     });
@@ -70,8 +70,8 @@ async function runQuiet(command: string): Promise<{ ok: boolean; output: string 
     return { ok: false, output: parsed.message };
   }
   try {
-    const bin = await resolvePinnedCli(parsed.cmd);
-    const { stdout, stderr } = await exec(bin, parsed.args, {
+    const bin = await resolvePinnedLaunch(parsed.cmd);
+    const { stdout, stderr } = await exec(bin.file, [...bin.prefix, ...parsed.args], {
       timeout: 15_000,
       env: { ...process.env },
     });

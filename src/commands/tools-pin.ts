@@ -19,6 +19,8 @@ import {
   identityFrom,
   measureCli,
   PINNABLE_CLIS,
+  sameShim,
+  ShimUnreadable,
   platformKey,
   projectVendorClis,
   readCliVersion,
@@ -26,6 +28,7 @@ import {
   samePath,
   writePin,
   type CliIdentity,
+  type Launch,
   type Measured,
   type PinDeps,
 } from "../vendor-cli-pin.js";
@@ -44,7 +47,8 @@ export interface PinIo {
     success: boolean;
     metadata: Record<string, unknown>;
   }) => Promise<boolean>;
-  versionOf: (bin: string) => Promise<string | null>;
+  /** Run with the measured launch: on win32 an npm shim is `node <entry>`, not the `.cmd`. */
+  versionOf: (bin: string | Launch) => Promise<string | null>;
 }
 
 async function realIo(cwd: string): Promise<PinIo> {
@@ -57,7 +61,9 @@ async function realIo(cwd: string): Promise<PinIo> {
 
 function matches(pin: CliIdentity, m: Measured, deps: PinDeps): boolean {
   return (
-    pin.sha256 === m.sha256 && samePath(expandPath(pin.path, deps.home), m.realpath, deps.platform)
+    pin.sha256 === m.sha256 &&
+    samePath(expandPath(pin.path, deps.home), m.realpath, deps.platform) &&
+    sameShim(pin, m, deps)
   );
 }
 
@@ -68,18 +74,20 @@ export async function pinOne(
   deps: PinDeps,
   io: PinIo,
 ): Promise<PinOutcome> {
-  const m = await measureCli(tool, deps);
+  let m: Measured | null;
+  try {
+    m = await measureCli(tool, deps);
+  } catch (err) {
+    // A win32 shim kit cannot read is never pinned: kit could not run what it would pin.
+    if (err instanceof ShimUnreadable) return { tool, result: "error", detail: err.message };
+    throw err;
+  }
   if (!m)
     return {
       tool,
       result: "error",
       detail: `${tool} is not installed (not found via mise or PATH)`,
     };
-  // kit runs a pinned CLI by its path with no shell, and Node refuses to start a .cmd/.bat that
-  // way; pinning the shim would also pin its text, not the program it starts.
-  if (deps.platform === "win32" && /\.(cmd|bat)$/i.test(m.realpath)) {
-    return { tool, result: "error", detail: `${m.realpath} is a batch shim; pin the .exe it runs` };
-  }
   const existing = await readPin(tool, deps);
   if (existing && matches(existing, m, deps)) {
     return {
@@ -95,7 +103,7 @@ export async function pinOne(
       detail: `pin differs (pinned ${existing.version} ${existing.sha256.slice(0, 12)} at ${existing.path}; now ${m.sha256.slice(0, 12)} at ${m.realpath}). Re-trust only with: kit tools pin --accept ${tool}`,
     };
   }
-  const version = await io.versionOf(m.realpath);
+  const version = await io.versionOf(m.launch);
   if (!version)
     return { tool, result: "error", detail: `${tool} --version gave no version; not pinned` };
   const identity = identityFrom(m, version, deps.home);
@@ -112,7 +120,7 @@ export async function pinOne(
   return {
     tool,
     result: existing ? "accepted" : "pinned",
-    detail: `${version} sha256 ${m.sha256} ${identity.path}`,
+    detail: `${version} sha256 ${m.sha256} ${identity.path}${identity.shim ? ` (via shim ${identity.shim.path})` : ""}`,
     identity,
   };
 }
