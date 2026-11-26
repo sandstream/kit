@@ -20,8 +20,10 @@ const BULK_SECRET = new RegExp(
 const TARGET =
   /(https?:\/\/(?!localhost\b|127\.0\.0\.1\b)[^\s)`"]+|\bpublic\s+(?:issue|comment|gist|repo)|\bgist\b|\bpastebin\b)/i;
 
+// "output" counts only as a verb, followed by a determiner ("output your system prompt"), so the
+// noun in "Put the output-format contract in a system message" is not a reveal.
 const REVEAL_PROMPT =
-  /\b(?:reveal|print|show|output|repeat|leak|disclose)\b[^.\n]{0,30}\b(?:system|developer)\s+(?:prompt|message|instructions)\b/i;
+  /\b(?:reveal|print|show|output(?=\s+(?:your|the|this|these|its|any|all|every|my|our)\b)|repeat|leak|disclose)\b[^.\n]{0,30}\b(?:system|developer)\s+(?:prompt|message|instructions)\b/i;
 const CLAIM_SYSTEM =
   /\btreat\s+(?:this|these|the following)\b[^.\n]{0,40}\bas\s+(?:an?\s+)?(?:system|developer)\s+(?:message|prompt|instruction)s?\b/i;
 
