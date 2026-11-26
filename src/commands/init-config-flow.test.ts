@@ -14,7 +14,14 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  symlinkSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,19 +36,24 @@ const plain = (s: string) => s.replace(ANSI, "");
 interface Fixture {
   dir: string;
   home: string;
+  bin: string;
 }
 
 function makeFixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), "kit-initcfg-char-"));
   const dir = join(root, "repo");
   const home = join(root, "home");
+  const bin = join(root, "bin");
   mkdirSync(dir);
   mkdirSync(home);
-  execFileSync("git", ["init", "-q", dir]);
+  mkdirSync(bin);
+  const git = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  symlinkSync(git, join(bin, "git"));
+  execFileSync(git, ["init", "-q", dir]);
   mkdirSync(join(dir, ".kit"));
   writeFileSync(join(dir, ".kit", "skills-lock.json"), "{}");
   writeFileSync(join(dir, ".kit", "cli-lock.json"), "{}");
-  return { dir, home };
+  return { dir, home, bin };
 }
 
 function file(f: Fixture, name: string, body: string): void {
@@ -52,6 +64,8 @@ async function init(f: Fixture, args: string[] = []): Promise<CliResult & { out:
   const r = await runCli(["init", "--non-interactive", "--no-setup", ...args], f.dir, {
     HOME: f.home,
     USERPROFILE: f.home,
+    // Keep real Git for init and exclude the runner's account and registry tools.
+    PATH: f.bin,
     KIT_WRAPPER_ALLOW_DEV: "1",
   });
   return { ...r, out: plain(r.stdout + r.stderr) };

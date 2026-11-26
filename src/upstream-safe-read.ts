@@ -31,6 +31,7 @@ export function readRegularFileBytesIfPresent(path: string, maxBytes = MAX_BYTES
     fd = openSync(
       path,
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+      0o600, // The read-only flags leave file creation and permissions untouched.
     );
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;

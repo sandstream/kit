@@ -281,12 +281,12 @@ describe("kit secrets incident: environment backend", () => {
   });
 });
 
-describe("kit secrets incident: the HMAC key stays outside the repo", () => {
-  async function keyFile(cwd: string, keyRoot: string): Promise<string> {
-    const project = await resolveIncidentProject(cwd);
-    return incidentKeyPath(keyRoot, project.id, "1password");
-  }
+async function keyFile(cwd: string, keyRoot: string): Promise<string> {
+  const project = await resolveIncidentProject(cwd);
+  return incidentKeyPath(keyRoot, project.id, "1password");
+}
 
+describe("kit secrets incident: the HMAC key stays outside the repo", () => {
   it("keeps no key in the repo tree: the snapshot holds only a key id", async () => {
     const cwd = tempProject();
     try {
@@ -324,7 +324,9 @@ describe("kit secrets incident: the HMAC key stays outside the repo", () => {
       rmTemp(cwd);
     }
   });
+});
 
+describe("kit secrets incident: required HMAC key and permissions", () => {
   it("a snapshot file alone, without the user's key, cannot verify", async () => {
     const cwd = tempProject();
     try {
@@ -390,7 +392,9 @@ describe("kit secrets incident: the HMAC key stays outside the repo", () => {
       }
     },
   );
+});
 
+describe("kit secrets incident: HMAC key identity and snapshot format", () => {
   it("refuses a key whose id differs from the snapshot's; --new-snapshot re-keys, audited", async () => {
     const cwd = tempProject();
     try {
