@@ -20,8 +20,14 @@
  *
  * curl's URL globbing (`curl 10.0.0.[1-5]`, `curl http://h[1-3].example`) is expanded into its
  * targets when it names at most 64 (broker/curl-glob.ts); a larger or malformed pattern is
- * unreadable and denied. curl and wget bundle short options as getopt does: in `-sSo out.json`
- * the last letter takes the next word as its value, so `out.json` is not a target.
+ * unreadable and denied.
+ *
+ * The tools that parse options with getopt read a bundle of short options the same way: the first
+ * letter that takes a value ends the bundle, with the rest of the word or else the next word as its
+ * value. In `ssh -vp 22 h.example` the target is `h.example`, not `22`; in `curl -sSo out.json` the
+ * file is not a target. An option that takes a value in one variant of a tool and none in another
+ * (`ping -n` on Windows and Linux, `nc -c` in ncat and OpenBSD nc) consumes the next word only when
+ * that word is not host-shaped, so the reading fails closed.
  *
  * Still not a boundary: a host in a variable, a file of targets (`nmap -iL hosts.txt`), a tool
  * not listed here, or a program that opens its own sockets passes. Pure and deterministic.
@@ -41,32 +47,67 @@ interface ToolSpec {
   values: string;
   /** Options whose value is a target. */
   target?: string;
+  /** Options that take a value in some variants of the tool and none in others. */
+  either?: string;
+  /** Short options whose value is optional and only ever attached (nmap's `-Pn`, `-sV`). */
+  inline?: string;
+  /** The tool reads a bundle of short options (`-vp 22`) as getopt does. */
+  bundles?: boolean;
+  /** The tool also takes its long options after one dash (nmap's `-script`, getopt_long_only). */
+  longOnly?: boolean;
 }
 
+/** nc, ncat and netcat. `-c`, `-C`, `-d` and `-Z` take a value in ncat or LibreSSL nc and none
+ *  in OpenBSD/Debian nc, so they are `either`. */
 const NC: ToolSpec = {
   take: "all",
+  bundles: true,
+  either: "-c -C -d -Z",
   values:
-    "-p -s -w -i -q -X -e -c -o -O -T -V -W -I -m -g -G --source --source-port --wait --exec --sh-exec --lua-exec --output --hex-dump --append-output --proxy-type --proxy-auth",
+    "-p -s -w -i -q -X -e -o -O -T -V -W -I -m -M -g -G -P -K -R -H --source --source-port --wait --exec --sh-exec --lua-exec --output --hex-dump --append-output --proxy-type --proxy-auth",
   target: "-x --proxy",
 };
-const PING: ToolSpec = { take: "all", values: "-c -i -I -W -w -s -t -l -p -Q -M -S -m -n" };
+/** iputils and BSD ping. Windows ping's `-n count` is `-n` (numeric output) elsewhere, and
+ *  macOS's `-b boundif` and `-h sweepincr` are flags in iputils, so those are `either`. */
+const PING: ToolSpec = {
+  take: "all",
+  bundles: true,
+  either: "-n -b -h",
+  values: "-c -i -I -W -w -s -t -T -l -p -Q -M -S -m -F -e -g -G -k -z -P",
+};
+/** nmap's getopt string is `46Ab:D:d::e:Ffg:hIi:M:m:nO::o:P::p:qRrS:s::T:Vv::`, read with
+ *  getopt_long_only, so `-oN`, `-iL` and `-script` are long options. */
 const NMAP: ToolSpec = {
   take: "all",
+  bundles: true,
+  longOnly: true,
+  inline: "-d -O -P -s -v",
   values:
-    "-p -oN -oX -oG -oA -oS -oM -iL -iR -e -S -D -g --script --script-args --exclude --excludefile --top-ports --max-retries --host-timeout --min-rate --max-rate --data-length --source-port --ttl --datadir --resume --stylesheet --proxies --dns-servers",
+    "-b -i -M -m -o -T -p -oN -oX -oG -oA -oS -oM -iL -iR -e -S -D -g --script --script-args --exclude --excludefile --top-ports --max-retries --host-timeout --min-rate --max-rate --data-length --source-port --ttl --datadir --resume --stylesheet --proxies --dns-servers",
 };
+/** OpenSSH: `1246ab:c:e:fgi:kl:m:no:p:qstvxAB:CD:E:F:GI:J:KL:MNO:P:Q:R:S:TVw:W:XYy`. */
 const SSH: ToolSpec = {
   take: "first",
-  values: "-b -c -D -E -e -F -I -i -L -l -m -O -o -p -Q -R -S -W -w -B",
+  bundles: true,
+  values: "-b -c -D -E -e -F -I -i -L -l -m -O -o -p -P -Q -R -S -W -w -B",
   target: "-J",
 };
-const SCP: ToolSpec = { take: "remote", values: "-c -F -i -l -o -P -S -X -D", target: "-J" };
+const SCP: ToolSpec = {
+  take: "remote",
+  bundles: true,
+  values: "-c -F -i -l -o -P -S -X -D",
+  target: "-J",
+};
 const SFTP: ToolSpec = {
   take: "first",
+  bundles: true,
   values: "-B -b -c -D -F -i -l -o -P -R -S -s -X",
   target: "-J",
 };
-const DNS: ToolSpec = { take: "all", values: "-b -c -f -k -p -q -t -x -y -N -R -W -m" };
+const DNS_VALUES = "-b -c -f -k -p -q -t -x -y -N -R -W -m";
+/** dig and host bundle short options; nslookup takes `-option=value` words and does not. */
+const DNS: ToolSpec = { take: "all", bundles: true, values: DNS_VALUES };
+const NSLOOKUP: ToolSpec = { take: "all", values: DNS_VALUES };
 const PS_TNC: ToolSpec = {
   take: "first",
   values:
@@ -84,12 +125,14 @@ const PS_WEB: ToolSpec = {
  *  `--data 10.0.0.5`, `--noproxy localhost`). A proxy (`-x`) is a network target, so it is read. */
 const CURL: ToolSpec = {
   take: "url",
+  bundles: true,
   values:
     "-o --output -T --upload-file -d --data --data-raw --data-binary --data-urlencode --data-ascii --json -H --header -F --form --form-string -A --user-agent -e --referer -u --user -b --cookie -c --cookie-jar -w --write-out -E --cert --key --cacert --capath -K --config -m --max-time --connect-timeout --retry --retry-delay --retry-max-time -X --request -r --range -z --time-cond -D --dump-header --trace --trace-ascii --stderr --noproxy --interface --local-port --dns-servers --dns-interface --dns-ipv4-addr --dns-ipv6-addr --haproxy-clientip --limit-rate -Y --speed-limit -y --speed-time --resolve --connect-to",
 };
 /** wget options that consume the next word as a value that is not a target. */
 const WGET: ToolSpec = {
   take: "url",
+  bundles: true,
   values:
     "-a --append-output -o --output-file -O --output-document -P --directory-prefix -U --user-agent -T --timeout -t --tries -w --wait -Q --quota -e --execute -i --input-file -l --level -D --domains -A --accept -R --reject -I --include-directories -X --exclude-directories --user --password --header --referer --post-data --post-file --body-data --body-file --method --certificate --private-key --ca-certificate --ca-directory --load-cookies --save-cookies --bind-address --exclude-domains",
 };
@@ -106,11 +149,13 @@ const TOOLS: Record<string, ToolSpec> = {
   ssh: SSH,
   scp: SCP,
   sftp: SFTP,
-  telnet: { take: "first", values: "-l -n -b -e -X" },
-  ftp: { take: "first", values: "" },
-  socat: { take: "socat", values: "-d -lf -lp" },
+  telnet: { take: "first", bundles: true, values: "-l -n -b -e -X" },
+  /** tnftp/BSD ftp: `-P port`, `-o output`, `-N netrc`, …; netkit and inetutils ftp take none. */
+  ftp: { take: "first", bundles: true, values: "-N -o -P -q -r -s -T -u" },
+  /** socat's `-d` raises the log level and takes no value; its options do not bundle. */
+  socat: { take: "socat", values: "-lf -lp -T -t -b -L -W" },
   dig: DNS,
-  nslookup: DNS,
+  nslookup: NSLOOKUP,
   host: DNS,
   openssl: { take: "named", values: "", target: "-connect -proxy" },
   "test-netconnection": PS_TNC,
@@ -173,32 +218,62 @@ function hasFlag(list: string | undefined, flag: string): boolean {
   return (list ?? "").split(" ").includes(flag);
 }
 
-/** Tools that read a bundle of short options (`-sSo`) as getopt does. */
-const BUNDLING = new Set(["curl", "wget"]);
+/** What an option does with the next word: consumes it as a value, reads it as a target,
+ *  consumes it unless it is host-shaped (`either`), takes only an attached value, or nothing. */
+type OptionKind = "value" | "target" | "either" | "inline" | "";
 
-/**
- * The letters of a short-option bundle that are options, and whether the last of them takes the
- * next word as its value. As in getopt, the first letter that takes a value ends the bundle: the
- * rest of the word is its value (`-sSoout.json`), or the next word is when nothing is left
- * (`-sSo out.json`).
- */
-function shortBundle(flag: string, values: string): { letters: string; takesNext: boolean } {
-  if (!/^-[A-Za-z0-9#:]+$/.test(flag)) return { letters: "", takesNext: false };
-  const body = flag.slice(1);
-  const k = [...body].findIndex((letter) => hasFlag(values, `-${letter}`));
-  if (k < 0) return { letters: body, takesNext: false };
-  return { letters: body.slice(0, k + 1), takesNext: k === body.length - 1 };
+function optionKind(spec: ToolSpec, flag: string): OptionKind {
+  if (hasFlag(spec.target, flag)) return "target";
+  if (hasFlag(spec.values, flag)) return "value";
+  if (hasFlag(spec.either, flag)) return "either";
+  if (hasFlag(spec.inline, flag)) return "inline";
+  return "";
 }
 
-/** Whether an option of `tool` consumes the next word as its value. */
-function takesValue(tool: string, spec: ToolSpec, flag: string): boolean {
-  if (hasFlag(spec.values, flag)) return true;
-  return BUNDLING.has(tool) && shortBundle(flag, spec.values).takesNext;
+/**
+ * A bundle of short options read as getopt does: the letters that are options (up to and
+ * including the first that takes a value), that option, and what is left of the word as its
+ * value, whatever it holds. `-sSo out.json` ends at `-o` with nothing left; `-4vp22` ends at `-p`
+ * with `22`; `-vJjump.example` ends at `-J` with `jump.example`.
+ */
+function shortBundle(
+  spec: ToolSpec,
+  flag: string,
+): { letters: string; end: string; rest: string } | null {
+  if (!spec.bundles || !/^-[A-Za-z0-9#:]/.test(flag)) return null;
+  const body = flag.slice(1);
+  const k = [...body].findIndex((letter) => optionKind(spec, `-${letter}`) !== "");
+  const letters = k < 0 ? body : body.slice(0, k + 1);
+  if (!/^[A-Za-z0-9#:]+$/.test(letters)) return null;
+  return k < 0
+    ? { letters, end: "", rest: "" }
+    : { letters, end: `-${body[k]}`, rest: body.slice(k + 1) };
+}
+
+/** The option an option word names and its attached value: the word itself (or its long form,
+ *  for a long-only tool), else the option that ends its short bundle. */
+function readOption(spec: ToolSpec, flag: string): { kind: OptionKind; rest: string } {
+  const exact = optionKind(spec, flag);
+  if (exact) return { kind: exact, rest: "" };
+  const long = spec.longOnly && /^-[a-z]{2,}/i.test(flag) ? optionKind(spec, `-${flag}`) : "";
+  if (long) return { kind: long, rest: "" };
+  const bundle = shortBundle(spec, flag);
+  return bundle?.end
+    ? { kind: optionKind(spec, bundle.end), rest: bundle.rest }
+    : { kind: "", rest: "" };
+}
+
+/** Whether an option consumes `next` as its value (a target value is consumed and read). */
+function consumesNext(spec: ToolSpec, flag: string, next: string | undefined): boolean {
+  const { kind, rest } = readOption(spec, flag);
+  if (rest || kind === "" || kind === "inline") return false;
+  if (kind === "either") return next !== undefined && bareTargetHost(next) === null;
+  return true;
 }
 
 /** Whether a curl/wget option consumes the next word as a value (extract.ts reads their domains). */
 export function fetchTakesValue(tool: string, flag: string): boolean {
-  return takesValue(tool, tool === "wget" ? WGET : CURL, flag);
+  return consumesNext(tool === "wget" ? WGET : CURL, flag, undefined);
 }
 
 /** Whether curl globs its URLs: `-g`/`--globoff` (alone or in a bundle) turns it off. */
@@ -207,8 +282,8 @@ function curlGlobs(args: readonly string[]): boolean {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--globoff" || arg === "--no-globoff") on = arg === "--no-globoff";
-    else if (shortBundle(arg, CURL.values).letters.includes("g")) on = false;
-    if (takesValue("curl", CURL, arg)) i++;
+    else if (shortBundle(CURL, arg)?.letters.includes("g")) on = false;
+    if (consumesNext(CURL, arg, args[i + 1])) i++;
   }
   return on;
 }
@@ -269,8 +344,9 @@ function targetWords(tool: string, spec: ToolSpec, args: readonly string[]): str
       continue;
     }
     const [flag, inline] = splitInline(ps ? raw.toLowerCase() : raw, ps);
-    if (hasFlag(spec.target, flag)) out.push(...(inline ?? args[++i] ?? "").split(","));
-    else if (inline === undefined && takesValue(tool, spec, flag)) i++;
+    const { kind, rest } = readOption(spec, flag);
+    if (kind === "target") out.push(...(inline ?? (rest || args[++i]) ?? "").split(","));
+    else if (inline === undefined && consumesNext(spec, flag, args[i + 1])) i++;
   }
   return out;
 }
