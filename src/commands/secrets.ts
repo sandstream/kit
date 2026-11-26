@@ -19,6 +19,7 @@ import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
 import { validateSecrets, summarizeValidation } from "../secrets-validate.js";
 import { planMigration, commentOutInFile, type PostMigrateMode } from "../secrets-migrate.js";
+import { formatEvidencedSecret } from "../finding-evidence.js";
 import { cmdSecretsRotate, pickBackendOpts } from "../secrets-rotate-cli.js";
 import {
   recordSecretWrite,
@@ -823,7 +824,7 @@ async function cmdSecretsMigrate(): Promise<boolean> {
         `${c.dim}Found ${plan.hits.length} suspicious file(s) but no migratable KEY=VALUE lines.${c.reset}`,
       );
       for (const hit of plan.hits) {
-        const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
+        const labels = hit.findings.map(formatEvidencedSecret).join(", ");
         console.log(`  ${c.dim}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
       }
       console.log(`${c.dim}Embedded secrets in scripts / JSON need manual extraction.${c.reset}\n`);

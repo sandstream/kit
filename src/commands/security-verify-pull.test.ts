@@ -53,3 +53,26 @@ it("the verify-pull command module returns failure for an uninspectable range", 
   assert.equal(report.coverage.status, "incomplete");
   assert.ok(report.errors.some((error: { code: string }) => error.code === "ref-unavailable"));
 });
+
+it("verify-pull JSON carries the location in the committed blob", (t) => {
+  const dir = repo(t);
+  const credential = ["sk_", "test_", "M".repeat(24)].join("");
+  write(dir, "config.ts", `// First line\n// ${credential}\n`);
+  commit(dir);
+  write(dir, "config.ts", "// Working copy\n");
+
+  const result = invokeCommand(dir, ["--base", "HEAD~1", "--json"]);
+  assert.equal(result.status, 1);
+  assert.equal(result.output.includes(credential), false);
+  const report = JSON.parse(result.output);
+  assert.deepEqual(report.plaintextHits[0].findings[0].evidence, {
+    file: "config.ts",
+    line: 2,
+    pattern: "stripe-key",
+  });
+
+  const text = invokeCommand(dir, ["--base", "HEAD~1"]);
+  assert.equal(text.status, 1);
+  assert.match(text.output, /config\.ts.*line 2 stripe-key/);
+  assert.equal(text.output.includes(credential), false);
+});

@@ -37,6 +37,7 @@ import { applyRecommendedHardening } from "../recommended.js";
 import { runStep } from "../output.js";
 import { detectStack } from "../stack-detector.js";
 import { scanPlaintextSecrets } from "../scan-plaintext.js";
+import { formatEvidencedSecret } from "../finding-evidence.js";
 import { detectSecretStore, vaultMeta } from "../vault-meta.js";
 import {
   generateToml,
@@ -542,7 +543,7 @@ async function warnPlaintextSecrets(): Promise<void> {
     `${c.red}⚠ Found ${totalFindings} plaintext secret(s) across ${plaintextHits.length} file(s):${c.reset}`,
   );
   for (const hit of plaintextHits) {
-    const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
+    const labels = hit.findings.map(formatEvidencedSecret).join(", ");
     console.log(`  ${c.dim}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
   }
   console.log(

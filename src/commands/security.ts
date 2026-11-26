@@ -506,7 +506,7 @@ function printTranscriptHits(hits: TranscriptHit[]): void {
     `${c.red}✗ scan-transcripts: ${total} potential secret(s) in ${hits.length} transcript/cache file(s):${c.reset}`,
   );
   for (const hit of hits.slice(0, 20)) {
-    const labels = hit.findings.map((f) => f.label).join(", ");
+    const labels = hit.findings.map(({ evidence: e }) => `line ${e.line} ${e.pattern}`).join(", ");
     console.error(
       `  ${c.red}•${c.reset} ${sanitizeDisplayText(hit.file)}  ${c.dim}${labels}${c.reset}`,
     );

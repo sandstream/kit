@@ -1,11 +1,11 @@
 import { readFile, readdir, access, stat, realpath } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { resolve, join, relative } from "node:path";
-import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
+import { locateSecretMatches, type EvidencedSecret } from "./finding-evidence.js";
 
 export interface PlaintextHit {
   file: string;
-  findings: SecretFinding[];
+  findings: EvidencedSecret[];
 }
 
 export interface PlaintextScanOptions {
@@ -114,7 +114,7 @@ export async function scanPlaintextSecrets(
     }
     try {
       const text = await readFile(realPath, "utf-8");
-      const findings = findSecrets(text);
+      const findings = locateSecretMatches(relativePath, text);
       if (findings.length > 0) {
         hits.push({ file: relativePath, findings });
       }
