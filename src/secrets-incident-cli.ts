@@ -9,7 +9,8 @@
  * Claude Code, Codex or a terminal.
  *
  * No value is printed, logged, audited or stored. Values exist only in memory, long enough to
- * HMAC them (`src/secrets-incident.ts`).
+ * HMAC them (`src/secrets-incident.ts`). The HMAC key lives per user, outside the repo tree
+ * (`src/secrets-incident-key.ts`); the snapshot holds only its id.
  */
 import { c } from "./utils/colors.js";
 import { flagValue, hasFlag } from "./utils/flags.js";
@@ -39,6 +40,14 @@ import {
   type Snapshot,
   type VerifyRow,
 } from "./secrets-incident.js";
+import {
+  createIncidentKey,
+  defaultIncidentKeyRoot,
+  incidentKeyId,
+  incidentKeyPath,
+  readIncidentKey,
+  resolveIncidentProject,
+} from "./secrets-incident-key.js";
 
 /** A vendor-CLI identity verdict. `unpinned` means no pin check ran (see {@link noCliPinCheck}). */
 export interface CliIdentityVerdict {
@@ -104,6 +113,8 @@ export async function resolveCliSource(backend: string): Promise<CliSource> {
 
 export interface IncidentDeps {
   cwd: string;
+  /** Per-user directory holding HMAC keys (`~/.kit/incident-keys`); never inside a project. */
+  keyRoot: string;
   read: (name: string, cfg: SecretKeyConfig, config: kitConfig) => Promise<string | null>;
   resolveCli: (backend: string) => Promise<CliSource>;
   checkCliIdentity: CliIdentityCheck;
@@ -121,6 +132,7 @@ async function readThroughBackend(name: string, cfg: SecretKeyConfig, config: ki
 export function defaultIncidentDeps(cwd: string = process.cwd()): IncidentDeps {
   return {
     cwd,
+    keyRoot: defaultIncidentKeyRoot(),
     read: readThroughBackend,
     resolveCli: resolveCliSource,
     checkCliIdentity: noCliPinCheck,
@@ -260,6 +272,44 @@ const OUTCOME_STYLE: Record<VerifyRow["outcome"], string> = {
   "no-baseline": `${c.red}✗ no baseline (unreadable at snapshot): not verified${c.reset}`,
 };
 
+type KeyResult = { ok: true; key: Buffer } | { ok: false; reason: string };
+
+/** The per-user key for a snapshot. Every problem is a reason, never a re-key. */
+async function snapshotKey(
+  backend: string,
+  snapshot: Snapshot,
+  deps: IncidentDeps,
+): Promise<KeyResult> {
+  try {
+    const project = await resolveIncidentProject(deps.cwd);
+    const key = await readIncidentKey(deps.keyRoot, project, backend);
+    const id = incidentKeyId(key);
+    if (id !== snapshot.keyId) {
+      return {
+        ok: false,
+        reason: `incident key id ${id} does not match the snapshot's ${snapshot.keyId}`,
+      };
+    }
+    return { ok: true, key };
+  } catch (error) {
+    return { ok: false, reason: (error as Error).message };
+  }
+}
+
+async function refuseVerify(
+  backend: string,
+  names: string[],
+  reason: string,
+  deps: IncidentDeps,
+): Promise<false> {
+  deps.err(`${c.red}✗ Snapshot refused: ${reason}.${c.reset}`);
+  deps.err(
+    `${c.dim}Nothing was compared. Take a fresh one only if you know why: kit secrets incident ${backend} --new-snapshot${c.reset}`,
+  );
+  await audit(deps, false, { backend, names, action: "verify" }, `snapshot refused: ${reason}`);
+  return false;
+}
+
 async function runVerify(
   backend: string,
   entries: InventoryEntry[],
@@ -268,22 +318,12 @@ async function runVerify(
 ): Promise<boolean> {
   const names = entries.map((e) => e.name);
   const loaded = await loadSnapshot(snapshotPath(deps.cwd, backend), backend, names);
-  if (!loaded.ok) {
-    deps.err(`${c.red}✗ Snapshot refused: ${loaded.reason}.${c.reset}`);
-    deps.err(
-      `${c.dim}Nothing was compared. Take a fresh one only if you know why: kit secrets incident ${backend} --new-snapshot${c.reset}`,
-    );
-    await audit(
-      deps,
-      false,
-      { backend, names, action: "verify" },
-      `snapshot refused: ${loaded.reason}`,
-    );
-    return false;
-  }
+  if (!loaded.ok) return refuseVerify(backend, names, loaded.reason, deps);
+  const keyed = await snapshotKey(backend, loaded.snapshot, deps);
+  if (!keyed.ok) return refuseVerify(backend, names, keyed.reason, deps);
   const src = await reportCliSource(backend, deps, loaded.snapshot.cli);
   if (!src.ok) return false;
-  const rows = compareSnapshot(loaded.snapshot, await readValues(entries, config, deps));
+  const rows = compareSnapshot(loaded.snapshot, keyed.key, await readValues(entries, config, deps));
   deps.out(`\n${c.bold}Verify against snapshot of ${loaded.snapshot.createdAt}${c.reset}`);
   for (const r of rows) deps.out(`  ${r.name}  ${OUTCOME_STYLE[r.outcome]}`);
   const ok = allChanged(rows);
@@ -319,19 +359,78 @@ async function takeSnapshot(
   }
   const src = await reportCliSource(backend, deps);
   if (!src.ok) return false;
+  const names = entries.map((e) => e.name);
+  const keyed = await newSnapshotKey(backend, replaced, deps);
+  if (!keyed.ok) {
+    deps.err(`${c.red}✗ No snapshot taken: ${keyed.reason}.${c.reset}`);
+    await audit(deps, false, { backend, names, action: "snapshot", replaced }, keyed.reason);
+    return false;
+  }
   const values = await readValues(entries, config, deps);
-  const snapshot: Snapshot = buildSnapshot(backend, values, src.cli.path);
+  const snapshot: Snapshot = buildSnapshot(backend, values, src.cli.path, keyed.key);
   await writeSnapshot(path, snapshot);
   const unreadable = snapshot.keys.filter((k) => k.fingerprint === null).map((k) => k.name);
   deps.out(`\n${c.green}✓ Fingerprint snapshot written:${c.reset} ${path}`);
+  deps.out(`${c.dim}HMAC key (per user, outside the repo): ${keyed.path}${c.reset}`);
   if (unreadable.length) {
     deps.out(
       `${c.yellow}⚠ unreadable now, so they can never verify: ${unreadable.join(", ")}${c.reset}`,
     );
   }
   deps.out(`${c.dim}After rotating: kit secrets incident ${backend} --verify${c.reset}`);
+  return audit(deps, true, {
+    backend,
+    names,
+    action: "snapshot",
+    replaced,
+    unreadable,
+    // Not "key_id": audit redacts any metadata name containing "key".
+    hmac_id: snapshot.keyId,
+  });
+}
+
+/** Create the snapshot's key. Only `--new-snapshot` (`replaced`) may replace an existing key. */
+async function newSnapshotKey(
+  backend: string,
+  replaced: boolean,
+  deps: IncidentDeps,
+): Promise<(KeyResult & { ok: false }) | { ok: true; key: Buffer; path: string }> {
+  try {
+    const project = await resolveIncidentProject(deps.cwd);
+    const key = await createIncidentKey(deps.keyRoot, project, backend, replaced);
+    return { ok: true, key, path: incidentKeyPath(deps.keyRoot, project.id, backend) };
+  } catch (error) {
+    return { ok: false, reason: (error as Error).message };
+  }
+}
+
+/** No flag: keep a usable snapshot, take the first one, refuse anything in between. */
+async function snapshotOnce(
+  backend: string,
+  entries: InventoryEntry[],
+  config: kitConfig,
+  deps: IncidentDeps,
+): Promise<boolean> {
+  const path = snapshotPath(deps.cwd, backend);
   const names = entries.map((e) => e.name);
-  return audit(deps, true, { backend, names, action: "snapshot", replaced, unreadable });
+  const existing = await loadSnapshot(path, backend, names);
+  const keyed = existing.ok ? await snapshotKey(backend, existing.snapshot, deps) : null;
+  if (keyed && !keyed.ok) {
+    deps.err(`${c.red}✗ Existing snapshot cannot be verified: ${keyed.reason}.${c.reset}`);
+    deps.err(`${c.dim}It was not replaced. Pass --new-snapshot to replace it (audited).${c.reset}`);
+    return false;
+  }
+  if (existing.ok) {
+    deps.out(`${c.dim}Snapshot of ${existing.snapshot.createdAt} kept (${path}).${c.reset}`);
+    deps.out(`${c.dim}Verify: --verify. Replace it (audited): --new-snapshot.${c.reset}`);
+    return true;
+  }
+  if (existing.reason !== "no snapshot on file") {
+    deps.err(`${c.red}✗ Existing snapshot refused: ${existing.reason}.${c.reset}`);
+    deps.err(`${c.dim}It was not replaced. Pass --new-snapshot to replace it (audited).${c.reset}`);
+    return false;
+  }
+  return takeSnapshot(backend, entries, config, deps, false);
 }
 
 /** `kit secrets incident <backend> [--verify] [--new-snapshot]`. */
@@ -354,20 +453,7 @@ export async function runSecretsIncident(
   printPlan(backend, entries, deps);
   if (hasFlag(args, "--verify")) return runVerify(backend, entries, config, deps);
   if (hasFlag(args, "--new-snapshot")) return takeSnapshot(backend, entries, config, deps, true);
-  const path = snapshotPath(deps.cwd, backend);
-  const names = entries.map((e) => e.name);
-  const existing = await loadSnapshot(path, backend, names);
-  if (existing.ok) {
-    deps.out(`${c.dim}Snapshot of ${existing.snapshot.createdAt} kept (${path}).${c.reset}`);
-    deps.out(`${c.dim}Verify: --verify. Replace it (audited): --new-snapshot.${c.reset}`);
-    return true;
-  }
-  if (existing.reason !== "no snapshot on file") {
-    deps.err(`${c.red}✗ Existing snapshot refused: ${existing.reason}.${c.reset}`);
-    deps.err(`${c.dim}It was not replaced. Pass --new-snapshot to replace it (audited).${c.reset}`);
-    return false;
-  }
-  return takeSnapshot(backend, entries, config, deps, false);
+  return snapshotOnce(backend, entries, config, deps);
 }
 
 /** `kit secrets list` / `kit secrets incident`, routed from `src/commands/secrets.ts`. */

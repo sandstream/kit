@@ -1,12 +1,14 @@
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -21,6 +23,7 @@ import {
   type IncidentDeps,
 } from "./secrets-incident-cli.js";
 import { snapshotPath } from "./secrets-incident.js";
+import { incidentKeyPath, isInsideTree, resolveIncidentProject } from "./secrets-incident-key.js";
 import { patchGitignore } from "./check-gitignore.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -45,6 +48,15 @@ const CONFIG = configFor({
   INLINE_SETTING: { source: "config", value: INLINE },
 });
 
+// Per-user key homes live outside every test project, as ~/.kit/incident-keys does.
+const KEY_HOMES = realpathSync(mkdtempSync(join(tmpdir(), "kit-incident-home-")));
+let keyHomes = 0;
+after(() => rmTemp(KEY_HOMES));
+
+function freshKeyRoot(): string {
+  return join(KEY_HOMES, String(++keyHomes), ".kit", "incident-keys");
+}
+
 function tempProject(gitignore = ".kit/*\n.kit-audit.jsonl\n"): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "kit-incident-")));
   execFileSync("git", ["init", "-q"], { cwd: dir });
@@ -52,7 +64,7 @@ function tempProject(gitignore = ".kit/*\n.kit-audit.jsonl\n"): string {
   return dir;
 }
 
-function harness(cwd: string, check?: CliIdentityCheck) {
+function harness(cwd: string, check?: CliIdentityCheck, keyRoot = freshKeyRoot()) {
   const vault = new Map<string, string>([
     ["STRIPE_SECRET_KEY", OLD_A],
     ["ALPHA_TOKEN", OLD_B],
@@ -60,6 +72,7 @@ function harness(cwd: string, check?: CliIdentityCheck) {
   const lines: string[] = [];
   const deps: IncidentDeps = {
     cwd,
+    keyRoot,
     read: async (name) => vault.get(name) ?? null,
     resolveCli: async () => ({ tool: "fakevault", path: FAKE_CLI, label: FAKE_CLI }),
     checkCliIdentity: check ?? (async () => ({ state: "unpinned", detail: "test" })),
@@ -69,10 +82,20 @@ function harness(cwd: string, check?: CliIdentityCheck) {
   return { deps, vault, lines };
 }
 
-function assertNoValues(cwd: string, lines: string[]): void {
+/** Every regular file under `dir`, recursively (skipping .git). */
+function filesUnder(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    if (e.name === ".git") return [];
+    const path = join(dir, e.name);
+    return e.isDirectory() ? filesUnder(path) : e.isFile() ? [path] : [];
+  });
+}
+
+function assertNoValues(cwd: string, lines: string[], keyRoot?: string): void {
   const blobs = [lines.join("\n")];
-  for (const f of [snapshotPath(cwd, "1password"), join(cwd, ".kit-audit.jsonl")]) {
-    if (existsSync(f)) blobs.push(readFileSync(f, "utf8"));
+  for (const f of [...filesUnder(cwd), ...(keyRoot ? filesUnder(keyRoot) : [])]) {
+    blobs.push(readFileSync(f, "utf8"));
   }
   for (const blob of blobs) for (const v of ALL_FAKES) assert.ok(!blob.includes(v), `leaked ${v}`);
 }
@@ -230,11 +253,12 @@ describe("kit secrets incident", () => {
         join(cwd, ".kit.toml"),
         '[secrets]\nstore = "env"\n[secrets.keys]\nKIT_TEST_INCIDENT_A = { source = "env" }\n',
       );
+      const home = join(KEY_HOMES, "e2e");
       const run = (args: string[], value: string) =>
         spawnSync(process.execPath, [CLI, "secrets", ...args], {
           cwd,
           encoding: "utf8",
-          env: { ...process.env, HOME: cwd, USERPROFILE: cwd, KIT_TEST_INCIDENT_A: value },
+          env: { ...process.env, HOME: home, USERPROFILE: home, KIT_TEST_INCIDENT_A: value },
         });
       const list = run(["list", "--backend", "env", "--json"], OLD_A);
       assert.equal(list.status, 0, list.stderr);
@@ -247,6 +271,161 @@ describe("kit secrets incident", () => {
       const out = [list, same, changed].map((r) => r.stdout + r.stderr).join("\n");
       for (const v of ALL_FAKES) assert.ok(!out.includes(v));
       assert.ok(!readFileSync(snapshotPath(cwd, "env"), "utf8").includes(OLD_A));
+    } finally {
+      rmTemp(cwd);
+    }
+  });
+});
+
+describe("kit secrets incident: the HMAC key stays outside the repo", () => {
+  async function keyFile(cwd: string, keyRoot: string): Promise<string> {
+    const project = await resolveIncidentProject(cwd);
+    return incidentKeyPath(keyRoot, project.id, "1password");
+  }
+
+  it("keeps no key in the repo tree: the snapshot holds only a key id", async () => {
+    const cwd = tempProject();
+    try {
+      const h = harness(cwd);
+      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), true);
+      const path = await keyFile(cwd, h.deps.keyRoot);
+      assert.ok(existsSync(path), "key written to the per-user root");
+      assert.equal(isInsideTree(path, cwd), false, "key file is outside the repo");
+      const keyHex = readFileSync(path, "utf8").trim();
+      const key = Buffer.from(keyHex, "hex");
+      const snap = JSON.parse(readFileSync(snapshotPath(cwd, "1password"), "utf8"));
+      assert.equal(snap.hmacKey, undefined);
+      assert.match(snap.keyId, /^ik_[0-9a-f]{32}$/);
+      for (const f of filesUnder(cwd)) {
+        const text = readFileSync(f, "utf8");
+        for (const enc of ["hex", "base64"] as const) {
+          assert.ok(!text.includes(key.toString(enc)), `key material in ${f}`);
+        }
+      }
+      assertNoValues(cwd, h.lines, h.deps.keyRoot);
+    } finally {
+      rmTemp(cwd);
+    }
+  });
+
+  it("refuses a key root inside the repo and writes nothing", async () => {
+    const cwd = tempProject();
+    try {
+      const h = harness(cwd, undefined, join(cwd, ".kit", "incident-keys"));
+      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), false);
+      assert.ok(h.lines.some((l) => l.includes("inside the project")));
+      assert.equal(existsSync(snapshotPath(cwd, "1password")), false);
+      assert.equal(existsSync(join(cwd, ".kit", "incident-keys")), false);
+    } finally {
+      rmTemp(cwd);
+    }
+  });
+
+  it("a snapshot file alone, without the user's key, cannot verify", async () => {
+    const cwd = tempProject();
+    try {
+      const h = harness(cwd);
+      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), true);
+      // Another user, machine or restored backup: the snapshot is here, the key is not.
+      const other = harness(cwd);
+      other.vault.set("STRIPE_SECRET_KEY", NEW_A);
+      other.vault.set("ALPHA_TOKEN", "fakenew-bravo-x");
+      assert.equal(await runSecretsIncident(["1password", "--verify"], CONFIG, other.deps), false);
+      assert.ok(other.lines.some((l) => l.includes("incident key missing")));
+      assert.ok(!other.lines.some((l) => l.includes("changed")), "nothing was compared");
+      assert.equal(existsSync(await keyFile(cwd, other.deps.keyRoot)), false, "never re-keys");
+      const refused = auditRows(cwd).filter((r) => r.metadata.action === "verify");
+      assert.equal(refused.at(-1)!.success, false);
+    } finally {
+      rmTemp(cwd);
+    }
+  });
+
+  it("refuses a missing key on --verify and on a plain run, and never re-keys", async () => {
+    const cwd = tempProject();
+    try {
+      const h = harness(cwd);
+      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), true);
+      const path = await keyFile(cwd, h.deps.keyRoot);
+      rmSync(path);
+      assert.equal(await runSecretsIncident(["1password", "--verify"], CONFIG, h.deps), false);
+      assert.ok(h.lines.some((l) => l.includes("incident key missing")));
+      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), false);
+      assert.equal(existsSync(path), false, "a plain run does not create a replacement key");
+      // A stale key with no snapshot is not silently replaced either.
+      rmSync(snapshotPath(cwd, "1password"));
+      writeFileSync(path, `${"ab".repeat(32)}\n`, { mode: 0o600 });
+      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), false);
+      assert.ok(h.lines.some((l) => l.includes("already exists")));
+      assert.equal(readFileSync(path, "utf8").trim(), "ab".repeat(32));
+    } finally {
+      rmTemp(cwd);
+    }
+  });
+
+  it(
+    "refuses a key file other users can read",
+    {
+      skip:
+        process.platform === "win32" &&
+        "POSIX mode bits; Windows uses the ACL check in secure-perms",
+    },
+    async () => {
+      const cwd = tempProject();
+      try {
+        const h = harness(cwd);
+        assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), true);
+        const path = await keyFile(cwd, h.deps.keyRoot);
+        assert.equal(statSync(path).mode & 0o777, 0o600);
+        assert.equal(statSync(h.deps.keyRoot).mode & 0o777, 0o700);
+        chmodSync(path, 0o640);
+        assert.equal(await runSecretsIncident(["1password", "--verify"], CONFIG, h.deps), false);
+        assert.ok(h.lines.some((l) => l.includes("not owner-only")));
+      } finally {
+        rmTemp(cwd);
+      }
+    },
+  );
+
+  it("refuses a key whose id differs from the snapshot's; --new-snapshot re-keys, audited", async () => {
+    const cwd = tempProject();
+    try {
+      const h = harness(cwd);
+      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), true);
+      const path = await keyFile(cwd, h.deps.keyRoot);
+      const first = JSON.parse(readFileSync(snapshotPath(cwd, "1password"), "utf8")).keyId;
+      writeFileSync(path, `${"cd".repeat(32)}\n`);
+      assert.equal(await runSecretsIncident(["1password", "--verify"], CONFIG, h.deps), false);
+      assert.ok(h.lines.some((l) => l.includes("does not match the snapshot's")));
+
+      assert.equal(await runSecretsIncident(["1password", "--new-snapshot"], CONFIG, h.deps), true);
+      const second = JSON.parse(readFileSync(snapshotPath(cwd, "1password"), "utf8")).keyId;
+      assert.notEqual(second, first);
+      const rekey = auditRows(cwd).filter((r) => r.metadata.replaced === true);
+      assert.equal(rekey.length, 1, "--new-snapshot writes one audit row");
+      assert.equal(rekey[0]!.success, true);
+      assert.equal(rekey[0]!.metadata.hmac_id, second);
+      // The new pair verifies again (values unchanged, so false, but compared, not refused).
+      h.lines.length = 0;
+      assert.equal(await runSecretsIncident(["1password", "--verify"], CONFIG, h.deps), false);
+      assert.ok(h.lines.some((l) => l.includes("unchanged")));
+      assertNoValues(cwd, h.lines, h.deps.keyRoot);
+    } finally {
+      rmTemp(cwd);
+    }
+  });
+
+  it("refuses a v1 snapshot that carries its key inline", async () => {
+    const cwd = tempProject();
+    try {
+      const h = harness(cwd);
+      assert.equal(await runSecretsIncident(["1password"], CONFIG, h.deps), true);
+      const path = snapshotPath(cwd, "1password");
+      const snap = JSON.parse(readFileSync(path, "utf8"));
+      delete snap.keyId;
+      writeFileSync(path, JSON.stringify({ ...snap, version: 1, hmacKey: "AAAA" }));
+      assert.equal(await runSecretsIncident(["1password", "--verify"], CONFIG, h.deps), false);
+      assert.ok(h.lines.some((l) => l.includes("format v1")));
     } finally {
       rmTemp(cwd);
     }
