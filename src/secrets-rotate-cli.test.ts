@@ -57,3 +57,31 @@ describe("buildPlaybook", () => {
     assert.ok(aws.revokeStep);
   });
 });
+
+describe("Stripe playbook (kit-research#232)", () => {
+  const now = new Date("2026-11-26T09:08:07.654Z");
+  const lines = (): string[] => {
+    const pb = buildPlaybook("STRIPE_SECRET_KEY", now);
+    return [...pb.steps, pb.revokeStep ?? ""];
+  };
+
+  it("prints a literal timestamp kit computed, with nothing for a shell to expand", () => {
+    const all = lines().join("\n");
+    assert.ok(all.includes("kit-rotated-2026-11-26T09:08:07Z"), all);
+    assert.doesNotMatch(all, /\$\(|`|%F/);
+  });
+
+  it("does not print `stripe api_keys`, which the Stripe CLI does not have", () => {
+    assert.doesNotMatch(lines().join("\n"), /stripe api_keys/);
+    // Every step is guidance (a comment), not a shell command to paste.
+    for (const step of buildPlaybook("STRIPE_SECRET_KEY", now).steps) {
+      assert.ok(step.startsWith("#"), step);
+    }
+  });
+
+  it("points at Stripe's Dashboard rotation docs", () => {
+    const pb = buildPlaybook("STRIPE_SECRET_KEY", now);
+    assert.equal(pb.docsUrl, "https://docs.stripe.com/keys#rotate-an-api-key");
+    assert.ok(pb.steps.some((step) => step === "#   https://dashboard.stripe.com/apikeys"));
+  });
+});

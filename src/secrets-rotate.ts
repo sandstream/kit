@@ -7,10 +7,10 @@ import type { SecretsConfig } from "./config.js";
  * shared-secrets, generic API tokens). Returns base64url so the value is
  * safe to embed in headers, env vars, and shell-pipe inputs.
  *
- * For services with a native rotation API (Stripe `roll-keys`, AWS IAM
- * `create-access-key`, GCP service-account-key-create), prefer the
- * service-specific flow in PR R3 — that's the only way to get a key the
- * service will recognize. This helper is only for opaque secrets.
+ * For services that mint their own keys (Stripe, AWS IAM, GCP IAM, GitHub,
+ * OpenAI), use `kit secrets rotate <KEY> --from-cli`, which prints the
+ * provider's steps; that is the only way to get a key the service will
+ * recognize. This helper is only for opaque secrets.
  */
 export function generateRandomToken(byteLength = 32): string {
   return randomBytes(byteLength).toString("base64url");
@@ -31,7 +31,8 @@ export interface RotationPlan {
  * - `--value <v>`     explicit new value
  * - `--random [N]`    generate a fresh base64url token (N bytes, default 32)
  *
- * Per-service rotation (Stripe / AWS IAM / GCP IAM) is deferred to PR R3.
+ * Provider-minted keys take `--from-cli` (see secrets-rotate-cli.ts) and then
+ * come back here through `--value`.
  */
 export function planRotation(
   key: string,
@@ -57,7 +58,9 @@ export function planRotation(
   } else {
     return {
       error:
-        "Provide --value <new> (explicit) or --random [N] (generate fresh). Per-service rotation (Stripe/AWS IAM/GCP) coming in PR R3.",
+        `Provide --value <new> (explicit) or --random [N] (generate fresh). ` +
+        `For a provider-minted key (Stripe, AWS IAM, GCP IAM, GitHub PAT, OpenAI), ` +
+        `run \`kit secrets rotate ${key} --from-cli\` for the provider's steps, then pass the new key with --value.`,
     };
   }
 
