@@ -823,6 +823,21 @@ def main(argv):
     return 0
 
 
+def _utf8_stdio():
+    """Write UTF-8 whatever the console or pipe encoding is.
+
+    On Windows a piped stdout uses the ANSI code page (cp1252 and the like), so printing a
+    path such as `payments` spelt with a Cyrillic a raised UnicodeEncodeError after the scan had
+    run, and no verdict line was printed. kit decodes the output as UTF-8.
+    `backslashreplace` keeps any character that still cannot be written visible as an escape.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)  # TextIOWrapper, Python 3.7+
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 if __name__ == "__main__":
     import urllib.parse  # noqa: E402  (kept local to module load is fine)
+    _utf8_stdio()
     sys.exit(main(sys.argv[1:]))
