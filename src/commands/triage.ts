@@ -36,6 +36,7 @@ const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> =
     (await import("./triage-instructions.js")).cmdTriageInstructions(args),
   prompt: async (args) => (await import("../triage-prompt.js")).cmdTriagePrompt(args),
   pkg: async (args) => (await import("./triage-pkg.js")).cmdTriagePkg(args),
+  release: async (args) => (await import("./triage-release-asset.js")).cmdTriageRelease(args),
   gem: async (args) => (await import("./triage-gem.js")).cmdTriageGem(args),
   cargo: async (args) => (await import("./triage-release.js")).cmdTriageCargo(args),
   go: async (args) => (await import("./triage-release.js")).cmdTriageGo(args),
@@ -74,6 +75,7 @@ export const TRIAGE_TYPES = [
   "instructions",
   "prompt",
   "pkg",
+  "release",
   "plugin",
   "vault-config",
   "all",
@@ -103,6 +105,7 @@ const HELP_ROWS = [
   "  kit triage instructions [path]       Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks",
   '  kit triage prompt "<text>"|-        Read a pasted install prompt (or stdin) for planted attacks, URLs and repos; fetches nothing',
   "  kit triage pkg <file.pkg>            Check a macOS installer: checksum, publisher Team ID, notarization (macOS)",
+  "  kit triage release <url|file>        Check a prebuilt release archive or binary: checksum, signature, age, repository, members",
 ];
 
 function printTriageHelp(): void {

@@ -370,6 +370,7 @@
     "triage pkg",
     "triage plugin",
     "triage prompt",
+    "triage release",
     "triage repo",
     "triage skill",
     "triage tools",
