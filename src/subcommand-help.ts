@@ -107,6 +107,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "security scan-transcripts": "Scan agent transcripts + prompt caches for leaked credentials",
   "security scan-outbound":
     "Fail when outbound text (a PR body, commit message or release note; a file or - for stdin) repeats a private agent instruction file: untracked or ignored instruction files in the repo and the user-level ones of Claude Code (~/.claude) and Codex ($CODEX_HOME or ~/.codex). Character n-gram overlap, no model; text also in a tracked instruction file is not a leak. Prints the span, file and line, never the file. kit security scan-outbound <file|-> [--min-chars <n>, default 40] [--json]",
+  "security routes":
+    "Inventory, not a verdict: list Express, Fastify, Hono, Next.js and SvelteKit routes whose path has an id parameter or names admin, login, signup, register, reset or password, or whose file imports an AI SDK, with the auth guard and rate limiter names seen. IDOR and rate limits are not decided statically; exits 0. kit security routes [--json]",
   "security costs": "Snapshot per-key spend vs policy cap (Stripe live; others stubbed)",
   "security check-gitignore": "Verify .gitignore covers sensitive paths (--fix to auto-patch)",
   "security verify-pull": "After git pull: audit new deps, gitignore drops, introduced secrets",
