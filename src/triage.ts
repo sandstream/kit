@@ -30,6 +30,7 @@ export const TRIAGE_SCRIPTS = [
   "scripts/triage.py",
   "scripts/skill_scan.py",
   "scripts/plugin_scan.py",
+  "scripts/skill_name.py",
   "scripts/docker_scan.py",
   "scripts/docker_label.py",
   "scripts/npm_hooks.py",

@@ -269,8 +269,19 @@ def frontmatter_hooks(rep, rel, text):
         _scan_script(rep, f"{rel} frontmatter {event} command", command)
 
 
+def _skill_name():
+    """skill_name.py from this file's own directory, loaded by path, as skill_scan.py loads this one."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skill_name.py")
+    spec = importlib.util.spec_from_file_location("kit_skill_name", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _skill_frontmatter(rep, rel, text):
     frontmatter_hooks(rep, rel, text)
+    _skill_name().judge(rep, f"{rel}: ", text, rel.split("/")[-2] if "/" in rel else "")
     head = text[:400]
     if not head.lstrip().startswith("---"):
         rep.critical(f"{rel}: no YAML frontmatter (--- ... ---)")

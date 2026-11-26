@@ -24,9 +24,13 @@ FILE_LIMIT = 1_000_000  # bytes; a larger file is reported unread, never skipped
 
 def _plugin_scan():
     """plugin_scan.py from this file's own directory, loaded by path (see triage.py's _skill_scan)."""
+    return _sibling("plugin_scan.py")
+
+
+def _sibling(name):
     import importlib.util
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugin_scan.py")
-    spec = importlib.util.spec_from_file_location("kit_plugin_scan", path)
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+    spec = importlib.util.spec_from_file_location("kit_" + name[:-3], path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -315,6 +319,9 @@ def _triage_skill_file(rep, path, scan_dir, label):
         keys = set()
     if "name" not in keys:
         rep.warn(f"{label}frontmatter missing 'name:'")
+    else:
+        folder = os.path.basename(os.path.dirname(os.path.abspath(path)))
+        _sibling("skill_name.py").judge(rep, label, text, folder)
     if "description" not in keys:
         rep.warn(f"{label}frontmatter missing 'description:'")
     _secrets_in(rep, f"{label}skill body", text)
