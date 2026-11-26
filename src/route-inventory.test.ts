@@ -74,3 +74,12 @@ describe("buildRouteInventory", () => {
     assert.equal(none.totalRoutes, 0);
   });
 });
+
+it("reports files that cannot be read within the route inventory limits", () => {
+  const inv = inventory({
+    "package.json/not-a-config": "",
+    "app/admin/page.tsx": "",
+    "src/oversized.ts": " ".repeat(1024 * 1024 + 1),
+  });
+  assert.deepEqual(inv.notRead.sort(), ["package.json", "src/oversized.ts"]);
+});

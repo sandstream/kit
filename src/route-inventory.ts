@@ -13,10 +13,10 @@
  * files and in docs/FEATURES.md.
  */
 
-import { readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 
 import { walkSourceFiles } from "./source-walk.js";
+import { readRegularFileBytesIfPresent } from "./upstream-safe-read.js";
 import { callRoutes, type RawRoute } from "./route-inventory-calls.js";
 import { fileRoute, guardFileCandidates, type FileRoute } from "./route-inventory-files.js";
 import {
@@ -86,10 +86,10 @@ function makeReader(root: string, notRead: string[]): Reader {
     let text: string | null = null;
     try {
       const full = join(root, ...rel.split("/"));
-      if (statSync(full).size > MAX_BYTES) notRead.push(rel);
-      else text = readFileSync(full, "utf8");
+      const bytes = readRegularFileBytesIfPresent(full, MAX_BYTES);
+      text = bytes?.toString("utf8") ?? null;
     } catch {
-      text = null;
+      notRead.push(rel);
     }
     cache.set(rel, text);
     return text;
