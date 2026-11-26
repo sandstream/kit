@@ -1,14 +1,20 @@
 import {
-  findSecrets,
+  findSecretMatches,
   SECRET_PATTERNS,
   shannonEntropy,
-  type SecretFinding,
+  type SecretMatch,
 } from "./utils/redactSecrets.js";
+
+import {
+  findingEvidenceSchema,
+  locateSecretMatches,
+  type EvidencedSecret,
+} from "./finding-evidence.js";
 
 export class ArtifactIncompleteError extends Error {
   constructor(
     message: string,
-    readonly findings: SecretFinding[],
+    readonly findings: EvidencedSecret[],
   ) {
     super(message);
   }
@@ -34,8 +40,8 @@ const UNSAFE_RAW_LABELS = new Set([
 const OPAQUE_MIN_LENGTH = 20;
 const OPAQUE_MIN_ENTROPY = 4.2;
 
-function findBuildSecrets(content: string): SecretFinding[] {
-  const findings = findSecrets(content).filter(
+export function findBuildMatches(content: string): SecretMatch[] {
+  const findings = findSecretMatches(content).filter(
     (finding) =>
       !BUILD_IRRELEVANT_LABELS.has(finding.label) && !BUILD_GENERIC_LABELS.has(finding.label),
   );
@@ -48,11 +54,44 @@ function findBuildSecrets(content: string): SecretFinding[] {
       const value =
         label === "keyed-secret" ? (match[3] ?? match[2]) : match[0].slice(match[1].length);
       if (value.length < OPAQUE_MIN_LENGTH || shannonEntropy(value) < OPAQUE_MIN_ENTROPY) continue;
-      findings.push({ label, preview: "[REDACTED]" });
+      findings.push({ label, preview: "[REDACTED]", offset: match.index });
     }
   }
 
   return findings;
+}
+
+function lineAt(text: string): (offset: number) => number {
+  const starts = [0];
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) starts.push(i + 1);
+  return (offset) => {
+    let from = 0;
+    let to = starts.length;
+    while (from + 1 < to) {
+      const mid = Math.floor((from + to) / 2);
+      if (starts[mid] <= offset) from = mid;
+      else to = mid;
+    }
+    return from + 1;
+  };
+}
+
+type ScanToken = (text: string, offset: number) => void;
+
+/** A decoded match lies inside one JSON string token on the physical map line. */
+function scanMapToken(content: string, file: string, findings: EvidencedSecret[]): ScanToken {
+  let locate: ((offset: number) => number) | undefined;
+  return (text, tokenOffset) => {
+    for (const { label, preview } of findBuildMatches(text)) {
+      locate ??= lineAt(content);
+      const evidence = findingEvidenceSchema.parse({
+        file,
+        line: locate(tokenOffset),
+        pattern: label,
+      });
+      findings.push({ label, preview, evidence });
+    }
+  };
 }
 
 type SourceRange = { start: number; end: number };
@@ -61,7 +100,7 @@ function readSourceArray(
   content: string,
   start: number,
   budget: SourceBudget,
-  findings: SecretFinding[],
+  scan: ScanToken,
 ): number | undefined {
   const strings = /"(?:\\.|[^"\\])*"/g;
   let cursor = start;
@@ -78,7 +117,7 @@ function readSourceArray(
       const decoded = JSON.parse(source[0]) as string;
       // No current credential or personal-number pattern can match fewer than eight characters.
       if (decoded.length >= 8) {
-        for (const finding of findBuildSecrets(decoded)) findings.push(finding);
+        scan(decoded, cursor);
       }
       cursor = strings.lastIndex;
     } else if (content.startsWith("null", cursor)) {
@@ -86,7 +125,9 @@ function readSourceArray(
     } else {
       budget.malformed = true;
       const end = skipJsonValue(content, cursor, budget);
-      scanMalformedObject(content.slice(cursor, end), findings, budget, findBuildSecrets);
+      scanMalformedObject(content.slice(cursor, end), budget, (text, offset) =>
+        scan(text, cursor + offset),
+      );
       cursor = end;
     }
     cursor += /^\s*/.exec(content.slice(cursor))![0].length;
@@ -95,7 +136,24 @@ function readSourceArray(
   }
 }
 
-function scanMapMetadata(content: string, findings: SecretFinding[]): void {
+function scanSourceValue(
+  content: string,
+  start: number,
+  budget: SourceBudget,
+  scan: ScanToken,
+): number | undefined {
+  const first = content[start];
+  if (first === "[") return readSourceArray(content, start + 1, budget, scan);
+  budget.malformed = true;
+  const end = skipJsonValue(content, start, budget);
+  const value = content.slice(start, end);
+  if (first === '"') scan(JSON.parse(value) as string, start);
+  if (first === "{")
+    scanMalformedObject(value, budget, (text, offset) => scan(text, start + offset));
+  return end;
+}
+
+function scanMapMetadata(content: string, scan: ScanToken): void {
   const strings = /"(?:\\.|[^"\\])*"/g;
   const ranges: SourceRange[] = [];
   const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false, ambiguous: false };
@@ -112,25 +170,31 @@ function scanMapMetadata(content: string, findings: SecretFinding[]): void {
   const rest: string[] = [];
   let from = 0;
   for (const range of ranges) {
-    rest.push(content.slice(from, range.start), "null");
+    rest.push(
+      content.slice(from, range.start),
+      content.slice(range.start, range.end).replace(/[^\n]/g, " "),
+    );
     from = range.end;
   }
   rest.push(content.slice(from));
-  scanMalformedObject(rest.join(""), findings, budget, findBuildSecrets);
+  scanMalformedObject(rest.join(""), budget, scan);
   if (budget.ambiguous) throw new Error("source map contains an ambiguous keyed value");
 }
 
-function reportInvalidMap(content: string): never {
+function reportInvalidMap(content: string, file: string): never {
   // Raw provider patterns can still match a source string cut off mid-value.
   // Generic key patterns need decoded delimiters and are scanned below.
-  const raw = findBuildSecrets(content).filter((finding) => !UNSAFE_RAW_LABELS.has(finding.label));
-  const findings: SecretFinding[] = [];
+  const raw = locateSecretMatches(
+    file,
+    content,
+    findBuildMatches(content).filter((finding) => !UNSAFE_RAW_LABELS.has(finding.label)),
+  );
+  const findings: EvidencedSecret[] = [];
   try {
     scanMalformedObject(
       content,
-      findings,
       { sources: 0, nestedBytes: 0, malformed: true, ambiguous: false },
-      findBuildSecrets,
+      scanMapToken(content, file, findings),
     );
   } catch {
     // The incomplete result still reports findings collected before an invalid token or limit.
@@ -146,16 +210,17 @@ function reportInvalidMap(content: string): never {
 
 // Scan decoded sources separately so escaped quotes cannot join unrelated code.
 // Keep the original remaining JSON, including duplicate fields, for the scan.
-export function findArtifactSecrets(content: string, file: string): SecretFinding[] {
-  if (!file.endsWith(".map")) return findBuildSecrets(content);
+export function findArtifactSecrets(content: string, file: string): EvidencedSecret[] {
+  if (!file.endsWith(".map")) return locateSecretMatches(file, content, findBuildMatches(content));
   try {
     const map: unknown = JSON.parse(content);
     if (!map || typeof map !== "object" || Array.isArray(map))
       throw new Error("invalid source map");
   } catch {
-    reportInvalidMap(content);
+    reportInvalidMap(content, file);
   }
-  const findings: SecretFinding[] = [];
+  const findings: EvidencedSecret[] = [];
+  const scan = scanMapToken(content, file, findings);
   const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false, ambiguous: false };
   const strings = /"(?:\\.|[^"\\])*"/g;
   let token: RegExpExecArray | null;
@@ -165,33 +230,19 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
       const prefix = /^\s*:\s*/.exec(content.slice(strings.lastIndex));
       if (!prefix) continue;
       const valueStart = strings.lastIndex + prefix[0].length;
-      if (content[valueStart] !== "[") {
-        budget.malformed = true;
-        const end = skipJsonValue(content, valueStart, budget);
-        if (content[valueStart] === '"') {
-          const decoded = JSON.parse(content.slice(valueStart, end)) as string;
-          findBuildSecrets(decoded).forEach((finding) => findings.push(finding));
-        } else if (content[valueStart] === "{") {
-          scanMalformedObject(content.slice(valueStart, end), findings, budget, findBuildSecrets);
-        }
-        strings.lastIndex = end;
-        continue;
-      }
-      const arrayStart = valueStart + 1;
-      const arrayEnd = readSourceArray(content, arrayStart, budget, findings);
-      if (arrayEnd === undefined) continue;
-      strings.lastIndex = arrayEnd;
+      const end = scanSourceValue(content, valueStart, budget, scan);
+      if (end !== undefined) strings.lastIndex = end;
     }
   } catch (error) {
     try {
-      scanMapMetadata(content, findings);
+      scanMapMetadata(content, scan);
     } catch {
       // The incomplete result still reports findings collected before the metadata limit.
     }
     throw new ArtifactIncompleteError((error as Error).message, findings);
   }
   try {
-    scanMapMetadata(content, findings);
+    scanMapMetadata(content, scan);
   } catch (error) {
     throw new ArtifactIncompleteError((error as Error).message, findings);
   }
