@@ -67,7 +67,7 @@ interface Tree {
 
 /** `<root>/npm dir/vercel.cmd` → `node_modules\vercel cli\bin\vc.js` (spaces on purpose). */
 function makeTree(platform: NodeJS.Platform = "win32"): Tree {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "kit-winshim-")));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-winshim-")));
   const proj = join(root, "proj");
   const shimDir = join(root, "npm dir");
   const entryDir = join(shimDir, "node_modules", "vercel cli", "bin");
