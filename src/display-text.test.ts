@@ -60,11 +60,15 @@ describe("diagnostic display controls", () => {
       "before\x1b^opaque\x1b\\after",
       "before\x1bXopaque\x1b\\after",
       "before\x9fopaque\x9cafter",
-      "before\u202e\u200b\0\r\n\t\u2028\u2029after",
     ];
     for (const sample of samples) {
       assert.equal(sanitizeDisplayText(sample), "beforeafter", JSON.stringify(sample));
     }
+    // The CRLF is a line break and leaves one space; the other controls leave nothing.
+    assert.equal(
+      sanitizeDisplayText("before\u202e\u200b\0\r\n\t\u2028\u2029after"),
+      "before after",
+    );
     assert.equal(
       sanitizeDisplayText("before\x1b]8;;https://x.example\x1b\\link\x1b]8;;\x1b\\after"),
       "beforelinkafter",
@@ -81,5 +85,30 @@ describe("diagnostic display controls", () => {
     assert.equal(finding.excerpt.length, 160);
     assert.match(finding.excerpt, /\[REDACTED\]/);
     assert.ok(finding.excerpt.endsWith("..."));
+  });
+});
+
+describe("diagnostic display line breaks", () => {
+  it("turns a line break into one space so the words on either side stay apart", () => {
+    assert.equal(sanitizeDisplayText("found on\nhttps://h.example"), "found on https://h.example");
+    for (const lineBreak of ["\n", "\r", "\r\n", "\n\n", "\r\n\r\n", "\n\x1b[31m\r"]) {
+      assert.equal(sanitizeDisplayText(`a${lineBreak}b`), "a b", JSON.stringify(lineBreak));
+    }
+  });
+
+  it("does not add a second space beside a space that is already there", () => {
+    for (const sample of ["a \nb", "a\n b", "a \r\n b", "a\t\nb", "\nab\n"]) {
+      assert.match(sanitizeDisplayText(sample), /^a ?b$/, JSON.stringify(sample));
+      assert.doesNotMatch(sanitizeDisplayText(sample), / {2}/);
+    }
+    assert.equal(sanitizeDisplayText("a \nb"), "a b");
+  });
+
+  it("still masks a credential whose pieces a line break separates", () => {
+    const token = `ghp_${"a".repeat(36)}`;
+    for (const lineBreak of ["\n", "\r\n"]) {
+      const split = token.slice(0, 20) + lineBreak + token.slice(20);
+      assert.equal(sanitizeDisplayText(`found ${split} here`), "found [REDACTED] here");
+    }
   });
 });

@@ -35,13 +35,13 @@ for (const [args, rootWarnings] of [
     const warnings = result.stderr.split("\n").filter((line) => line.startsWith("Warning:"));
     assert.equal(warnings.length, rootWarnings + 1, result.stderr);
     assert.equal(
-      warnings.filter((line) => line.startsWith("Warning: unknown section [rootspoof [REDACTED]]"))
+      warnings.filter((line) => line.startsWith("Warning: unknown section [root spoof [REDACTED]]"))
         .length,
       rootWarnings,
     );
     assert.equal(
       warnings.filter((line) =>
-        line.startsWith("Warning: unknown key [browser].browserspoof [REDACTED]"),
+        line.startsWith("Warning: unknown key [browser].browser spoof [REDACTED]"),
       ).length,
       1,
     );
