@@ -3,7 +3,7 @@
  * with ADR-0007's three limits, verbatim, so the numbers never travel without them.
  */
 import type { RigManifest } from "./manifest.js";
-import { compare, LIMITS, type Shortfall, type Spread } from "./report.js";
+import { compareConfigs, LIMITS, type Comparison, type Shortfall, type Spread } from "./report.js";
 import type { RigResult } from "./store.js";
 
 const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
@@ -35,14 +35,23 @@ export function renderPlan(m: RigManifest, inputId: string, findingsPath: string
   return lines;
 }
 
+/** A verdict line. Recall overlap is not called "within spread" when volume differs tenfold. */
+function verdictText(c: Comparison): string {
+  if (c.verdict === "refused") return `refused: ${c.reason}`;
+  if (c.volumeRatio === undefined) return c.verdict;
+  const times = `findings per run differ ${Math.round(c.volumeRatio)}x`;
+  return c.verdict === "within spread"
+    ? `recall overlaps, but ${times}; recall alone does not compare them (see volume and precision)`
+    : `${c.verdict} (${times})`;
+}
+
 function renderComparisons(result: RigResult): string[] {
   const lines: string[] = [];
   const stats = result.stats;
   for (let i = 0; i < stats.length; i++) {
     for (let j = i + 1; j < stats.length; j++) {
       for (const split of ["tune", "holdout"] as const) {
-        const c = compare(stats[i][split], stats[j][split]);
-        const what = c.verdict === "refused" ? `refused: ${c.reason}` : c.verdict;
+        const what = verdictText(compareConfigs(stats[i], stats[j], split));
         lines.push(`  ${stats[i].config} vs ${stats[j].config} (${split}): ${what}`);
       }
     }
@@ -50,11 +59,16 @@ function renderComparisons(result: RigResult): string[] {
   return lines.length > 0 ? ["Comparisons (recall, min/max overlap rule):", ...lines, ""] : [];
 }
 
-/** Findings per run and the unmatched count: volume buys recall that only controls price. */
+const perRunText = (s: Spread | null | undefined): string =>
+  s ? `${s.mean.toFixed(1)} (${s.min}–${s.max})` : "n/a";
+
+/** Findings and duplicates per run, and the unmatched count: volume buys recall that only controls price. */
 function volumeLine(v: NonNullable<RigResult["stats"][number]["volume"]>): string {
-  const f = v.findingsPerRun;
-  const perRun = f ? `${f.mean.toFixed(1)} (${f.min}–${f.max})` : "n/a";
-  return `findings per run ${perRun}  unmatched ${v.unmatched}`;
+  const duplicates =
+    v.duplicatesPerRun === undefined
+      ? ""
+      : `  duplicates per run ${perRunText(v.duplicatesPerRun)}`;
+  return `findings per run ${perRunText(v.findingsPerRun)}${duplicates}  unmatched ${v.unmatched}`;
 }
 
 /** One line per run that did not review every target of a half: the shortfall the numbers include. */
@@ -84,6 +98,9 @@ export function renderReport(result: RigResult, otherInputs: string[]): string[]
       `  controls ${s.controls.runs} run(s)  flagged ${range(s.controls.falsePositiveRate)}`,
     );
     if (s.volume) lines.push(`  volume   ${volumeLine(s.volume)}`);
+    if (s.volume?.precision !== undefined) {
+      lines.push(`  precision ${range(s.volume.precision)}  defects caught per finding`);
+    }
     lines.push(
       ...shortfallLines("tune", s.tune.shortfall),
       ...shortfallLines("holdout", s.holdout.shortfall),

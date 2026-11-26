@@ -369,3 +369,38 @@ describe("checkExternalFindings legacy records", () => {
     }
   });
 });
+
+describe("externalFindingResults: repeated (source, id) records", () => {
+  const severities = ["critical", "high", "medium", "low"];
+  const lines = (count: number, ids: number) =>
+    Array.from({ length: count }, (_, i) =>
+      JSON.stringify({
+        source: "appender",
+        id: `id${i % ids}`,
+        severity: severities[Math.floor((i * severities.length) / count)],
+      }),
+    ).join("\n");
+
+  it("counts 1,000 records over 250 ids as 250 findings, each at its worst severity", () => {
+    const [result] = externalFindingResults(parseExternalFindings(lines(1000, 250)));
+    assert.match(result.detail, /^250 finding\(s\) from appender \(250 critical, /);
+    assert.match(result.detail, /1000 records with 750 repeated id\(s\)/);
+    assert.equal(result.severity, "critical");
+    assert.equal(result.status, "fail");
+  });
+
+  it("keeps the same id from two sources apart and never collapses records without an id", () => {
+    const parsed = parseExternalFindings(
+      [
+        '{"source":"a","id":"X","severity":"low"}',
+        '{"source":"b","id":"X","severity":"low"}',
+        '{"source":"a","severity":"low"}',
+        '{"source":"a","severity":"low"}',
+      ].join("\n"),
+    );
+    const results = externalFindingResults(parsed);
+    assert.match(results.find((r) => r.name === "external: a")?.detail ?? "", /^3 finding\(s\)/);
+    assert.match(results.find((r) => r.name === "external: b")?.detail ?? "", /^1 finding\(s\)/);
+    assert.ok(!results.some((r) => /repeated/.test(r.detail)));
+  });
+});
