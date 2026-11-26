@@ -2,6 +2,7 @@
 // subcommand dispatcher; restructured to a handler table in a follow-up.
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
+import { promptFromUser, readHookPayload } from "../utils/hook-payload.js";
 import { isReadOnlyMode } from "../read-only-mode.js";
 import { memPalList } from "./memory-pal-list.js";
 import { planSessionStartLines } from "./memory-plan-hook.js";
@@ -438,7 +439,7 @@ async function memHelp(): Promise<boolean> {
     "  kit memory project [show|init]  Show or initialize the checked-in cross-clone project identity",
   );
   console.log(
-    "  kit memory pal [list|show|add|configure|claim|renew|takeover|release|reopen|done|snooze|resolve|forget|verify|import|prune]   Pending action ledger (show = history/frontier; resolve = reconcile unclaimed alternatives; forget = erase task/history; list --all = every device)",
+    "  kit memory pal [list|show|add|configure|claim|renew|takeover|release|reopen|done|snooze|resolve|forget|verify|import|prune]   Pending action ledger: open work and its session handoff (show = history/frontier; resolve = reconcile unclaimed alternatives; forget = erase task/history; list --all = every device)",
     "    claim/renew/takeover <id> --harness <name> --session <id> --expect <frontier>; use the returned frontier for the next write. Claimed work requires matching owner and receipt; takeover explicitly replaces ownership (multiple heads require --take <head>). Claims never expire automatically.",
   );
   console.log("  kit memory save <name>      Bookmark the current session as a named copilot");
@@ -1072,16 +1073,20 @@ async function memSearch(): Promise<boolean> {
   return true;
 }
 
+/** UserPromptSubmit: the memory reminder, only for a prompt the user sent (not a Code Mode poll event). */
+async function promptHook(): Promise<boolean> {
+  maybeStartMidSessionIndex(); // debounced, detached — keeps recall fresh mid-session
+  if (!promptFromUser(await readHookPayload())) return true;
+  const text = userPromptSubmitReminder();
+  if (text) console.log(text);
+  for (const line of await servicesPromptLines()) console.log(line);
+  return true;
+}
+
 async function memHook(): Promise<boolean> {
   // Internal: invoked by Claude Code / Codex hooks. Fail-open — never block.
   const event = process.argv[4];
-  if (event === "user-prompt-submit") {
-    maybeStartMidSessionIndex(); // debounced, detached — keeps recall fresh mid-session
-    const text = userPromptSubmitReminder();
-    if (text) console.log(text);
-    for (const line of await servicesPromptLines()) console.log(line);
-    return true;
-  }
+  if (event === "user-prompt-submit") return promptHook();
   const endHarness = sessionEndHarness(event);
   if (endHarness) {
     await markServicesAtSessionEnd();

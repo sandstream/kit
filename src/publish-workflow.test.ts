@@ -203,7 +203,7 @@ describe(
       writeFileSync(join(root, "package.json"), JSON.stringify({ name: "kit-fixture", version }));
       writeFileSync(join(root, "CHANGELOG.md"), changelog);
       mkdirSync(join(root, "scripts"));
-      for (const script of ["changelog-section.mjs", "changelog-fragments.mjs"]) {
+      for (const script of ["changelog-section.mjs", "changelog-fragments.mjs", "fix-of-fix.mjs"]) {
         writeFileSync(
           join(root, "scripts", script),
           readFileSync(join(REPO_ROOT, "scripts", script)),

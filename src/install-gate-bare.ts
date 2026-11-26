@@ -25,7 +25,8 @@ type Directory = { dir: string } | { unresolved: string };
 const LEADING_CD = /^\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;
 const DYNAMIC = /[$`*?[\]{}()<>|&;!\n]/;
 
-function literalPath(token: string, base: string): string | undefined {
+/** `token` as an absolute path from `base`, or undefined when the shell would expand it. */
+export function literalPath(token: string, base: string): string | undefined {
   const bare = token.replace(/^(["'])(.*)\1$/, "$2");
   const home = bare.replace(/^~(?=\/|$)/, homedir()).replace(/^\$HOME(?=\/|$)/, homedir());
   if (home === "" || DYNAMIC.test(home)) return undefined;
@@ -40,6 +41,8 @@ const MOVES_NPM =
 export interface BareSegment {
   manager: string;
   tokens: string[];
+  /** The requirements files a sync command reads, when they are operands and not `-r` values. */
+  files?: string[];
 }
 
 const EQUALS_FLAGS = ["--prefix", "-C", "--dir", "--cwd"];
@@ -128,7 +131,17 @@ function directDependencies(manifest: unknown): Direct[] {
   return found;
 }
 
-function freshReceipts(dir: string): Set<string> {
+const npmReceiptName = (target: string): string => {
+  const at = target.lastIndexOf("@");
+  return at > 0 ? target.slice(0, at) : target;
+};
+
+/** Names with a fresh PASS receipt of `type` in `dir`, each read from its target by `nameOf`. */
+export function freshReceipts(
+  dir: string,
+  type = "npm",
+  nameOf: (target: string) => string = npmReceiptName,
+): Set<string> {
   const file = join(dir, TRIAGE_LOG_FILE);
   const names = new Set<string>();
   if (!existsSync(file)) return names;
@@ -136,10 +149,12 @@ function freshReceipts(dir: string): Set<string> {
   for (const line of readFileSync(file, "utf8").split("\n")) {
     try {
       const entry = JSON.parse(line) as { type?: unknown; target?: unknown; timestamp?: unknown };
-      if (entry.type !== "npm" || typeof entry.target !== "string") continue;
-      if (typeof entry.timestamp !== "string" || Date.parse(entry.timestamp) < cutoff) continue;
-      const at = entry.target.lastIndexOf("@");
-      names.add(at > 0 ? entry.target.slice(0, at) : entry.target);
+      if (entry.type !== type || typeof entry.target !== "string") continue;
+      // As in `check-deps`: an unparseable timestamp is NaN, and `NaN < cutoff` is false, so
+      // reject a non-finite one, or a garbage timestamp would count as a fresh triage.
+      const at = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
+      if (!Number.isFinite(at) || at < cutoff) continue;
+      names.add(nameOf(entry.target));
     } catch {
       /* a line that is not a receipt proves nothing */
     }

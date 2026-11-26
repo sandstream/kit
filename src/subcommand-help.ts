@@ -12,6 +12,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Read the current pull request, its signed review receipt and independent review reports, and write the exact actions to .kit-escalation.txt (--merge-denied after a permission layer refuses a merge)",
   "escalate feed":
     "Track what outside services report as broken as action items: github (failed workflows on the default branch, open Dependabot alerts) and vercel (failed production deploys). kit escalate feed <github|vercel> [--repo owner/name | --team id-or-slug] [--dry-run] [--json]",
+  "review gate":
+    "Read-only, deterministic verdict on one pull request: kit review gate --pr <n> [--repo owner/name] [--json]. Prints approve (exit 0), owner (3: protected path, wide module or over 1500 lines), hold (4: failed checks or red main), pending (5) or incomplete (6: a read failed; never approves), with the reasons and the exact head SHA; appends one audit row. Reads GitHub, not the agent, so it is harness-neutral. Never posts. Token: GITHUB_TOKEN or GH_TOKEN, none for public repos",
   "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
   "check verify-vercel-token": "Verify an environment-provided Vercel token",
   "check compare":
@@ -65,7 +67,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "memory context":
     "Push-surface active decisions for the area(s) whose files you're touching (deterministic, path→cluster)",
   "memory pal":
-    "Pending action ledger — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
+    "Pending action ledger: open work and its handoff between sessions (claim/renew/release/takeover) — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
   "memory pal claim":
     "Claim inspected work: kit memory pal claim <id> [label] --harness <name> --session <id> --expect <frontier>",
   "memory pal renew":
@@ -103,6 +105,10 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "security scan-staged": "Pre-commit: scan staged files for credential patterns",
   "security scan-build": "Scan build artifacts (.next/, dist/) for inlined secrets",
   "security scan-transcripts": "Scan agent transcripts + prompt caches for leaked credentials",
+  "security scan-outbound":
+    "Fail when outbound text (a PR body, commit message or release note; a file or - for stdin) repeats a private agent instruction file: untracked or ignored instruction files in the repo and the user-level ones of Claude Code (~/.claude) and Codex ($CODEX_HOME or ~/.codex). Character n-gram overlap, no model; text also in a tracked instruction file is not a leak. Prints the span, file and line, never the file. kit security scan-outbound <file|-> [--min-chars <n>, default 40] [--json]",
+  "security routes":
+    "Inventory, not a verdict: list Express, Fastify, Hono, Next.js and SvelteKit routes whose path has an id parameter or names admin, login, signup, register, reset or password, or whose file imports an AI SDK, with the auth guard and rate limiter names seen. IDOR and rate limits are not decided statically; exits 0. kit security routes [--json]",
   "security costs": "Snapshot per-key spend vs policy cap (Stripe live; others stubbed)",
   "security check-gitignore": "Verify .gitignore covers sensitive paths (--fix to auto-patch)",
   "security verify-pull": "After git pull: audit new deps, gitignore drops, introduced secrets",

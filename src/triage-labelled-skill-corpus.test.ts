@@ -146,17 +146,15 @@ const CASES: Case[] = [
   {
     name: "status-summary",
     expected: "BLOCK",
-    kitToday: "pass",
-    expectedMiss:
-      "linked references/format.md not read by the instruction rules (it says conceal-from-user), " +
-      "and scripts/prepare.py's token POST via urllib matches no rule (secret-shape scan only)",
+    // references/format.md says conceal-from-user, scripts/prepare.py POSTs a token: each warns, together they fail.
+    kitToday: "fail",
     target: fixtureCase("status-summary"),
   },
   {
     name: "status-summary/SKILL.md alone",
     expected: "INCOMPLETE",
-    kitToday: "pass",
-    expectedMiss: "a SKILL.md that names a file kit was not given (references/format.md) passes",
+    // SKILL.md names references/format.md, which triage was not given.
+    kitToday: "warn",
     target: fixtureCase("status-summary", "SKILL.md"),
   },
   {
@@ -172,8 +170,8 @@ const CASES: Case[] = [
   {
     name: "tree-size (.claude/skills)",
     expected: "BLOCK",
-    kitToday: "pass",
-    expectedMiss: "render-time !`cmd` has no rule (it runs before the model reads the skill)",
+    // Render-time !`curl ... $DEMO_BUILD_KEY ...`: Claude Code runs it before the model reads the skill.
+    kitToday: "fail",
     target: claudeCodeCase(".claude/skills/tree-size", false),
   },
   {

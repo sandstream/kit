@@ -7,16 +7,38 @@
  *
  * Static first: this reads `CREATE POLICY`, `GRANT` and `REVOKE` statements in file name order and
  * lists each table that anonymous readers can select from. A live check against a database needs a
- * read-only role and is deferred. Out of scope here: `ALTER DEFAULT PRIVILEGES`, roles other than
- * anon and public, and policies created outside the SQL files in the repository.
+ * read-only role and is deferred. Out of scope here: roles other than anon and public, and policies
+ * created outside the SQL files in the repository.
+ *
+ * On a Supabase project, a new table in `public` starts with every privilege granted to `anon` and
+ * `authenticated` through default privileges, so a `public` table without row level security is
+ * readable with the publishable key ("A table in an exposed schema without RLS is readable and
+ * writable by any role with a grant on it",
+ * https://supabase.com/docs/guides/database/postgres/row-level-security). There, a table created in
+ * `public` counts as granted to anon unless a `REVOKE … FROM anon` on it, on all tables in `public`,
+ * or an `ALTER DEFAULT PRIVILEGES … REVOKE … FROM anon` before it takes the grant away. Other
+ * schemas are not exposed by default and are skipped. `FORCE ROW LEVEL SECURITY` alone does not
+ * enable it.
+ *
+ * A second row, `signed-in database access`, lists each table where a permissive policy
+ * `TO authenticated USING (true)` for select or all lets every signed-in user read every row. On
+ * Supabase anyone can sign up, so on most apps that is close to public. It warns, and fails only
+ * when the table has a personal-looking column, by the same column rule as the anon row. A table
+ * anon can already read is left to the anon row.
  */
 
 import { constants } from "node:fs";
-import { open, readdir } from "node:fs/promises";
+import { access, open, readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
+import { columnsOf, normTable, splitStatements } from "./anon-sql-statements.js";
 import { loadPublicTables, type PublicTables } from "./anon-public-tables.js";
 import type { SecurityCheckResult } from "./check-security.js";
+import {
+  describeReadableTable,
+  SIGNED_IN_ACCESS_CHECK,
+  signedInResult,
+} from "./check-signed-in-access.js";
 
 const ANON_ACCESS_CHECK = "anonymous database access";
 
@@ -39,6 +61,8 @@ export interface ReadableTable {
 
 export interface AnonAnalysis {
   readable: ReadableTable[];
+  /** Tables anon cannot read that every signed-in user can, through `TO authenticated USING (true)`. */
+  signedIn: ReadableTable[];
   /** Files with an unterminated quote, comment or dollar quote, which may hide statements. */
   incomplete: string[];
 }
@@ -47,175 +71,6 @@ const PERSONAL_COLUMN =
   /(^|_)(phone|mobile|telephone|tel|email|e_?mail|ssn|personnummer|national_?id|birth_?date|dob)(_|$)|(first|last|full|sur|customer|guest|contact|person)_?name$/;
 
 const ANON_ROLES = new Set(["anon", "public"]);
-
-const BLOCK_OPEN = String.fromCharCode(47, 42);
-const BLOCK_CLOSE = String.fromCharCode(42, 47);
-const LINE_COMMENT = String.fromCharCode(45, 45);
-const SQ = String.fromCharCode(39);
-const DQ = String.fromCharCode(34);
-
-/** What a lexer step consumed: the index after it and the text it leaves behind. */
-type Skip = { end: number; keep: string; unterminated?: true };
-
-function skipLineComment(text: string, i: number): Skip | null {
-  if (!text.startsWith(LINE_COMMENT, i)) return null;
-  const nl = text.indexOf("\n", i);
-  return { end: nl === -1 ? text.length : nl, keep: " " };
-}
-
-function skipBlockComment(text: string, i: number): Skip | null {
-  if (!text.startsWith(BLOCK_OPEN, i)) return null;
-  let depth = 0;
-  let at = i;
-  while (at < text.length) {
-    if (text.startsWith(BLOCK_OPEN, at)) {
-      depth++;
-      at += 2;
-    } else if (text.startsWith(BLOCK_CLOSE, at)) {
-      depth--;
-      at += 2;
-      if (depth === 0) return { end: at, keep: " " };
-    } else {
-      at++;
-    }
-  }
-  return { end: text.length, keep: " ", unterminated: true };
-}
-
-function isIdentChar(ch: string | undefined): boolean {
-  return ch === "$" || isTagChar(ch, false);
-}
-
-/** An E string (a lone E or e right before the quote) treats a backslash as an escape. */
-function isEscapeString(text: string, i: number): boolean {
-  const before = text[i - 1];
-  return (before === "E" || before === "e") && !isIdentChar(text[i - 2]);
-}
-
-/** A quoted run, with a doubled quote as the escape. A string loses its content, an identifier keeps it. */
-function skipQuoted(text: string, i: number, quote: string): Skip | null {
-  if (text[i] !== quote) return null;
-  const backslash = quote === SQ && isEscapeString(text, i);
-  let at = i + 1;
-  while (at < text.length) {
-    if (backslash && text[at] === "\\") at += 2;
-    else if (text[at] === quote && text[at + 1] === quote) at += 2;
-    else if (text[at] === quote) break;
-    else at++;
-  }
-  const closed = at < text.length;
-  const end = Math.min(at + 1, text.length);
-  const keep = quote === SQ ? SQ + SQ : text.slice(i, end);
-  return closed ? { end, keep } : { end, keep, unterminated: true };
-}
-
-/** Identifier characters as Postgres reads them: ASCII letters and underscore, digits after the first, and any character above 0x7f. */
-function isTagChar(ch: string | undefined, first: boolean): boolean {
-  if (ch === undefined) return false;
-  const letter = (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_";
-  return letter || ch.charCodeAt(0) > 0x7f || (!first && ch >= "0" && ch <= "9");
-}
-
-/** The opening tag at i, such as the two dollar signs or a named tag, or null when none starts here. */
-function dollarTagAt(text: string, i: number): string | null {
-  let at = i + 1;
-  while (isTagChar(text[at], at === i + 1)) at++;
-  return text[at] === "$" ? text.slice(i, at + 1) : null;
-}
-
-function skipDollarQuote(text: string, i: number): Skip | null {
-  if (text[i] !== "$" || isIdentChar(text[i - 1])) return null;
-  const tag = dollarTagAt(text, i);
-  if (!tag) return null;
-  const close = text.indexOf(tag, i + tag.length);
-  if (close === -1) return { end: text.length, keep: " ", unterminated: true };
-  return { end: close + tag.length, keep: " " };
-}
-
-function skipSpecial(text: string, i: number): Skip | null {
-  return (
-    skipLineComment(text, i) ??
-    skipBlockComment(text, i) ??
-    skipQuoted(text, i, SQ) ??
-    skipQuoted(text, i, DQ) ??
-    skipDollarQuote(text, i)
-  );
-}
-
-/**
- * Split SQL into statements in one pass. Comments, string contents and dollar-quoted bodies are
- * recognised only where they can start, so a dollar sign or comment opener inside another
- * construct cannot hide the statements that follow it.
- */
-function splitStatements(text: string): { statements: string[]; unterminated: boolean } {
-  const statements: string[] = [];
-  let current = "";
-  let unterminated = false;
-  let i = 0;
-  while (i < text.length) {
-    const skip = skipSpecial(text, i);
-    if (skip) {
-      current += skip.keep;
-      i = skip.end;
-      unterminated ||= skip.unterminated === true;
-    } else if (text[i] === ";") {
-      statements.push(current);
-      current = "";
-      i++;
-    } else {
-      current += text[i++];
-    }
-  }
-  statements.push(current);
-  return { statements, unterminated };
-}
-
-function normTable(raw: string): string {
-  return raw
-    .replace(/\x22/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/^public\./, "");
-}
-
-function splitTopLevel(body: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let current = "";
-  for (const ch of body) {
-    if (ch === "(") depth++;
-    if (ch === ")") depth--;
-    if (ch === "," && depth === 0) {
-      parts.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  if (current.trim()) parts.push(current);
-  return parts;
-}
-
-const CONSTRAINT_START = /^(constraint|primary|foreign|unique|check|like|exclude)\b/i;
-
-/** The identifier a column definition starts with, with an optional double quote in front, or "". */
-function leadingIdentifier(part: string): string {
-  const start = part[0] === DQ ? 1 : 0;
-  let end = start;
-  while (isTagChar(part[end], end === start)) end++;
-  return part.slice(start, end);
-}
-
-function columnsOf(body: string): string[] {
-  const names: string[] = [];
-  for (const item of splitTopLevel(body)) {
-    const part = item.trim();
-    if (!part || CONSTRAINT_START.test(part)) continue;
-    const name = leadingIdentifier(part);
-    if (name) names.push(name.toLowerCase());
-  }
-  return names;
-}
 
 function isOpenExpression(expr: string): boolean {
   const flat = expr.replace(/[\s()]/g, "").toLowerCase();
@@ -239,11 +94,21 @@ function rolesOf(clause: string | undefined): string[] {
 interface State {
   tables: Map<string, Set<string>>;
   rls: Set<string>;
-  policies: Map<string, { table: string; open: boolean }>;
+  policies: Map<string, { table: string; open: boolean; signedIn: boolean }>;
   grants: Map<string, true>;
   /** Tables where REVOKE SELECT left anon only the columns granted afterwards. */
   columnLimit: Map<string, Set<string>>;
   wildcard: boolean;
+  /** Supabase only: public tables that still hold the default grant to anon. */
+  defaultGranted: Set<string>;
+  /** Supabase only: ALTER DEFAULT PRIVILEGES took select on new public tables away from anon. */
+  defaultsRevoked: boolean;
+  supabase: boolean;
+}
+
+export interface AnonAccessOptions {
+  /** Model Supabase's default grants: a public table without row level security is readable by anon. */
+  supabase?: boolean;
 }
 
 function addColumns(state: State, table: string, cols: string[]): void {
@@ -270,22 +135,27 @@ function usingExpression(rest: string): string | undefined {
   return undefined;
 }
 
-/** True when the clauses after ON <table> let anon or public select every row. */
-function opensRowsToAnon(rest: string): boolean {
-  if (/\bas\s+restrictive\b/i.test(rest)) return false;
+/** The roles a permissive select-or-all policy with USING (true) opens every row to, else none. */
+function rolesOpenedToAllRows(rest: string): string[] {
+  if (/\bas\s+restrictive\b/i.test(rest)) return [];
   const cmd = (rest.match(POLICY_CMD_RE)?.[1] ?? "all").toLowerCase();
-  if (cmd !== "all" && cmd !== "select") return false;
-  if (!rolesOf(rest.match(POLICY_TO_RE)?.[1]).some((r) => ANON_ROLES.has(r))) return false;
+  if (cmd !== "all" && cmd !== "select") return [];
   // Not named `using`: a contextual keyword that some parsers read as a declaration.
   const condition = usingExpression(rest);
-  return condition !== undefined && isOpenExpression(condition);
+  if (condition === undefined || !isOpenExpression(condition)) return [];
+  return rolesOf(rest.match(POLICY_TO_RE)?.[1]);
 }
 
 function applyPolicy(state: State, stmt: string): void {
   const head = stmt.match(POLICY_HEAD_RE);
   if (!head) return;
   const table = normTable(head[2]);
-  state.policies.set(policyKey(table, head[1]), { table, open: opensRowsToAnon(head[3]) });
+  const roles = rolesOpenedToAllRows(head[3]);
+  state.policies.set(policyKey(table, head[1]), {
+    table,
+    open: roles.some((r) => ANON_ROLES.has(r)),
+    signedIn: roles.includes("authenticated"),
+  });
 }
 
 const GRANT_RE = /^grant\s+([\w\s,]+?)\s+on\s+(?:table\s+)?([\s\S]+?)\s+to\s+([\w\x22,\s]+)/i;
@@ -351,10 +221,55 @@ function applyAlter(state: State, table: string, action: string): void {
   }
 }
 
+/** A table name normTable left without a schema is in `public`, the only schema Supabase exposes by default. */
+function isPublicTable(table: string): boolean {
+  return !table.includes(".");
+}
+
+function createTable(state: State, table: string, cols: string[]): void {
+  addColumns(state, table, cols);
+  if (isPublicTable(table) && !state.defaultsRevoked) state.defaultGranted.add(table);
+}
+
+function namesAnon(roles: string): boolean {
+  return rolesOf(roles).includes("anon");
+}
+
+/** REVOKE SELECT or ALL … FROM anon removes the Supabase default grant; FROM public does not, anon holds its own. */
+function applyRevoke(state: State, stmt: string): void {
+  applyGrant(state, stmt, true);
+  const m = stmt.match(REVOKE_RE);
+  if (!m || !/\b(select|all)\b/i.test(m[1]) || !namesAnon(m[3])) return;
+  if (/^all\s+tables\s+in\s+schema\s+public$/i.test(m[2].trim())) {
+    state.defaultGranted.clear();
+    return;
+  }
+  for (const t of m[2].split(",")) state.defaultGranted.delete(normTable(t));
+}
+
+const DROP_TABLE_RE = /^drop\s+table\s+(?:if\s+exists\s+)?([^;]+?)(?:\s+(?:cascade|restrict))?$/i;
+
+function dropTables(state: State, stmt: string): void {
+  const m = stmt.match(DROP_TABLE_RE);
+  if (!m) return;
+  for (const t of m[1].split(",")) state.defaultGranted.delete(normTable(t));
+}
+
+const DEFAULT_PRIVILEGES_RE =
+  /^alter\s+default\s+privileges\s+(?:for\s+(?:role|user)\s+[\w\x22,\s]+?\s+)?(?:in\s+schema\s+([\w\x22,\s]+?)\s+)?(grant|revoke)\s+(?:grant\s+option\s+for\s+)?([\w\s,]+?)\s+on\s+tables\s+(?:to|from)\s+([\w\x22,\s]+)/i;
+
+/** ALTER DEFAULT PRIVILEGES [IN SCHEMA public] REVOKE SELECT|ALL ON TABLES FROM anon: later tables get no grant. */
+function applyDefaultPrivileges(state: State, stmt: string): void {
+  const m = stmt.match(DEFAULT_PRIVILEGES_RE);
+  if (!m || !/\b(select|all)\b/i.test(m[3]) || !namesAnon(m[4])) return;
+  if (m[1] !== undefined && !rolesOf(m[1]).includes("public")) return;
+  state.defaultsRevoked = m[2].toLowerCase() === "revoke";
+}
+
 function applyStatement(state: State, raw: string): void {
   const stmt = raw.trim().replace(/\s+/g, " ");
   const create = stmt.match(CREATE_TABLE_RE);
-  if (create) return addColumns(state, normTable(create[1]), columnsOf(create[2]));
+  if (create) return createTable(state, normTable(create[1]), columnsOf(create[2]));
   const alter = stmt.match(ALTER_TABLE_RE);
   if (alter) return applyAlter(state, normTable(alter[1]), alter[2]);
   const drop = stmt.match(DROP_POLICY_RE);
@@ -365,7 +280,9 @@ function applyStatement(state: State, raw: string): void {
   if (/^create\s+policy\b/i.test(stmt)) return applyPolicy(state, stmt);
   if (/^grant\b/i.test(stmt) && applyColumnGrant(state, stmt)) return;
   if (/^grant\b/i.test(stmt)) return applyGrant(state, stmt, false);
-  if (/^revoke\b/i.test(stmt)) applyGrant(state, stmt, true);
+  if (/^revoke\b/i.test(stmt)) return applyRevoke(state, stmt);
+  if (/^drop\s+table\b/i.test(stmt)) return dropTables(state, stmt);
+  if (/^alter\s+default\s+privileges\b/i.test(stmt)) applyDefaultPrivileges(state, stmt);
 }
 
 function personalOf(state: State, table: string): string[] {
@@ -373,6 +290,25 @@ function personalOf(state: State, table: string): string[] {
   return [...(state.tables.get(table) ?? [])]
     .filter((c) => (limit === undefined || limit.has(c)) && PERSONAL_COLUMN.test(c))
     .sort();
+}
+
+/** Tables a `TO authenticated USING (true)` policy opens, less those anon can already read. */
+function signedInTables(state: State, anonReadable: Set<string>): ReadableTable[] {
+  const via = new Map<string, string[]>();
+  for (const [key, p] of state.policies) {
+    if (!p.signedIn || anonReadable.has(p.table)) continue;
+    const how = `policy "${key.split("\u0000")[1]}" (TO authenticated USING true)`;
+    via.set(p.table, [...(via.get(p.table) ?? []), how]);
+  }
+  return [...via.entries()]
+    .map(([table, how]) => ({
+      table,
+      personalColumns: [...(state.tables.get(table) ?? [])]
+        .filter((c) => PERSONAL_COLUMN.test(c))
+        .sort(),
+      via: how,
+    }))
+    .sort((a, b) => a.table.localeCompare(b.table));
 }
 
 function summarise(state: State): Omit<AnonAnalysis, "incomplete"> {
@@ -385,6 +321,10 @@ function summarise(state: State): Omit<AnonAnalysis, "incomplete"> {
   for (const t of [...state.grants.keys(), ...grantedTables]) {
     if (!state.rls.has(t)) note(t, "GRANT SELECT to anon without row level security");
   }
+  for (const t of state.supabase ? state.defaultGranted : []) {
+    if (!state.rls.has(t))
+      note(t, "Supabase default grant to anon, row level security not enabled");
+  }
   const readable = [...via.entries()]
     .map(([table, how]) => ({
       table,
@@ -392,11 +332,14 @@ function summarise(state: State): Omit<AnonAnalysis, "incomplete"> {
       via: [...new Set(how)],
     }))
     .sort((a, b) => a.table.localeCompare(b.table));
-  return { readable };
+  return { readable, signedIn: signedInTables(state, new Set(via.keys())) };
 }
 
 /** Pure: apply the sources in the order given and list the tables anonymous readers can select from. */
-export function analyzeAnonAccess(sources: SqlSource[]): AnonAnalysis {
+export function analyzeAnonAccess(
+  sources: SqlSource[],
+  options: AnonAccessOptions = {},
+): AnonAnalysis {
   const state: State = {
     tables: new Map(),
     rls: new Set(),
@@ -404,6 +347,9 @@ export function analyzeAnonAccess(sources: SqlSource[]): AnonAnalysis {
     grants: new Map(),
     columnLimit: new Map(),
     wildcard: false,
+    defaultGranted: new Set(),
+    defaultsRevoked: false,
+    supabase: options.supabase === true,
   };
   const incomplete: string[] = [];
   for (const source of sources) {
@@ -476,11 +422,29 @@ async function collectSql(root: string): Promise<Collected> {
   return { sources, oversize, unreadable, truncated };
 }
 
-function describe(t: ReadableTable): string {
-  const cols = t.personalColumns.length
-    ? ` (personal columns: ${t.personalColumns.join(", ")})`
-    : "";
-  return `${t.table}${cols}`;
+const SUPABASE_PACKAGES = ["@supabase/supabase-js", "supabase"];
+
+/**
+ * The signals `kit monkey-test` uses for Supabase, without its free-text match: a Supabase CLI
+ * project (`supabase/config.toml`) or a Supabase package in package.json.
+ */
+async function isSupabaseProject(root: string): Promise<boolean> {
+  try {
+    await access(join(root, "supabase", "config.toml"));
+    return true;
+  } catch {
+    // not a Supabase CLI project; fall through to package.json
+  }
+  try {
+    const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as Record<
+      string,
+      Record<string, string> | undefined
+    >;
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    return SUPABASE_PACKAGES.some((name) => name in deps);
+  } catch {
+    return false;
+  }
 }
 
 function notReadReason(c: Pick<Collected, "oversize" | "unreadable" | "truncated">): string | null {
@@ -494,34 +458,47 @@ function notReadReason(c: Pick<Collected, "oversize" | "unreadable" | "truncated
 }
 
 export async function checkAnonAccess(root: string): Promise<SecurityCheckResult> {
-  const base = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
+  return (await checkDatabaseAccess(root))[0];
+}
+
+/** Both rows from one read of the SQL files: `anonymous database access`, then `signed-in database access`. */
+export async function checkDatabaseAccess(
+  root: string,
+): Promise<[SecurityCheckResult, SecurityCheckResult]> {
+  const both = (r: Omit<SecurityCheckResult, "category" | "name">) =>
+    [ANON_ACCESS_CHECK, SIGNED_IN_ACCESS_CHECK].map((name) => ({
+      ...r,
+      category: "exposure",
+      name,
+    })) as [SecurityCheckResult, SecurityCheckResult];
   const { sources, oversize, unreadable, truncated } = await collectSql(root);
   const why = notReadReason({ oversize, unreadable, truncated });
   if (why) {
-    return {
-      ...base,
+    return both({
       status: "warn",
       didNotRun: true,
       scanIncomplete: true,
       detail: `scan incomplete: ${why}`,
-    };
+    });
   }
   if (sources.length === 0) {
-    return {
-      ...base,
+    return both({
       status: "skip",
       detail: "no SQL files in the project, nothing to read policies from",
-    };
+    });
   }
-  const analysis = analyzeAnonAccess(sources);
+  const analysis = analyzeAnonAccess(sources, { supabase: await isSupabaseProject(root) });
   const count = `${sources.length} SQL file${sources.length === 1 ? "" : "s"}`;
   const declared = await loadPublicTables(root, normTable);
-  return withIncompleteNote(resultFor(analysis.readable, count, declared), analysis.incomplete);
+  return [
+    withIncompleteNote(resultFor(analysis.readable, count, declared), analysis.incomplete),
+    withIncompleteNote(signedInResult(analysis.signedIn, count, declared), analysis.incomplete),
+  ];
 }
 
 const BASE = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
 const SUGGESTION =
-  "Replace USING (true) with a row-scoped condition, or move personal columns to a table anon cannot read. If a table without personal columns is public on purpose, declare it under [anon_access.public] in .kit.toml with a reason. Run `kit check --category security` again after the migration.";
+  "Enable row level security on each listed table and replace USING (true) with a row-scoped condition, or move personal columns to a table anon cannot read. If a table without personal columns is public on purpose, declare it under [anon_access.public] in .kit.toml with a reason. Run `kit check --category security` again after the migration.";
 
 function resultFor(
   all: ReadableTable[],
@@ -554,7 +531,7 @@ function resultFor(
       suggestion: "Give each [anon_access.public] entry in .kit.toml a reason.",
     };
   }
-  const list = readable.map(describe).join("; ");
+  const list = readable.map(describeReadableTable).join("; ");
   if (readable.some((t) => t.personalColumns.length > 0)) {
     return {
       ...BASE,

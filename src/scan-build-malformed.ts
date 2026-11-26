@@ -1,4 +1,4 @@
-import { SECRET_PATTERNS, shannonEntropy, type SecretFinding } from "./utils/redactSecrets.js";
+import { SECRET_PATTERNS, shannonEntropy } from "./utils/redactSecrets.js";
 import { MAX_MAP_SOURCES, type SourceBudget } from "./scan-build-json.js";
 
 function* jsonStringTokens(content: string): Generator<{ index: number; text: string }> {
@@ -33,9 +33,8 @@ function* jsonStringTokens(content: string): Generator<{ index: number; text: st
 
 export function scanMalformedObject(
   content: string,
-  findings: SecretFinding[],
   budget: SourceBudget,
-  scan: (value: string) => SecretFinding[],
+  scan: (value: string, offset: number) => void,
 ): void {
   for (const token of jsonStringTokens(content)) {
     budget.sources++;
@@ -66,11 +65,10 @@ export function scanMalformedObject(
         budget.ambiguous = true;
       }
       if (keyed && !/[\s"'\\]/.test(value)) {
-        for (const finding of scan(`${JSON.stringify(decoded)}:${JSON.stringify(value)}`))
-          findings.push(finding);
+        scan(`${JSON.stringify(decoded)}:${JSON.stringify(value)}`, token.index);
       }
     }
     if (decoded.length < 8) continue;
-    for (const finding of scan(decoded)) findings.push(finding);
+    scan(decoded, token.index);
   }
 }

@@ -37,6 +37,7 @@ import {
 import { resolve, join, relative, extname } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { findSecrets } from "./utils/redactSecrets.js";
+import { PS_DOWNLOAD_PIPE_IEX, PS_IEX_OF_DOWNLOAD } from "./utils/powershell-download-exec.js";
 
 /** Plaintext secrets in an agent/MCP config file. */
 export function auditConfigSecrets(content: string): { label: string; preview: string }[] {
@@ -82,11 +83,11 @@ const SUSPICIOUS_HOOK_PATTERNS: { re: RegExp; why: string }[] = [
     why: "pipes a download straight into a shell",
   },
   {
-    re: /\b(iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n|]{0,400}\|\s*(iex|invoke-expression)\b/i,
+    re: PS_DOWNLOAD_PIPE_IEX,
     why: "pipes a download straight into PowerShell's Invoke-Expression",
   },
   {
-    re: /\b(iex|invoke-expression)\b[\s(]{0,20}(iwr|irm|invoke-webrequest|invoke-restmethod|\(?\s*new-object\s+net\.webclient)/i,
+    re: PS_IEX_OF_DOWNLOAD,
     why: "evaluates a download with PowerShell's Invoke-Expression",
   },
   {
@@ -308,6 +309,9 @@ const CONFIG_FILES = [
   // (kit-research `agent-config-audit-vs-kit`).
   ".cursor/hooks.json",
   ".gemini/settings.json",
+  // Factory Droid's project hooks (Claude Code's shape). kit writes its own Droid gate here
+  // (`installInstallGateDroid`), and the file was not read: a SessionStart hook in it gave no row.
+  ".factory/hooks.json",
 ];
 
 /**
@@ -566,7 +570,7 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
       result(
         "agent-audit",
         "pass",
-        `no issues in ${scannedConfigs} agent config(s) + ${hooks.scanned} hook(s) + ${agent.scanned} command/agent/skill/plugin file(s)`,
+        `no issues in ${scannedConfigs} agent config(s) + ${hooks.scanned} git hook file(s) + ${agent.scanned} command/agent/skill/plugin file(s)`,
         "exposure",
       ),
     );

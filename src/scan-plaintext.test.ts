@@ -41,9 +41,15 @@ describe("scanPlaintextSecrets — key-file coverage (B3)", () => {
     withTmp(async (dir) => {
       writeFileSync(
         join(dir, ".npmrc"),
-        `//registry.npmjs.org/:_authToken=npm_${"a".repeat(36)}\n`,
+        `registry=https://registry.npmjs.org/\n//registry.npmjs.org/:_authToken=npm_${"a".repeat(36)}\n`,
       );
-      assert.deepEqual(labels(await scanPlaintextSecrets(dir), ".npmrc"), ["npm-token"]);
+      const hits = await scanPlaintextSecrets(dir);
+      assert.deepEqual(labels(hits, ".npmrc"), ["npm-token"]);
+      assert.deepEqual(hits.find((hit) => hit.file === ".npmrc")?.findings[0]?.evidence, {
+        file: ".npmrc",
+        line: 2,
+        pattern: "npm-token",
+      });
     }),
   );
 

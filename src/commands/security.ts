@@ -4,7 +4,7 @@
  * `cmdSecurity` is the single top-level entry (registered in the COMMANDS dispatch
  * table in cli.ts); it routes `kit security <sub>` to the module-private handlers
  * below via process.argv[3]. Subcommands: policy [init|add|check], scan-staged,
- * scan-build, scan-transcripts, costs, check-gitignore, verify-pull, prescan,
+ * scan-build, scan-transcripts, scan-outbound, routes, costs, check-gitignore, verify-pull, prescan,
  * prescan-diff, clear-cache.
  *
  * Self-contained lift: every dependency is a sibling core module — no cli.ts-local
@@ -38,11 +38,15 @@ import { sampleCosts } from "../cost-monitor.js";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "../check-gitignore.js";
 import { cmdSecurityVerifyPull } from "./security-verify-pull.js";
 import { cmdSecurityIncoming, SECURITY_INCOMING_USAGE } from "./security-incoming.js";
+import { cmdSecurityScanOutbound } from "./security-scan-outbound.js";
+import { cmdSecurityRoutes } from "./security-routes.js";
 
 /** Subcommands that live in their own module. A table keeps `cmdSecurity` from growing a branch each. */
 const DELEGATED_SUBCOMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   "verify-pull": cmdSecurityVerifyPull,
   incoming: () => cmdSecurityIncoming(process.argv.slice(4)),
+  "scan-outbound": () => cmdSecurityScanOutbound(process.argv),
+  routes: () => cmdSecurityRoutes(process.argv),
 };
 
 function delegatedSubcommand(sub: string | undefined) {
@@ -320,7 +324,7 @@ export async function cmdSecurity(): Promise<boolean> {
 
   if (sub !== "policy") {
     console.error(
-      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] [--include-tests] | advisories [--accept] | scan-artifact <path> [--recursive] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | incoming (${SECURITY_INCOMING_USAGE}) | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
+      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] [--include-tests] | advisories [--accept] | scan-artifact <path> [--recursive] | scan-transcripts | scan-outbound <file|-> [--min-chars <n>] [--json] | routes [--json] | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | incoming (${SECURITY_INCOMING_USAGE}) | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
     );
     return false;
   }
@@ -504,7 +508,7 @@ function printTranscriptHits(hits: TranscriptHit[]): void {
     `${c.red}✗ scan-transcripts: ${total} potential secret(s) in ${hits.length} transcript/cache file(s):${c.reset}`,
   );
   for (const hit of hits.slice(0, 20)) {
-    const labels = hit.findings.map((f) => f.label).join(", ");
+    const labels = hit.findings.map(({ evidence: e }) => `line ${e.line} ${e.pattern}`).join(", ");
     console.error(
       `  ${c.red}•${c.reset} ${sanitizeDisplayText(hit.file)}  ${c.dim}${labels}${c.reset}`,
     );

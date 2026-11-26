@@ -50,6 +50,7 @@ interface DiscoveryState {
   coverageGaps: InstructionCoverageGap[];
   seen: number;
   stopped: boolean;
+  match: (relPath: string) => boolean;
 }
 
 /** INSTRUCTION_NAMES lower-cased: macOS and Windows open `agents.md` when an agent asks for `AGENTS.md`. */
@@ -88,7 +89,7 @@ function visit(
 ): void {
   const path = join(abs, entry.name);
   const rel = relativePath(root, path);
-  if (isInstructionFile(rel)) {
+  if (state.match(rel)) {
     if (state.files.length < MAX_FILES) state.files.push(rel);
     else {
       state.coverageGaps.push({ path: rel, reason: "file-limit" });
@@ -124,12 +125,18 @@ function walk(root: string, abs: string, depth: number, state: DiscoveryState): 
   }
 }
 
-/** Discover files and preserve every traversal failure or reached limit. */
-export function discoverInstructionFiles(root: string): {
+/**
+ * Discover files and preserve every traversal failure or reached limit. `match` widens or narrows
+ * which repo-relative paths count; the default is the files an agent loads as instructions.
+ */
+export function discoverInstructionFiles(
+  root: string,
+  match: (relPath: string) => boolean = isInstructionFile,
+): {
   files: string[];
   coverageGaps: InstructionCoverageGap[];
 } {
-  const state: DiscoveryState = { files: [], coverageGaps: [], seen: 0, stopped: false };
+  const state: DiscoveryState = { files: [], coverageGaps: [], seen: 0, stopped: false, match };
   walk(root, root, 0, state);
   return { files: state.files.sort(), coverageGaps: state.coverageGaps };
 }

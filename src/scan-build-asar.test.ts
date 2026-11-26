@@ -41,7 +41,10 @@ describe("findAsarSecrets", () => {
     );
     const found = await findAsarSecrets(file, "app.asar", { window: 64, overlap: 48 });
     assert.ok(Array.isArray(found));
-    assert.equal(found.filter((f) => f.label === "stripe-key").length, 1);
+    assert.deepEqual(
+      found.filter((f) => f.label === "stripe-key").map((f) => f.evidence),
+      [{ file: "app.asar", byteOffset: 55, pattern: "stripe-key" }],
+    );
   });
 });
 

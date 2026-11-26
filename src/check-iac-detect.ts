@@ -29,13 +29,17 @@ const SKIPPED = new Set([
 
 const COMPOSE = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"];
 
+/**
+ * The Dockerfile names trivy reads: `Dockerfile`, `Dockerfile.<x>`, `<x>.Dockerfile` and
+ * `Containerfile`. A tree whose only images were `containers/*.Dockerfile` skipped both trivy rows
+ * with "no Dockerfile found" (kit-research `decepticon-vs-kit`).
+ */
+export function isDockerfileName(name: string): boolean {
+  return /^(?:Dockerfile(?:\..+)?|.+\.Dockerfile|Containerfile)$/.test(name);
+}
+
 function isIacFile(name: string): boolean {
-  return (
-    name === "Dockerfile" ||
-    name.startsWith("Dockerfile.") ||
-    name.endsWith(".tf") ||
-    COMPOSE.includes(name)
-  );
+  return isDockerfileName(name) || name.endsWith(".tf") || COMPOSE.includes(name);
 }
 
 /** Dockerfile, Compose and Terraform paths within the bounded project discovery. */
@@ -61,9 +65,7 @@ export async function findIacFiles(root: string): Promise<string[]> {
 
 /** Dockerfile paths within the same bounded discovery, so a root without one is not "none". */
 export async function findDockerfiles(root: string): Promise<string[]> {
-  return (await findIacFiles(root)).filter((path) =>
-    /^Dockerfile(?:\.|$)/.test(posix.basename(path)),
-  );
+  return (await findIacFiles(root)).filter((path) => isDockerfileName(posix.basename(path)));
 }
 
 /** Directories (relative, "." for the root) that hold discovered IaC. */

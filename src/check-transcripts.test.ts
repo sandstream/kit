@@ -8,7 +8,13 @@ import { actionableFindings, securityFindingToSync } from "./findings-track.js";
 
 const HIT = {
   file: "/home/u/.claude/projects/p/a.jsonl",
-  findings: [{ label: "aws-access-key", preview: "AKIA…ZZ" }],
+  findings: [
+    {
+      label: "aws-access-key",
+      preview: "AKIA…ZZ",
+      evidence: { file: "transcript.jsonl", line: 1, pattern: "aws-access-key" },
+    },
+  ],
 };
 
 function scanned(hits: TranscriptScan["hits"] = []): TranscriptScan {

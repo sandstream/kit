@@ -1814,7 +1814,7 @@
         },
         "pal": {
           "kind": "command",
-          "summary": "Pending action ledger — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
+          "summary": "Pending action ledger: open work and its handoff between sessions (claim/renew/release/takeover) — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -2423,8 +2423,19 @@
       "x-kit-stability": "experimental"
     },
     "review": {
-      "kind": "command",
-      "summary": "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks it. recover-receipt restores a stopped transaction. resolve-interruption records a review of an unknown result. --json emits a report; --stages and --category scope runs.",
+      "commands": {
+        "gate": {
+          "kind": "command",
+          "summary": "Read-only, deterministic verdict on one pull request: kit review gate --pr <n> [--repo owner/name] [--json]. Prints approve (exit 0), owner (3: protected path, wide module or over 1500 lines), hold (4: failed checks or red main), pending (5) or incomplete (6: a read failed; never approves), with the reasons and the exact head SHA; appends one audit row. Reads GitHub, not the agent, so it is harness-neutral. Never posts. Token: GITHUB_TOKEN or GH_TOKEN, none for public repos",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Full repo audit: check + design + standards + adr + skill. --receipt writes signed PR evidence; verify-receipt checks it. recover-receipt restores a stopped transaction. resolve-interruption records a review of an unknown result. gate --pr <n> gives a read-only approve/owner/hold/pending/incomplete verdict on a pull request. --json emits a report; --stages and --category scope runs.",
       "x-kit-accepted-flags": [
         "--acknowledge-unknown",
         "--attest",
@@ -2440,9 +2451,11 @@
         "--lenient",
         "--no-auto-install",
         "--non-interactive",
+        "--pr",
         "--read-only",
         "--readonly",
         "--receipt",
+        "--repo",
         "--stages",
         "--strict",
         "--version"
@@ -2801,6 +2814,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "routes": {
+          "kind": "command",
+          "summary": "Inventory, not a verdict: list Express, Fastify, Hono, Next.js and SvelteKit routes whose path has an id parameter or names admin, login, signup, register, reset or password, or whose file imports an AI SDK, with the auth guard and rate limiter names seen. IDOR and rate limits are not decided statically; exits 0. kit security routes [--json]",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "scan-artifact": {
           "kind": "command",
           "summary": "Ingestion gate for an untrusted file/tree: byte-level malware scan via the ClamAV delegate. malicious fails and an unverifiable gap fails (no scanner / scan error is never a pass)",
@@ -2813,6 +2835,15 @@
         "scan-build": {
           "kind": "command",
           "summary": "Scan build artifacts (.next/, dist/) for inlined secrets",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "scan-outbound": {
+          "kind": "command",
+          "summary": "Fail when outbound text (a PR body, commit message or release note; a file or - for stdin) repeats a private agent instruction file: untracked or ignored instruction files in the repo and the user-level ones of Claude Code (~/.claude) and Codex ($CODEX_HOME or ~/.codex). Character n-gram overlap, no model; text also in a tracked instruction file is not a leak. Prints the span, file and line, never the file. kit security scan-outbound <file|-> [--min-chars <n>, default 40] [--json]",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -2865,6 +2896,7 @@
         "--help",
         "--include-tests",
         "--json",
+        "--min-chars",
         "--non-interactive",
         "--only",
         "--origin",

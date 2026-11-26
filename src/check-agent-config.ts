@@ -9,6 +9,9 @@
  * The same held for a redirected model endpoint and a code-loading variable in a settings `env`
  * block: `kit agent-audit` warned, `kit check` printed "agent-audit: no issues" (kit-research
  * `dragos-canary-prompts-vs-kit`). Both rows are part of this view now.
+ *
+ * `instruction-file secrets` sits next to agent-audit: the files every harness loads as
+ * instructions (AGENTS.md, CLAUDE.md, .cursorrules, GEMINI.md, Copilot's), read for keys.
  */
 import { homedir } from "node:os";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -24,6 +27,7 @@ export async function checkAgentConfig(
   const { checkPreTrusted } = await import("./check-pretrusted.js");
   const { checkWorktreeInclude } = await import("./check-worktreeinclude.js");
   const { checkGitEmail } = await import("./check-git-email.js");
+  const { checkInstructionSecrets } = await import("./check-instruction-secrets.js");
   const { checkPlaintextCredentials } = await import("./check-plaintext-credentials.js");
   const { userSurfaceDriftRows } = await import("./user-surface-drift.js");
   const { isReadOnlyMode } = await import("./read-only-mode.js");
@@ -31,6 +35,7 @@ export async function checkAgentConfig(
   const { runAgentEndpoint } = await import("./agent-endpoint.js");
   return [
     ...runAgentAudit(root),
+    ...checkInstructionSecrets(root),
     ...runUserAgentAudit(root, home, env),
     ...userSurfaceDriftRows(home, env, !isReadOnlyMode()),
     ...checkMcpLoopbackToken(root),

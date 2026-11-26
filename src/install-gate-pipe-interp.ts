@@ -12,6 +12,8 @@
  * chose to stop exempting vanity installers (`curl https://mise.run | sh`), because nothing ties
  * that script to a repository triage could read. Download it, read it, then run the file.
  *
+ * PowerShell's `irm <url> | iex` and `iex (irm <url>)` are the same shape and get the same answer.
+ *
  * An interpreter that reads its program from an argument (`python3 -m json.tool`, `node -e …`,
  * `perl -ne …`, `bash -c …`, `python3 script.py`) reads the pipe as data, and is not a hit.
  *
@@ -20,6 +22,7 @@
 import { bin } from "./install-gate-hooks.js";
 import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { shellPipelines, shellWords, shellWordValue } from "./install-gate-words.js";
+import { powershellDownloadExecs } from "./utils/powershell-download-exec.js";
 
 /** What a pipeline feeds an interpreter: GitHub refs to triage, and refusals. */
 export interface PipedPayloads {
@@ -271,6 +274,11 @@ export function pipedPayloads(command: string): PipedPayloads {
   });
   for (const text of [masked, ...subs]) {
     for (const stages of shellPipelines(text)) scanPipeline(stages, subs, out);
+  }
+  // PowerShell (`irm … | iex`, `iex (irm …)`), read as text: its quoting is not POSIX, and it
+  // runs the same inside `powershell -c "…"` (kit-research `decepticon-vs-kit`).
+  for (const ps of powershellDownloadExecs(command)) {
+    record(out, { name: ps.download, urls: ps.urls }, ps.exec);
   }
   return { refs: [...new Set(out.refs)], refused: [...new Set(out.refused)] };
 }
