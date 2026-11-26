@@ -1,8 +1,9 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   analyzeCountClaims,
@@ -117,5 +118,51 @@ describe("self-audit-counts — fixture repository", () => {
     assert.match(rows[1].detail, /12 self-hardening rules.*the self-audit rule table has 16/);
     const ok = runCountClaimsAudit(root, 12).filter((r) => r.files?.[0] === "docs/SELF.md:1");
     assert.deepEqual(ok, []);
+  });
+});
+
+describe("self-audit-counts — ADR files and kit's own docs", () => {
+  it("reads docs/adr/*.md, and skips a dated history line that carries the marker", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-r17-adr-"));
+    try {
+      write(root, "package.json", JSON.stringify({ dependencies: { a: "1", b: "1" } }));
+      write(
+        root,
+        "docs/adr/0002-floor.md",
+        "title: Floor — four runtime deps\n## Amended: three runtime deps <!-- kit-self-audit: allow-count -->\n",
+      );
+      const got = analyzeCountClaims(root, 0).map((m) => `${m.file}:${m.line} ${m.stated}`);
+      assert.deepEqual(got, ["docs/adr/0002-floor.md:1 4"]);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  // kit-research#233 E2: CLAUDE.md said "exactly four runtime deps" and "seven ADRs" while
+  // package.json had two and docs/adr more than seven. These read the real repository.
+  const repo = fileURLToPath(new URL("..", import.meta.url));
+  const deps = Object.keys(
+    (JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { dependencies?: object })
+      .dependencies ?? {},
+  ).length;
+
+  for (const doc of ["CLAUDE.md", "AGENTS.md", "docs/adr/0002-dependency-floor.md"]) {
+    it(`${doc} states the runtime dependency count package.json has (${deps})`, () => {
+      const stated = extractCountClaims(readFileSync(join(repo, doc), "utf8"), doc)
+        .filter((c) => c.kind === "runtime-deps")
+        .map((c) => c.stated);
+      assert.ok(stated.length > 0, `${doc} no longer states the floor as a count`);
+      assert.deepEqual(
+        stated,
+        stated.map(() => deps),
+      );
+    });
+  }
+
+  it("no ADR or runtime-dependency count in the repository's docs has drifted", () => {
+    const drift = analyzeCountClaims(repo, 0)
+      .filter((m) => m.kind === "adrs" || m.kind === "runtime-deps")
+      .map((m) => `${m.file}:${m.line} "${m.text}" (actual ${m.actual})`);
+    assert.deepEqual(drift, []);
   });
 });
