@@ -531,3 +531,28 @@ describe("a bare install below a workspace root", () => {
     assert.equal(verdict.block, false, verdict.reason);
   });
 });
+
+describe("a bare install: a receipt without a readable timestamp is not fresh", () => {
+  function rawReceipt(dir: string, entry: Record<string, unknown>): void {
+    const line = JSON.stringify({ type: "npm", sandbox: false, granter: "t", ...entry });
+    writeFileSync(join(dir, TRIAGE_LOG_FILE), line + "\n", { flag: "a" });
+  }
+
+  it("treats an unparseable timestamp as missing, not as fresh", async () => {
+    const dir = project(skill);
+    rawReceipt(dir, { target: "axe-core", timestamp: "not-a-date" });
+    receipt(dir, "playwright");
+    const verdict = await decideBashGate("npm install", undefined, dir);
+    assert.equal(verdict.block, true);
+    assert.match(verdict.reason, /no fresh triage receipt \(7 days\) for axe-core\./);
+  });
+
+  it("treats a missing or non-string timestamp as missing", async () => {
+    const dir = project(skill);
+    rawReceipt(dir, { target: "axe-core" });
+    rawReceipt(dir, { target: "playwright", timestamp: 1 });
+    const verdict = await decideBashGate("npm install", undefined, dir);
+    assert.equal(verdict.block, true);
+    assert.match(verdict.reason, /axe-core, playwright/);
+  });
+});

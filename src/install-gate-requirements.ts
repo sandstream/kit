@@ -4,7 +4,8 @@
  * (`install-gate-bare.ts`, kit#844). This is the pip side of that rule. A requirements file that
  * git does not track needs a fresh `kit triage pip` receipt (`.kit-triage.jsonl`, the same file
  * and window) for every requirement it names. A tracked file is left to `kit triage check-deps`,
- * as a tracked package.json is.
+ * as a tracked package.json is. `pip-sync <file>...` and `uv pip sync <file>...` install the files
+ * they name and are held to the same rule.
  *
  * The file is read, never run. Anything in it that is not a plain registry requirement (a nested
  * `-r`, an index or find-links option, an editable, a URL, a direct `name @ url` reference)
@@ -32,6 +33,86 @@ export function requirementFileValues(tokens: string[]): (string | undefined)[] 
     else if (/^-r[^-]/.test(token)) values.push(token.slice(2));
   });
   return values;
+}
+
+// Options of `pip-sync` and `uv pip sync` that take a value. Any other option is read as taking
+// none, so a misread can only add a file to check, never hide one.
+const SYNC_VALUE_FLAGS = new Set([
+  "-c",
+  "--constraint",
+  "-b",
+  "--build-constraint",
+  "-p",
+  "--python",
+  "--python-executable",
+  "--python-version",
+  "--python-platform",
+  "--target",
+  "--prefix",
+  "--index-strategy",
+  "--keyring-provider",
+  "-C",
+  "--config-setting",
+  "--reinstall-package",
+  "--refresh-package",
+  "--no-binary",
+  "--only-binary",
+  "--no-build-package",
+  "--exclude-newer",
+  "--link-mode",
+  "--cache-dir",
+  "--allow-insecure-host",
+  "--trusted-host",
+  "--cert",
+  "--client-cert",
+]);
+
+/**
+ * The files a `pip-sync` or `uv pip sync` installs: its operands, read from `args` (the tokens after
+ * the verb). `fallback` is the file the command reads when it is given none (pip-sync's
+ * `requirements.txt`). A constraints file is an option value: it installs nothing.
+ */
+export function syncFileValues(args: string[], fallback?: string): string[] {
+  const files: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--") {
+      files.push(...args.slice(i + 1));
+      break;
+    }
+    if (SYNC_VALUE_FLAGS.has(arg)) i++;
+    else if (!arg.startsWith("-") || arg === "-") files.push(arg);
+  }
+  return files.length === 0 && fallback ? [fallback] : files;
+}
+
+/** `pip-sync`, `python -m piptools sync` and `uv pip sync` → the index after the verb, else -1. */
+function syncArgStart(tokens: string[]): number {
+  const [a, b, c, d] = tokens;
+  if (a === "pip-sync") return 1;
+  if ((a === "python" || a === "python3") && b === "-m" && c === "piptools" && d === "sync")
+    return 4;
+  if (a !== "uv") return -1;
+  const at = tokens.findIndex((token, i) => token === "pip" && tokens[i + 1] === "sync");
+  return at > 0 ? at + 2 : -1;
+}
+
+// What a sync reads that a name receipt does not cover: a find-links source, pip arguments passed
+// through, a config file, another working directory, or stdin.
+const SYNC_STEERING =
+  /^(?:-f.*|--find-links(?:=.*)?|--pip-args(?:=.*)?|--config(?:-file)?(?:=.*)?|--directory(?:=.*)?|-)$/;
+
+/**
+ * A `pip-sync`, `python -m piptools sync` or `uv pip sync` as a segment whose `files` are its
+ * operands; the option the gate cannot see past, as a string; or undefined when it is no sync.
+ */
+export function syncSegment(tokens: string[]): BareSegment | string | undefined {
+  const start = syncArgStart(tokens);
+  if (start < 0) return undefined;
+  const steer = tokens.slice(1).find((token) => SYNC_STEERING.test(token));
+  if (steer) return steer;
+  const fallback = tokens[0] === "uv" ? undefined : "requirements.txt";
+  return { manager: tokens[0], tokens, files: syncFileValues(tokens.slice(start), fallback) };
 }
 
 /** PEP 503 normalised project name, so `Example_Pkg` and `example-pkg` are one receipt. */
@@ -92,7 +173,7 @@ function refusal(dir: string, detail: string): BareVerdict {
 /** The untracked requirements files the command installs, or a refusal when one cannot be resolved. */
 function untrackedFiles(dir: string, segments: BareSegment[]): string[] | BareVerdict {
   const files: string[] = [];
-  for (const value of segments.flatMap((s) => requirementFileValues(s.tokens))) {
+  for (const value of segments.flatMap((s) => s.files ?? requirementFileValues(s.tokens))) {
     const file = value === undefined ? undefined : literalPath(value, dir);
     if (!file)
       return refusal(
