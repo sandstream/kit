@@ -34,6 +34,12 @@ exactly as its entry should appear under `## [Unreleased]` ([`changes/README.md`
 Fragments never share lines, so merging one pull request does not give the others a CHANGELOG
 conflict. `src/changelog-fragments.test.ts` fails CI on a malformed fragment.
 
+A patch release (`X.Y.Z`, `Z > 0`) is bug fixes only. `assemble` refuses an `### Added` entry while
+`package.json` names a patch version, and the publish job's `check --none-left` refuses a patch
+version whose section has one: bump the minor, or leave the feature's fragment for the next minor.
+`assemble` also prints the fix commits since the previous tag that rewrite lines another fix in the
+range wrote (`scripts/fix-of-fix.mjs`). Read those pairs before tagging; a fix can add a bug.
+
 Every release PR also updates, in the same PR:
 
 - `README.md`: the what's-new section names the version being released
