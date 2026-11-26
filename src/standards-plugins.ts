@@ -379,7 +379,7 @@ export interface PluginFinding {
 export interface PluginEvaluation {
   findings: PluginFinding[];
   warnings: StandardsCheckResult[];
-  /** Require mode: files the scope selected. Zero means the rule checked nothing. */
+  /** Files the rule checked: those read (forbid) or the scope selected (require). Zero: nothing. */
   scopedFiles: number;
 }
 
@@ -444,6 +444,7 @@ function evaluatePlugin(cwd: string, spec: StandardPluginSpec): PluginEvaluation
       continue;
     }
 
+    scopedFiles++;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (line.length > MAX_LINE_LEN) continue;
@@ -466,13 +467,15 @@ export function evaluatePluginFindings(cwd: string, spec: StandardPluginSpec): P
 }
 
 /**
- * A require rule whose scope selected no file checked nothing, so it cannot pass. It is reported
- * once, as incomplete, and fails under `--enforce` like any other gate that did not run.
+ * A rule that checked no file cannot pass: a require rule whose scope selected none, or a forbid
+ * rule whose extensions and excludes left none to read ("no matches" over zero files). It is
+ * reported once, as incomplete, and fails under `--enforce` like any other gate that did not run.
  */
 function emptyScopeResult(spec: StandardPluginSpec, enforce: boolean): StandardsCheckResult {
-  const selector = spec.scope
-    ? `scope regex ${spec.scope}`
-    : `extension(s) ${spec.exts.join(", ")}`;
+  const selector =
+    spec.mode === "require" && spec.scope
+      ? `scope regex ${spec.scope}`
+      : `extension(s) ${spec.exts.join(", ")}`;
   return {
     category: "standards",
     dimension: "plugin",
@@ -542,7 +545,7 @@ function pluginResult(
   seen: Set<string>,
   enforce: boolean,
 ): StandardsCheckResult {
-  if (spec.mode === "require" && evaluation.scopedFiles === 0) {
+  if (evaluation.scopedFiles === 0) {
     return emptyScopeResult(spec, enforce);
   }
   const findings = evaluation.findings;

@@ -332,3 +332,22 @@ describe("agentskills.io invocation-control fields", () => {
     assert.equal(skillInvocationPosture(m), "model-invocation disabled, not user-invokable");
   });
 });
+
+describe("invocation control: Claude Code's user-invocable spelling", () => {
+  it("reads user-invocable: false, the field Claude Code documents", () => {
+    const m = parseSkillManifest(
+      "---\nname: x\ndescription: does a thing well enough\nuser-invocable: false\n---\nbody",
+    );
+    assert.equal(m.userInvokable, false);
+    assert.equal(skillInvocationPosture(m), "model-invocable, not user-invokable");
+  });
+
+  it("still reads the user-invokable and user_invocable spellings", () => {
+    for (const key of ["user-invokable", "user_invocable"]) {
+      const m = parseSkillManifest(
+        `---\nname: x\ndescription: d is long enough\n${key}: false\n---\nb`,
+      );
+      assert.equal(m.userInvokable, false, key);
+    }
+  });
+});
