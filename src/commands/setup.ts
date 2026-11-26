@@ -369,6 +369,9 @@ async function agentConfigStep(): Promise<void> {
     if (result.action === "created" || result.action === "updated") {
       console.log(`  ${c.green}✓${c.reset} ${agent} gate ${c.dim}→ ${result.file}${c.reset}`);
     }
+    for (const step of result.next ?? []) {
+      console.log(`    ${c.yellow}!${c.reset} ${agent}: ${step}`);
+    }
   }
   console.log();
 }

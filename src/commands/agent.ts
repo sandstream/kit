@@ -232,6 +232,10 @@ async function cmdAgentConfig(): Promise<boolean> {
       } else {
         console.log(`    ${c.dim}· ${agent} skipped: ${result.detail ?? result.action}${c.reset}`);
       }
+      // A written hook the agent will not run yet (Codex trust): say what the user must do.
+      for (const step of result.next ?? []) {
+        console.log(`      ${c.yellow}!${c.reset} ${agent}: ${step}`);
+      }
     }
     // The git-hook floor's bootstrap, as a hook instead of a line of prose (#671).
     const start = await installSessionStartCheck();

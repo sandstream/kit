@@ -929,22 +929,25 @@ describe("installInstallGateDroid", () => {
       const r1 = await installInstallGateDroid(dir);
       assert.equal(r1.action, "created");
       const s = JSON.parse(readFileSync(join(dir, ".factory", "hooks.json"), "utf-8"));
-      const groups = s.hooks.PreToolUse;
+      // A standalone hooks.json is keyed directly by event name, no `hooks` wrapper
+      // (docs.factory.com/reference/hooks-reference.md, "Structure").
+      const groups = s.PreToolUse;
       assert.ok(Array.isArray(groups) && groups.length === 1);
       // the ONE adaptation vs Claude/Codex: matcher is "Execute", not "Bash"
       assert.equal(groups[0].matcher, "Execute");
       assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+      assert.equal(groups[0].hooks[0].onFailure, "block");
 
       const r2 = await installInstallGateDroid(dir);
       assert.equal(r2.action, "unchanged");
       const s2 = JSON.parse(readFileSync(join(dir, ".factory", "hooks.json"), "utf-8"));
-      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+      assert.equal(s2.PreToolUse.length, 1, "no duplicate group on re-run");
     } finally {
       rmTemp(dir);
     }
   });
 
-  it("treats a legacy .factory/hooks/hooks.json gate as already-wired", async () => {
+  it("fixes a legacy .factory/hooks/hooks.json gate in place, without a second file", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-droidgate-legacy-"));
     try {
       mkdirSync(join(dir, ".factory", "hooks"), { recursive: true });
@@ -958,9 +961,11 @@ describe("installInstallGateDroid", () => {
           },
         }),
       );
+      // The wrapped shape never matched Droid's event-keyed file, so it is lifted and fails closed.
       const r = await installInstallGateDroid(dir);
-      assert.equal(r.action, "unchanged");
-      // must NOT create a second scope-root file
+      assert.equal(r.action, "updated");
+      assert.equal((await installInstallGateDroid(dir)).action, "unchanged");
+      // must NOT create a second scope-root file (it would hide the legacy file's other hooks)
       assert.equal(existsSync(join(dir, ".factory", "hooks.json")), false);
     } finally {
       rmTemp(dir);
@@ -1162,7 +1167,8 @@ describe("installInstallGateCursor", () => {
       assert.equal(r1.action, "created");
       const c = JSON.parse(readFileSync(join(dir, ".cursor", "hooks.json"), "utf-8"));
       assert.equal(c.version, 1);
-      assert.ok(c.hooks.beforeShellExecution[0].command.endsWith("gate-bash"));
+      assert.ok(c.hooks.beforeShellExecution[0].command.endsWith("gate-bash --format cursor"));
+      assert.equal(c.hooks.beforeShellExecution[0].failClosed, true);
       assert.equal((await installInstallGateCursor(dir)).action, "unchanged");
     } finally {
       rmTemp(dir);
