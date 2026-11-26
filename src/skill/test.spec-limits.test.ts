@@ -30,7 +30,7 @@ describe("contract: agentskills.io limits (measured gap)", () => {
     assert.match(r.detail, /name is 80 characters/);
     assert.match(r.detail, /description is 2880 characters/);
     assert.match(r.detail, /folder "x"/);
-    assert.match(r.detail, /agentskills\.io\/specification/);
+    assert.ok(r.detail.endsWith(" (https://agentskills.io/specification)"));
   });
   it("testSkill threads the folder name to contract", () => {
     const r = testSkill(skill("run-tests", DESC), { dirName: "x" });
