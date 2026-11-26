@@ -1,5 +1,6 @@
 import { check1PasswordStatus } from "./onepassword.js";
 import { exec } from "./utils/exec.js";
+import { execPinned } from "./vendor-cli-pin.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import type { SecretKeyConfig, InfisicalConfig } from "./config.js";
 import type { SecretResolveResult } from "./secrets.js";
@@ -18,8 +19,9 @@ async function execCli(
   args: string[],
   opts?: Parameters<typeof exec>[2],
 ): Promise<{ stdout: string; stderr: string }> {
-  const bin = (await resolveToolBin(tool)) ?? tool;
-  return exec(bin, args, opts) as Promise<{ stdout: string; stderr: string }>;
+  // Behind the vendor-CLI pin: a pinned CLI runs only as its verified realpath, a mismatch is
+  // refused (never a fallback to the bare name); an unpinned one resolves mise-first as before.
+  return execPinned(tool, args, opts, resolveToolBin);
 }
 
 /** Is a vault CLI installed (mise or PATH)? Used to tell "not installed" apart
@@ -422,7 +424,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
       ];
       if (config.aws_region) args.push("--region", config.aws_region);
       try {
-        const { stdout } = await exec("aws", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("aws", args, { timeout: 15_000 });
         const val = stdout.trim();
         if (!val || val === "None") {
           return { name, resolved: false, value: null, detail: "AWS: secret empty or not found" };
@@ -450,7 +452,9 @@ export const BACKENDS: Record<string, SecretBackend> = {
       ];
       if (opts.region) args.push("--region", opts.region);
       try {
-        await exec("aws", args, { timeout: 15_000, input: value } as Parameters<typeof exec>[2]);
+        await execPinned("aws", args, { timeout: 15_000, input: value } as Parameters<
+          typeof exec
+        >[2]);
       } catch {
         const update = [
           "secretsmanager",
@@ -461,7 +465,9 @@ export const BACKENDS: Record<string, SecretBackend> = {
           "file:///dev/stdin",
         ];
         if (opts.region) update.push("--region", opts.region);
-        await exec("aws", update, { timeout: 15_000, input: value } as Parameters<typeof exec>[2]);
+        await execPinned("aws", update, { timeout: 15_000, input: value } as Parameters<
+          typeof exec
+        >[2]);
       }
       return { ok: true, detail: "wrote to AWS Secrets Manager" };
     },
@@ -476,7 +482,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
         config.gcp_project || process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
       if (project) args.push("--project", project);
       try {
-        const { stdout } = await exec("gcloud", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("gcloud", args, { timeout: 15_000 });
         const val = stdout.trim();
         return {
           name,
@@ -504,14 +510,14 @@ export const BACKENDS: Record<string, SecretBackend> = {
       ];
       if (opts.project) createArgs.push("--project", opts.project);
       try {
-        await exec("gcloud", createArgs, {
+        await execPinned("gcloud", createArgs, {
           timeout: 15_000,
           input: value,
         } as Parameters<typeof exec>[2]);
       } catch {
         const addArgs = ["secrets", "versions", "add", key, "--data-file=-"];
         if (opts.project) addArgs.push("--project", opts.project);
-        await exec("gcloud", addArgs, {
+        await execPinned("gcloud", addArgs, {
           timeout: 15_000,
           input: value,
         } as Parameters<typeof exec>[2]);
@@ -546,7 +552,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
         "tsv",
       ];
       try {
-        const { stdout } = await exec("az", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("az", args, { timeout: 15_000 });
         const val = stdout.trim();
         return {
           name,
@@ -570,7 +576,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
           detail: "Azure: --vault required (azure_vault or AZURE_KEYVAULT_NAME)",
         };
       }
-      await exec(
+      await execPinned(
         "az",
         ["keyvault", "secret", "set", "--vault-name", opts.vault, "--name", key, "--value", value],
         { timeout: 15_000 },
