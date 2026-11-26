@@ -19,6 +19,12 @@
  * or an `ALTER DEFAULT PRIVILEGES … REVOKE … FROM anon` before it takes the grant away. Other
  * schemas are not exposed by default and are skipped. `FORCE ROW LEVEL SECURITY` alone does not
  * enable it.
+ *
+ * A second row, `signed-in database access`, lists each table where a permissive policy
+ * `TO authenticated USING (true)` for select or all lets every signed-in user read every row. On
+ * Supabase anyone can sign up, so on most apps that is close to public. It warns, and fails only
+ * when the table has a personal-looking column, by the same column rule as the anon row. A table
+ * anon can already read is left to the anon row.
  */
 
 import { constants } from "node:fs";
@@ -30,6 +36,7 @@ import { loadPublicTables, type PublicTables } from "./anon-public-tables.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 const ANON_ACCESS_CHECK = "anonymous database access";
+const SIGNED_IN_ACCESS_CHECK = "signed-in database access";
 
 const MAX_SQL_BYTES = 2 * 1024 * 1024;
 const MAX_SQL_FILES = 2000;
@@ -50,6 +57,8 @@ export interface ReadableTable {
 
 export interface AnonAnalysis {
   readable: ReadableTable[];
+  /** Tables anon cannot read that every signed-in user can, through `TO authenticated USING (true)`. */
+  signedIn: ReadableTable[];
   /** Files with an unterminated quote, comment or dollar quote, which may hide statements. */
   incomplete: string[];
 }
@@ -81,7 +90,7 @@ function rolesOf(clause: string | undefined): string[] {
 interface State {
   tables: Map<string, Set<string>>;
   rls: Set<string>;
-  policies: Map<string, { table: string; open: boolean }>;
+  policies: Map<string, { table: string; open: boolean; signedIn: boolean }>;
   grants: Map<string, true>;
   /** Tables where REVOKE SELECT left anon only the columns granted afterwards. */
   columnLimit: Map<string, Set<string>>;
@@ -122,22 +131,27 @@ function usingExpression(rest: string): string | undefined {
   return undefined;
 }
 
-/** True when the clauses after ON <table> let anon or public select every row. */
-function opensRowsToAnon(rest: string): boolean {
-  if (/\bas\s+restrictive\b/i.test(rest)) return false;
+/** The roles a permissive select-or-all policy with USING (true) opens every row to, else none. */
+function rolesOpenedToAllRows(rest: string): string[] {
+  if (/\bas\s+restrictive\b/i.test(rest)) return [];
   const cmd = (rest.match(POLICY_CMD_RE)?.[1] ?? "all").toLowerCase();
-  if (cmd !== "all" && cmd !== "select") return false;
-  if (!rolesOf(rest.match(POLICY_TO_RE)?.[1]).some((r) => ANON_ROLES.has(r))) return false;
+  if (cmd !== "all" && cmd !== "select") return [];
   // Not named `using`: a contextual keyword that some parsers read as a declaration.
   const condition = usingExpression(rest);
-  return condition !== undefined && isOpenExpression(condition);
+  if (condition === undefined || !isOpenExpression(condition)) return [];
+  return rolesOf(rest.match(POLICY_TO_RE)?.[1]);
 }
 
 function applyPolicy(state: State, stmt: string): void {
   const head = stmt.match(POLICY_HEAD_RE);
   if (!head) return;
   const table = normTable(head[2]);
-  state.policies.set(policyKey(table, head[1]), { table, open: opensRowsToAnon(head[3]) });
+  const roles = rolesOpenedToAllRows(head[3]);
+  state.policies.set(policyKey(table, head[1]), {
+    table,
+    open: roles.some((r) => ANON_ROLES.has(r)),
+    signedIn: roles.includes("authenticated"),
+  });
 }
 
 const GRANT_RE = /^grant\s+([\w\s,]+?)\s+on\s+(?:table\s+)?([\s\S]+?)\s+to\s+([\w\x22,\s]+)/i;
@@ -274,6 +288,25 @@ function personalOf(state: State, table: string): string[] {
     .sort();
 }
 
+/** Tables a `TO authenticated USING (true)` policy opens, less those anon can already read. */
+function signedInTables(state: State, anonReadable: Set<string>): ReadableTable[] {
+  const via = new Map<string, string[]>();
+  for (const [key, p] of state.policies) {
+    if (!p.signedIn || anonReadable.has(p.table)) continue;
+    const how = `policy "${key.split("\u0000")[1]}" (TO authenticated USING true)`;
+    via.set(p.table, [...(via.get(p.table) ?? []), how]);
+  }
+  return [...via.entries()]
+    .map(([table, how]) => ({
+      table,
+      personalColumns: [...(state.tables.get(table) ?? [])]
+        .filter((c) => PERSONAL_COLUMN.test(c))
+        .sort(),
+      via: how,
+    }))
+    .sort((a, b) => a.table.localeCompare(b.table));
+}
+
 function summarise(state: State): Omit<AnonAnalysis, "incomplete"> {
   const via = new Map<string, string[]>();
   const note = (table: string, how: string) => via.set(table, [...(via.get(table) ?? []), how]);
@@ -295,7 +328,7 @@ function summarise(state: State): Omit<AnonAnalysis, "incomplete"> {
       via: [...new Set(how)],
     }))
     .sort((a, b) => a.table.localeCompare(b.table));
-  return { readable };
+  return { readable, signedIn: signedInTables(state, new Set(via.keys())) };
 }
 
 /** Pure: apply the sources in the order given and list the tables anonymous readers can select from. */
@@ -428,29 +461,76 @@ function notReadReason(c: Pick<Collected, "oversize" | "unreadable" | "truncated
 }
 
 export async function checkAnonAccess(root: string): Promise<SecurityCheckResult> {
-  const base = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
+  return (await checkDatabaseAccess(root))[0];
+}
+
+/** Both rows from one read of the SQL files: `anonymous database access`, then `signed-in database access`. */
+export async function checkDatabaseAccess(
+  root: string,
+): Promise<[SecurityCheckResult, SecurityCheckResult]> {
+  const both = (r: Omit<SecurityCheckResult, "category" | "name">) =>
+    [ANON_ACCESS_CHECK, SIGNED_IN_ACCESS_CHECK].map((name) => ({
+      ...r,
+      category: "exposure",
+      name,
+    })) as [SecurityCheckResult, SecurityCheckResult];
   const { sources, oversize, unreadable, truncated } = await collectSql(root);
   const why = notReadReason({ oversize, unreadable, truncated });
   if (why) {
-    return {
-      ...base,
+    return both({
       status: "warn",
       didNotRun: true,
       scanIncomplete: true,
       detail: `scan incomplete: ${why}`,
-    };
+    });
   }
   if (sources.length === 0) {
-    return {
-      ...base,
+    return both({
       status: "skip",
       detail: "no SQL files in the project, nothing to read policies from",
-    };
+    });
   }
   const analysis = analyzeAnonAccess(sources, { supabase: await isSupabaseProject(root) });
   const count = `${sources.length} SQL file${sources.length === 1 ? "" : "s"}`;
   const declared = await loadPublicTables(root, normTable);
-  return withIncompleteNote(resultFor(analysis.readable, count, declared), analysis.incomplete);
+  return [
+    withIncompleteNote(resultFor(analysis.readable, count, declared), analysis.incomplete),
+    withIncompleteNote(signedInResult(analysis.signedIn, count, declared), analysis.incomplete),
+  ];
+}
+
+const SIGNED_IN_BASE = { category: "exposure", name: SIGNED_IN_ACCESS_CHECK } as const;
+const SIGNED_IN_SUGGESTION =
+  "Replace USING (true) on each listed table with a row-scoped condition such as USING (auth.uid() = user_id), or move personal columns to a table each user reads only their own rows of. A table every signed-in user may read on purpose, with no personal-looking column, can be declared under [anon_access.public] in .kit.toml with a reason.";
+
+/** Warn for a table every signed-in user can read; fail high when it has a personal-looking column. */
+function signedInResult(
+  all: ReadableTable[],
+  count: string,
+  declared: PublicTables,
+): SecurityCheckResult {
+  const accepted = all.filter((t) => !t.personalColumns.length && declared.reasons.has(t.table));
+  const open = all.filter((t) => !accepted.includes(t));
+  const suffix = accepted.length
+    ? ` (${accepted.length} declared public: ${accepted.map((t) => t.table).join(", ")})`
+    : "";
+  if (open.length === 0) {
+    const what = accepted.length ? "no undeclared table" : "no table";
+    return {
+      ...SIGNED_IN_BASE,
+      status: "pass",
+      detail: `${what} is readable in full by every signed-in user in ${count}${suffix}`,
+    };
+  }
+  const personal = open.some((t) => t.personalColumns.length > 0);
+  return {
+    ...SIGNED_IN_BASE,
+    status: personal ? "fail" : "warn",
+    severity: personal ? "high" : "medium",
+    hasFindings: true,
+    detail: `every signed-in user can read every row of ${open.length} table(s) in ${count}: ${open.map(describe).join("; ")}${suffix}`,
+    suggestion: SIGNED_IN_SUGGESTION,
+  };
 }
 
 const BASE = { category: "exposure", name: ANON_ACCESS_CHECK } as const;
