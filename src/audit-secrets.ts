@@ -14,6 +14,7 @@ import { readFile, access } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { AuditEvent } from "./audit.js";
 import { SECRET_WRITE_OPS } from "./secrets-write-record.js";
+import { INCIDENT_AUDIT_OP } from "./secrets-incident.js";
 
 export interface SecretAccessEntry {
   timestamp: string;
@@ -34,6 +35,7 @@ const AUDIT_FILE = ".kit-audit.jsonl";
 const SECRET_OPERATIONS = new Set<string>([
   "secrets.generate",
   ...Object.values(SECRET_WRITE_OPS),
+  INCIDENT_AUDIT_OP,
   "services.login",
   "fix",
 ]);
