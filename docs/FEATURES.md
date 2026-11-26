@@ -192,7 +192,7 @@ in to any vault is always your own account action; kit never does it for you.
 - `kit security policy [init|add <pkg>|check]`: Dependency allowlist enforcement + per-key spend caps/TTL/scope
 - `kit security costs`: Snapshot per-key spend vs policy cap (Stripe live; OpenAI/Anthropic/Resend/Vercel stubbed)
 - `kit security clear-cache`: Reset the cached supply-chain scanner binary (use after an intentional rebuild)
-- `kit check` row `anonymous database access`: reads `CREATE POLICY`, `GRANT` and `REVOKE` in the project's SQL files, in file name order, and lists the tables that anon or public can select from. A table with a phone, email, person name or national id column fails; a column-level `GRANT` limits what counts. It reads files only and contacts no database
+- `kit check` row `anonymous database access`: reads `CREATE POLICY`, `GRANT` and `REVOKE` in the project's SQL files, in file name order, and lists the tables that anon or public can select from. A table with a phone, email, person name or national id column fails; a column-level `GRANT` limits what counts. On a Supabase project (`supabase/config.toml`, or `@supabase/supabase-js` or `supabase` in `package.json`) it also lists each table created in `public` without row level security enabled, because Supabase grants new `public` tables to `anon` by default; `REVOKE … FROM anon` and `ALTER DEFAULT PRIVILEGES … REVOKE … FROM anon` count, and other schemas are skipped. It reads files only and contacts no database
 
 ### Self-audit
 
