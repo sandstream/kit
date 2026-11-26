@@ -21,11 +21,7 @@
  */
 import { refIsBareName, shadowedBins } from "./install-gate-cwd.js";
 import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
-import {
-  checkRequirementsInstall,
-  requirementFileValues,
-  syncSegment,
-} from "./install-gate-requirements.js";
+import * as requirements from "./install-gate-requirements.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
 import {
@@ -1138,25 +1134,20 @@ function isApprovalNoop(tokens: string[], pos: string[]): boolean {
 }
 
 /** Record a pip-family install that reads a requirements file (`pip install -r <file>`, a sync). */
-function noteRequirementFiles(
-  pos: string[],
-  tokens: string[],
-  raw: string[],
-  probe: InstallProbe,
-): void {
-  const sync = syncSegment(tokens);
+function noteRequirementFiles(pos: string[], tokens: string[], raw: string[], p: InstallProbe) {
+  const sync = requirements.syncSegment(tokens);
   if (sync === undefined) {
-    if (pipInstallerArgStart(pos) >= 0 && requirementFileValues(tokens).length > 0) {
-      probe.requirementSegments.push({ manager: tokens[0], tokens });
+    if (pipInstallerArgStart(pos) >= 0 && requirements.requirementFileValues(tokens).length > 0) {
+      p.requirementSegments.push({ manager: tokens[0], tokens });
     }
     return;
   }
   // A sync whose source the gate cannot see is refused, as an index option on any install is.
   const steer = typeof sync === "string" ? sync : sourceRedirect(raw, tokens);
-  if (!steer && typeof sync !== "string") probe.requirementSegments.push(sync);
+  if (!steer && typeof sync !== "string") p.requirementSegments.push(sync);
   else {
-    probe.isInstall = true;
-    probe.unverifiable.push(`requirements-sync:${steer}`);
+    p.isInstall = true;
+    p.unverifiable.push(`requirements-sync:${steer}`);
   }
 }
 
@@ -1235,7 +1226,7 @@ function bareRefusal(command: string, cwd: string, probe: InstallProbe): string 
   const verdicts = [
     probe.bareInstall ? checkBareInstall(command, cwd, probe.bareSegments) : undefined,
     probe.requirementSegments.length > 0
-      ? checkRequirementsInstall(command, cwd, probe.requirementSegments)
+      ? requirements.checkRequirementsInstall(command, cwd, probe.requirementSegments)
       : undefined,
   ];
   return verdicts.find((v) => v?.block)?.reason;
