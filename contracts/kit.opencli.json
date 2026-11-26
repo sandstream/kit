@@ -2814,6 +2814,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "routes": {
+          "kind": "command",
+          "summary": "Inventory, not a verdict: list Express, Fastify, Hono, Next.js and SvelteKit routes whose path has an id parameter or names admin, login, signup, register, reset or password, or whose file imports an AI SDK, with the auth guard and rate limiter names seen. IDOR and rate limits are not decided statically; exits 0. kit security routes [--json]",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "scan-artifact": {
           "kind": "command",
           "summary": "Ingestion gate for an untrusted file/tree: byte-level malware scan via the ClamAV delegate. malicious fails and an unverifiable gap fails (no scanner / scan error is never a pass)",
