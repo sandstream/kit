@@ -11,7 +11,11 @@
  *   - A newer release than the first fixed one is not waived. An old advisory about the version in
  *     use must not let a brand new release through under its cover.
  *
- * With no lockfile version, with OSV unreachable, or with air-gap on and no OSV mirror named, the
+ * The version in use comes from the project lockfile first, then from an installed copy (npm's global
+ * install, `node_modules`, pip's dist-info), which counts only when the registry has published it
+ * (`triage-current-version.ts`). The cooling line says which source it was.
+ *
+ * With no current version, with OSV unreachable, or with air-gap on and no OSV mirror named, the
  * warning stays and says why. This runs after triage.py: the bundled script is a frozen, verified
  * asset and reads no project files. The summary counts and the score take the cooling line, with
  * triage.py's own penalties (`countCoolingWarnings`).
@@ -21,6 +25,14 @@ import { join } from "node:path";
 import { resolveInstalledVersion } from "./upstream-installed.js";
 import { readRegularFileIfPresent } from "./upstream-safe-read.js";
 import { pipName, pypiJsonUrl, pypiReleaseTimes } from "./triage-cooling-pypi.js";
+import {
+  defaultInstallLocator,
+  npmProbes,
+  pipProbes,
+  resolveCurrent,
+  type CurrentVersion,
+  type InstallLocator,
+} from "./triage-current-version.js";
 
 export interface SupplyChainConfig {
   internal_scopes?: string[];
@@ -175,8 +187,17 @@ export interface CoolingInput {
   times: Record<string, string>;
   limitDays: number;
   enforce: boolean;
-  /** The version the lockfile pins now. */
+  /** The version in use now: the lockfile's pin, or a published version an installed copy has. */
   current?: string;
+  /** Where `current` came from, printed on the cooling line ("the project lockfile"). */
+  currentFrom?: string;
+  /**
+   * True when `current` came from an installed copy, not a lockfile. Such a version only feeds the
+   * waiver: it never skips the cooling period the way a pin of the same version does.
+   */
+  currentInstalled?: boolean;
+  /** Why no current version is known, naming the sources checked. */
+  currentNote?: string;
   now: number;
   /** A lookup, or the reason advisories must not be queried (air-gap). */
   osv: OsvLookup | { skipped: string };
@@ -202,7 +223,10 @@ type Waiver = { waived: string } | { note?: string };
 async function waiver(input: CoolingInput): Promise<Waiver> {
   const { pkg, version, current, osv } = input;
   if (!current)
-    return { note: "no current version known, so a security patch cannot be recognised" };
+    return {
+      note:
+        input.currentNote ?? "no current version known, so a security patch cannot be recognised",
+    };
   if (typeof osv !== "function") return { note: `advisories not queried: ${osv.skipped}` };
   const [before, after] = [await osv(pkg, current), await osv(pkg, version)];
   if (!before || !after) return { note: "advisories could not be checked" };
@@ -225,22 +249,29 @@ async function waiver(input: CoolingInput): Promise<Waiver> {
 /** The cooling verdict for one release. Pure but for the injected advisory lookup. */
 export async function coolingCheck(input: CoolingInput): Promise<CoolingResult> {
   const { version, limitDays, now } = input;
-  if (limitDays <= 0 || input.current === version) return { lines: [], held: false };
+  const pinned = input.current === version && !input.currentInstalled;
+  if (limitDays <= 0 || pinned) return { lines: [], held: false };
   const age = ageDays(input.times[version], now);
   if (age === undefined) {
     return unverified(`the registry gives no publish time for ${plain(version)}`, input.enforce);
   }
   if (age >= limitDays) return { lines: [], held: false };
   const result = await waiver(input);
+  const source =
+    input.current && input.currentFrom
+      ? `current ${plain(input.current)} from ${input.currentFrom}`
+      : undefined;
   if ("waived" in result) {
-    const fact = `cooling: waived, ${plain(version)} fixes ${result.waived} (the first release that does)`;
+    const why = ["the first release that does", source].filter(Boolean).join("; ");
+    const fact = `cooling: waived, ${plain(version)} fixes ${result.waived} (${why})`;
     return { lines: [`  . ${fact}`], held: false };
   }
   let msg = `cooling: ${plain(version)} was published ${age} days ago, limit ${limitDays}`;
   const older = newestOlder(input.versions, input.times, limitDays, now);
   if (older)
     msg += `; newest version public for ${limitDays} days or more: ${plain(input.pkg)}${input.pin ?? "@"}${plain(older)}`;
-  if (result.note) msg += ` (${result.note})`;
+  const notes = [source, result.note].filter(Boolean);
+  if (notes.length > 0) msg += ` (${notes.join("; ")})`;
   const line = input.enforce ? `  x CRITICAL: ${msg}` : `  ! WARNING: ${msg}`;
   return { lines: [line], held: input.enforce };
 }
@@ -269,6 +300,8 @@ export interface CoolingDeps {
   /** POST a JSON body and read a JSON answer, or null on any failure. */
   postJson: (url: string, body: unknown) => Promise<unknown>;
   airGap: (cwd: string) => Promise<AirGapView>;
+  /** Where installed copies live, for the current version. Defaults to this machine's. */
+  locator?: InstallLocator;
 }
 
 async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
@@ -307,6 +340,7 @@ export const defaultCoolingDeps: CoolingDeps = {
   getJson: (url) => fetchJson(url),
   postJson: (url, body) => fetchJson(url, { method: "POST", body: JSON.stringify(body) }),
   airGap: airGapView,
+  locator: defaultInstallLocator,
 };
 
 const TRIAGED_LINE = /^\s*\. triaged ([0-9A-Za-z.+-]+)/m;
@@ -428,9 +462,31 @@ function registrySource(
 }
 
 /**
- * Run the cooling check for an npm or pip triage and fold it into the result. Other ecosystems
- * pass through. pip has no lockfile kit reads, so a pip warning is never waived as a security fix.
+ * The version in use, in the order of trust: npm's lockfile, then its global install, then
+ * `node_modules`; pip's installed dist-info. Installed copies count only when `published` has them.
  */
+export function currentVersion(
+  cwd: string,
+  type: string,
+  target: string,
+  published: readonly string[],
+  deps: CoolingDeps,
+): Promise<CurrentVersion> {
+  const loc = deps.locator ?? defaultInstallLocator;
+  if (type === "npm") {
+    const pkg = npmName(target) ?? target;
+    const locked = { label: "the project lockfile", version: lockedVersion(cwd, target) };
+    return resolveCurrent(locked, npmProbes(cwd, pkg, deps.env, loc), published);
+  }
+  const name = pipName(target) ?? target;
+  return resolveCurrent(
+    { label: "a lockfile (pip has none kit reads)" },
+    pipProbes(cwd, name, loc),
+    published,
+  );
+}
+
+/** Run the cooling check for an npm or pip triage and fold it into the result. Other ecosystems pass through. */
 export async function applyCooling(
   cwd: string,
   type: string,
@@ -455,6 +511,12 @@ export async function applyCooling(
   if ("skip" in source) return fold(unverified(source.skip, enforce));
   const view = source.parse(await deps.getJson(source.url));
   if (!view) return fold(unverified("the registry could not be read again", enforce));
+  // Only a release inside the cooling period (or with no publish time) needs the version in use.
+  const age = ageDays(view.times[version], deps.now());
+  const current =
+    age === undefined || age < limitDays
+      ? await currentVersion(cwd, type, target, view.versions, deps)
+      : {};
   const verdict = await coolingCheck({
     pkg,
     version,
@@ -462,7 +524,10 @@ export async function applyCooling(
     times: view.times,
     limitDays,
     enforce,
-    current: type === "npm" ? lockedVersion(cwd, target) : undefined,
+    current: current.version,
+    currentFrom: current.from,
+    currentInstalled: current.installed,
+    currentNote: current.note,
     now: deps.now(),
     osv: osvFor(deps, air.enabled, type === "npm" ? "npm" : "PyPI"),
     pin: type === "npm" ? "@" : "==",

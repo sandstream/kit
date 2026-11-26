@@ -68,15 +68,16 @@ describe("pypiReleaseTimes", () => {
   });
 });
 
+const report = (v: string) =>
+  `Triage: pip fixture\n  . triaged ${v}, 3 releases, author: x\n\nHealth score: 88/100\nTRIAGE PASSED\n`;
+const doc = {
+  releases: {
+    "1.0.0": [{ upload_time_iso_8601: ago(60) }],
+    "1.1.0": [{ upload_time_iso_8601: ago(3) }],
+  },
+};
+
 describe("applyCooling for pip", () => {
-  const report = (v: string) =>
-    `Triage: pip fixture\n  . triaged ${v}, 3 releases, author: x\n\nHealth score: 88/100\nTRIAGE PASSED\n`;
-  const doc = {
-    releases: {
-      "1.0.0": [{ upload_time_iso_8601: ago(60) }],
-      "1.1.0": [{ upload_time_iso_8601: ago(3) }],
-    },
-  };
   function deps(env: NodeJS.ProcessEnv = {}, airGap = false): CoolingDeps & { urls: string[] } {
     const urls: string[] = [];
     return {
@@ -89,6 +90,13 @@ describe("applyCooling for pip", () => {
       },
       postJson: async () => ({ vulns: [] }),
       airGap: async () => ({ enabled: airGap, mirrors: {} }),
+      // No interpreter is run: nothing is installed.
+      locator: {
+        platform: process.platform,
+        execPath: join(tmpdir(), "kit-cooling-no-node", "node"),
+        home: join(tmpdir(), "kit-cooling-no-home"),
+        sitePackages: async () => [],
+      },
     };
   }
 

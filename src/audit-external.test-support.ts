@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import {
+  auditCli,
   auditFixture,
   runAuditWorkers,
   startAuditWorker,
@@ -15,13 +16,17 @@ export async function externalAuditFixture(
 ): Promise<
   ReturnType<typeof auditFixture> & { witness: string; indexPath: string; logPath: string }
 > {
-  const fixture = auditFixture(t, true);
+  const fixture = auditFixture(t);
   await runAuditWorkers([
     startAuditWorker(
       fixture,
       `assert.equal(await audit.appendAuditEventDirect(event("seed"), { cwd: project }), true);`,
     ),
   ]);
+  // Appending is allowed to succeed even when automatic sealing cannot.
+  fixture.env.KIT_AUDIT_ANCHOR = "1";
+  const sealed = auditCli(fixture, ["anchor"]);
+  assert.equal(sealed.status, 0, sealed.stdout + sealed.stderr);
   const witness = join(fixture.root, "witness");
   mkdirSync(witness);
   const keys = generateKeyPairSync("ed25519");
