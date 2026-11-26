@@ -6,6 +6,7 @@ import {
 } from "../scan-build.js";
 import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
 import { isTestArtifact } from "../check-client-exposure.js";
+import { sanitizeDisplayText } from "../display-text.js";
 
 export async function cmdSecurityScanBuild(): Promise<boolean> {
   // Optional positional: extra dirs to scan beyond the defaults.
@@ -42,8 +43,16 @@ export async function cmdSecurityScanBuild(): Promise<boolean> {
     `${c.red}✗ scan-build: ${total} potential secret(s) in ${hits.length} build file(s):${c.reset}`,
   );
   for (const hit of hits.slice(0, 20)) {
-    const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
-    console.error(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
+    const labels = hit.findings
+      .map(({ evidence, preview }) => {
+        const position =
+          "line" in evidence ? `line ${evidence.line}` : `byte ${evidence.byteOffset}`;
+        return `${position} ${evidence.pattern}:${sanitizeDisplayText(preview)}`;
+      })
+      .join(", ");
+    console.error(
+      `  ${c.red}•${c.reset} ${sanitizeDisplayText(hit.file)}  ${c.dim}${labels}${c.reset}`,
+    );
   }
   if (hits.length > 20) {
     console.error(`  ${c.dim}… and ${hits.length - 20} more${c.reset}`);
