@@ -12,7 +12,10 @@
  */
 import { open } from "node:fs/promises";
 import type { SecretFinding } from "./utils/redactSecrets.js";
-import { findArtifactSecrets } from "./scan-build-sourcemap.js";
+import { archiveEvidenceSchema, type ArchiveEvidence } from "./finding-evidence.js";
+import { findBuildMatches } from "./scan-build-sourcemap.js";
+
+export type ArchiveSecret = SecretFinding & { evidence: ArchiveEvidence };
 
 /** Larger than this, the asar is reported as not scanned rather than read. */
 const MAX_ASAR_BYTES = 1024 * 1024 * 1024; // 1 GiB
@@ -29,7 +32,7 @@ export async function findAsarSecrets(
   path: string,
   rel: string,
   opts: { window?: number; overlap?: number } = {},
-): Promise<SecretFinding[] | "too-large"> {
+): Promise<ArchiveSecret[] | "too-large"> {
   const window = opts.window ?? WINDOW;
   const overlap = opts.overlap ?? OVERLAP;
   // One descriptor for both the size and the reads, so the file checked is the file read.
@@ -38,17 +41,22 @@ export async function findAsarSecrets(
     const { size } = await handle.stat();
     if (size > MAX_ASAR_BYTES) return "too-large";
     const seen = new Set<string>();
-    const findings: SecretFinding[] = [];
+    const findings: ArchiveSecret[] = [];
     const buffer = Buffer.alloc(window);
     for (let pos = 0; pos < size; pos += window - overlap) {
       const { bytesRead } = await handle.read(buffer, 0, window, pos);
       if (bytesRead === 0) break;
       const text = buffer.subarray(0, bytesRead).toString("latin1");
-      for (const f of findArtifactSecrets(text, rel)) {
-        const id = `${f.label}\0${f.preview}`;
+      for (const { label, preview, offset } of findBuildMatches(text)) {
+        const id = `${label}\0${preview}`;
         if (seen.has(id)) continue;
         seen.add(id);
-        findings.push(f);
+        const evidence = archiveEvidenceSchema.parse({
+          file: rel,
+          byteOffset: pos + offset,
+          pattern: label,
+        });
+        findings.push({ label, preview, evidence });
       }
       if (pos + bytesRead >= size) break;
     }

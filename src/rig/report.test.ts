@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { adjudicate, type RunOutcome } from "./adjudicate.js";
 import { parseFindings } from "./findings.js";
 import { parseManifest } from "./manifest.js";
-import { aggregate, compare, LIMITS, spread, splitWarnings } from "./report.js";
+import {
+  aggregate,
+  compare,
+  compareConfigs,
+  LIMITS,
+  spread,
+  splitWarnings,
+  VOLUME_RATIO_LIMIT,
+} from "./report.js";
 
 const MANIFEST = parseManifest(`
 [input]
@@ -192,8 +200,15 @@ describe("volume", () => {
     assert.deepEqual(f.volume, {
       findingsPerRun: { mean: 100, min: 100, max: 100 },
       unmatched: 95,
+      duplicatesPerRun: { mean: 4, min: 4, max: 4 },
+      precision: { mean: 0.01, min: 0.01, max: 0.01 },
     });
-    assert.deepEqual(q.volume, { findingsPerRun: { mean: 1, min: 1, max: 1 }, unmatched: 0 });
+    assert.deepEqual(q.volume, {
+      findingsPerRun: { mean: 1, min: 1, max: 1 },
+      unmatched: 0,
+      duplicatesPerRun: { mean: 0, min: 0, max: 0 },
+      precision: { mean: 1, min: 1, max: 1 },
+    });
     const withControl = aggregate(MANIFEST, [quiet, control("Q", "r1", 2)]);
     assert.deepEqual(withControl[0].volume?.findingsPerRun, { mean: 3, min: 3, max: 3 });
   });
@@ -256,5 +271,34 @@ describe("a run that did not review every target", () => {
     const a = statsOf(hit("d1", "a.ts", 1), row({ target: "c1", failed: "refused" }));
     assert.deepEqual(a.controls.falsePositiveRate, { mean: 1, min: 1, max: 1 });
     assert.equal(a.controls.shortfall?.[0].failed[0].reason, "refused");
+  });
+});
+
+describe("a flooding reviewer against a precise one", () => {
+  /** Three runs: each catches d1 once; `extra` more findings land on d1 and on the control. */
+  const config = (name: string, duplicates: number, unmatched: number, fps: number) =>
+    [1, 2, 3].flatMap((n) => [
+      { ...defect(name, `r${n}`, "d1", true), duplicates, unmatched },
+      control(name, `r${n}`, fps),
+    ]);
+
+  it("does not call recall-equal configs comparable when volume differs tenfold", () => {
+    const [flood, precise] = aggregate(MANIFEST, [
+      ...config("FLOOD", 9, 990, 1000),
+      ...config("PRECISE", 0, 0, 0),
+    ]);
+    assert.equal(compare(flood.tune, precise.tune).verdict, "within spread");
+    const c = compareConfigs(flood, precise, "tune");
+    assert.equal(c.verdict, "within spread");
+    assert.equal(c.verdict === "within spread" ? c.volumeRatio : undefined, 2000);
+    assert.deepEqual(flood.volume?.duplicatesPerRun, { mean: 9, min: 9, max: 9 });
+    assert.equal(flood.volume?.precision?.mean, 1 / 2000);
+    assert.equal(precise.volume?.precision?.mean, 1);
+  });
+
+  it(`leaves the plain verdict below a ${VOLUME_RATIO_LIMIT}x difference`, () => {
+    const [a, b] = aggregate(MANIFEST, [...config("A", 1, 7, 0), ...config("B", 0, 0, 0)]);
+    const c = compareConfigs(a, b, "tune");
+    assert.ok(c.verdict === "within spread" && c.volumeRatio === undefined);
   });
 });
