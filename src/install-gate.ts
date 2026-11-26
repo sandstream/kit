@@ -50,6 +50,7 @@ import { cargoInstall } from "./install-gate-cargo.js";
 import { goInstall } from "./install-gate-go.js";
 import { brewInstall } from "./install-gate-brew.js";
 import { githubRepoRef, notePipedPayloads } from "./install-gate-pipe-interp.js";
+import { releaseChains, releaseRefusal, type ReleaseChain } from "./install-gate-release.js";
 import {
   shellWords,
   shellSegments,
@@ -89,6 +90,8 @@ export interface InstallProbe {
   bareSegments: BareSegment[];
   /** pip-family installs that read a requirements file (`-r <file>`), checked like a bare install. */
   requirementSegments: BareSegment[];
+  /** Fetches chained into an extract, chmod, run or PATH move: install-gate-release.ts. */
+  releaseChains?: ReleaseChain[];
 }
 
 // Leading shell keywords / grouping tokens that precede a real command without
@@ -712,6 +715,7 @@ export function parseInstallCommand(command: string): InstallProbe {
     bareInstall: false,
     bareSegments: [],
     requirementSegments: [],
+    releaseChains: [],
   };
   if (!command || typeof command !== "string") return probe;
   for (const ref of repoFetchToShellRefs(command)) {
@@ -749,6 +753,7 @@ export function parseInstallCommand(command: string): InstallProbe {
     }
     for (const segment of shellSegments(cmd)) scanSegment(segment, probe);
     notePipedPayloads(cmd, probe);
+    probe.releaseChains!.push(...releaseChains(cmd));
   }
 
   // De-dup (npm i a a, or a && a).
@@ -1240,6 +1245,8 @@ async function gateVerdict(
   const refused = policyRefusal(command, splitHeredocs(command));
   if (refused) return { block: true, reason: refused, checked: [] };
   const probe = parseInstallCommand(command);
+  const release = releaseRefusal(probe.releaseChains ?? [], cwd);
+  if (release) return { block: true, reason: release, checked: [] };
   if (!probe.isInstall && !probe.bareInstall && probe.requirementSegments.length === 0) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };
   }
