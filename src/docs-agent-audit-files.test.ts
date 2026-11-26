@@ -18,9 +18,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** The string entries of `const CONFIG_FILES = [ … ];` in src/agent-audit.ts. */
 function auditedConfigFiles(): string[] {
   const source = readFileSync(resolve(root, "src", "agent-audit.ts"), "utf8");
-  const block = /const CONFIG_FILES = \[([^\]]*)\]/.exec(source);
+  const block = /^const CONFIG_FILES = \[\r?\n([\s\S]*?)^\];/m.exec(source);
   assert.ok(block, "src/agent-audit.ts declares CONFIG_FILES as an array literal");
-  return [...block[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+  return [...block[1]!.matchAll(/^[ \t]+"([^"]+)",/gm)].map((m) => m[1]!);
 }
 
 describe("docs/FEATURES.md names every agent config file kit agent-audit reads", () => {
@@ -28,6 +28,7 @@ describe("docs/FEATURES.md names every agent config file kit agent-audit reads",
     const files = auditedConfigFiles();
     assert.ok(files.length >= 10, `found ${files.length}`);
     assert.ok(files.includes(".claude/settings.json"));
+    assert.ok(files.includes(".codex/config.toml"));
   });
 
   it("names each file in backticks", () => {
