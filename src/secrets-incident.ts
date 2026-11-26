@@ -8,9 +8,11 @@
  *
  * Fingerprints are HMAC-SHA256 under a random 32-byte key generated per snapshot, never a plain
  * hash. That defeats precomputed tables and makes two snapshots (or two machines) incomparable.
- * The key sits in the same owner-only, gitignored file, so whoever can read the file can still
- * test guesses for one key; the file's protection is the 0600/ACL mode and the ignore rule, both
- * checked before any read or write here.
+ * The key is NOT in the snapshot: it lives per user, outside the repo tree
+ * (`~/.kit/incident-keys/<project-id>/<backend>.key`, `src/secrets-incident-key.ts`), and the
+ * snapshot records only its id. A snapshot read from a leaked tree, backup or synced folder
+ * therefore cannot be used to test guesses, and cannot verify on its own. The snapshot file is
+ * still owner-only and gitignored, both checked before any read or write here.
  *
  * Owner direction "trust no one" (2026-11-26):
  *  - a value that cannot be re-read is NOT verified, never "changed";
@@ -18,18 +20,20 @@
  *    different key list is an error, never a silent re-snapshot (`--new-snapshot` replaces one);
  *  - nothing here changes a remote credential. Rotation stays a person's step.
  */
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, lstatSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { INCIDENT_KEY_BYTES, incidentKeyId } from "./secrets-incident-key.js";
 import {
   privateFileIsControlled,
   secureDirStrict,
   secureFileStrictAsync,
 } from "./utils/secure-perms.js";
 
-export const SNAPSHOT_VERSION = 1;
+/** v2: the key moved out of the snapshot; a v1 file (key inline) is refused, never read. */
+export const SNAPSHOT_VERSION = 2;
 /** Audit operation for every `kit secrets incident` run; `kit audit secrets` lists it per key. */
 export const INCIDENT_AUDIT_OP = "secrets.incident";
 const SNAPSHOT_KIND = "kit-secrets-incident-snapshot";
@@ -47,8 +51,8 @@ export interface Snapshot {
   createdAt: string;
   /** The CLI the values were read through, as resolved at snapshot time (null: no CLI). */
   cli: string | null;
-  /** base64 of the random per-snapshot HMAC key. */
-  hmacKey: string;
+  /** Id of the per-user HMAC key (`incidentKeyId`), never the key itself. */
+  keyId: string;
   keys: SnapshotKey[];
 }
 
@@ -76,21 +80,22 @@ export function fingerprint(hmacKey: Buffer, value: string): string {
   return createHmac("sha256", hmacKey).update(value, "utf8").digest("hex");
 }
 
-/** Build a snapshot from values already read. Pure apart from the random key. */
+/** Build a snapshot from values already read, under `key` (kept outside the snapshot). Pure. */
 export function buildSnapshot(
   backend: string,
   values: ReadValue[],
   cli: string | null,
+  key: Buffer,
   now: Date = new Date(),
 ): Snapshot {
-  const key = randomBytes(32);
+  if (key.length !== INCIDENT_KEY_BYTES) throw new Error("incident key has the wrong length");
   return {
     version: SNAPSHOT_VERSION,
     kind: SNAPSHOT_KIND,
     backend,
     createdAt: now.toISOString(),
     cli,
-    hmacKey: key.toString("base64"),
+    keyId: incidentKeyId(key),
     keys: values
       .map((v) => ({ name: v.name, fingerprint: v.value ? fingerprint(key, v.value) : null }))
       .sort((a, b) => a.name.localeCompare(b.name)),
@@ -103,9 +108,16 @@ function sameFingerprint(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-/** Compare current values against a snapshot. Only a re-read, different value counts as changed. */
-export function compareSnapshot(snapshot: Snapshot, current: ReadValue[]): VerifyRow[] {
-  const key = Buffer.from(snapshot.hmacKey, "base64");
+/**
+ * Compare current values against a snapshot. Only a re-read, different value counts as changed.
+ * A key whose id differs from the snapshot's throws: it would make every key look "changed".
+ */
+export function compareSnapshot(
+  snapshot: Snapshot,
+  key: Buffer,
+  current: ReadValue[],
+): VerifyRow[] {
+  if (incidentKeyId(key) !== snapshot.keyId) throw new Error("incident key id mismatch");
   const now = new Map(current.map((v) => [v.name, v.value]));
   return snapshot.keys.map(({ name, fingerprint: before }) => {
     const value = now.get(name);
@@ -139,10 +151,14 @@ function keyListMismatch(snapshot: Snapshot, names: string[]): string | null {
 function shapeProblem(data: unknown, backend: string): string | null {
   const s = data as Partial<Snapshot> | null;
   if (!s || typeof s !== "object") return "not a JSON object";
+  if (s.kind === SNAPSHOT_KIND && s.version === 1) {
+    return "snapshot is format v1, which stored its key beside the fingerprints; replace it with --new-snapshot";
+  }
   if (s.kind !== SNAPSHOT_KIND || s.version !== SNAPSHOT_VERSION) return "unknown snapshot format";
+  if ("hmacKey" in s) return "snapshot carries key material, which this format never writes";
   if (s.backend !== backend) return `snapshot is for backend "${String(s.backend)}"`;
-  if (typeof s.hmacKey !== "string" || Buffer.from(s.hmacKey, "base64").length !== 32) {
-    return "snapshot key is missing or malformed";
+  if (typeof s.keyId !== "string" || !/^ik_[0-9a-f]{32}$/.test(s.keyId)) {
+    return "snapshot key id is missing or malformed";
   }
   if (!Array.isArray(s.keys)) return "snapshot has no key list";
   const bad = s.keys.some(
@@ -156,8 +172,8 @@ function shapeProblem(data: unknown, backend: string): string | null {
 
 /**
  * Owner-only, a regular file, not a symlink. On POSIX that is stricter than
- * `privateFileIsControlled` (which allows group/other READ): fingerprints plus their key let a
- * reader test guesses, so no other user may read the file. On Windows the ACL check decides.
+ * `privateFileIsControlled` (which allows group/other READ): the key is elsewhere, but the
+ * fingerprints and key list are still nobody else's business. On Windows the ACL check decides.
  */
 export function snapshotIsOwnerOnly(path: string): boolean {
   try {
