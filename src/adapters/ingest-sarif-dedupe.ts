@@ -13,6 +13,8 @@ export interface SarifResult {
   ruleId?: string;
   /** SARIF 2.1.0 kind. An absent kind represents a failure. */
   kind?: string;
+  /** A suppression with no status is accepted. */
+  suppressions?: { status?: string }[];
   level?: string;
   message?: { text?: string };
   locations?: SarifLocation[];

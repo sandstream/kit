@@ -41,6 +41,17 @@ PIPE_TO_SHELL = (
     re.compile(r"\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b[^\n|]*\|\s*(?:iex|Invoke-Expression)\b", re.I),
 )
 URL_HOST = re.compile(r"https?://([^/\s\"'`)$:?#]+)")
+# A request whose body is a credential: `Request(url, data=token)`, `requests.post(u, json={"token":
+# t})`, `fetch(u, {body: secret})`, `curl -d "key=$API_TOKEN"`. A credential in a header is how an API
+# is called and is not matched; one sent as the payload is the credential itself leaving the machine.
+# Line scan: a payload built on an earlier line is not seen.
+_CRED_NAME = r"\w*(?:token|secret|passw(?:or)?d|api_?key|credential)\w*"
+CRED_PAYLOAD = (
+    re.compile(r"(?:\bRequest|\burlopen|\brequests\.\w+|\bhttpx\.\w+|\bfetch|\baxios\.\w+|\.post|\.put)\s*\("
+               r"[^\n]*\b(?:data|json|body|content)\s*[=:]\s*[^,\n]*\b" + _CRED_NAME, re.I),
+    re.compile(r"\b(?:curl|wget)\b[^\n]*(?:\s-d|--data[\w-]*|\s-F|--form[\w-]*|--post-data)[=\s]+[\"']?[^\s\"']*"
+               r"\$\{?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY|CREDENTIAL)"),
+)
 
 
 def _load_json(rep, path, label):
@@ -183,6 +194,9 @@ def _judge_hook(rep, source, event, matcher):
 
 
 def _scan_script(rep, rel, text):
+    """Line-scan one script or command. Returns the kinds it found that a caller combines with other
+    evidence ({"credential-payload"}); every finding is also reported here."""
+    hits = set()
     for n, line in enumerate(text.splitlines(), 1):
         code = line.split("#", 1)[0] if not line.lstrip().startswith("#!") else ""
         for m in RUNNER.finditer(code):
@@ -190,7 +204,11 @@ def _scan_script(rep, rel, text):
                 rep.warn(f"{rel}:{n}: `{m.group(1)} {m.group(3)}` runs the newest published version on every call (unpinned)")
         if UPLOAD.search(code):
             rep.warn(f"{rel}:{n}: uploads a local file's contents over the network")
+        if any(p.search(code) for p in CRED_PAYLOAD):
+            hits.add("credential-payload")
+            rep.warn(f"{rel}:{n}: sends a credential as the body of a network request")
         _pipe_to_shell(rep, f"{rel}:{n}", code)
+    return hits
 
 
 def _pipe_to_shell(rep, where, code):

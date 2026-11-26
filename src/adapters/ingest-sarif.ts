@@ -77,6 +77,7 @@ function sarifFinding(
   tool: string,
   res: SarifResult,
   rulesById: Map<string, SarifRule>,
+  status: "fail" | "warn",
 ): SarifFinding {
   const ruleId = res.ruleId ?? "(rule)";
   const rule = rulesById.get(ruleId);
@@ -87,7 +88,7 @@ function sarifFinding(
   return {
     category: "exposure",
     name: `${tool}: ${ruleId}`,
-    status: "fail",
+    status,
     detail: `${res.message?.text ?? ruleId}${sarifLocation(res)}`,
     severity,
     rule: cweRuleFromTags(rule?.properties?.tags),
@@ -108,19 +109,39 @@ export function parseSarif(json: string): SecurityCheckResult[] {
 
 /**
  * SARIF kinds that say the rule was evaluated and nothing is wrong. A scanner such as Strix writes its
- * coverage rows this way. `open` (Nuclei marks every result open), `review`, `fail` and an absent kind
- * stay findings.
+ * coverage rows this way. `open` (Nuclei marks every result open), `fail` and an absent kind stay
+ * failures; `review` (a person must still look) is a warning.
  */
 const SARIF_NOT_FAILED = new Set(["pass", "notApplicable", "informational"]);
 
-export function sarifFindings(log: SarifLog): SarifFinding[] {
+/**
+ * SARIF 2.1.0 §3.27.23: a result is suppressed when it carries suppressions and each one is accepted
+ * (a missing `status` means accepted). An `underReview` or `rejected` suppression keeps it a finding.
+ */
+function sarifSuppressed(res: SarifResult): boolean {
+  const list: unknown = res.suppressions;
+  return (
+    Array.isArray(list) &&
+    list.length > 0 &&
+    list.every((s) => isRecord(s) && (s.status === undefined || s.status === "accepted"))
+  );
+}
+
+function sarifRules(run: SarifRun): Map<string, SarifRule> {
+  const rules = new Map<string, SarifRule>();
+  for (const rule of run.tool?.driver?.rules ?? []) if (rule.id) rules.set(rule.id, rule);
+  return rules;
+}
+
+export function sarifFindings(log: SarifLog, tally = { suppressed: 0 }): SarifFinding[] {
   const out: SarifFinding[] = [];
   for (const run of log.runs ?? []) {
     const tool = run.tool?.driver?.name ?? "sarif";
-    const rulesById = new Map<string, SarifRule>();
-    for (const r of run.tool?.driver?.rules ?? []) if (r.id) rulesById.set(r.id, r);
+    const rulesById = sarifRules(run);
     for (const res of run.results ?? []) {
-      if (!SARIF_NOT_FAILED.has(String(res.kind))) out.push(sarifFinding(tool, res, rulesById));
+      if (SARIF_NOT_FAILED.has(String(res.kind))) continue;
+      if (sarifSuppressed(res)) tally.suppressed++;
+      else out.push(sarifFinding(tool, res, rulesById, res.kind === "review" ? "warn" : "fail"));
     }
   }
   return collapseDuplicates(out);

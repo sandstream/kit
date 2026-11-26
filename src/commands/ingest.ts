@@ -97,6 +97,8 @@ export async function cmdIngest(): Promise<boolean> {
   const results = findings.reduce((sum, finding) => sum + occurrences(finding), 0);
   console.error("External scanner report. Findings do not verify the current account state.");
   for (const note of outcome.notes ?? []) console.error(note);
+  const { suppressed } = outcome;
+  if (suppressed) console.error(`${suppressed} suppressed SARIF result(s) are not counted.`);
 
   if (jsonMode) {
     console.log(
@@ -108,6 +110,7 @@ export async function cmdIngest(): Promise<boolean> {
           findings,
           coverage: outcome.coverage,
           reportGap: outcome.reportGap,
+          suppressed,
           scannerCoverage,
         },
         null,

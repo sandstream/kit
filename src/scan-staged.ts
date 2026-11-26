@@ -1,4 +1,4 @@
-import { findSecrets, findSecretMatches } from "./utils/redactSecrets.js";
+import { findSecrets } from "./utils/redactSecrets.js";
 import { locateSecretMatches, type EvidencedSecret } from "./finding-evidence.js";
 import { isTestOrFixturePath } from "./utils/test-paths.js";
 import { exec } from "./utils/exec.js";
@@ -90,7 +90,7 @@ export async function scanStagedFiles(cwd: string = process.cwd()): Promise<Stag
       });
       continue;
     }
-    const located = locateSecretMatches(path, content, findSecretMatches(content));
+    const located = locateSecretMatches(path, content);
     const findings = hasHead ? await netNewFindings(cwd, path, located) : located;
     if (findings.length > 0) {
       hits.push({ file: path, findings, ...(isTestOrFixturePath(path) ? { advisory: true } : {}) });

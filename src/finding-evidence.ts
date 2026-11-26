@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SecretFinding, SecretMatch } from "./utils/redactSecrets.js";
+import { findSecretMatches, type SecretFinding, type SecretMatch } from "./utils/redactSecrets.js";
 
 const evidenceLine = z.number().int().positive();
 export const findingEvidenceSchema = z.strictObject({
@@ -19,10 +19,14 @@ export const falsePositiveMarkSchema = z.strictObject({
 
 export type EvidencedSecret = SecretFinding & { evidence: FindingEvidence };
 
+export function formatEvidencedSecret({ evidence, preview }: EvidencedSecret): string {
+  return `line ${evidence.line} ${evidence.pattern}:${preview}`;
+}
+
 export function locateSecretMatches(
   file: string,
   text: string,
-  matches: readonly SecretMatch[],
+  matches: readonly SecretMatch[] = findSecretMatches(text),
 ): EvidencedSecret[] {
   const ordered = [...matches].sort((a, b) => a.offset - b.offset);
   let line = 1;

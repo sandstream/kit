@@ -2832,6 +2832,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "scan-outbound": {
+          "kind": "command",
+          "summary": "Fail when outbound text (a PR body, commit message or release note; a file or - for stdin) repeats a private agent instruction file: untracked or ignored instruction files in the repo and the user-level ones of Claude Code (~/.claude) and Codex ($CODEX_HOME or ~/.codex). Character n-gram overlap, no model; text also in a tracked instruction file is not a leak. Prints the span, file and line, never the file. kit security scan-outbound <file|-> [--min-chars <n>, default 40] [--json]",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "scan-staged": {
           "kind": "command",
           "summary": "Pre-commit: scan staged files for credential patterns",
@@ -2878,6 +2887,7 @@
         "--help",
         "--include-tests",
         "--json",
+        "--min-chars",
         "--non-interactive",
         "--only",
         "--origin",

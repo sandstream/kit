@@ -308,6 +308,9 @@ const CONFIG_FILES = [
   // (kit-research `agent-config-audit-vs-kit`).
   ".cursor/hooks.json",
   ".gemini/settings.json",
+  // Factory Droid's project hooks (Claude Code's shape). kit writes its own Droid gate here
+  // (`installInstallGateDroid`), and the file was not read: a SessionStart hook in it gave no row.
+  ".factory/hooks.json",
 ];
 
 /**
@@ -566,7 +569,7 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
       result(
         "agent-audit",
         "pass",
-        `no issues in ${scannedConfigs} agent config(s) + ${hooks.scanned} hook(s) + ${agent.scanned} command/agent/skill/plugin file(s)`,
+        `no issues in ${scannedConfigs} agent config(s) + ${hooks.scanned} git hook file(s) + ${agent.scanned} command/agent/skill/plugin file(s)`,
         "exposure",
       ),
     );

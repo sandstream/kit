@@ -257,7 +257,8 @@ def _skills_under(root):
 
 
 def _triage_skill_file(rep, path, scan_dir, label):
-    """Frontmatter and secrets of one SKILL.md, and its directory's other files when `scan_dir`."""
+    """Frontmatter, secrets and instruction rules of one SKILL.md, the files it names, and its
+    directory's other files when `scan_dir`."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             text = f.read()
@@ -274,9 +275,119 @@ def _triage_skill_file(rep, path, scan_dir, label):
         rep.warn(f"{label}frontmatter missing 'description:'")
     _secrets_in(rep, f"{label}skill body", text)
     _plugin_scan().frontmatter_hooks(rep, f"{label}SKILL.md", text)
+    _render_time_commands(rep, f"{label}SKILL.md", text)
+    signals = {"conceal": _conceal_lines(rep, f"{label}SKILL.md", text), "credential-payload": []}
+    _named_files(rep, os.path.dirname(path), text, scan_dir, label)
     if scan_dir:
-        _scan_other_files(rep, os.path.dirname(path), path, label)
+        _scan_other_files(rep, os.path.dirname(path), path, label, signals)
+    _concealed_credential_payload(rep, signals, label)
     rep.fact(f"validated local skill at {path} ({len(text)} bytes)")
+
+
+# Claude Code runs `!`<command>`` in a SKILL.md (and in a custom slash command) through the shell
+# when the skill is loaded, and puts the command's output where it stood: the command runs before
+# the model reads the skill, and the model sees only its output. kit knows no other harness that
+# does this: OpenAI Codex and other readers of SKILL.md document no such step and hand the line to
+# the model as text. Every `!`...`` span is read, inside code fences too: whether a harness skips
+# fences is not something kit can verify here.
+RENDER_CMD = re.compile(r"!`([^`\n]+)`")
+_RENDER_NET = re.compile(r"\b(?:curl|wget|nc|ncat|ssh|scp|rsync|ftp|telnet|Invoke-WebRequest|"
+                         r"Invoke-RestMethod|iwr|irm)\b|https?://|/dev/(?:tcp|udp)/", re.I)
+_RENDER_SECRET = re.compile(r"\$\{?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY|CREDENTIAL)|\bprintenv\b|"
+                            r"(?:^|[;&|]\s*)env\s*(?:$|[|>;&])|\.env\b|\.ssh/|\.aws/|\.netrc|\.npmrc|"
+                            r"\.pypirc|\bcredentials\b|\bsecurity\s+find-")
+
+
+def _render_reach(plugin, cmd):
+    """What a render-time command reaches that fails the skill, or None."""
+    if any(p.search(cmd) for p in plugin.PIPE_TO_SHELL) or plugin.RUNNER.search(cmd):
+        return "runs downloaded code"
+    if _RENDER_SECRET.search(cmd):
+        return "reads a secret"
+    return "reaches the network" if _RENDER_NET.search(cmd) else None
+
+
+def _render_time_commands(rep, where, text):
+    plugin = _plugin_scan()
+    for n, line in enumerate(text.splitlines(), 1):
+        for m in RENDER_CMD.finditer(line):
+            cmd = m.group(1).strip()
+            shown = cmd if len(cmd) <= 80 else cmd[:77] + "..."
+            reach = _render_reach(plugin, cmd)
+            what = f"{where}:{n}: render-time command `{shown}` runs when Claude Code loads the skill, before the model reads it"
+            if reach:
+                rep.critical(f"{what}, and it {reach}")
+            else:
+                rep.warn(what)
+
+
+# Kept in step with CONCEAL and HIDE_ACTIVITY in src/instruction-scan-text.ts and
+# src/instruction-rules.ts (`kit triage instructions`): a line telling the agent to keep something
+# from its user. A line that forbids hiding ("never hide failures") has no `do not ... to the user`.
+_WHO = r"(?:the\s+)?(?:user|human|operator|owner|reviewer)s?"
+CONCEAL = re.compile(
+    r"\b(?:never|don'?t|do not|without)\s+(?:tell(?:ing)?|inform(?:ing)?|notify(?:ing)?|alert(?:ing)?)\s+"
+    + _WHO + r"\s+(?:about|that|of)\b"
+    r"|\b(?:never|don'?t|do not|without)\s+(?:mention(?:ing)?|reveal(?:ing)?|show(?:ing)?)\s+(?:\S+\s+){0,4}to\s+"
+    + _WHO + r"\b"
+    r"|\b(?:hide|conceal|cover up)\s+(?:your|the|any|all)\s+(?:\w+\s+){0,2}(?:activity|actions|tracks|traces)\b",
+    re.I)
+
+
+def _conceal_lines(rep, where, text):
+    """`file:line` of each line telling the agent to keep something from the user (each a warning)."""
+    hits = [f"{where}:{n}" for n, line in enumerate(text.splitlines(), 1) if CONCEAL.search(line)]
+    for at in hits:
+        rep.warn(f"{at}: tells the agent to keep something from the user")
+    return hits
+
+
+def _concealed_credential_payload(rep, signals, label):
+    """Each alone is a warning; together the skill hides a step from the user and ships the code
+    that sends a credential away, which is what a credential-stealing skill looks like."""
+    if signals["conceal"] and signals["credential-payload"]:
+        rep.critical(f"{label}the skill tells the agent to keep a step from the user ({signals['conceal'][0]}) "
+                     f"and ships a script that sends a credential over the network ({signals['credential-payload'][0]})")
+
+
+# A file the skill bundles, as SKILL.md names it: a relative Markdown link, or a path that starts
+# with ./ or one of the folders skills bundle files in. A bare `procedure.md` is not counted: it
+# reads the same as a file of the user's project. URLs and `${VAR}/` prefixes are removed first.
+_NAMED_LINK = re.compile(r"\]\(\s*<?([^)\s>]+)")
+_NAMED_PATH = re.compile(r"(?<![\w./:-])((?:\./|(?:scripts|references|reference|assets|templates|"
+                         r"examples|resources)/)[\w./-]*[\w-])")
+
+
+def _named_paths(text):
+    text = re.sub(r"\$?\{[^}\s]*\}/", "", re.sub(r"[A-Za-z][\w+.-]*://\S+", " ", text))
+    out = []
+    for m in _NAMED_LINK.finditer(text):
+        target = re.split(r"[#?]", m.group(1), 1)[0]
+        if target and ":" not in target and not target.startswith("/"):
+            out.append(target)
+    out += [m.group(1) for m in _NAMED_PATH.finditer(text)]
+    return list(dict.fromkeys(p[2:] if p.startswith("./") else p for p in out))
+
+
+def _named_files(rep, skill_dir, text, scan_dir, label):
+    """A SKILL.md that tells the agent to read or run a file triage was not given is incomplete:
+    the verdict covers less than the skill does (upstream labels it INCOMPLETE)."""
+    base = os.path.realpath(skill_dir)
+    missing, outside, unread = [], [], []
+    for rel in _named_paths(text):
+        full = os.path.join(skill_dir, *rel.split("/"))
+        real = os.path.realpath(full)
+        if real != base and not real.startswith(base + os.sep):
+            outside.append(rel)
+        elif not os.path.lexists(full):
+            missing.append(rel)
+        elif not scan_dir:
+            unread.append(rel)
+    for names, why in ((missing, "which is not there"), (outside, "outside the skill directory, not read"),
+                       (unread, "not triaged: only SKILL.md was given; triage its directory")):
+        if names:
+            more = f" and {len(names) - 10} more" if len(names) > 10 else ""
+            rep.warn(f"{label}SKILL.md names {', '.join(names[:10])}{more}, {why} -- the verdict does not cover it")
 
 
 def _secrets_in(rep, label, text):
@@ -285,9 +396,13 @@ def _secrets_in(rep, label, text):
             rep.critical(f"possible secret in {label}: {kind}")
 
 
-def _scan_other_files(rep, skill_dir, skill_md, label=""):
+def _scan_other_files(rep, skill_dir, skill_md, label="", signals=None):
     """A skill's scripts are its code: a verdict that read only the prose would pass a skill
-    whose script was never opened. Files that cannot be read as text are named, not skipped."""
+    whose script was never opened. Markdown files get the instruction rules SKILL.md gets, other
+    text files the line rules plugin_scan.py applies to a plugin's scripts. Files that cannot be
+    read as text are named, not skipped."""
+    signals = signals if signals is not None else {"conceal": [], "credential-payload": []}
+    plugin = _plugin_scan()
     read, unread = 0, []
     for root, dirs, files in os.walk(skill_dir):
         dirs[:] = sorted(d for d in dirs if d != ".git")
@@ -296,19 +411,21 @@ def _scan_other_files(rep, skill_dir, skill_md, label=""):
             if full == skill_md:
                 continue
             rel = os.path.relpath(full, skill_dir).replace(os.sep, "/")  # same report on Windows
-            try:
-                if os.path.islink(full) or os.path.getsize(full) > FILE_LIMIT:
-                    raise ValueError(name)
-                with open(full, "r", encoding="utf-8") as f:
-                    body = f.read()
-            except (OSError, ValueError, UnicodeDecodeError):
+            body = _read_text(full)
+            if body is None:
                 unread.append(rel)
                 continue
             read += 1
-            _secrets_in(rep, f"{label}{rel}", body)
-            if not rel.endswith((".md", ".json")):
-                _plugin_scan()._scan_script(rep, f"{label}{rel}", body)
+            _judge_skill_file(rep, plugin, f"{label}{rel}", body, signals)
     rep.fact(f"{label}scanned {read} other file(s) in the skill directory")
     if unread:
         more = f" and {len(unread) - 10} more" if len(unread) > 10 else ""
         rep.warn(f"{label}not scanned (binary, symlink or over 1 MB): {', '.join(unread[:10])}{more}")
+
+
+def _judge_skill_file(rep, plugin, where, body, signals):
+    _secrets_in(rep, where, body)
+    if where.endswith(".md"):
+        signals["conceal"] += _conceal_lines(rep, where, body)
+    elif not where.endswith(".json") and "credential-payload" in plugin._scan_script(rep, where, body):
+        signals["credential-payload"].append(where)
