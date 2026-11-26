@@ -45,6 +45,13 @@ Do not edit `CHANGELOG.md` in a pull request. Add `changes/<name>.md` with the e
 ([`changes/README.md`](./changes/README.md)). Fragments never conflict; edits to the shared
 `[Unreleased]` lines conflicted with every other open branch on each merge.
 
+## Never `git stash` in a shared repo
+
+Several agents work here at once, each in its own worktree, and `refs/stash` is shared by every
+worktree of the repository: one agent's `git stash pop` can apply another agent's stash, which once
+swapped changes between two sessions. Do not use `git stash`. To show a test failing on main, copy
+the file aside and restore it with `git show origin/main:<path> > <path>`, or use a separate worktree.
+
 ## Before you push
 
 CI runs its steps in order and stops at the first red one, so a push used to show one failure at a
