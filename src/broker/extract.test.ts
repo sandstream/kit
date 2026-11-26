@@ -171,3 +171,86 @@ describe("bare addresses given to curl/wget", () => {
     ]);
   });
 });
+
+describe("curl URL globbing", () => {
+  // `curl 10.0.0.[1-5]` contacts five hosts; the gate read none and passed it.
+  it("expands a bounded glob into every host it names", () => {
+    const cases: [string, string[]][] = [
+      ["curl 10.0.0.[1-3]", ["10.0.0.1", "10.0.0.2", "10.0.0.3"]],
+      ["curl http://h[1-3].example", ["h1.example", "h2.example", "h3.example"]],
+      ["curl 'https://{a,b}.example/x'", ["a.example", "b.example"]],
+      ["curl '{a,b}.example'", ["a.example", "b.example"]],
+      ["curl -s 'https://h.example{/a,.evil.example/b}'", ["h.example", "h.example.evil.example"]],
+      ["curl -o out 'u:p@h[1-2].example:8080/x'", ["h1.example", "h2.example"]],
+    ];
+    for (const [command, expected] of cases) {
+      assert.deepEqual(extractHostsFromCommand(command), expected, command);
+    }
+  });
+
+  it("names an unbounded or malformed glob in its host as unreadable", () => {
+    assert.deepEqual(extractHostsFromCommand("curl 'h[1-999].example'"), [
+      "h[1-999].example (unexpanded curl glob)",
+    ]);
+    assert.deepEqual(extractHostsFromCommand("curl 'http://10.0.0.[1-5/x'"), [
+      "10.0.0.[1-5 (unexpanded curl glob)",
+    ]);
+  });
+
+  it("reads the literal with -g/--globoff, and a path-only glob as its host", () => {
+    const cases: [string, string[]][] = [
+      ["curl -g 'h[1-3].example'", []],
+      ["curl --globoff http://10.0.0.[1-3]/", []],
+      ["curl -sg '[::1]:3000'", ["[::1]"]],
+      ["curl 'h.example/img[1-999].png'", ["h.example"]],
+      ["curl 'h.example/{a,b}'", ["h.example"]],
+      ["curl -H -g 'h[1-2].example'", ["h1.example", "h2.example"]],
+      ["wget 'h.example/[1-999]'", ["h.example"]],
+    ];
+    for (const [command, expected] of cases) {
+      assert.deepEqual(extractHostsFromCommand(command), expected, command);
+    }
+  });
+
+  it("expands a glob in an argv that runs without a shell", async () => {
+    const { extractHostsFromArgs } = await import("./extract.js");
+    assert.deepEqual(extractHostsFromArgs(["curl", "10.0.0.[1-2]"]), ["10.0.0.1", "10.0.0.2"]);
+  });
+});
+
+describe("curl/wget bundled short options", () => {
+  // `curl -so out.json https://h.example` read `out.json` as a domain target.
+  it("skips the value the last letter of a bundle takes", () => {
+    for (const command of [
+      "curl -so out.json https://h.example",
+      "curl -sSo out.json https://h.example",
+      "curl -Lo out.json https://h.example",
+      "curl -fsSLo out.json https://h.example",
+      "curl -fsSLo out.json h.example",
+      "wget -qO out.json https://h.example",
+      "curl -sSH 'X-Host: other.example' h.example",
+    ]) {
+      assert.deepEqual(extractHostsFromCommand(command), ["h.example"], command);
+    }
+  });
+
+  it("still reads the target after a bundle that takes no value or holds its value", () => {
+    const cases: [string, string[]][] = [
+      ["curl -sSL h.example", ["h.example"]],
+      ["curl -sSLO h.example/x.tgz", ["h.example"]],
+      ["curl -oout.json h.example", ["h.example"]],
+      ["curl -sSoout.json 10.0.0.5", ["10.0.0.5"]],
+      ["curl -os h.example", ["h.example"]],
+    ];
+    for (const [command, expected] of cases) {
+      assert.deepEqual(extractHostsFromCommand(command), expected, command);
+    }
+  });
+
+  it("skips a bundle's value in an argv that runs without a shell", async () => {
+    const { extractHostsFromArgs } = await import("./extract.js");
+    assert.deepEqual(extractHostsFromArgs(["curl", "-sSo", "out.json", "https://h.example"]), [
+      "h.example",
+    ]);
+  });
+});
