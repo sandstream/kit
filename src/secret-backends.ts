@@ -3,7 +3,9 @@ import { exec } from "./utils/exec.js";
 import { execPinned } from "./vendor-cli-pin.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import type { SecretKeyConfig, InfisicalConfig } from "./config.js";
-import type { SecretResolveResult } from "./secrets.js";
+import type { SecretBackend, SecretResolveResult, WriteOpts, WriteResult } from "./secrets.js";
+
+export type { SecretBackend, WriteOpts, WriteResult } from "./secrets.js";
 
 /**
  * Run a vault CLI, resolving its binary mise-first.
@@ -28,54 +30,6 @@ async function execCli(
  *  from "installed but not logged in" in user-facing hints. */
 export async function vaultCliInstalled(tool: string): Promise<boolean> {
   return (await resolveToolBin(tool)) !== null;
-}
-
-/**
- * Single source of truth for every secret backend kit speaks to.
- *
- * Each backend declares how to `resolve` (read) a value and, optionally, how
- * to `write` one. A backend with no `write` is read-only — migration to it is
- * unsupported, surfaced uniformly by {@link writeViaBackend}. Keeping read and
- * write side-by-side in one object is the whole point: the previous design had
- * two independent `switch (source)` statements (one in secrets.ts, one in
- * secrets-migrate.ts), so adding a backend to one and forgetting the other
- * failed silently. Here the omission is visible in a single place — and the
- * read/write capability matrix is asserted in secret-backends.test.ts.
- */
-
-export interface WriteOpts {
-  vault?: string;
-  project?: string;
-  region?: string;
-  vaultPath?: string;
-}
-
-export interface WriteResult {
-  ok: boolean;
-  ref?: string;
-  detail: string;
-}
-
-export interface SecretBackend {
-  /** Read a secret value for `name` using its `config`. Never throws — failures
-   *  come back as `{ resolved: false, detail }`. */
-  resolve(
-    name: string,
-    config: SecretKeyConfig,
-    infisicalConfig?: InfisicalConfig,
-    cwd?: string,
-  ): Promise<SecretResolveResult>;
-  /** Write a secret. Absent ⇒ the backend is read-only (migration unsupported).
-   *  May throw; callers wrap it so the error is redacted before surfacing.
-   *
-   *  Value handling: where the CLI supports it, the value is fed via stdin so it
-   *  never lands in argv / the process table (vault `kv put -`, aws/gcp
-   *  `file:///dev/stdin` / `--data-file=-`). The 1Password, Infisical, Doppler and
-   *  Azure CLIs only accept the value as a `key=value` / `--value` argv token for
-   *  these operations, so it is briefly visible in `ps` there — an inherent CLI
-   *  limitation. The error path is covered regardless: writeSecretToBackend redacts
-   *  the held plaintext by exact substring before any failure message is surfaced. */
-  write?(key: string, value: string, opts: WriteOpts): Promise<WriteResult>;
 }
 
 // ─── Infisical bulk-fetch cache (avoids repeated CLI calls per generate) ──────
@@ -135,6 +89,18 @@ async function fetchInfisicalSecrets(
 
 // ─── Backend registry ─────────────────────────────────────────────────────────
 
+/**
+ * Single source of truth for every secret backend kit speaks to.
+ *
+ * Each backend declares how to `resolve` (read) a value and, optionally, how
+ * to `write` one. A backend with no `write` is read-only — migration to it is
+ * unsupported, surfaced uniformly by {@link writeViaBackend}. Keeping read and
+ * write side-by-side in one object is the whole point: the previous design had
+ * two independent `switch (source)` statements (one in secrets.ts, one in
+ * secrets-migrate.ts), so adding a backend to one and forgetting the other
+ * failed silently. Here the omission is visible in a single place — and the
+ * read/write capability matrix is asserted in secret-backends.test.ts.
+ */
 export const BACKENDS: Record<string, SecretBackend> = {
   env: {
     async resolve(name) {
