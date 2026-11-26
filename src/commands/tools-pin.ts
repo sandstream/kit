@@ -67,6 +67,23 @@ function matches(pin: CliIdentity, m: Measured, deps: PinDeps): boolean {
   );
 }
 
+/** The tool measured, or the error outcome: not installed, or a win32 shim kit cannot read. */
+async function measureForPin(tool: string, deps: PinDeps): Promise<Measured | PinOutcome> {
+  try {
+    const m = await measureCli(tool, deps);
+    if (m) return m;
+    return {
+      tool,
+      result: "error",
+      detail: `${tool} is not installed (not found via mise or PATH)`,
+    };
+  } catch (err) {
+    // A win32 shim kit cannot read is never pinned: kit could not run what it would pin.
+    if (err instanceof ShimUnreadable) return { tool, result: "error", detail: err.message };
+    throw err;
+  }
+}
+
 /** Pin (or, with `accept`, re-trust) one tool. Never re-pins a changed tool without `accept`. */
 export async function pinOne(
   tool: string,
@@ -74,20 +91,8 @@ export async function pinOne(
   deps: PinDeps,
   io: PinIo,
 ): Promise<PinOutcome> {
-  let m: Measured | null;
-  try {
-    m = await measureCli(tool, deps);
-  } catch (err) {
-    // A win32 shim kit cannot read is never pinned: kit could not run what it would pin.
-    if (err instanceof ShimUnreadable) return { tool, result: "error", detail: err.message };
-    throw err;
-  }
-  if (!m)
-    return {
-      tool,
-      result: "error",
-      detail: `${tool} is not installed (not found via mise or PATH)`,
-    };
+  const m = await measureForPin(tool, deps);
+  if ("result" in m) return m;
   const existing = await readPin(tool, deps);
   if (existing && matches(existing, m, deps)) {
     return {
