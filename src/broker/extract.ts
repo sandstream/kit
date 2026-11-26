@@ -14,8 +14,9 @@
  *      mistaken for hosts, and a token is only taken when it matches a strict domain shape.
  *
  *   3. The host targets of network tools that take a bare host (`nc`, `ping`, `nmap`, `ssh`,
- *      `dig`, `openssl s_client -connect`, `Test-NetConnection`, …), read only in the tool's target
- *      position (broker/bare-hosts.ts).
+ *      `dig`, `openssl s_client -connect`, `Test-NetConnection`, …), and a bare address or
+ *      `localhost` given to `curl`/`wget`, read only in the tool's target position
+ *      (broker/bare-hosts.ts).
  *
  * Still an HONEST LIMITATION, not a complete boundary: implicit-registry tools (`git`, `npm`,
  * `pip`), non-http(s) schemes, and variable-expanded URLs (`curl $HOST`) remain out of reach —
@@ -23,7 +24,7 @@
  * boundary. Pure + deterministic: same command → same hosts (unique, sorted).
  */
 
-import { addBareToolHosts, addBareToolHostsFromArgs } from "./bare-hosts.js";
+import { addBareToolHosts, addBareToolHostsFromArgs, fetchTakesValue } from "./bare-hosts.js";
 
 const URL_RE = /https?:\/\/[^\s"'`<>\\)\];]+/gi;
 
@@ -33,106 +34,9 @@ const URL_RE = /https?:\/\/[^\s"'`<>\\)\];]+/gi;
  *  broker/bare-hosts.ts, in their own target positions. */
 const FETCH_TOOLS = new Set(["curl", "wget"]);
 
-/** curl/wget flags that CONSUME the next token as a NON-host value, so it is never read as a
- *  network target (e.g. `curl -o out.txt host` must not extract `out.txt`). */
-const CURL_VALUE_FLAGS = new Set([
-  "-o",
-  "--output",
-  "-T",
-  "--upload-file",
-  "-d",
-  "--data",
-  "--data-raw",
-  "--data-binary",
-  "--data-urlencode",
-  "-H",
-  "--header",
-  "-F",
-  "--form",
-  "-A",
-  "--user-agent",
-  "-e",
-  "--referer",
-  "-u",
-  "--user",
-  "-b",
-  "--cookie",
-  "-c",
-  "--cookie-jar",
-  "-w",
-  "--write-out",
-  "-E",
-  "--cert",
-  "--key",
-  "--cacert",
-  "-K",
-  "--config",
-  "-m",
-  "--max-time",
-  "--connect-timeout",
-  "--retry",
-]);
-
-const WGET_VALUE_FLAGS = new Set([
-  "-a",
-  "--append-output",
-  "-o",
-  "--output-file",
-  "-O",
-  "--output-document",
-  "-P",
-  "--directory-prefix",
-  "-U",
-  "--user-agent",
-  "-T",
-  "--timeout",
-  "-t",
-  "--tries",
-  "-w",
-  "--wait",
-  "-Q",
-  "--quota",
-  "-e",
-  "--execute",
-  "-i",
-  "--input-file",
-  "-l",
-  "--level",
-  "-D",
-  "--domains",
-  "-A",
-  "--accept",
-  "-R",
-  "--reject",
-  "-I",
-  "--include-directories",
-  "-X",
-  "--exclude-directories",
-  "--user",
-  "--password",
-  "--header",
-  "--referer",
-  "--post-data",
-  "--post-file",
-  "--body-data",
-  "--body-file",
-  "--method",
-  "--certificate",
-  "--private-key",
-  "--ca-certificate",
-  "--ca-directory",
-  "--load-cookies",
-  "--save-cookies",
-]);
-
 /** Strict domain shape: ≥2 dot-separated labels + an alpha TLD, optional :port and /path. A
  *  scheme (`x://…`) never matches — those are handled by URL_RE. */
 const HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:\/\S*)?$/i;
-
-function takesValue(tool: string, flag: string): boolean {
-  // curl -O selects the remote name. wget -O consumes an output filename.
-  return (tool === "wget" ? WGET_VALUE_FLAGS : CURL_VALUE_FLAGS).has(flag);
-}
 
 /** basename of a command token (`/usr/bin/curl` → `curl`). */
 function basename(tok: string): string {
@@ -169,7 +73,7 @@ function extractFetchHosts(command: string, hosts: Set<string>): void {
       }
       if (tok.startsWith("-")) {
         // `--flag=value` carries its value inline (one token) — nothing to skip after it.
-        if (takesValue(fetchTool, tok)) skipNext = true;
+        if (fetchTakesValue(fetchTool, tok)) skipNext = true;
         continue;
       }
       const h = hostOf(tok);
@@ -238,7 +142,7 @@ export function extractHostsFromArgs(args: readonly string[]): string[] {
         continue;
       }
       if (arg.startsWith("-")) {
-        skipNext = takesValue(tool, arg);
+        skipNext = fetchTakesValue(tool, arg);
         continue;
       }
       const host = hostOf(arg);

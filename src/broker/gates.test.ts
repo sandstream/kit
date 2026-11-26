@@ -212,3 +212,32 @@ describe("kit gate-egress: bare-host network tools (subprocess)", () => {
     }
   });
 });
+
+describe("kit gate-egress: bare addresses to curl/wget (subprocess)", () => {
+  // Owner decision 2026-11-26: `curl 10.0.0.5` and `curl localhost:3000` passed with no verified
+  // scope, where `curl http://127.0.0.1` was denied.
+  const unsigned = () => rmSync(join(proj, ".kit-profile.sig"), { force: true });
+
+  it("denies a bare address or localhost with no verified scope, as it denies a URL", () => {
+    unsigned();
+    for (const command of ["curl 10.0.0.5", "curl localhost:3000", "curl -g [::1]:3000"]) {
+      const r = runGate("gate-egress", bash(command));
+      assert.equal(r.status, 2, command);
+      assert.match(r.stderr, /network egress to .+ denied — no verified scope\/RoE/);
+    }
+  });
+
+  it("checks a bare address against the scope with the URL matcher", () => {
+    const r = runGate("gate-egress", bash("curl 10.0.0.5:8080/x"));
+    assert.equal(r.status, 2);
+    assert.ok(r.stderr.includes("outside the signed egress scope: 10.0.0.5"), r.stderr);
+    assert.equal(runGate("gate-egress", bash("curl -o out.json api.acme.com/x")).status, 0);
+  });
+
+  it("passes a command whose address is not a target", () => {
+    unsigned();
+    for (const command of ["echo 10.0.0.5", "git commit -m 'curl 10.0.0.5'"]) {
+      assert.equal(runGate("gate-egress", bash(command)).status, 0, command);
+    }
+  });
+});
