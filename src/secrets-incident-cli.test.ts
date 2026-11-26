@@ -102,7 +102,7 @@ describe("kit secrets list", () => {
   });
 });
 
-describe("kit secrets incident", () => {
+describe("kit secrets incident: snapshot and verify", () => {
   it("snapshots, then verifies changed / unchanged / unresolvable with the right exit", async () => {
     const cwd = tempProject();
     try {
@@ -172,7 +172,9 @@ describe("kit secrets incident", () => {
       rmTemp(cwd);
     }
   });
+});
 
+describe("kit secrets incident: snapshot safeguards", () => {
   it(
     "refuses a snapshot other users can read",
     {
@@ -222,7 +224,9 @@ describe("kit secrets incident", () => {
       rmTemp(cwd);
     }
   });
+});
 
+describe("kit secrets incident: environment backend", () => {
   it("runs end to end through the CLI with the env backend", async () => {
     const cwd = tempProject();
     try {

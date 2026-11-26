@@ -265,7 +265,9 @@ describe("patchGitignore", () => {
       rmTemp(dir);
     }
   });
+});
 
+describe("patchGitignore: Kit state", () => {
   it("ignores .kit contents via .kit/* and re-includes the curated shared tier", async () => {
     const dir = tmpRepo();
     try {
