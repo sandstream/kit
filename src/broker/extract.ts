@@ -16,7 +16,8 @@
  *   3. The host targets of network tools that take a bare host (`nc`, `ping`, `nmap`, `ssh`,
  *      `dig`, `openssl s_client -connect`, `Test-NetConnection`, …), and a bare address or
  *      `localhost` given to `curl`/`wget`, read only in the tool's target position
- *      (broker/bare-hosts.ts).
+ *      (broker/bare-hosts.ts). curl's URL globbing (`10.0.0.[1-5]`, `h{a,b}.example`) is
+ *      expanded into its targets there (broker/curl-glob.ts).
  *
  * Still an HONEST LIMITATION, not a complete boundary: implicit-registry tools (`git`, `npm`,
  * `pip`), non-http(s) schemes, and variable-expanded URLs (`curl $HOST`) remain out of reach —
@@ -25,6 +26,7 @@
  */
 
 import { addBareToolHosts, addBareToolHostsFromArgs, fetchTakesValue } from "./bare-hosts.js";
+import { expandCurlGlob } from "./curl-glob.js";
 
 const URL_RE = /https?:\/\/[^\s"'`<>\\)\];]+/gi;
 
@@ -83,6 +85,19 @@ function extractFetchHosts(command: string, hosts: Set<string>): void {
 }
 
 /**
+ * The hosts a URL's hostname names. `{a,b}.example` names a.example and b.example (curl's glob,
+ * the shell's braces), not the literal, which kept an in-scope pair from passing. A brace left
+ * open (`h.example{` from `https://h.example{/a,/b}`) belongs to a pattern that goes on past the
+ * host; curl's own reading of it (bare-hosts.ts) expands it whole. A pattern too large to expand
+ * is kept as it is, and no scope entry matches it.
+ */
+function urlHostNames(host: string): string[] {
+  if (!/[{}]/.test(host)) return host ? [host] : [];
+  if (host.split("{").length !== host.split("}").length) return [];
+  return expandCurlGlob(host) ?? [host];
+}
+
+/**
  * Add a URL's host, and the hosts of URLs nested in its path, query or fragment
  * (`https://mirror/fetch?url=https://elsewhere/`, encoded or not). An allowed host that forwards a
  * request is how agents left a sandbox with no direct internet (kit-research
@@ -96,7 +111,7 @@ function addUrlHosts(raw: string, hosts: Set<string>, depth = 0): void {
   } catch {
     return; // not a parseable URL after all — skip (conservative: never guess)
   }
-  if (u.hostname) hosts.add(u.hostname.toLowerCase());
+  for (const h of urlHostNames(u.hostname.toLowerCase())) hosts.add(h);
   if (depth >= 2) return;
   const rest = `${u.pathname}${u.search}${u.hash}`;
   let decoded = rest;

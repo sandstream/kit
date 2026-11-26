@@ -18,11 +18,17 @@
  * not, and passed with no verified scope where `curl http://127.0.0.1` was denied. The owner
  * decided (2026-11-26) that these fail closed too, so curl and wget are read here like the rest.
  *
+ * curl's URL globbing (`curl 10.0.0.[1-5]`, `curl http://h[1-3].example`) is expanded into its
+ * targets when it names at most 64 (broker/curl-glob.ts); a larger or malformed pattern is
+ * unreadable and denied. curl and wget bundle short options as getopt does: in `-sSo out.json`
+ * the last letter takes the next word as its value, so `out.json` is not a target.
+ *
  * Still not a boundary: a host in a variable, a file of targets (`nmap -iL hosts.txt`), a tool
  * not listed here, or a program that opens its own sockets passes. Pure and deterministic.
  */
 import { unwrapCommandWrappers } from "../install-gate-wrappers.js";
 import { shellSegments, shellWords, shellWordValue } from "../install-gate-words.js";
+import { expandCurlGlob } from "./curl-glob.js";
 
 /** How a tool names its target: every positional, every positional as a URL (no address
  *  ranges), the first one, `[user@]host:path` words (scp), socat address specs, or only through
@@ -167,9 +173,71 @@ function hasFlag(list: string | undefined, flag: string): boolean {
   return (list ?? "").split(" ").includes(flag);
 }
 
+/** Tools that read a bundle of short options (`-sSo`) as getopt does. */
+const BUNDLING = new Set(["curl", "wget"]);
+
+/**
+ * The letters of a short-option bundle that are options, and whether the last of them takes the
+ * next word as its value. As in getopt, the first letter that takes a value ends the bundle: the
+ * rest of the word is its value (`-sSoout.json`), or the next word is when nothing is left
+ * (`-sSo out.json`).
+ */
+function shortBundle(flag: string, values: string): { letters: string; takesNext: boolean } {
+  if (!/^-[A-Za-z0-9#:]+$/.test(flag)) return { letters: "", takesNext: false };
+  const body = flag.slice(1);
+  const k = [...body].findIndex((letter) => hasFlag(values, `-${letter}`));
+  if (k < 0) return { letters: body, takesNext: false };
+  return { letters: body.slice(0, k + 1), takesNext: k === body.length - 1 };
+}
+
+/** Whether an option of `tool` consumes the next word as its value. */
+function takesValue(tool: string, spec: ToolSpec, flag: string): boolean {
+  if (hasFlag(spec.values, flag)) return true;
+  return BUNDLING.has(tool) && shortBundle(flag, spec.values).takesNext;
+}
+
 /** Whether a curl/wget option consumes the next word as a value (extract.ts reads their domains). */
 export function fetchTakesValue(tool: string, flag: string): boolean {
-  return hasFlag((tool === "wget" ? WGET : CURL).values, flag);
+  return takesValue(tool, tool === "wget" ? WGET : CURL, flag);
+}
+
+/** Whether curl globs its URLs: `-g`/`--globoff` (alone or in a bundle) turns it off. */
+function curlGlobs(args: readonly string[]): boolean {
+  let on = true;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--globoff" || arg === "--no-globoff") on = arg === "--no-globoff";
+    else if (shortBundle(arg, CURL.values).letters.includes("g")) on = false;
+    if (takesValue("curl", CURL, arg)) i++;
+  }
+  return on;
+}
+
+/** The host part of a URL word, for naming a pattern that is not read. */
+function rawHost(word: string): string {
+  const rest = word.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  return rest.slice(rest.lastIndexOf("@", rest.search(/[/?#]|$/)) + 1).replace(/[/?#].*$/, "");
+}
+
+/**
+ * Add the hosts a curl URL names once its glob is expanded. A pattern only after the host
+ * (`h.example/img[1-100].png`) leaves the word as it is. A malformed pattern, or one that names
+ * more than 64 URLs, adds a label that no URL parser reads, so no scope entry matches it and the
+ * gate denies it.
+ */
+function addCurlGlobHosts(word: string, hosts: Set<string>): void {
+  const host = rawHost(word);
+  const hostOnly = expandCurlGlob(host);
+  const fixed = hostOnly?.length === 1 && hostOnly[0] === host;
+  const urls = fixed ? [word] : expandCurlGlob(word);
+  if (!urls) {
+    hosts.add(`${host} (unexpanded curl glob)`);
+    return;
+  }
+  for (const url of urls) {
+    const h = bareTargetHost(url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, ""), false);
+    if (h) hosts.add(h);
+  }
 }
 
 /** The word a positional argument names as a target, or "" when it names none. */
@@ -202,13 +270,18 @@ function targetWords(tool: string, spec: ToolSpec, args: readonly string[]): str
     }
     const [flag, inline] = splitInline(ps ? raw.toLowerCase() : raw, ps);
     if (hasFlag(spec.target, flag)) out.push(...(inline ?? args[++i] ?? "").split(","));
-    else if (inline === undefined && hasFlag(spec.values, flag)) i++;
+    else if (inline === undefined && takesValue(tool, spec, flag)) i++;
   }
   return out;
 }
 
 function addTargets(tool: string, spec: ToolSpec, args: readonly string[], hosts: Set<string>) {
+  const globs = tool === "curl" && curlGlobs(args);
   for (const word of targetWords(tool, spec, args)) {
+    if (globs && /[[{]/.test(word)) {
+      addCurlGlobHosts(word, hosts);
+      continue;
+    }
     const host = bareTargetHost(word, spec.take !== "url");
     if (host) hosts.add(host);
   }

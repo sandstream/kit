@@ -241,3 +241,43 @@ describe("kit gate-egress: bare addresses to curl/wget (subprocess)", () => {
     }
   });
 });
+
+describe("kit gate-egress: curl URL globbing (subprocess)", () => {
+  // `curl 10.0.0.[1-5]` and `curl http://h[1-3].example` passed with no verified scope.
+  const unsigned = () => rmSync(join(proj, ".kit-profile.sig"), { force: true });
+
+  it("denies a glob with no verified scope, bounded or not, as it denies a URL", () => {
+    unsigned();
+    for (const command of [
+      "curl 10.0.0.[1-5]",
+      "curl http://h[1-3].example",
+      "curl 'h[1-999].example'",
+    ]) {
+      const r = runGate("gate-egress", bash(command));
+      assert.equal(r.status, 2, command);
+      assert.match(r.stderr, /network egress to .+ denied — no verified scope\/RoE/);
+    }
+  });
+
+  it("allows a glob under a scope only when every expansion is in scope", () => {
+    assert.equal(runGate("gate-egress", bash("curl 'https://api.acme.com{/a,/b}'")).status, 0);
+    const r = runGate("gate-egress", bash("curl 'https://{api,www}.acme.com/x'"));
+    assert.equal(r.status, 2);
+    assert.ok(r.stderr.includes("outside the signed egress scope: www.acme.com\n"), r.stderr);
+    const unbounded = runGate("gate-egress", bash("curl 'api.acme.com:[1-100]'"));
+    assert.equal(unbounded.status, 2);
+    assert.ok(unbounded.stderr.includes("(unexpanded curl glob)"), unbounded.stderr);
+  });
+
+  it("does not read a bundled option's value as a target", () => {
+    for (const command of [
+      "curl -so out.json https://api.acme.com/x",
+      "curl -sSo out.json api.acme.com/x",
+      "curl -Lo out.json https://api.acme.com/x",
+      "curl -fsSLo out.json https://api.acme.com/x",
+      "curl 'api.acme.com/img[1-999].png'",
+    ]) {
+      assert.equal(runGate("gate-egress", bash(command)).status, 0, command);
+    }
+  });
+});
