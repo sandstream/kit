@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,7 +92,7 @@ describe("runAgentSkillPosture", () => {
     mkdirSync(empty);
     assert.deepEqual(
       runAgentSkillPosture(empty, empty).map((r) => r.detail),
-      ["no skills in .claude/skills here or in ~/.claude/skills"],
+      ["no skills in .claude/skills, .agents/skills or .codex/skills here or at user level"],
     );
     assert.equal(readSkillPostures(f.home, f.home).length, 3);
     assert.ok(readSkillPostures(f.home, f.home).every((p) => p.scope === "project"));
@@ -127,5 +127,51 @@ describe("kit agent-audit prints the skill posture", () => {
       /! skill fixture-audit \(project\) {2}allowed-tools not declared: all tools/,
     );
     assert.match(r.stdout, /✓ skill fixture-lint \(user\) {2}allowed-tools: Read, Grep, Bash/);
+  });
+});
+
+describe("skill posture reads Codex's skill directories", () => {
+  function codexSkill(root: string, rel: string, name: string, frontmatter: string): void {
+    const dir = join(root, ...rel.split("/"), name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\n${frontmatter}---\nBody.\n`);
+  }
+
+  it("lists .agents/skills and .codex/skills in the checkout and at user level", (t) => {
+    const f = fixture();
+    t.after(f.cleanup);
+    codexSkill(f.cwd, ".agents/skills", "lookup", "allowed-tools: Read\n");
+    codexSkill(f.cwd, ".codex/skills", "fmt", "description: Format.\n");
+    codexSkill(f.home, ".agents/skills", "shared", "allowed-tools: Read\n");
+    const codexDir = join(f.home, "codex-home");
+    codexSkill(codexDir, "skills", "legacy", "allowed-tools: Read\n");
+    const rows = runAgentSkillPosture(f.cwd, f.home, { CODEX_HOME: codexDir });
+    const names = rows.map((r) => r.name);
+    for (const want of [
+      "skill lookup (project, .agents/skills)",
+      "skill fmt (project, .codex/skills)",
+      "skill shared (user, ~/.agents/skills)",
+      "skill legacy (user, $CODEX_HOME/skills)",
+    ]) {
+      assert.ok(names.includes(want), `${want} missing: ${names.join(" | ")}`);
+    }
+    assert.equal(rows[0].detail, "8 skill(s): 3 in this checkout, 5 at user level");
+  });
+
+  it("lists a skill linked from ~/.agents/skills into ~/.claude/skills once", (t) => {
+    if (process.platform === "win32") {
+      t.skip("directory symlinks need elevation or developer mode on Windows");
+      return;
+    }
+    const f = fixture();
+    t.after(f.cleanup);
+    codexSkill(f.home, ".agents/skills", "linked", "allowed-tools: Read\n");
+    symlinkSync(
+      join(f.home, ".agents", "skills", "linked"),
+      join(f.home, ".claude", "skills", "linked"),
+    );
+    const linked = readSkillPostures(f.cwd, f.home).filter((p) => p.dir === "linked");
+    assert.equal(linked.length, 1);
+    assert.equal(linked[0].base, "~/.claude/skills");
   });
 });

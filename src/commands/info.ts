@@ -148,7 +148,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
     ...runAgentTrifecta(process.cwd(), homedir()),
     ...runAgentPreload(process.cwd(), homedir(), process.env),
     ...runAgentEndpoint(process.cwd(), homedir(), process.env),
-    ...runAgentSkillPosture(process.cwd(), homedir()),
+    ...runAgentSkillPosture(process.cwd(), homedir(), process.env),
   ];
   const fails = results.filter((r) => r.status === "fail").length;
 
