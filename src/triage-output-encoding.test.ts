@@ -39,7 +39,12 @@ after(() => rmTemp(root));
 
 /** A child env whose Python stdout encoding is `encoding`, as a Windows pipe would set it. */
 function legacyEnv(encoding: string): NodeJS.ProcessEnv {
-  return { ...process.env, PYTHONIOENCODING: encoding, PYTHONUTF8: "0", KIT_GITHUB_API: "http://127.0.0.1:9" };
+  return {
+    ...process.env,
+    PYTHONIOENCODING: encoding,
+    PYTHONUTF8: "0",
+    KIT_GITHUB_API: "http://127.0.0.1:9",
+  };
 }
 
 describe("triage.py output encoding", () => {
