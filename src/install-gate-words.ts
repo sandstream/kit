@@ -51,6 +51,30 @@ export function shellWords(text: string): string[] {
   );
 }
 
+/**
+ * Remove shell redirects before matching package operands.
+ * A bare redirect consumes its following target. Quoted operands stay in the token list.
+ */
+const REDIRECT_OP_RE = /^\d*(>>?|<{1,2})(&\d*)?$/; // > >> < << 2> 2>> >& 2>&1 1>&2
+const REDIRECT_WITH_TARGET_RE = /^(\d*(>>?|<{1,2})|&>{1,2})(\/|\.|\w|~|-|"|')/; // >/dev/null 2>file &>log <input
+export function stripRedirections(tokens: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok === "&>" || tok === "&>>" || REDIRECT_OP_RE.test(tok)) {
+      // `2>&1` / `1>&2` name their target inside the token. Every other bare
+      // operator (`>`, `2>`, `<`, `>&`, `&>`) takes the NEXT token as its file
+      // target.
+      const selfContained = /&\d+$/.test(tok);
+      if (!selfContained) i++;
+      continue;
+    }
+    if (REDIRECT_WITH_TARGET_RE.test(tok)) continue; // operator and target in one token
+    out.push(tok);
+  }
+  return out;
+}
+
 /** Apply literal shell quote removal. Single quotes preserve every character inside them. */
 export function shellWordValue(word: string): string {
   let value = "";
