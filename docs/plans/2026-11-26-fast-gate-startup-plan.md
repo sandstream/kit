@@ -54,10 +54,10 @@ under the criteria in Phase 5.
 
 - [ ] Add `src/gate-entry.ts` → `dist/gate.js`: parses `gate-bash|gate-env|gate-egress`, reads
   stdin, calls the same handlers `src/commands/gate.ts` uses, and never imports `src/cli.ts`.
-- [ ] `kit gate-*` through `cli.js` keeps working and delegates to the same handler (one code path).
+- [ ] `kit gate-bash`, `kit gate-env` and `kit gate-egress` through `cli.js` keeps working and delegates to the same handler (one code path).
 - [ ] Wire the hooks to the slim entry: `kit agent-config` (`src/agent-config.ts`), the portable
   gate entries, the `~/.kit/bin/kit` wrapper and the Codex/Cursor/Droid/… gate files kit writes.
-  Old hook entries pointing at `kit gate-*` keep working.
+  Old hook entries pointing at `kit gate-bash` and the other gate verbs keep working.
 - [ ] A test that fails if `dist/gate.js` statically reaches `cli.js`, `node:sqlite` or `zod`
   (walk the import graph of the built file).
 - [ ] The differential test (Rules) plus a fail-closed test that breaks a module load in the slim entry.
