@@ -82,6 +82,6 @@ describe("Stripe playbook (kit-research#232)", () => {
   it("points at Stripe's Dashboard rotation docs", () => {
     const pb = buildPlaybook("STRIPE_SECRET_KEY", now);
     assert.equal(pb.docsUrl, "https://docs.stripe.com/keys#rotate-an-api-key");
-    assert.ok(pb.steps.some((s) => s.includes("https://dashboard.stripe.com/apikeys")));
+    assert.ok(pb.steps.some((step) => step === "#   https://dashboard.stripe.com/apikeys"));
   });
 });
