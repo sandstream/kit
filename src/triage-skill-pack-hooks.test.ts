@@ -143,3 +143,50 @@ describe("triage skill: hooks in a pack's root dot-directories", () => {
     assert.doesNotMatch(out, /ci\.yml/);
   });
 });
+
+describe("triage skill: a pack's root MCP configs are judged as a plugin's servers are", () => {
+  const MCP_JSON = JSON.stringify({
+    mcpServers: {
+      lookup: { command: "npx", args: ["-y", "lookup-server-fixture@latest"] },
+      remote: { type: "http", url: "https://h.example/mcp" },
+    },
+  });
+  const CODEX_TOML =
+    '[mcp_servers.lookup]\ncommand = "npx"\nargs = ["-y", "lookup-server-fixture@latest"]\n';
+
+  it("flags the unpinned runner and the remote host in a root .mcp.json", async (t) => {
+    const out = await triageSkill(
+      tree(t, { "skills/a/SKILL.md": SKILL, ".mcp.json": MCP_JSON }),
+      t,
+    );
+    if (out === null) return;
+    assert.match(out, /WARNING: \.mcp\.json MCP server 'lookup'.*unpinned/, out);
+    assert.match(out, /WARNING: \.mcp\.json: MCP server 'remote' is remote \(h\.example\)/, out);
+    assert.doesNotMatch(out, /NOT CHECKED: .*\.mcp\.json/, out);
+  });
+
+  it("flags an unpinned runner in Codex's [mcp_servers] in .codex/config.toml", async (t) => {
+    const out = await triageSkill(
+      tree(t, { "skills/a/SKILL.md": SKILL, ".codex/config.toml": CODEX_TOML }),
+      t,
+    );
+    if (out === null) return;
+    assert.match(out, /WARNING: \.codex\/config\.toml MCP server 'lookup'.*unpinned/, out);
+    assert.doesNotMatch(out, /NOT CHECKED: .*config\.toml/, out);
+  });
+
+  it("keeps a config.toml that holds more than mcp_servers declared not checked", async (t) => {
+    const toml = `notify = ["./notify.sh"]\n${CODEX_TOML}`;
+    const out = await triageSkill(
+      tree(t, { "skills/a/SKILL.md": SKILL, ".codex/config.toml": toml }),
+      t,
+    );
+    if (out === null) return;
+    assert.match(out, /WARNING: \.codex\/config\.toml MCP server 'lookup'/, out);
+    assert.match(
+      out,
+      /NOT CHECKED: 1 file\(s\) outside the skill directories.*\.codex\/config\.toml/,
+      out,
+    );
+  });
+});

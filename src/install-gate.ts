@@ -54,7 +54,12 @@ import { cargoInstall } from "./install-gate-cargo.js";
 import { goInstall } from "./install-gate-go.js";
 import { brewInstall } from "./install-gate-brew.js";
 import { githubRepoRef, notePipedPayloads } from "./install-gate-pipe-interp.js";
-import { shellWords, shellSegments, shellWordValue } from "./install-gate-words.js";
+import {
+  shellWords,
+  shellSegments,
+  shellWordValue,
+  stripRedirections,
+} from "./install-gate-words.js";
 
 export { ownerRepoArg, explainUnverifiable };
 
@@ -1119,35 +1124,6 @@ function applyMatcher(
     if (bare) probe.runnerBinCandidates.push(bare);
   }
   return true;
-}
-
-/**
- * Drop shell REDIRECTION tokens before matching — they are I/O plumbing, never
- * package operands (`npm i pkg 2>&1`, `npm init -y >/dev/null`, `pip install x
- * > log`). Without this, `>/dev/null` / `2>&1` reach the positional matcher,
- * fail `toName`, and fail-close a legitimate install ("cannot reduce: 2>").
- * Runs on the UNDEQUOTED tokens: a quoted `">weird"` stays a (bogus) operand
- * and keeps fail-closing — only bare shell syntax is plumbing.
- * A bare operator (`>`, `2>`, `<`) consumes its following target token too.
- */
-const REDIRECT_OP_RE = /^\d*(>>?|<{1,2})(&\d*)?$/; // > >> < << 2> 2>> >& 2>&1 1>&2
-const REDIRECT_WITH_TARGET_RE = /^(\d*(>>?|<{1,2})|&>{1,2})(\/|\.|\w|~|-|"|')/; // >/dev/null 2>file &>log <input
-function stripRedirections(tokens: string[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const tok = tokens[i];
-    if (tok === "&>" || tok === "&>>" || REDIRECT_OP_RE.test(tok)) {
-      // `2>&1` / `1>&2` name their target inside the token; every other bare
-      // operator (`>`, `2>`, `<`, `>&`, `&>`) takes the NEXT token as its file
-      // target — consume that as plumbing too.
-      const selfContained = /&\d+$/.test(tok);
-      if (!selfContained) i++;
-      continue;
-    }
-    if (REDIRECT_WITH_TARGET_RE.test(tok)) continue; // operator+target glued in one token
-    out.push(tok);
-  }
-  return out;
 }
 
 /** The faces of npm's approval flow that hand out nothing: `--allow-scripts-pending` and

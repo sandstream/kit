@@ -134,7 +134,7 @@ def _declare_outside_skills(rep, root, skills):
     `humanmaxxing-vs-kit`: a hooks fragment and a getting-started file an agent is told to follow).
     Hook fragments and scripts are judged as a plugin's are; the rest is declared not checked,
     never passed silently."""
-    rest = _read_hooks_and_scripts(rep, root, _outside_skills(root, skills))
+    rest = _read_hooks_and_scripts(rep, root, _read_pack_mcp(rep, root, _outside_skills(root, skills)))
     if not rest:
         return
     more = f" and {len(rest) - 10} more" if len(rest) > 10 else ""
@@ -143,6 +143,50 @@ def _declare_outside_skills(rep, root, skills):
 
 
 _HOOK_SCRIPTS = (".sh", ".py", ".js")
+# A pack's root MCP configs, loaded when it is installed as a project: Claude Code's `.mcp.json`
+# and Codex's `[mcp_servers.<name>]` tables in `.codex/config.toml`.
+_PACK_MCP = (".mcp.json", ".codex/config.toml")
+
+
+def _read_pack_mcp(rep, root, rest):
+    """Judge the MCP servers a pack's root `.mcp.json` and `.codex/config.toml` register, by the
+    rules a plugin's are judged by; return the files still unread. Both used to be declared not
+    checked, so `npx -y server@latest` and a remote host read as nothing to flag (kit-research
+    `uber-skills-at-scale-vs-kit`). A `config.toml` holding more than `mcp_servers` stays declared."""
+    plugin = _plugin_scan()
+    left, count = [], 0
+    for rel in rest:
+        servers, whole = _pack_mcp_servers(root, rel) if rel in _PACK_MCP else (None, False)
+        if not whole:
+            left.append(rel)
+        for name, server in servers or []:
+            plugin.judge_mcp_server(rep, rel, name, server, "pack")
+        count += len(servers or [])
+    if count:
+        rep.fact(f"pack registers {count} MCP server(s) outside the skill directories")
+    return left
+
+
+def _pack_mcp_servers(root, rel):
+    """([(name, server)], whole_file_read) for a root MCP config; (None, False) when it does not
+    parse, or when this Python has no `tomllib` (3.11+) for the TOML one."""
+    text = _read_text(os.path.join(root, *rel.split("/")))
+    try:
+        if text is None:
+            return None, False
+        if rel.endswith(".toml"):
+            import tomllib
+            data = tomllib.loads(text)
+            servers, whole = data.get("mcp_servers", {}), set(data) <= {"mcp_servers"}
+        else:
+            data = json.loads(text)
+            servers = data.get("mcpServers", data) if isinstance(data, dict) else {}
+            whole = True
+    except (ImportError, ValueError):
+        return None, False
+    if not isinstance(servers, dict):
+        return None, False
+    return [(n, v) for n, v in sorted(servers.items()) if isinstance(v, dict)], whole
 
 
 def _read_hooks_and_scripts(rep, root, rest):
