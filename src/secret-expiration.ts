@@ -142,15 +142,18 @@ function namesExpiry(field: OnePasswordField): boolean {
  * date is coerced to) and anything unparseable mean "no date".
  */
 function parse1PasswordDate(value: unknown): number | null {
-  if (typeof value === "number") return value > 0 ? value * 1000 : null;
+  if (typeof value === "number") return parseEpochSeconds(value);
   if (typeof value !== "string") return null;
   const v = value.trim();
-  if (/^\d+$/.test(v)) {
-    const secs = Number(v);
-    return secs > 0 ? secs * 1000 : null;
-  }
+  if (/^\d+$/.test(v)) return parseEpochSeconds(Number(v));
   const ms = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00Z` : v);
   return Number.isNaN(ms) ? null : ms;
+}
+
+function parseEpochSeconds(seconds: number): number | null {
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const ms = new Date(seconds * 1000).getTime();
+  return Number.isFinite(ms) ? ms : null;
 }
 
 /**

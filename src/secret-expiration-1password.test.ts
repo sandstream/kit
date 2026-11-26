@@ -32,8 +32,17 @@ describe("parse1PasswordExpiry: the real op item shape", () => {
   });
 
   it("reads a DATE value given as unix epoch seconds", () => {
-    const json = item([{ id: "x1", type: "DATE", label: "Expiry date", value: "1577836800" }]);
-    assert.equal(parse1PasswordExpiry(json), "2020-01-01T00:00:00.000Z");
+    for (const value of ["1577836800", 1577836800]) {
+      const json = item([{ id: "x1", type: "DATE", label: "Expiry date", value }]);
+      assert.equal(parse1PasswordExpiry(json), "2020-01-01T00:00:00.000Z");
+    }
+  });
+
+  it("ignores seconds outside the JavaScript date range", () => {
+    for (const value of [9_000_000_000_000, "9000000000000", Number.MAX_VALUE, "9".repeat(400)]) {
+      const json = item([{ id: "expires", type: "DATE", label: "expires", value }]);
+      assert.equal(parse1PasswordExpiry(json), null);
+    }
   });
 
   it("matches expiry, expiration and valid until by label or id", () => {
