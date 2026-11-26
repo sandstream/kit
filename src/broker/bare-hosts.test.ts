@@ -76,3 +76,67 @@ describe("bare-host network tools: targets", () => {
     assert.equal(bareTargetHost("scan.txt"), "scan.txt");
   });
 });
+
+describe("bare-host network tools: bundled short options", () => {
+  it("reads the target after a bundle whose last letter takes the next word", () => {
+    const cases: [string, string[]][] = [
+      ["ssh -vp 22 h.example", ["h.example"]],
+      ["ssh -4vp22 h.example", ["h.example"]],
+      ["ssh -vl root h.example", ["h.example"]],
+      ["ssh -vi key.example h.example", ["h.example"]],
+      ["sftp -vP 2222 h.example", ["h.example"]],
+      ["telnet -8l root h.example", ["h.example"]],
+      ["ftp -dP 2121 h.example", ["h.example"]],
+      ["nc -vz -w3 h.example 443", ["h.example"]],
+      ["ping -qc1 h.example", ["h.example"]],
+      ["nmap -sV -p22 10.0.0.5", ["10.0.0.5"]],
+      ["nmap -sS -Pn -T4 10.0.0.5", ["10.0.0.5"]],
+      ["dig -4p53 @10.0.0.53 h.example", ["10.0.0.53", "h.example"]],
+    ];
+    for (const [command, expected] of cases) assert.deepEqual(hosts(command), expected, command);
+  });
+
+  it("reads a target option at the end of a bundle, attached or in the next word", () => {
+    assert.deepEqual(hosts("ssh -vJ jump.example h.example"), ["h.example", "jump.example"]);
+    assert.deepEqual(hosts("ssh -vJjump.example h.example"), ["h.example", "jump.example"]);
+    assert.deepEqual(hosts("scp -rJ jump.example f h.example:/x"), ["h.example", "jump.example"]);
+  });
+
+  it("does not read an option's value in a bundle as a target", () => {
+    const cases: [string, string[]][] = [
+      ["nc -vs 10.0.0.1 h.example 443", ["h.example"]],
+      ["nc -nvs10.0.0.1 h.example 443", ["h.example"]],
+      ["ping -qI 10.0.0.2 h.example", ["h.example"]],
+      ["nmap -nS 10.0.0.9 10.0.0.5", ["10.0.0.5"]],
+      ["nmap -sV -oN out.example 10.0.0.5", ["10.0.0.5"]],
+      ["nmap -script http-title.example 10.0.0.5", ["10.0.0.5"]],
+      ["dig -vb 10.0.0.7 h.example", ["h.example"]],
+    ];
+    for (const [command, expected] of cases) assert.deepEqual(hosts(command), expected, command);
+  });
+});
+
+describe("bare-host network tools: options that differ between variants", () => {
+  it("consumes the next word only when it is not host-shaped", () => {
+    const cases: [string, string[]][] = [
+      ["ping -n h.example", ["h.example"]],
+      ["ping -n 4 h.example", ["h.example"]],
+      ["ping -qn h.example", ["h.example"]],
+      ["nc -c h.example 443", ["h.example"]],
+      ["ncat -c cat h.example 443", ["h.example"]],
+      ["ncat -d 1 h.example 443", ["h.example"]],
+    ];
+    for (const [command, expected] of cases) assert.deepEqual(hosts(command), expected, command);
+  });
+
+  it("reads socat's address after -d, which takes no value", () => {
+    assert.deepEqual(hosts("socat -d TCP:h.example:443 -"), ["h.example"]);
+    assert.deepEqual(hosts("socat -d -d -lf log.txt - TCP:h.example:443"), ["h.example"]);
+  });
+
+  it("does not read a word in a bundle that holds no option", () => {
+    for (const command of ["ssh -o ConnectTimeout=5 -p 22", "nc -lvp 8080", "ping -c1"]) {
+      assert.deepEqual(hosts(command), [], command);
+    }
+  });
+});
