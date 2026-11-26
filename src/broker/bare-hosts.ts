@@ -13,15 +13,21 @@
  * `localhost`). `git commit -m "ping h.example"`, `echo nc h.example` and `grep nmap file` hold
  * no target. `bash -c "…"` and `powershell -c "…"` are read one level in.
  *
+ * `curl`/`wget` take a URL without a scheme as their positional. Their domain targets were read by
+ * extract.ts; a bare address (`curl 10.0.0.5`, `curl localhost:3000`, `curl -g [::1]:3000`) was
+ * not, and passed with no verified scope where `curl http://127.0.0.1` was denied. The owner
+ * decided (2026-11-26) that these fail closed too, so curl and wget are read here like the rest.
+ *
  * Still not a boundary: a host in a variable, a file of targets (`nmap -iL hosts.txt`), a tool
  * not listed here, or a program that opens its own sockets passes. Pure and deterministic.
  */
 import { unwrapCommandWrappers } from "../install-gate-wrappers.js";
 import { shellSegments, shellWords, shellWordValue } from "../install-gate-words.js";
 
-/** How a tool names its target: every positional, the first one, `[user@]host:path` words
- *  (scp), socat address specs, or only through `target` options. */
-type Take = "all" | "first" | "remote" | "socat" | "named";
+/** How a tool names its target: every positional, every positional as a URL (no address
+ *  ranges), the first one, `[user@]host:path` words (scp), socat address specs, or only through
+ *  `target` options. */
+type Take = "all" | "url" | "first" | "remote" | "socat" | "named";
 
 interface ToolSpec {
   take: Take;
@@ -68,7 +74,23 @@ const PS_WEB: ToolSpec = {
   target: "-uri -proxy",
 };
 
+/** curl options that consume the next word as a value that is not a target (`-o out.json`,
+ *  `--data 10.0.0.5`, `--noproxy localhost`). A proxy (`-x`) is a network target, so it is read. */
+const CURL: ToolSpec = {
+  take: "url",
+  values:
+    "-o --output -T --upload-file -d --data --data-raw --data-binary --data-urlencode --data-ascii --json -H --header -F --form --form-string -A --user-agent -e --referer -u --user -b --cookie -c --cookie-jar -w --write-out -E --cert --key --cacert --capath -K --config -m --max-time --connect-timeout --retry --retry-delay --retry-max-time -X --request -r --range -z --time-cond -D --dump-header --trace --trace-ascii --stderr --noproxy --interface --local-port --dns-servers --dns-interface --dns-ipv4-addr --dns-ipv6-addr --haproxy-clientip --limit-rate -Y --speed-limit -y --speed-time --resolve --connect-to",
+};
+/** wget options that consume the next word as a value that is not a target. */
+const WGET: ToolSpec = {
+  take: "url",
+  values:
+    "-a --append-output -o --output-file -O --output-document -P --directory-prefix -U --user-agent -T --timeout -t --tries -w --wait -Q --quota -e --execute -i --input-file -l --level -D --domains -A --accept -R --reject -I --include-directories -X --exclude-directories --user --password --header --referer --post-data --post-file --body-data --body-file --method --certificate --private-key --ca-certificate --ca-directory --load-cookies --save-cookies --bind-address --exclude-domains",
+};
+
 const TOOLS: Record<string, ToolSpec> = {
+  curl: CURL,
+  wget: WGET,
   nc: NC,
   ncat: NC,
   netcat: NC,
@@ -111,14 +133,30 @@ const IPV4_RANGE = /^\d{1,3}(?:[-,*\d]*)(?:\.[-,*\d]+){3}(?:\/\d{1,2})?$/;
 const SOCAT_ADDRESS =
   /^(?:tcp|tcp4|tcp6|udp|udp4|udp6|sctp|openssl|ssl|proxy|socks4a?)(?:-connect|-sendto|-datagram)?:([^:,]+)/i;
 
+/** An IPv6 literal in the form a URL's hostname takes (`[::1]`), or null. */
+function ipv6Host(text: string): string | null {
+  if (!/^[0-9a-f]*:[0-9a-f]*:[0-9a-f:.]*$/i.test(text)) return null;
+  try {
+    return new URL(`http://[${text}]/`).hostname;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The host a target word names, or null when the word is not host-shaped. `user@` and a `:port`
- * or `/path` suffix are dropped; an address range is kept whole, so no scope entry matches it.
+ * or `/path` suffix are dropped; an IPv6 literal, bracketed or not, comes back bracketed as a URL
+ * names it. An address range is kept whole, so no scope entry matches it; with `ranges` false
+ * (a URL, where `10.0.0.5/24` is a path) none is read.
  */
-export function bareTargetHost(word: string): string | null {
+export function bareTargetHost(word: string, ranges = true): string | null {
   const at = word.lastIndexOf("@");
   const rest = at >= 0 ? word.slice(at + 1) : word;
-  if (IPV4_RANGE.test(rest) && !IPV4.test(rest)) return rest;
+  const bracketed = /^\[([^\]]+)\](?:[:/].*)?$/.exec(rest);
+  if (bracketed) return ipv6Host(bracketed[1]!);
+  const v6 = ipv6Host(rest);
+  if (v6) return v6;
+  if (ranges && IPV4_RANGE.test(rest) && !IPV4.test(rest)) return rest;
   const host = rest.replace(/[:/].*$/, "").replace(/\.$/, "");
   if (/^localhost$/i.test(host)) return "localhost";
   if (IPV4.test(host) || DOMAIN.test(host)) return host.toLowerCase();
@@ -129,12 +167,19 @@ function hasFlag(list: string | undefined, flag: string): boolean {
   return (list ?? "").split(" ").includes(flag);
 }
 
+/** Whether a curl/wget option consumes the next word as a value (extract.ts reads their domains). */
+export function fetchTakesValue(tool: string, flag: string): boolean {
+  return hasFlag((tool === "wget" ? WGET : CURL).values, flag);
+}
+
 /** The word a positional argument names as a target, or "" when it names none. */
 function positionalTarget(tool: string, spec: ToolSpec, word: string, index: number): string {
   if (tool === "dig" && word.startsWith("@")) return word.slice(1);
   if (spec.take === "socat") return SOCAT_ADDRESS.exec(word)?.[1] ?? "";
   if (spec.take === "remote") return /^[^/:]+:/.test(word) ? word.split(":")[0]! : "";
-  return spec.take === "all" || (spec.take === "first" && index === 0) ? word : "";
+  return spec.take === "all" || spec.take === "url" || (spec.take === "first" && index === 0)
+    ? word
+    : "";
 }
 
 /** `--opt=value` (and PowerShell's `-Opt:value`) as [flag, value]; else [word, undefined]. */
@@ -160,6 +205,13 @@ function targetWords(tool: string, spec: ToolSpec, args: readonly string[]): str
     else if (inline === undefined && hasFlag(spec.values, flag)) i++;
   }
   return out;
+}
+
+function addTargets(tool: string, spec: ToolSpec, args: readonly string[], hosts: Set<string>) {
+  for (const word of targetWords(tool, spec, args)) {
+    const host = bareTargetHost(word, spec.take !== "url");
+    if (host) hosts.add(host);
+  }
 }
 
 /** The program text a shell runs from `-c`/`-Command`, if any. */
@@ -188,10 +240,7 @@ function segmentHosts(segment: string, hosts: Set<string>, depth: number): void 
   }
   const spec = Object.hasOwn(TOOLS, tool) ? TOOLS[tool] : undefined;
   if (!spec) return;
-  for (const word of targetWords(tool, spec, args)) {
-    const host = bareTargetHost(word);
-    if (host) hosts.add(host);
-  }
+  addTargets(tool, spec, args, hosts);
 }
 
 function commandHosts(command: string, hosts: Set<string>, depth: number): void {
@@ -210,8 +259,5 @@ export function addBareToolHostsFromArgs(args: readonly string[], hosts: Set<str
   const name = tool.replace(/\.exe$/, "");
   const spec = Object.hasOwn(TOOLS, name) ? TOOLS[name] : undefined;
   if (!spec) return;
-  for (const word of targetWords(name, spec, args.slice(1))) {
-    const host = bareTargetHost(word);
-    if (host) hosts.add(host);
-  }
+  addTargets(name, spec, args.slice(1), hosts);
 }

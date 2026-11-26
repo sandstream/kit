@@ -73,8 +73,8 @@ describe("extractHostsFromCommand", () => {
     assert.deepEqual(extractHostsFromCommand("echo evil.com | curl good.com"), ["good.com"]);
   });
 
-  it("ignores schemeless targets without a dotted domain (localhost, bare words)", () => {
-    assert.deepEqual(extractHostsFromCommand("curl localhost:3000/health"), []);
+  it("ignores schemeless bare words that are not a domain or an address", () => {
+    // `curl localhost:3000/health` is a target since 2026-11-26 ("bare addresses" below).
     assert.deepEqual(extractHostsFromCommand("curl -X POST myservice/health"), []);
   });
 
@@ -122,5 +122,52 @@ describe("hosts a request is forwarded to", () => {
       extractHostsFromCommand("curl https://a.example/login?next=https://a.example/home"),
       ["a.example"],
     );
+  });
+});
+
+describe("bare addresses given to curl/wget", () => {
+  // Owner decision 2026-11-26: `curl 10.0.0.5` and `curl localhost:3000` are targets like a URL.
+  it("reads an IPv4, IPv6 or localhost positional, with or without a port", () => {
+    const cases: [string, string[]][] = [
+      ["curl 10.0.0.5", ["10.0.0.5"]],
+      ["curl localhost:3000", ["localhost"]],
+      ["curl localhost:3000/health", ["localhost"]],
+      ["wget 127.0.0.1:8080/x.tgz", ["127.0.0.1"]],
+      ["curl -s user:pw@10.0.0.5:8443/api", ["10.0.0.5"]],
+      ["curl -g '[::1]:3000/health'", ["[::1]"]],
+      ["curl -6 -g [2001:DB8::1]", ["[2001:db8::1]"]],
+      ["sudo curl -sS 10.0.0.5/24", ["10.0.0.5"]],
+      ['bash -c "curl 10.0.0.5"', ["10.0.0.5"]],
+      ["Invoke-WebRequest -Uri [::1]:3000/x", ["[::1]"]],
+      ["iwr 10.0.0.5:8080", ["10.0.0.5"]],
+    ];
+    for (const [command, expected] of cases) {
+      assert.deepEqual(extractHostsFromCommand(command), expected, command);
+    }
+  });
+
+  it("does not read an address or file name that is not the target", () => {
+    const cases: [string, string[]][] = [
+      ["curl -o out.json https://h.example", ["h.example"]],
+      ["curl --data 10.0.0.5 https://h.example", ["h.example"]],
+      ["curl -d 'ip 10.0.0.5 here' https://h.example", ["h.example"]],
+      ["curl --noproxy localhost https://h.example", ["h.example"]],
+      ["curl --interface 10.0.0.9 https://h.example", ["h.example"]],
+      ["wget --bind-address 10.0.0.9 https://h.example", ["h.example"]],
+      ["echo 10.0.0.5", []],
+      ["echo localhost:3000", []],
+      ["curl --max-time 10 --retry 3 https://h.example", ["h.example"]],
+    ];
+    for (const [command, expected] of cases) {
+      assert.deepEqual(extractHostsFromCommand(command), expected, command);
+    }
+  });
+
+  it("reads the same targets from an argv that runs without a shell", async () => {
+    const { extractHostsFromArgs } = await import("./extract.js");
+    assert.deepEqual(extractHostsFromArgs(["curl", "localhost:3000"]), ["localhost"]);
+    assert.deepEqual(extractHostsFromArgs(["curl", "--data", "10.0.0.5", "https://h.example"]), [
+      "h.example",
+    ]);
   });
 });
