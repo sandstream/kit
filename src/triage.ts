@@ -451,8 +451,11 @@ export async function runTriage(
     const { stdout, stderr } = await exec("python3", [TRIAGE_SCRIPT, type, pipSpec ?? target], {
       timeout: 300_000, // 5 min for Docker pulls
       cwd,
+      // A piped stdout on Windows is the ANSI code page, which cannot print every path; triage.py
+      // also switches itself to UTF-8, and both ends agree on it here.
+      encoding: "utf8",
       // config-declared mirrors, with real env taking precedence
-      env: { ...(await airGapMirrorEnv(cwd)), ...process.env },
+      env: { ...(await airGapMirrorEnv(cwd)), ...process.env, PYTHONIOENCODING: "utf-8" },
     });
 
     const output = note + stdout + (stderr ? `\n${stderr}` : "");

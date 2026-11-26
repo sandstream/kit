@@ -823,6 +823,14 @@ def main(argv):
     return 0
 
 
+def _utf8_stdio():
+    """Use UTF-8 for console and pipe output so Kit reads the full verdict."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)  # TextIOWrapper, Python 3.7+
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 if __name__ == "__main__":
-    import urllib.parse  # noqa: E402  (kept local to module load is fine)
+    _utf8_stdio()
     sys.exit(main(sys.argv[1:]))
