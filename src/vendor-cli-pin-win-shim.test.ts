@@ -111,15 +111,20 @@ async function refusal(p: Promise<unknown>): Promise<VendorCliPinRefusal> {
   assert.fail("expected a VendorCliPinRefusal");
 }
 
-describe("vendor-CLI pin through a win32 npm shim", () => {
+function registerShimTree(): () => Tree {
   let t: Tree;
   beforeEach(() => (t = makeTree()));
   afterEach(() => {
     process.exitCode = 0;
     rmSync(t.root, { recursive: true, force: true });
   });
+  return () => t;
+}
 
+describe("vendor-CLI pin measures and pins a win32 npm shim", () => {
+  const tree = registerShimTree();
   it("measures the JS entry, runs it with kit's own node, and hashes the shim", async () => {
+    const t = tree();
     const m = (await measureCli("vercel", t.deps))!;
     assert.equal(m.realpath, t.entry);
     assert.equal(m.shim?.path, t.shim);
@@ -127,6 +132,7 @@ describe("vendor-CLI pin through a win32 npm shim", () => {
   });
 
   it("pins the entry and records that it came via the shim", async () => {
+    const t = tree();
     const seen: unknown[] = [];
     const io: PinIo = { ...t.io, versionOf: async (l) => (seen.push(l), "41.0.0") };
     const o = await pinOne("vercel", false, t.deps, io);
@@ -141,8 +147,12 @@ describe("vendor-CLI pin through a win32 npm shim", () => {
     const l = await resolvePinnedLaunch("vercel", t.proj, t.deps);
     assert.deepEqual(l, { file: process.execPath, prefix: [t.entry] });
   });
+});
 
+describe("vendor-CLI pin refuses changed or unusable win32 shims", () => {
+  const tree = registerShimTree();
   it("refuses a tampered entry", async () => {
+    const t = tree();
     await pinOne("vercel", false, t.deps, t.io);
     writeFileSync(t.entry, ENTRY.replace("v1", "evil"));
     const err = await refusal(resolvePinnedLaunch("vercel", t.proj, t.deps));
@@ -152,6 +162,7 @@ describe("vendor-CLI pin through a win32 npm shim", () => {
   });
 
   it("refuses a shim edited to start something else, even with the old entry intact", async () => {
+    const t = tree();
     await pinOne("vercel", false, t.deps, t.io);
     const other = join(t.shimDir, "node_modules", "vercel cli", "bin", "other.js");
     writeFileSync(other, ENTRY);
@@ -161,6 +172,7 @@ describe("vendor-CLI pin through a win32 npm shim", () => {
   });
 
   it("refuses a shim whose text changed but still names the pinned entry", async () => {
+    const t = tree();
     await pinOne("vercel", false, t.deps, t.io);
     writeFileSync(
       t.shim,
@@ -177,6 +189,7 @@ describe("vendor-CLI pin through a win32 npm shim", () => {
   });
 
   it("refuses an unparseable shim: never pinned, never run, no shell", async () => {
+    const t = tree();
     const fresh = await pinOne("vercel", false, { ...t.deps, cwd: t.root }, t.io);
     assert.equal(fresh.result, "pinned", "a readable shim pins (into another project)");
     writeFileSync(t.shim, '@ECHO off\r\npowershell -File "%~dp0\\vercel.ps1" %*\r\n');
@@ -193,12 +206,15 @@ describe("vendor-CLI pin through a win32 npm shim", () => {
   });
 
   it("refuses a shim that names a file that does not exist", async () => {
+    const t = tree();
     writeFileSync(t.shim, npmShim("node_modules\\gone\\x.js"));
     const err = await refusal(resolvePinnedLaunch("vercel", t.proj, t.deps));
     assert.match(err.message, /does not exist/);
   });
+});
 
-  it("leaves POSIX alone: a .cmd there is just the file, run as itself", async () => {
+describe("vendor-CLI pin on POSIX", () => {
+  it("treats a .cmd as a file and runs it as itself", async () => {
     const posix = makeTree("linux");
     try {
       const m = (await measureCli("vercel", posix.deps))!;

@@ -75,7 +75,7 @@ function refused(text: string, why: RegExp): void {
   if (!r.ok) assert.match(r.reason, why);
 }
 
-describe("win32 npm shim parser", () => {
+describe("win32 npm shim parser accepts supported shims", () => {
   it("reads npm 7+ cmd-shim output", () => {
     const t = okTarget(npmShim("node_modules\\vercel\\dist\\vc.js"));
     assert.deepEqual(t, {
@@ -127,7 +127,9 @@ describe("win32 npm shim parser", () => {
     assert.equal(t.runner, "direct");
     refused(`${head}"%dp0%\\node_modules\\x\\bin\\x"   %*\r\n`, /not an \.exe/);
   });
+});
 
+describe("win32 npm shim parser validates batch input", () => {
   it("refuses text with no invocation", () => {
     refused("@ECHO off\r\necho hello\r\n", /no invocation/);
     refused("", /no invocation/);
