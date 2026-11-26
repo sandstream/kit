@@ -563,3 +563,26 @@ it("SARIF: treats an unavailable Kit delegate as incomplete and retains valid fi
   assert.equal(value.count, 1);
   assert.deepEqual(value.scannerCoverage, run.properties.scannerCoverage);
 });
+
+it("collapses repeated SARIF results and says how many results the findings came from", () => {
+  const token = `ghp_${"q".repeat(36)}`;
+  const results = Array.from({ length: 8 }, (_, i) => ({
+    ruleId: "repeat",
+    message: { text: `finding ${i % 2}` },
+    partialFingerprints: { hash: `fp${i % 2}-${token}` },
+  }));
+  const file = report({ runs: [{ tool: { driver: { name: "fixture" } }, results }] });
+  const text = fixture.run(["ingest", "sarif", file]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /2 finding\(s\) from 8 results/);
+  assert.match(text.stdout, /×4/);
+  const json = fixture.run(["ingest", "sarif", file, "--json"]);
+  const value = JSON.parse(json.stdout);
+  assert.equal(value.count, 2);
+  assert.equal(value.results, 8);
+  assert.deepEqual(
+    value.findings.map((f: { occurrences: number }) => f.occurrences),
+    [4, 4],
+  );
+  assert.ok(!json.stdout.includes(token), "a report-supplied fingerprint is sanitized");
+});

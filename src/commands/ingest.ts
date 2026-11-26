@@ -44,10 +44,12 @@ const isIngestFormat = (value: string | undefined): value is IngestFormat =>
 function displayFinding<T extends { name: string; detail: string; package?: AdvisoryPackage }>(
   finding: T,
 ): T {
+  const fingerprint = (finding as { fingerprint?: unknown }).fingerprint;
   const shown = {
     ...finding,
     name: sanitizeDisplayText(finding.name),
     detail: sanitizeDisplayText(finding.detail),
+    ...(typeof fingerprint === "string" ? { fingerprint: sanitizeDisplayText(fingerprint) } : {}),
   };
   const pkg = finding.package;
   if (!pkg) return shown;
@@ -92,6 +94,7 @@ export async function cmdIngest(): Promise<boolean> {
   // One added fact beside a dependency finding: does this project's source import the package?
   // It is read from the current directory once, and changes no severity, status or order.
   const findings = await withImportFacts(process.cwd(), named);
+  const results = findings.reduce((sum, finding) => sum + occurrences(finding), 0);
   console.error("External scanner report. Findings do not verify the current account state.");
   for (const note of outcome.notes ?? []) console.error(note);
   const { suppressed } = outcome;
@@ -102,6 +105,8 @@ export async function cmdIngest(): Promise<boolean> {
       JSON.stringify(
         {
           count: findings.length,
+          // Present only when repeated results collapsed, so `count` stays the finding count.
+          ...(results > findings.length ? { results } : {}),
           findings,
           coverage: outcome.coverage,
           reportGap: outcome.reportGap,
@@ -115,7 +120,7 @@ export async function cmdIngest(): Promise<boolean> {
     return true;
   }
   console.log(
-    `${c.bold}kit ingest${c.reset}  ${c.dim}${format} · ${findings.length} finding(s)${c.reset}`,
+    `${c.bold}kit ingest${c.reset}  ${c.dim}${format} · ${findings.length} finding(s)${results > findings.length ? ` from ${results} results` : ""}${c.reset}`,
   );
   const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
   const sorted = [...findings].sort(
@@ -123,6 +128,12 @@ export async function cmdIngest(): Promise<boolean> {
   );
   for (const finding of sorted) printFinding(finding);
   return true;
+}
+
+/** How many report results one finding stands for; SARIF duplicates collapse into one finding. */
+function occurrences(finding: object): number {
+  const n = (finding as { occurrences?: unknown }).occurrences;
+  return typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : 1;
 }
 
 function printFinding(finding: SecurityCheckResult & { importFact?: { text: string } }): void {
@@ -134,7 +145,11 @@ function printFinding(finding: SecurityCheckResult & { importFact?: { text: stri
         ? c.yellow
         : c.dim;
   const citation = finding.rule ? ` ${c.dim}[${finding.rule.id}]${c.reset}` : "";
-  console.log(`  ${color}${severity.toUpperCase().padEnd(8)}${c.reset} ${finding.name}${citation}`);
+  const times = occurrences(finding);
+  const repeated = times > 1 ? ` ${c.dim}×${times}${c.reset}` : "";
+  console.log(
+    `  ${color}${severity.toUpperCase().padEnd(8)}${c.reset} ${finding.name}${citation}${repeated}`,
+  );
   console.log(`    ${c.dim}${finding.detail}${c.reset}`);
   if (finding.importFact) console.log(`    ${c.dim}${finding.importFact.text}${c.reset}`);
 }

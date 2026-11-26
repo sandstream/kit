@@ -77,12 +77,17 @@ describe("kit security scan-build", () => {
       mkdirSync(join(dir, "dist"));
       writeFileSync(join(dir, "dist", "broken.js.map"), "{");
       writeFileSync(join(dir, "dist", "leak.js"), "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123");
+      writeFileSync(
+        join(dir, "dist", "app.asar"),
+        Buffer.concat([Buffer.alloc(8), Buffer.from("sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123")]),
+      );
       const result = await runScan(dir);
       assert.equal(result.ok, false);
       assert.match(result.output, /scan-build: incomplete/);
       assert.match(result.output, /dist\/broken\.js\.map/);
       assert.match(result.output, /dist\/leak\.js/);
-      assert.match(result.output, /stripe-key/);
+      assert.match(result.output, /line 1 stripe-key/);
+      assert.match(result.output, /dist\/app\.asar.*byte 8 stripe-key/);
       assert.doesNotMatch(result.output, /no matches/);
     } finally {
       rmTemp(dir);
