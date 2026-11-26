@@ -176,8 +176,10 @@ async function securityRows(cwd: string, online: boolean | undefined, config: ki
   const runtimes = await checkRuntimes(cwd, { online });
   const installs = await checkRuntimeInstalls(cwd, { online });
   const { checkWatchFreshness } = await import("./check-watch-freshness.js");
+  const { checkVendorCliPins } = await import("./check-vendor-cli-pin.js");
   return [
     ...tagged,
+    ...(await checkVendorCliPins(cwd, config.secrets)),
     ...runtimes,
     ...installs,
     ...(await checkGlobalPackages(cwd)),

@@ -30,6 +30,21 @@ export interface SkillLockEntry {
 export interface CliLock {
   version: number;
   tools: Record<string, CliLockEntry>;
+  /**
+   * Vendor-CLI identity pins (`kit tools pin`): tool → `<platform>-<arch>` → the file, hash and
+   * version someone accepted. Written only by `kit tools pin`; see `vendor-cli-pin.ts`.
+   */
+  identity?: Record<string, Record<string, CliIdentity>>;
+}
+
+export interface CliIdentity {
+  /** The realpath that was hashed; `~/…` (forward slashes) when under the home directory. */
+  path: string;
+  sha256: string;
+  /** What `--version` reported when it was pinned. */
+  version: string;
+  size: number;
+  pinnedAt: string;
 }
 
 export interface CliLockEntry {
@@ -311,6 +326,8 @@ export async function updateCliLock(
   const lock: CliLock = {
     version: 1,
     tools: {},
+    // Identity pins are not this writer's to drop: only `kit tools pin` changes them.
+    ...(existing?.identity ? { identity: existing.identity } : {}),
   };
 
   // Preserve existing entries and merge with new ones

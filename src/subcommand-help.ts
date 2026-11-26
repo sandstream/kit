@@ -252,6 +252,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "decisions verify": "The gate's verdict on its own exit code — the same function kit check calls",
   "tools list":
     "Inventory the CLIs on this machine: resolved path, the installer that owns it (measured from the path, never assumed), installed version, and — with --latest — how far behind each one is",
+  "tools pin":
+    "Pin the vault/cloud CLIs (op, infisical, bw, doppler, vault, aws, gcloud, az, gh) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
   "memory keygen":
     "X25519 recipient keypair: ephemeral sessions push encrypted with NO secret; only holders of the private key decrypt",
   "memory push":

@@ -154,9 +154,12 @@ function printList(
 export async function cmdTools(): Promise<boolean> {
   const args = process.argv.slice(3);
   const sub = args[0] && !args[0].startsWith("--") ? args[0] : "list";
+  if (sub === "pin") return (await import("./tools-pin.js")).cmdToolsPin(args.slice(1));
   if (sub !== "list") {
     console.error(`${c.red}unknown subcommand: kit tools ${sub}${c.reset}`);
-    console.error(`${c.dim}available: kit tools list [--latest] [--auth] [--json]${c.reset}`);
+    console.error(
+      `${c.dim}available: kit tools list [--latest] [--auth] [--json] | kit tools pin [--accept] <tool>...${c.reset}`,
+    );
     return false;
   }
   const jsonMode = hasFlag(process.argv, "--json");
