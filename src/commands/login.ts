@@ -15,7 +15,7 @@ import { isNonInteractive } from "../environment.js";
 import { withGovernance } from "../governance-middleware.js";
 import { loginServices } from "../login.js";
 import { resolveAllAuth } from "../service-auth.js";
-import { resolvePinnedCli } from "../vendor-cli-pin.js";
+import { resolvePinnedLaunch } from "../vendor-cli-pin.js";
 
 async function ensureSecretsBackend(config: kitConfig): Promise<boolean> {
   // Some secret backends (1Password) need a separate interactive signin before
@@ -67,10 +67,10 @@ async function ensureSecretsBackend(config: kitConfig): Promise<boolean> {
   // enabled mid-session this will succeed; with eval-only setups it will
   // print export commands the user can copy.
   // The same resolver, behind the vendor-CLI pin, as every other `op` call.
-  const op = await resolvePinnedCli("op").catch(() => null);
+  const op = await resolvePinnedLaunch("op").catch(() => null);
   if (!op) return false;
   const ok = await new Promise<boolean>((resolve) => {
-    const child = spawnChild(op, ["signin"], {
+    const child = spawnChild(op.file, [...op.prefix, "signin"], {
       stdio: "inherit",
       env: { ...process.env },
     });

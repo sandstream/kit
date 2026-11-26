@@ -4,7 +4,7 @@
  */
 import { spawn } from "node:child_process";
 import { redactSecrets } from "./utils/redactSecrets.js";
-import { resolvePinnedCli, VendorCliPinRefusal } from "./vendor-cli-pin.js";
+import { resolvePinnedLaunch, VendorCliPinRefusal, type Launch } from "./vendor-cli-pin.js";
 
 export function safeDiagnostic(
   value: unknown,
@@ -22,7 +22,7 @@ export const PIN_REFUSED_CODE = 126;
  * Spawns a CLI with the value piped via stdin. Returns the exit code +
  * captured stderr for diagnostics. The value never appears in argv.
  *
- * The CLI is resolved behind the vendor-CLI pin (`resolvePinnedCli`): a pinned CLI that changed is
+ * The CLI is resolved behind the vendor-CLI pin (`resolvePinnedLaunch`): a pinned CLI that changed is
  * never started and the value never leaves kit; the result is `PIN_REFUSED_CODE` with the refusal
  * as its first stderr line.
  */
@@ -32,14 +32,14 @@ export async function spawnWithStdin(
   stdinValue: string,
   sensitiveValues: readonly string[] = [],
 ): Promise<{ code: number; stderr: string }> {
-  let bin: string;
+  let bin: Launch;
   try {
-    bin = await resolvePinnedCli(cmd);
+    bin = await resolvePinnedLaunch(cmd);
   } catch (err) {
     if (!(err instanceof VendorCliPinRefusal)) throw err;
     return { code: PIN_REFUSED_CODE, stderr: err.message };
   }
-  return spawnResolved(bin, args, stdinValue, sensitiveValues);
+  return spawnResolved(bin.file, [...bin.prefix, ...args], stdinValue, sensitiveValues);
 }
 
 function spawnResolved(

@@ -5,7 +5,7 @@ import { checkInfisicalStatus, isInfisicalLoginStatus } from "./infisical-status
 import { parseCommand } from "./utils/parseCommand.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
-import { resolvePinnedCli } from "./vendor-cli-pin.js";
+import { resolvePinnedLaunch } from "./vendor-cli-pin.js";
 
 export interface ServiceStatus {
   name: string;
@@ -38,8 +38,8 @@ async function runCheck(
     // (stripe, vercel, supabase, …) is found even when mise isn't activated in
     // the shell, behind the vendor-CLI pin (a refused CLI is not run: the catch
     // below reports it unauthenticated, and the refusal fails the run).
-    const bin = await resolvePinnedCli(parsed.cmd, cwd);
-    const { stdout, stderr } = await exec(bin, parsed.args, {
+    const bin = await resolvePinnedLaunch(parsed.cmd, cwd);
+    const { stdout, stderr } = await exec(bin.file, [...bin.prefix, ...parsed.args], {
       timeout: 15_000,
       cwd,
       env: { ...process.env },

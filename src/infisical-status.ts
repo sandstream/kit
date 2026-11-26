@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { exec } from "./utils/exec.js";
-import { resolvePinnedCli, VendorCliPinRefusal } from "./vendor-cli-pin.js";
+import { resolvePinnedLaunch, VendorCliPinRefusal, type Launch } from "./vendor-cli-pin.js";
 
 const STATUS_ARGS = ["login", "status", "--json", "--silent", "--telemetry=false"];
 const KEYRING = "infisical login (keyring)";
@@ -273,16 +273,20 @@ export async function checkInfisicalStatus(
     );
   }
   const flagToken = args.some((arg) => arg === "--token" || arg.startsWith("--token="));
-  let bin: string;
+  let bin: Launch;
   try {
     // Behind the vendor-CLI pin, through the resolver every other `infisical` call uses.
-    bin = await resolvePinnedCli(command, cwd);
+    bin = await resolvePinnedLaunch(command, cwd);
   } catch (error) {
     if (!(error instanceof VendorCliPinRefusal)) throw error;
     return unverified("infisical refused by the vendor-CLI pin (kit check --category security).");
   }
   try {
-    const { stdout } = await exec(bin, args, { timeout: 15_000, cwd, env });
+    const { stdout } = await exec(bin.file, [...bin.prefix, ...args], {
+      timeout: 15_000,
+      cwd,
+      env,
+    });
     return statusResult(stdout, 0, domain, flagToken, env);
   } catch (error) {
     const { stdout, exitCode } = failedRun(error);
