@@ -5,7 +5,7 @@ import { checkInfisicalStatus, isInfisicalLoginStatus } from "./infisical-status
 import { parseCommand } from "./utils/parseCommand.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
-import { resolveToolBin } from "./utils/resolveTool.js";
+import { resolvePinnedCli } from "./vendor-cli-pin.js";
 
 export interface ServiceStatus {
   name: string;
@@ -36,8 +36,9 @@ async function runCheck(
   try {
     // Resolve the CLI mise-first so a service tool installed via `mise use -g`
     // (stripe, vercel, supabase, …) is found even when mise isn't activated in
-    // the shell; fall back to the bare name for non-mise installs.
-    const bin = (await resolveToolBin(parsed.cmd)) ?? parsed.cmd;
+    // the shell, behind the vendor-CLI pin (a refused CLI is not run: the catch
+    // below reports it unauthenticated, and the refusal fails the run).
+    const bin = await resolvePinnedCli(parsed.cmd, cwd);
     const { stdout, stderr } = await exec(bin, parsed.args, {
       timeout: 15_000,
       cwd,

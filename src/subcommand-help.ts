@@ -253,7 +253,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "tools list":
     "Inventory the CLIs on this machine: resolved path, the installer that owns it (measured from the path, never assumed), installed version, and — with --latest — how far behind each one is",
   "tools pin":
-    "Pin the vault/cloud CLIs (op, infisical, bw, doppler, vault, aws, gcloud, az, gh) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
+    "Pin the vault, cloud and deploy CLIs kit hands secrets or credentials through (op, infisical, bw, doppler, vault, aws, gcloud, az, gh, eas, dotenvx, vercel, supabase, fly, flyctl, railway, wrangler, stripe) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
   "memory keygen":
     "X25519 recipient keypair: ephemeral sessions push encrypted with NO secret; only holders of the private key decrypt",
   "memory push":

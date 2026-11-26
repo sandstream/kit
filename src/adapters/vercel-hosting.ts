@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
-import { exec } from "../utils/exec.js";
+import { execPinned } from "../vendor-cli-pin.js";
 
 /**
  * Vercel Hosting Adapter
@@ -29,7 +29,7 @@ export const vercelHostingAdapter: ServiceAdapter = {
     try {
       // Step 1: Check if Vercel CLI is installed
       try {
-        await exec("vercel", ["--version"], {
+        await execPinned("vercel", ["--version"], {
           timeout: 5_000,
         });
       } catch {
@@ -42,7 +42,7 @@ export const vercelHostingAdapter: ServiceAdapter = {
 
       // Step 2: Check authentication
       try {
-        const { stdout: whoamiOutput } = await exec("vercel", ["whoami"], {
+        const { stdout: whoamiOutput } = await execPinned("vercel", ["whoami"], {
           timeout: 10_000,
         });
 
@@ -62,13 +62,13 @@ export const vercelHostingAdapter: ServiceAdapter = {
       }
 
       // Step 3: Link project (interactive, will ask for project details)
-      await exec("vercel", ["link", "--yes"], {
+      await execPinned("vercel", ["link", "--yes"], {
         cwd: context.projectPath,
         timeout: 30_000,
       });
 
       // Step 4: Get project info
-      const { stdout: projectInfo } = await exec("vercel", ["project", "ls", "--json"], {
+      const { stdout: projectInfo } = await execPinned("vercel", ["project", "ls", "--json"], {
         timeout: 10_000,
       });
 
