@@ -21,9 +21,9 @@ async function execCli(
   args: string[],
   opts?: Parameters<typeof exec>[2],
 ): Promise<{ stdout: string; stderr: string }> {
-  // Behind the vendor-CLI pin: a pinned CLI runs only as its verified realpath, a mismatch is
-  // refused (never a fallback to the bare name); an unpinned one resolves mise-first as before.
-  return execPinned(tool, args, opts, resolveToolBin);
+  // Behind the vendor-CLI pin, mise-first through the resolver the pin measures with: every call
+  // to one tool starts the same file, and a mismatched pin is refused (never a fallback).
+  return execPinned(tool, args, opts);
 }
 
 /** Is a vault CLI installed (mise or PATH)? Used to tell "not installed" apart
@@ -207,7 +207,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
   eas: {
     async resolve(name, config) {
       try {
-        const { stdout } = await exec("eas", ["secret:list", "--json"], { timeout: 10_000 });
+        const { stdout } = await execCli("eas", ["secret:list", "--json"], { timeout: 10_000 });
         const secrets = JSON.parse(stdout);
         const found =
           Array.isArray(secrets) &&
@@ -326,7 +326,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
     async write(key, value) {
       // `dotenvx set <KEY> <value>` encrypts the value into .env (ECIES). The
       // value is an argv token — see the SecretBackend.write note on exposure.
-      await exec("dotenvx", ["set", key, value], { timeout: 15_000 });
+      await execCli("dotenvx", ["set", key, value], { timeout: 15_000 });
       return { ok: true, detail: "encrypted into .env via dotenvx" };
     },
   },

@@ -3412,7 +3412,7 @@
         },
         "pin": {
           "kind": "command",
-          "summary": "Pin the vault/cloud CLIs (op, infisical, bw, doppler, vault, aws, gcloud, az, gh) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
+          "summary": "Pin the vault, cloud and deploy CLIs kit hands secrets or credentials through (op, infisical, bw, doppler, vault, aws, gcloud, az, gh, eas, dotenvx, vercel, supabase, fly, flyctl, railway, wrangler, stripe) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,

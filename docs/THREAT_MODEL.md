@@ -203,9 +203,10 @@ yours — kit ships no default value.
 
 kit pins and triages what **it** manages: mise-installed tools (versioned in
 `.kit.toml`), project dependencies (`kit triage` before install, bumblebee per
-release), and its own actions (SHA-pinned in CI). For the vault and cloud CLIs it
-hands secrets through (`op`, `infisical`, `bw`, `doppler`, `vault`, `aws`,
-`gcloud`, `az`, `gh`), `kit tools pin` records the resolved realpath, SHA-256 and
+release), and its own actions (SHA-pinned in CI). For the vault, cloud and deploy
+CLIs it hands secrets or credentials through (`op`, `infisical`, `bw`, `doppler`,
+`vault`, `aws`, `gcloud`, `az`, `gh`, `eas`, `dotenvx`, `vercel`, `supabase`,
+`fly`/`flyctl`, `railway`, `wrangler`, `stripe`), `kit tools pin` records the resolved realpath, SHA-256 and
 reported version in `.kit/cli-lock.json`. From then on kit verifies that **the
 binary is the one your team accepted**: `kit check` fails a hash change without a
 version change and warns on a new version or a different resolved file, and kit

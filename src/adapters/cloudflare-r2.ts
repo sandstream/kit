@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
-import { exec } from "../utils/exec.js";
+import { execPinned } from "../vendor-cli-pin.js";
 
 /**
  * Cloudflare R2 Object Storage Adapter
@@ -24,7 +24,7 @@ export const cloudflareR2Adapter: ServiceAdapter = {
   async provision(context: AdapterContext): Promise<ProvisionResult> {
     // Check wrangler CLI
     try {
-      await exec("wrangler", ["--version"], { timeout: 5_000 });
+      await execPinned("wrangler", ["--version"], { timeout: 5_000 });
     } catch {
       return {
         success: false,
@@ -69,7 +69,7 @@ export const cloudflareR2Adapter: ServiceAdapter = {
 
     // Create bucket
     try {
-      await exec("wrangler", ["r2", "bucket", "create", bucketName], {
+      await execPinned("wrangler", ["r2", "bucket", "create", bucketName], {
         timeout: 30_000,
         env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId },
       });

@@ -1,6 +1,6 @@
 /**
- * Vendor-CLI identity pin: the vault and cloud CLIs kit hands secrets through (`op`, `infisical`,
- * `bw`, `doppler`, `vault`, `aws`, `gcloud`, `az`, `gh`) are pinned by the file they resolve to,
+ * Vendor-CLI identity pin: the vault, cloud and deploy CLIs kit hands secrets or credentials
+ * through (`PINNABLE_CLIS`) are pinned by the file they resolve to,
  * its SHA-256 and the version it reported, and kit refuses to run a pinned CLI that no longer
  * matches (kit-research#232: 1Password's November 2026 incident reached the vendor's git and
  * CI/CD, and kit ran whichever `op` came first on PATH).
@@ -13,6 +13,10 @@
  * What this proves: the binary is the one someone on the team accepted. It does NOT prove the
  * vendor built it — vendor signatures (codesign, Authenticode, gpg) differ per OS and are a manual
  * step (docs/THREAT_MODEL.md).
+ *
+ * One resolver: every call resolves the CLI the same way, mise first, then PATH
+ * (`resolvePinnedCli`), pinned or not, so the file the pin measures is the file each call runs and
+ * two calls to one tool (`op whoami`, `op read`) can never start two different binaries.
  *
  * Use time (`execPinned`): resolve, realpath, hash (once per process per file), compare. A pinned
  * CLI whose file or hash differs is never run — not even with `--version`, since that would execute
@@ -27,6 +31,7 @@ import { readCliLock, writeCliLock, type CliIdentity } from "./lock.js";
 import { exec } from "./utils/exec.js";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { findOnPath } from "./utils/path-lookup.js";
+import { failCall } from "./utils/call-scope.js";
 import { identityOf, sameIdentity } from "./utils/same-file.js";
 import { vaultToolFor } from "./vault-tool.js";
 
@@ -36,9 +41,16 @@ export type { CliIdentity };
 const EXTRA_SOURCE_CLIS: Readonly<Record<string, string>> = {
   "gcp-sm": "gcloud",
   "azure-kv": "az",
+  eas: "eas",
+  dotenvx: "dotenvx",
 };
 
-/** Every CLI the pin covers: the secret backends' CLIs, plus `gh` (`secrets sync` hands it values). */
+/**
+ * Every CLI the pin covers: the secret backends' CLIs (`eas` and `dotenvx` are backends too),
+ * `gh` (`secrets sync` hands it values), and the deploy CLIs kit pushes secrets through
+ * (`secrets propagate`) or reads deploy credentials with (`vercel`, `supabase`, `fly`/`flyctl`, `railway`,
+ * `wrangler`; `stripe config --list` prints API keys).
+ */
 export const PINNABLE_CLIS: readonly string[] = [
   "op",
   "infisical",
@@ -49,6 +61,15 @@ export const PINNABLE_CLIS: readonly string[] = [
   "gcloud",
   "az",
   "gh",
+  "eas",
+  "dotenvx",
+  "vercel",
+  "supabase",
+  "fly",
+  "flyctl",
+  "railway",
+  "wrangler",
+  "stripe",
 ];
 
 function cliForSource(source: string | undefined): string | null {
@@ -289,8 +310,9 @@ const announced = new Set<string>();
 /**
  * The verified file to run for a pinned `tool`, null when `tool` is unpinned (the caller keeps
  * its own resolution), or a `VendorCliPinRefusal`. A refusal is printed to stderr once per
- * process and sets a non-zero exit code, so a caller that swallows the throw (most backends turn
- * errors into "not found") still exits non-zero with the reason on screen.
+ * process and fails the call (`failCall`): the CLI exits non-zero, so a caller that swallows the
+ * throw (most backends turn errors into "not found") still fails with the reason on screen; in the
+ * MCP server it is that tool call's error and leaves the server's exit code alone.
  */
 export async function assertPinnedCli(
   tool: string,
@@ -306,24 +328,27 @@ export async function assertPinnedCli(
     announced.add(once);
     process.stderr.write(msg + "\n");
   }
-  process.exitCode = 1;
+  failCall(msg);
   throw new VendorCliPinRefusal(tool, msg);
 }
 
 /**
- * `exec(tool, args, opts)` behind the pin. Pinned: runs the verified realpath, never the bare name.
- * Unpinned: runs exactly what the caller ran before — `unpinned(tool)` when given (the backends'
- * mise-first resolver), else the bare name — so adding the pin changes nothing until a tool is
- * pinned.
+ * The file a call to `tool` runs: the verified realpath when pinned (or a `VendorCliPinRefusal`),
+ * else what the pin's own resolver finds (mise first, then PATH), else the bare name. Use this
+ * for every spawn of a pinnable CLI, so the pin measures exactly what runs.
  */
+export async function resolvePinnedCli(tool: string, cwd: string = process.cwd()): Promise<string> {
+  const deps = defaultPinDeps(cwd);
+  return (await assertPinnedCli(tool, deps)) ?? (await resolveVendorCli(tool, deps)) ?? tool;
+}
+
+/** `exec(tool, args, opts)` behind the pin, resolved by `resolvePinnedCli`. Never a fallback. */
 export async function execPinned(
   tool: string,
   args: string[],
   opts?: Parameters<typeof exec>[2],
-  unpinned?: (tool: string) => Promise<string | null>,
 ): Promise<{ stdout: string; stderr: string }> {
   const cwd = typeof opts?.cwd === "string" ? opts.cwd : process.cwd();
-  const pinned = await assertPinnedCli(tool, defaultPinDeps(cwd));
-  const bin = pinned ?? (unpinned ? await unpinned(tool) : null) ?? tool;
+  const bin = await resolvePinnedCli(tool, cwd);
   return exec(bin, args, opts) as Promise<{ stdout: string; stderr: string }>;
 }

@@ -4,7 +4,6 @@ import type { SecretsConfig, SecretKeyConfig, InfisicalConfig } from "./config.j
 import { check1PasswordStatus } from "./onepassword.js";
 import { checkInfisicalStatus } from "./infisical-status.js";
 import { resolveViaBackend } from "./secret-backends.js";
-import { exec } from "./utils/exec.js";
 import { execPinned } from "./vendor-cli-pin.js";
 
 export interface SecretStatus {
@@ -171,7 +170,7 @@ async function checkInfisicalSecret(
 
 async function checkEasSecret(name: string): Promise<{ available: boolean; detail: string }> {
   try {
-    const { stdout } = await exec("eas", ["secret:list", "--json"], {
+    const { stdout } = await execPinned("eas", ["secret:list", "--json"], {
       timeout: 10_000,
     });
     const secrets = JSON.parse(stdout);

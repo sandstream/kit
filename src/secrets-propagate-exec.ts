@@ -4,6 +4,7 @@
  */
 import { spawn } from "node:child_process";
 import { redactSecrets } from "./utils/redactSecrets.js";
+import { resolvePinnedCli, VendorCliPinRefusal } from "./vendor-cli-pin.js";
 
 export function safeDiagnostic(
   value: unknown,
@@ -14,15 +15,38 @@ export function safeDiagnostic(
   return (text.split(/\r?\n/)[0] ?? "").slice(0, max);
 }
 
+/** Exit code reported for a CLI the vendor-CLI pin refused: it was never started. */
+export const PIN_REFUSED_CODE = 126;
+
 /**
  * Spawns a CLI with the value piped via stdin. Returns the exit code +
  * captured stderr for diagnostics. The value never appears in argv.
+ *
+ * The CLI is resolved behind the vendor-CLI pin (`resolvePinnedCli`): a pinned CLI that changed is
+ * never started and the value never leaves kit; the result is `PIN_REFUSED_CODE` with the refusal
+ * as its first stderr line.
  */
 export async function spawnWithStdin(
   cmd: string,
   args: string[],
   stdinValue: string,
   sensitiveValues: readonly string[] = [],
+): Promise<{ code: number; stderr: string }> {
+  let bin: string;
+  try {
+    bin = await resolvePinnedCli(cmd);
+  } catch (err) {
+    if (!(err instanceof VendorCliPinRefusal)) throw err;
+    return { code: PIN_REFUSED_CODE, stderr: err.message };
+  }
+  return spawnResolved(bin, args, stdinValue, sensitiveValues);
+}
+
+function spawnResolved(
+  cmd: string,
+  args: string[],
+  stdinValue: string,
+  sensitiveValues: readonly string[],
 ): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve) => {
     const knownSecrets = [stdinValue, ...sensitiveValues];
