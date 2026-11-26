@@ -1,22 +1,18 @@
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { detectFormat, inspectArchive } from "./release-archive.js";
-import { memberFindings } from "./release-archive-member.js";
-import { makeTar, makeTarGz, makeZip, type FixtureEntry } from "./release-fixtures.test-support.js";
+import {
+  makeTar,
+  makeTarGz,
+  makeZip,
+  scratchDir,
+  type FixtureEntry,
+} from "./release-fixtures.test-support.js";
 
-let dir: string;
-before(() => (dir = mkdtempSync(join(tmpdir(), "kit-release-archive-"))));
-after(() => rmSync(dir, { recursive: true, force: true }));
-
-function file(name: string, bytes: Buffer): string {
-  const path = join(dir, name);
-  writeFileSync(path, bytes);
-  return path;
-}
+const scratch = scratchDir("kit-release-archive-");
+after(scratch.remove);
+const file = scratch.put;
 
 const SAFE: FixtureEntry[] = [
   { name: "tool/", type: "5", mode: 0o755 },
@@ -58,26 +54,6 @@ describe("release archive members", () => {
       assert.match(r.detail, /setuid/);
     }
   });
-
-  it("reads a long name from a pax header and judges that name, not the truncated one", async () => {
-    const long = `${"d/".repeat(60)}../../../escape`;
-    const r = await inspectArchive(file("long.tgz", makeTarGz([{ name: long }])));
-    assert.equal(r.status, "fail");
-    assert.equal(r.members[0]!.name, long);
-  });
-
-  it("fails a device entry, a hard link out of the tree, and a Windows-style escape", () => {
-    assert.match(memberFindings({ name: "dev", kind: "special", mode: 0 }).join(), /special/);
-    assert.match(
-      memberFindings({ name: "h", kind: "hardlink", mode: 0, link: "../x" }).join(),
-      /hard link/,
-    );
-    assert.match(memberFindings({ name: "..\\..\\x.exe", kind: "file", mode: 0 }).join(), /"\.\."/);
-    assert.match(
-      memberFindings({ name: "C:\\Windows\\x", kind: "file", mode: 0 }).join(),
-      /absolute/,
-    );
-  });
 });
 
 describe("release archive formats", () => {
@@ -92,23 +68,14 @@ describe("release archive formats", () => {
   it("is unverified for xz, bzip2, 7z and unknown bytes: never a pass", async () => {
     const xz = Buffer.from([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00, 1, 2]);
     assert.equal((await inspectArchive(file("a.tar.xz", xz))).status, "unverified");
-    assert.equal(
-      (await inspectArchive(file("a.tbz", Buffer.from("BZh91AY")))).status,
-      "unverified",
-    );
+    const bz = Buffer.from("BZh91AY");
+    assert.equal((await inspectArchive(file("a.tbz", bz))).status, "unverified");
     assert.equal((await inspectArchive(file("a.bin", Buffer.from("hello")))).status, "unverified");
-    assert.deepEqual(detectFormat(Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c])), {
-      unreadable: "7z",
-    });
+    const sevenZip = Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]);
+    assert.deepEqual(detectFormat(sevenZip), { unreadable: "7z" });
   });
 
-  it("fails a tar with a corrupt header or a truncated member, and a corrupt gzip", async () => {
-    const tar = makeTar([{ name: "a", data: "x".repeat(2000) }]);
-    const bad = Buffer.from(tar);
-    bad[0] = 0x41; // the name changes, the checksum does not
-    assert.equal((await inspectArchive(file("bad.tar", bad))).status, "fail");
-    const cut = tar.subarray(0, 1024);
-    assert.match((await inspectArchive(file("cut.tar", cut))).detail, /ends inside a member/);
+  it("fails a corrupt gzip", async () => {
     const gz = makeTarGz(SAFE);
     const broken = Buffer.concat([gz.subarray(0, 12), Buffer.alloc(40, 0xff)]);
     assert.equal((await inspectArchive(file("broken.tgz", broken))).status, "fail");

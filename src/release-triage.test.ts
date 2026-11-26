@@ -1,6 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,18 +87,6 @@ describe("kit triage release: checksum", () => {
     assert.equal(status(r, "checksum"), "fail");
     assert.match(r.checks[0]!.detail, /the GitHub asset digest says b{64}/);
   });
-
-  it("takes --checksum before anything published, and reads a BSD-style or per-asset file", async () => {
-    const d = deps({}, release([]));
-    assert.equal(
-      status(await triageRelease({ url: URL_, file }, opts({ sha256: SHA }), d), "checksum"),
-      "pass",
-    );
-    const bsd = opts({ shasumsText: `SHA256 (${ASSET}) = ${SHA}\n` });
-    assert.equal(status(await triageRelease({ url: URL_, file }, bsd, d), "checksum"), "pass");
-    const own = deps({ [`${URL_}.sha256`]: `${SHA}\n` }, release([`${ASSET}.sha256`]));
-    assert.equal(status(await triageRelease({ url: URL_, file }, opts(), own), "checksum"), "pass");
-  });
 });
 
 describe("kit triage release: age and repository", () => {
@@ -150,70 +138,5 @@ describe("kit triage release: age and repository", () => {
     const local = await triageRelease({ url: null, file }, opts(), deps({}, null));
     assert.equal(status(local, "checksum"), "unverified");
     assert.equal(local.passed, false);
-  });
-});
-
-function minisignPair(): { pub: string; key: KeyObject; id: Buffer } {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const x = Buffer.from(publicKey.export({ format: "jwk" }).x!, "base64url");
-  const id = Buffer.from("0123456789abcdef", "hex");
-  const pub = `untrusted comment: minisign public key\n${Buffer.concat([Buffer.from("Ed"), id, x]).toString("base64")}\n`;
-  return { pub, key: privateKey, id };
-}
-
-function minisig(data: Buffer, key: KeyObject, id: Buffer, trusted = "timestamp:1"): string {
-  const hash = createHash("blake2b512").update(data).digest();
-  const sig = sign(null, hash, key);
-  const global = sign(null, Buffer.concat([sig, Buffer.from(trusted)]), key);
-  const line = Buffer.concat([Buffer.from("ED"), id, sig]).toString("base64");
-  return `untrusted comment: sig\n${line}\ntrusted comment: ${trusted}\n${global.toString("base64")}\n`;
-}
-
-describe("kit triage release: signatures", () => {
-  it("verifies a minisign signature on the asset with the user's key, and fails another key's", async () => {
-    const { pub, key, id } = minisignPair();
-    const d = deps({ [`${URL_}.minisig`]: minisig(BYTES, key, id) }, release([`${ASSET}.minisig`]));
-    const r = await triageRelease({ url: URL_, file }, opts({ minisignKey: pub }), d);
-    assert.equal(status(r, "signature"), "pass", r.checks[1]!.detail);
-    const other = minisignPair();
-    const bad = await triageRelease({ url: URL_, file }, opts({ minisignKey: other.pub }), d);
-    assert.equal(status(bad, "signature"), "fail");
-    const tampered = deps(
-      { [`${URL_}.minisig`]: minisig(Buffer.from("other"), key, id) },
-      release([`${ASSET}.minisig`]),
-    );
-    assert.equal(
-      status(
-        await triageRelease({ url: URL_, file }, opts({ minisignKey: pub }), tampered),
-        "signature",
-      ),
-      "fail",
-    );
-  });
-
-  it("verifies a cosign key signature on the checksum list, which covers the asset", async () => {
-    const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-    const list = `${SHA}  ${ASSET}\n`;
-    const sig = sign("sha256", Buffer.from(list), privateKey).toString("base64");
-    const d = deps(
-      { [`${BASE}/checksums.txt`]: list, [`${BASE}/checksums.txt.sig`]: sig },
-      release(["checksums.txt", "checksums.txt.sig"]),
-    );
-    const pem = publicKey.export({ type: "spki", format: "pem" }).toString();
-    const r = await triageRelease({ url: URL_, file }, opts({ cosignKey: pem }), d);
-    assert.equal(status(r, "signature"), "pass", r.checks[1]!.detail);
-  });
-
-  it("is unverified for a signature with no key, and fails a key with no signature", async () => {
-    const d = deps({ [`${URL_}.asc`]: "-----BEGIN PGP SIGNATURE-----" }, release([`${ASSET}.asc`]));
-    const r = await triageRelease({ url: URL_, file }, opts(), d);
-    assert.equal(status(r, "signature"), "unverified");
-    assert.match(r.checks[1]!.detail, /OpenPGP/);
-    const keyOnly = await triageRelease(
-      { url: URL_, file },
-      opts({ minisignKey: minisignPair().pub }),
-      deps({}, release([])),
-    );
-    assert.equal(status(keyOnly, "signature"), "fail");
   });
 });

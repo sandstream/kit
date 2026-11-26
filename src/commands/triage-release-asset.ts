@@ -156,8 +156,9 @@ function render(r: ReleaseReport): void {
 async function download(url: string, dir: string): Promise<string> {
   const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(300_000) });
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+  // A missing or garbled length is not a small one: the stream below still counts every byte.
   const length = Number(res.headers.get("content-length") ?? "0");
-  if (length > MAX_ASSET)
+  if (!Number.isFinite(length) || length > MAX_ASSET)
     throw new Error(`the asset is ${length} bytes, over the ${MAX_ASSET}-byte limit`);
   const file = join(dir, urlFileName(url).replace(/[^A-Za-z0-9._-]/g, "_") || "asset");
   let seen = 0;

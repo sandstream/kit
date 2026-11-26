@@ -1,5 +1,8 @@
 // Archive fixtures built in memory, so the release triage tests need no tar or zip binary and
 // never read a real download.
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { deflateRawSync, gzipSync } from "node:zlib";
 
 export interface FixtureEntry {
@@ -99,4 +102,20 @@ export function makeZip(entries: FixtureEntry[]): Buffer {
   end.writeUInt32LE(dir.length, 12);
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, dir, end]);
+}
+
+/** A scratch directory for one test file: `put` writes bytes and returns the path. */
+export function scratchDir(prefix: string): {
+  put: (name: string, bytes: Buffer) => string;
+  remove: () => void;
+} {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  return {
+    put: (name, bytes) => {
+      const path = join(dir, name);
+      writeFileSync(path, bytes);
+      return path;
+    },
+    remove: () => rmSync(dir, { recursive: true, force: true }),
+  };
 }

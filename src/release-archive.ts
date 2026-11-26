@@ -5,6 +5,7 @@
  * decompressor it does not ship (xz, bzip2, 7z) is `unverified`, never `pass`.
  */
 import { closeSync, createReadStream, openSync, readSync } from "node:fs";
+import { once } from "node:events";
 import { createGunzip } from "node:zlib";
 import * as zlib from "node:zlib";
 import { memberFindings, type ArchiveMember } from "./release-archive-member.js";
@@ -22,7 +23,7 @@ export interface ArchiveReport {
 }
 
 /** More members than this and the listing stops: `unverified`, not a partial pass. */
-export const MAX_MEMBERS = 100_000;
+const MAX_MEMBERS = 100_000;
 const SHOWN_FINDINGS = 10;
 
 type Format = "tar" | "tar.gz" | "zip" | "gzip" | "binary" | { unreadable: string } | "unknown";
@@ -83,28 +84,59 @@ function report(format: string, members: ArchiveMember[]): ArchiveReport {
   return { status: "fail", detail, format, members, findings };
 }
 
-/** A gzip stream that holds a tar is listed; one that holds a single file is that file. */
-async function gzipReport(path: string): Promise<ArchiveReport> {
-  const first = await gunzipHead(path);
-  if (detectFormat(first) !== "tar") {
-    const detail = "a single gzip-compressed file, not an archive";
-    return { status: "pass", detail, format: "gzip", members: [], findings: [] };
+type Decompressor = () => NodeJS.ReadWriteStream;
+
+/**
+ * Run `use` over the file's bytes, decompressed when `make` is given, and close the file before
+ * returning, however `use` ends. A stream left open would keep the file locked on Windows, where
+ * the caller then removes the download.
+ */
+async function withBytes<T>(
+  path: string,
+  make: Decompressor | null,
+  use: (bytes: AsyncIterable<Buffer>) => Promise<T>,
+): Promise<T> {
+  const source = createReadStream(path);
+  const inflate = make ? make() : null;
+  const bytes = (inflate ? source.pipe(inflate) : source) as unknown as AsyncIterable<Buffer>;
+  try {
+    return await use(bytes);
+  } finally {
+    (inflate as unknown as { destroy?: () => void } | null)?.destroy?.();
+    if (!source.closed) {
+      const closed = once(source, "close");
+      source.destroy();
+      await closed;
+    }
   }
-  const stream = createReadStream(path).pipe(createGunzip());
-  return report("tar.gz", await listTar(stream, MAX_MEMBERS));
 }
 
-async function gunzipHead(path: string): Promise<Buffer> {
+async function firstBytes(bytes: AsyncIterable<Buffer>): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
-  const stream = createReadStream(path).pipe(createGunzip());
-  for await (const chunk of stream as AsyncIterable<Buffer>) {
+  for await (const chunk of bytes) {
     chunks.push(chunk);
     size += chunk.length;
     if (size >= 512) break;
   }
-  stream.destroy();
   return Buffer.concat(chunks).subarray(0, 512);
+}
+
+/** A compressed stream that holds a tar is listed; one that holds a single file is that file. */
+async function decompressedReport(
+  path: string,
+  make: Decompressor,
+  name: string,
+): Promise<ArchiveReport> {
+  const first = await withBytes(path, make, firstBytes);
+  if (detectFormat(first) !== "tar") {
+    const detail = `a single ${name}-compressed file, not an archive`;
+    return { status: "pass", detail, format: name, members: [], findings: [] };
+  }
+  return report(
+    `tar.${name === "gzip" ? "gz" : "zst"}`,
+    await withBytes(path, make, (b) => listTar(b, MAX_MEMBERS)),
+  );
 }
 
 function unverified(format: string, detail: string): ArchiveReport {
@@ -112,7 +144,7 @@ function unverified(format: string, detail: string): ArchiveReport {
 }
 
 /** Node's zstd decompressor, where this Node has one (22.15+). */
-function zstd(): (() => NodeJS.ReadWriteStream) | null {
+function zstd(): Decompressor | null {
   const make = (zlib as unknown as { createZstdDecompress?: () => NodeJS.ReadWriteStream })
     .createZstdDecompress;
   return typeof make === "function" ? () => make() : null;
@@ -126,8 +158,7 @@ async function opaqueReport(path: string, name: string): Promise<ArchiveReport> 
       `${name}-compressed: kit ships no ${name} decompressor, so the members were not read`,
     );
   }
-  const stream = createReadStream(path).pipe(make()) as unknown as AsyncIterable<Buffer>;
-  return report("tar.zst", await listTar(stream, MAX_MEMBERS));
+  return decompressedReport(path, make, "zstd");
 }
 
 /** A malformed archive: kit's own parsers, or zlib refusing the compressed stream. */
@@ -141,8 +172,10 @@ function isFormatError(e: unknown): e is Error {
 export async function inspectArchive(path: string): Promise<ArchiveReport> {
   const format = detectFormat(head(path));
   try {
-    if (format === "tar") return report("tar", await listTar(createReadStream(path), MAX_MEMBERS));
-    if (format === "gzip") return await gzipReport(path);
+    if (format === "tar") {
+      return report("tar", await withBytes(path, null, (b) => listTar(b, MAX_MEMBERS)));
+    }
+    if (format === "gzip") return await decompressedReport(path, createGunzip, "gzip");
     if (format === "zip") return report("zip", listZip(path, MAX_MEMBERS));
     if (typeof format === "object") return await opaqueReport(path, format.unreadable);
   } catch (e) {

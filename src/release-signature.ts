@@ -57,7 +57,7 @@ function payloadLine(text: string): string | undefined {
   return at < 0 ? undefined : lines[at];
 }
 
-export function parseMinisignKey(text: string): MinisignKey | null {
+function parseMinisignKey(text: string): MinisignKey | null {
   const raw = Buffer.from(payloadLine(text) ?? "", "base64");
   if (raw.length !== 42 || raw.subarray(0, 2).toString("latin1") !== "Ed") return null;
   const x = raw.subarray(10).toString("base64url");
@@ -73,7 +73,7 @@ interface Minisig {
   global: Buffer;
 }
 
-export function parseMinisig(text: string): Minisig | null {
+function parseMinisig(text: string): Minisig | null {
   const lines = text.split(/\r?\n/);
   if (!lines[0]?.startsWith("untrusted comment:") || !lines[2]?.startsWith("trusted comment: "))
     return null;
@@ -109,7 +109,7 @@ async function collect(bytes: AsyncIterable<Buffer>, hash?: string): Promise<Buf
   return Buffer.concat(chunks);
 }
 
-export async function verifyMinisign(
+async function verifyMinisign(
   file: SignedFile,
   sigText: string,
   keyText: string,
@@ -151,7 +151,7 @@ export async function verifyMinisign(
   };
 }
 
-export async function verifyCosign(
+async function verifyCosign(
   file: SignedFile,
   sigText: string,
   pem: string,
