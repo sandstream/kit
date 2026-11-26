@@ -320,6 +320,7 @@
     "security prescan-diff",
     "security scan-artifact",
     "security scan-build",
+    "security scan-outbound",
     "security scan-staged",
     "security scan-transcripts",
     "security verify-pull",
