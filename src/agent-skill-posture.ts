@@ -1,7 +1,8 @@
 /**
  * Default skill posture, for `kit agent-audit`: which skills the agent has in this checkout
- * (`.claude/skills/<name>/SKILL.md`) and at user level (`~/.claude/skills/<name>/SKILL.md`), what
- * tools each declares (`allowed-tools`), and who may invoke it.
+ * (`<dir>/<name>/SKILL.md` for Claude Code's `.claude/skills` and Codex's `.agents/skills` and
+ * `.codex/skills`) and at user level (`~/.claude/skills`, `~/.agents/skills` and the Codex home's
+ * `skills`), what tools each declares (`allowed-tools`), and who may invoke it.
  *
  * `kit skill test` already judges one skill's scope. What nobody printed was the set the agent is
  * actually carrying, with the spec defaults written out. A skill with no `allowed-tools` claims every
@@ -11,6 +12,8 @@
  */
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { PROJECT_SKILL_DIRS } from "./agent-sbom.js";
+import { codexHome } from "./agent-audit-user.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import { parseSkillManifest, type SkillManifest } from "./skill/test.js";
 import { shown } from "./agent-trifecta.js";
@@ -19,14 +22,15 @@ type SkillScope = "project" | "user";
 
 interface SkillPosture {
   scope: SkillScope;
-  /** The directory name under `.claude/skills`. */
+  /** The skill's directory name. */
   dir: string;
+  /** The skills directory it is in, as shown: `.claude/skills`, `~/.agents/skills`, … */
+  base: string;
   manifest: SkillManifest | null;
 }
 
-/** The skill dirs under `root/.claude/skills` that hold a SKILL.md, sorted. Missing root → []. */
-function skillDirs(root: string): string[] {
-  const base = join(root, ".claude", "skills");
+/** The skill dirs under `base` that hold a SKILL.md, sorted. Missing base → []. */
+function skillDirs(base: string): string[] {
   let names: string[];
   try {
     names = readdirSync(base);
@@ -60,15 +64,46 @@ function readManifest(path: string): SkillManifest | null {
   }
 }
 
-/** Every installed skill, project first. When the checkout is the home directory, once. */
-export function readSkillPostures(cwd: string, home: string): SkillPosture[] {
-  const roots: [SkillScope, string][] = [["project", cwd]];
-  if (realOrSelf(cwd) !== realOrSelf(home)) roots.push(["user", home]);
+/** [scope, absolute dir, shown] for every skills directory Claude Code or Codex loads. */
+function skillBases(
+  cwd: string,
+  home: string,
+  env: Record<string, unknown>,
+): [SkillScope, string, string][] {
+  const bases: [SkillScope, string, string][] = PROJECT_SKILL_DIRS.map((rel) => [
+    "project",
+    join(cwd, ...rel.split("/")),
+    rel,
+  ]);
+  if (realOrSelf(cwd) === realOrSelf(home)) return bases;
+  const codex = codexHome(home, env);
+  bases.push(
+    ["user", join(home, ".claude", "skills"), "~/.claude/skills"],
+    ["user", join(home, ".agents", "skills"), "~/.agents/skills"],
+    ["user", join(codex.dir, "skills"), `${codex.shown}/skills`],
+  );
+  return bases;
+}
+
+/**
+ * Every installed skill, project first, Claude Code's directory before Codex's. A SKILL.md reached
+ * twice (a skill linked from `~/.agents/skills` into `~/.claude/skills`, or a checkout that is the
+ * home directory) is listed once.
+ */
+export function readSkillPostures(
+  cwd: string,
+  home: string,
+  env: Record<string, unknown> = {},
+): SkillPosture[] {
   const out: SkillPosture[] = [];
-  for (const [scope, root] of roots) {
-    for (const dir of skillDirs(root)) {
-      const file = join(root, ".claude", "skills", dir, "SKILL.md");
-      out.push({ scope, dir, manifest: readManifest(file) });
+  const seen = new Set<string>();
+  for (const [scope, abs, base] of skillBases(cwd, home, env)) {
+    for (const dir of skillDirs(abs)) {
+      const file = join(abs, dir, "SKILL.md");
+      const real = realOrSelf(file);
+      if (seen.has(real)) continue;
+      seen.add(real);
+      out.push({ scope, dir, base, manifest: readManifest(file) });
     }
   }
   return out;
@@ -106,7 +141,8 @@ function row(status: "pass" | "warn", name: string, detail: string): SecurityChe
 }
 
 function postureRow(p: SkillPosture): SecurityCheckResult {
-  const label = `skill ${shown(p.dir)} (${p.scope})`;
+  const where = p.base.endsWith(".claude/skills") ? "" : `, ${p.base}`;
+  const label = `skill ${shown(p.dir)} (${p.scope}${where})`;
   if (!p.manifest) return row("warn", label, "SKILL.md could not be read");
   const tools = toolsPhrase(p.manifest);
   const detail = `${tools.text}; ${invocationPhrase(p.manifest)}`;
@@ -118,11 +154,19 @@ function postureRow(p: SkillPosture): SecurityCheckResult {
  * judgement `kit skill test` makes; nothing here is a `fail`, so the exit code of
  * `kit agent-audit` does not change.
  */
-export function runAgentSkillPosture(cwd: string, home: string): SecurityCheckResult[] {
-  const postures = readSkillPostures(cwd, home);
+export function runAgentSkillPosture(
+  cwd: string,
+  home: string,
+  env: Record<string, unknown> = {},
+): SecurityCheckResult[] {
+  const postures = readSkillPostures(cwd, home, env);
   if (postures.length === 0) {
     return [
-      row("pass", "skill posture", "no skills in .claude/skills here or in ~/.claude/skills"),
+      row(
+        "pass",
+        "skill posture",
+        "no skills in .claude/skills, .agents/skills or .codex/skills here or at user level",
+      ),
     ];
   }
   const project = postures.filter((p) => p.scope === "project").length;
