@@ -82,7 +82,7 @@ async function changedHashRow(
 }
 
 /** One tool's row. `versionOf` is only called when the hash changed. */
-export async function judgeVendorCli(
+async function judgeVendorCli(
   tool: string,
   pins: Record<string, CliIdentity>,
   m: Measured | null,

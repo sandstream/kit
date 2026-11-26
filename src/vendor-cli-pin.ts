@@ -51,7 +51,7 @@ export const PINNABLE_CLIS: readonly string[] = [
   "gh",
 ];
 
-export function cliForSource(source: string | undefined): string | null {
+function cliForSource(source: string | undefined): string | null {
   if (source === undefined) return null;
   return (
     vaultToolFor(source) ??
@@ -139,7 +139,7 @@ function stampOf(st: BigIntStats): string {
 }
 
 /** SHA-256 of a file's bytes. Re-reads only when the file's id, size or mtime changed. */
-export async function hashFile(path: string): Promise<{ sha256: string; size: number }> {
+async function hashFile(path: string): Promise<{ sha256: string; size: number }> {
   const st = identityOf(path);
   if (!st) throw new Error(`cannot stat ${path}`);
   const hit = hashCache.get(path);
@@ -178,7 +178,7 @@ export interface Measured {
   size: number;
 }
 
-export async function resolveVendorCli(tool: string, deps: PinDeps): Promise<string | null> {
+async function resolveVendorCli(tool: string, deps: PinDeps): Promise<string | null> {
   return (await deps.miseWhich(tool)) ?? findOnPath(tool, deps.env, deps.platform, deps.cwd);
 }
 
@@ -242,7 +242,7 @@ export type UseVerdict =
     };
 
 /** Pure: a measured binary against its pin. No pin → allowed, unpinned (the check row warns). */
-export function judgeUse(
+function judgeUse(
   pin: CliIdentity | null,
   m: Measured | null,
   deps: Pick<PinDeps, "home" | "platform">,
@@ -272,11 +272,7 @@ const WHY: Record<"missing" | "moved" | "hash", string> = {
   hash: "its SHA-256 differs from the pin",
 };
 
-export function refusalMessage(
-  tool: string,
-  v: Extract<UseVerdict, { ok: false }>,
-  key: string,
-): string {
+function refusalMessage(tool: string, v: Extract<UseVerdict, { ok: false }>, key: string): string {
   const actual = v.measured ? `${v.measured.realpath}  sha256 ${v.measured.sha256}` : "(not found)";
   return [
     `kit refused to run ${tool}: ${WHY[v.reason]} (.kit/cli-lock.json, ${key}).`,
