@@ -20,12 +20,12 @@ function snapshot(root: string): unknown[] {
       // Open once and read the metadata and the content through the same descriptor.
       const fd = openSync(path, "r");
       try {
-        const stat = fstatSync(fd);
+        const stat = fstatSync(fd, { bigint: true });
         return [
           entry.name,
           createHash("sha256").update(readFileSync(fd)).digest("hex"),
           stat.ino,
-          stat.mtimeMs,
+          stat.mtimeNs,
           stat.mode,
         ];
       } finally {

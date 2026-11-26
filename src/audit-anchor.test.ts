@@ -21,6 +21,7 @@ import {
 } from "./audit-anchor.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 import { privateFileIsControlled } from "./utils/secure-perms.js";
+import { identityOf, sameIdentity } from "./utils/same-file.js";
 
 // Build a real hash-chained log without auto-anchoring (KIT_AUDIT_ANCHOR=0 is
 // set by the test runner) so each test controls anchoring explicitly.
@@ -174,7 +175,7 @@ describe("audit anchor - key file", () => {
     const observed = await reader;
     assert.equal(privateFileIsControlled(path), true);
     assert.equal(observed.toString("hex"), readFileSync(path, "utf8").trim());
-    assert.equal(statSync(path).ino, statSync(temp).ino);
+    assert.ok(sameIdentity(identityOf(path), identityOf(temp)));
     assert.equal(statSync(path).nlink, 2);
     await assert.rejects(
       getAuditAnchorKey(dir, () => {}),
