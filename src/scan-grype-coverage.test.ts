@@ -98,7 +98,9 @@ it("requires the declared inventory and a distinct SARIF finding for each versio
   const inventory = { ...evidence, requiredFindings: [...evidence.requiredFindings] };
   const partial = settle([row, row], inventory);
   assert.equal(partial.run.status, "partial");
-  assert.equal(partial.findings?.length, 2);
+  // Two identical rows are one finding seen twice; they cannot stand for two versions.
+  assert.equal(partial.findings?.length, 1);
+  assert.equal((partial.findings?.[0] as { occurrences?: number }).occurrences, 2);
   const second = { ...row, message: { text: row.message.text.replace("1.0.0", "2.0.0") } };
   assert.equal(settle([row, second], inventory).run.status, "ran");
 });
