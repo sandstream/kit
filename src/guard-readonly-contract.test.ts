@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { createCliContractFixture } from "./cli-contract.test-support.js";
 import { generateShim, SHIM_MARKER } from "./guard.js";
+import { readRegularFileIfPresent } from "./upstream-safe-read.js";
 import { sameIdentity } from "./utils/same-file.js";
 
 let fixture: ReturnType<typeof createCliContractFixture>;
@@ -103,7 +104,7 @@ for (const mode of modes) {
     const identity = statSync(shim, { bigint: true });
     assert.equal(assertObservation(mode.args, clone).wouldBlock, false);
     assert.equal(
-      readFileSync(shim, "utf8"),
+      readRegularFileIfPresent(shim),
       stale,
       "read-only must not refresh the installed shim",
     );
