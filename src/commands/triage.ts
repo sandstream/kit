@@ -2,6 +2,7 @@
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { runTriage, listTriageTools, type TriageType } from "../triage.js";
+import { recordNpxBins } from "../triage-npm-bins.js";
 import { SKIPPED_COMMITS_LOG } from "../hooks.js";
 import { triageMcpTools, extractToolDefs } from "../mcp-triage.js";
 import { discoverPlugins } from "../agent-sbom.js";
@@ -36,6 +37,7 @@ const TRIAGE_SUBCOMMANDS: Record<string, (args: string[]) => Promise<boolean>> =
     (await import("./triage-instructions.js")).cmdTriageInstructions(args),
   prompt: async (args) => (await import("../triage-prompt.js")).cmdTriagePrompt(args),
   pkg: async (args) => (await import("./triage-pkg.js")).cmdTriagePkg(args),
+  release: async (args) => (await import("./triage-release-asset.js")).cmdTriageRelease(args),
   gem: async (args) => (await import("./triage-gem.js")).cmdTriageGem(args),
   cargo: async (args) => (await import("./triage-release.js")).cmdTriageCargo(args),
   go: async (args) => (await import("./triage-release.js")).cmdTriageGo(args),
@@ -74,6 +76,7 @@ export const TRIAGE_TYPES = [
   "instructions",
   "prompt",
   "pkg",
+  "release",
   "plugin",
   "vault-config",
   "all",
@@ -103,6 +106,7 @@ const HELP_ROWS = [
   "  kit triage instructions [path]       Read agent instruction files (CLAUDE.md, AGENTS.md, SKILL.md …) for planted attacks",
   '  kit triage prompt "<text>"|-        Read a pasted install prompt (or stdin) for planted attacks, URLs and repos; fetches nothing',
   "  kit triage pkg <file.pkg>            Check a macOS installer: checksum, publisher Team ID, notarization (macOS)",
+  "  kit triage release <url|file>        Check a prebuilt release archive or binary: checksum, signature, age, repository, members",
 ];
 
 function printTriageHelp(): void {
@@ -159,6 +163,8 @@ async function evaluate(
   if (deep && type === "skill") return evaluateDeepSkill(target, sandbox);
   const result = await runTriage(type, target);
   console.log(result.output);
+  if (!(await recordNpxBins(process.cwd(), result.npxBins)))
+    console.error(`${c.dim}(npm-bin record append failed)${c.reset}`);
   if (type === "skill") {
     const { skillInstructionLines } = await import("../triage-skill-instructions.js");
     const lines = skillInstructionLines(target);

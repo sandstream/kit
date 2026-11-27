@@ -7,6 +7,7 @@ import { summarizeCheckRun, fullCheckPayload } from "./check-mcp-summary.js";
 import { writeCheckDetail } from "./check-detail-store.js";
 import { repairLocalProject } from "./fix-local.js";
 import { generateSecrets } from "./secrets.js";
+import { keyNameMetadata } from "./secrets-write-record.js";
 import { generateMcpInit } from "./mcp-init.js";
 import { redactArgumentsForEnvironment, requireWorkingDirectory } from "./run.js";
 import { executeGovernedCommand } from "./run-governance.js";
@@ -16,6 +17,7 @@ import { isReadOnlyMode } from "./read-only-mode.js";
 import { runGovernedBrokered } from "./governance-middleware.js";
 import { runTriage, type TriageType } from "./triage.js";
 import { recordTriageRun } from "./commands/triage.js";
+import { recordNpxBins } from "./triage-npm-bins.js";
 import { openMemoryDb, searchMessages, getMemoryDbPath, recordQuery } from "./memory/db.js";
 import { searchShared } from "./memory/shared.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
@@ -353,7 +355,8 @@ function register_kit_secrets(server: StdioMcpServer): void {
           {
             operation: "secrets.generate",
             operationType: "write",
-            metadata: {},
+            // Key NAMES only, never values: `kit audit secrets` attributes the read per key.
+            metadata: keyNameMetadata(Object.keys(config.secrets.keys ?? {})),
             // Honest effect declaration (MCP-runtime adoption step 2): kit's OWN direct effect is
             // the .env.local write. The configured vault CLI resolves secrets in ITS OWN
             // subprocess, whose network I/O is the CLI's — not kit's — and thus out of the
@@ -694,6 +697,7 @@ function register_kit_triage(server: StdioMcpServer): void {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_triage");
       try {
         const result = await runTriage(type as TriageType, target, { cwd });
+        await recordNpxBins(cwd ?? process.cwd(), result.npxBins);
         if (result.passed && target) {
           await recordTriageRun(type, target, false, false, { cwd });
         }

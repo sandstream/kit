@@ -1,0 +1,3 @@
+### Security
+
+- **`kit env diff --compare` no longer prints a hash of each changed value; it reports the key as "differs".** It printed the first 8 hex of an unsalted sha256 of both values, which is reversible for short values: a 4-digit PIN is recovered from those 8 hex in under a second by trying all 10,000 candidates, and the output lands in agent transcripts and CI logs. That contradicted the module's own promise that values are never printed. `EnvDiffResult.changed` entries now carry only `key`; the `aHash`/`bHash` fields are removed (`kit env diff` has no `--json` output, so no machine reader relied on them). Found by kit-research note kms-decrypt-evidence-vs-kit.

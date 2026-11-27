@@ -112,7 +112,7 @@ describe("checkGateLiveness with user-level gates", () => {
       mkdirSync(join(home, ".claude"));
       const hooks = {
         PreToolUse: [
-          { matcher: "Bash", hooks: [{ type: "command", command: cmd("gate-bash") }] },
+          { matcher: "Bash|PowerShell", hooks: [{ type: "command", command: cmd("gate-bash") }] },
           { matcher: "Write|Edit", hooks: [{ type: "command", command: cmd("gate-env") }] },
         ],
       };

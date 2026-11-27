@@ -33,7 +33,7 @@ export function skillInstructionLines(target: string): string[] | null {
   }
   const scan = scanInstructions(target, isDir);
   const head =
-    "Instruction rules (SKILL.md, the .md files it links or keeps in references/, read as text an agent follows):";
+    "Instruction rules (SKILL.md, the .md files it links or keeps in references/, a plugin's commands/ and agents/, read as text an agent follows):";
   if (scan.files.length === 0) return [head, "  no agent instruction file found"];
   const read = filesReadPhrase(scan);
   const partial = scan.complete ? "" : "; the scan was incomplete, so this is a lower bound";

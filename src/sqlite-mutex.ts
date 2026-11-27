@@ -1,6 +1,7 @@
 import { lstatSync, type BigIntStats } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "./utils/sqlite.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { sameIdentity } from "./utils/same-file.js";
 
@@ -43,7 +44,7 @@ function assertIdentity(path: string, expected: BigIntStats): void {
 
 function openDatabase(path: string): { database: DatabaseSync; stat: BigIntStats } {
   const before = regularFile(path);
-  const database = new DatabaseSync(path);
+  const database = openSqlite(path);
   try {
     database.exec("PRAGMA busy_timeout = 0");
     const stat = regularFile(path);
