@@ -57,7 +57,7 @@ export function pathKey(p: string, platform: NodeJS.Platform = process.platform)
 }
 
 /** The keys this repository can appear under: as given, resolved, and with links resolved. */
-function rootKeys(root: string): Set<string> {
+export function rootKeys(root: string): Set<string> {
   const paths = [root, resolve(root)];
   try {
     paths.push(realpathSync(root));

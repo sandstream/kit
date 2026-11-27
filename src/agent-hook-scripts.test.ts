@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hookScriptRows, scriptPaths } from "./agent-hook-scripts.js";
+import { hookCommands, hookScriptRows, scriptPaths } from "./agent-hook-scripts.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // kit-research supply-chain-2026-fundamentals-vs-kit: the 2026 worms' SessionStart hook was
@@ -81,5 +81,26 @@ describe("hookScriptRows", () => {
       hookScriptRows(settings("SessionStart", "node .claude/none.mjs"), root, "x"),
       [],
     );
+  });
+});
+
+describe("hookCommands: Factory Droid's event-keyed hooks.json", () => {
+  // docs.factory.com/reference/hooks-reference.md, "Structure": a standalone hooks.json is keyed
+  // directly by event name, with no `hooks` wrapper. The audit must read that shape too.
+  it("reads commands from top-level event keys, next to a `hooks` wrapper", () => {
+    const droid = JSON.stringify({
+      PreToolUse: [{ matcher: "Execute", hooks: [{ type: "command", command: "node a.mjs" }] }],
+      hooksDisabled: false,
+      hooks: { SessionStart: [{ hooks: [{ type: "command", command: "node b.mjs" }] }] },
+    });
+    assert.deepEqual(hookCommands(droid), [
+      ["SessionStart", "node b.mjs"],
+      ["PreToolUse", "node a.mjs"],
+    ]);
+  });
+
+  it("ignores top-level arrays that are not hook events", () => {
+    const settings = JSON.stringify({ enabledMcpjsonServers: ["x"], env: { A: "1" } });
+    assert.deepEqual(hookCommands(settings), []);
   });
 });

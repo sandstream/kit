@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { loadConfig } from "./config.js";
 import { resolveAirGap } from "./airgap/config.js";
-import { resolveViaBackend } from "./secret-backends.js";
+import { readBy, resolveRecorded } from "./secrets-read-record.js";
 import {
   approvalsFromClassic,
   approvalsFromRules,
@@ -301,7 +301,7 @@ export async function runBranchProtectionAudit(root: string): Promise<SecurityCh
   if (key.source === "config")
     return [unverified(`${name} must not be stored inline in .kit.toml`)];
   try {
-    const resolved = await resolveViaBackend(name, key, config.secrets?.infisical, root);
+    const resolved = await resolveRecorded(name, key, readBy("branch-protection", config, root));
     if (!resolved.resolved || !resolved.value || resolved.managed)
       return [unverified(`configured ${name} unavailable`)];
     return [
