@@ -649,7 +649,7 @@ describe("installInstallGate", () => {
 });
 
 describe("installBrokerGates (Pillar 3, opt-in)", () => {
-  it("wires PreToolUse gate-egress (Bash) + gate-fs (Write|Edit|NotebookEdit), idempotently", async () => {
+  it("wires PreToolUse gate-egress (Bash|PowerShell) + gate-fs (Write|Edit|NotebookEdit), idempotently", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-broker-gate-"));
     try {
       mkdirSync(join(dir, ".claude"), { recursive: true });
@@ -658,7 +658,7 @@ describe("installBrokerGates (Pillar 3, opt-in)", () => {
       const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
       const groups = s.hooks.PreToolUse;
       assert.equal(groups.length, 2);
-      const egress = groups.find((g: { matcher: string }) => g.matcher === "Bash");
+      const egress = groups.find((g: { matcher: string }) => g.matcher === "Bash|PowerShell");
       const fs = groups.find((g: { matcher: string }) => g.matcher === "Write|Edit|NotebookEdit");
       assert.ok(egress.hooks[0].command.endsWith("gate-egress"));
       assert.ok(fs.hooks[0].command.endsWith("gate-fs"));
