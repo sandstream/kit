@@ -14,6 +14,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   COMMIT_LOG_FORMAT,
@@ -107,7 +108,17 @@ function changedFiles() {
 function tests() {
   const files = testsForChanged(changedFiles(), (p) => existsSync(join(root, p)));
   if (files.length === 0) return { ok: true, warn: "  no changed source file has a compiled test" };
-  const r = run(process.execPath, ["--test", ...files]);
+  // As scripts/test.mjs does: no real `mise` a test reaches may read this machine's global mise
+  // config, where an npm: tool at "latest" made mise recurse through its own npm shim.
+  const saved = process.env.MISE_GLOBAL_CONFIG_FILE;
+  process.env.MISE_GLOBAL_CONFIG_FILE = join(tmpdir(), "kit-test-no-global-mise-config.toml");
+  let r;
+  try {
+    r = run(process.execPath, ["--test", ...files]);
+  } finally {
+    if (saved === undefined) delete process.env.MISE_GLOBAL_CONFIG_FILE;
+    else process.env.MISE_GLOBAL_CONFIG_FILE = saved;
+  }
   return r.ok
     ? { ok: true, warn: `  ${files.length} test file(s)` }
     : { ok: false, detail: tail(r.out) };

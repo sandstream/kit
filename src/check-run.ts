@@ -33,6 +33,7 @@ import { checkDeploy, type DeployCheckResult } from "./check-deploy.js";
 import { tagWithDeployed } from "./deployed-exposure.js";
 import { checkRuntimes } from "./check-runtimes.js";
 import { checkGlobalPackages } from "./check-global-packages.js";
+import { checkMiseLatest } from "./check-mise-latest.js";
 import { checkRuntimeInstalls } from "./check-installs.js";
 import { checkUpstream, upstreamToJsonChecks, type UpstreamCheckRow } from "./check-upstream.js";
 import { loadBaselineForGate, baselineGet, BASELINE_FILE } from "./baseline.js";
@@ -183,6 +184,7 @@ async function securityRows(cwd: string, online: boolean | undefined, config: ki
     ...runtimes,
     ...installs,
     ...(await checkGlobalPackages(cwd)),
+    ...checkMiseLatest(cwd),
     ...checkWatchFreshness(cwd),
   ];
 }

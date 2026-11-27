@@ -1,4 +1,5 @@
 import { installTools } from "./install.js";
+import { migrateMiseLatest } from "./check-mise-latest.js";
 import {
   readkitMeta,
   readSkillsLock,
@@ -538,6 +539,10 @@ async function runFixPipeline(config: kitConfig, cwd: string): Promise<boolean> 
   }
 
   const state: FixState = { fixed: 0, manual: [] };
+  const mise = await migrateMiseLatest(cwd); // the mise fork loop, check-mise-latest.ts
+  mise.lines.forEach((line) => console.log(line));
+  state.fixed += mise.fixed;
+  state.manual.push(...mise.manual.map(developerBlock));
   await fixTools(config, state);
   await fixLockFiles(config, cwd, state);
   await fixServices(config, state);

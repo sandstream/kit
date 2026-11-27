@@ -21,6 +21,11 @@ const env = {
   KIT_ADVISORIES: "0",
   // Disable automatic seals for incidental appends.
   KIT_AUDIT_ANCHOR: "0",
+  // Keep every real `mise` a test reaches (`mise current`, `mise which`) off this machine's global
+  // mise config. A global `"npm:<pkg>" = "latest"` there made mise run `npm view` through its own
+  // shim, which recursed until the machine ran out of processes during `npm test`. No such file
+  // exists at this path, so mise reads no global config, as on CI.
+  MISE_GLOBAL_CONFIG_FILE: join(tmpdir(), "kit-test-no-global-mise-config.toml"),
 };
 
 // KIT_TEST_SHARD=2/4 runs the second of four shards. A malformed value stops here, before anything runs.

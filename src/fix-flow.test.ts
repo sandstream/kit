@@ -9,9 +9,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { cmdFix } from "./fix.js";
@@ -38,7 +46,13 @@ async function runFix(
 ): Promise<{ out: string; ok: boolean }> {
   const idDir = mkdtempSync(join(tmpdir(), "kit-fix-flow-id-"));
   const saved: Record<string, string | undefined> = {};
-  const vars = { KIT_IDENTITY_DIR: idDir, ...env };
+  // The mise variables keep `kit fix` off this machine's real mise config and data folder.
+  const vars = {
+    KIT_IDENTITY_DIR: idDir,
+    MISE_GLOBAL_CONFIG_FILE: join(idDir, "no-global-mise.toml"),
+    MISE_DATA_DIR: join(idDir, "mise-data"),
+    ...env,
+  };
   for (const [k, v] of Object.entries(vars)) {
     saved[k] = process.env[k];
     process.env[k] = v;
@@ -321,4 +335,36 @@ describe("cmdFix read-only mode and the deploy step", () => {
       f.cleanup();
     }
   });
+});
+
+describe("cmdFix pins npm: tools a mise config holds at latest (fork loop)", () => {
+  it(
+    "rewrites the project's mise.toml to the installed version and counts it as fixed",
+    { skip: process.platform === "win32" ? "symlinks need privileges on Windows" : false },
+    async () => {
+      const f = useFixture();
+      const dir = f.dir();
+      const machine = mkdtempSync(join(tmpdir(), "kit-fix-flow-mise-"));
+      try {
+        const data = join(machine, "data");
+        mkdirSync(join(data, "shims"), { recursive: true });
+        mkdirSync(join(data, "installs", "npm-snyk", "1.1305.1"), { recursive: true });
+        writeFileSync(join(machine, "mise"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+        symlinkSync(join(machine, "mise"), join(data, "shims", "npm"));
+        writeFileSync(join(dir, "mise.toml"), '[tools]\n"npm:snyk" = "latest"\n');
+        const { out } = await runFix(dir, {
+          MISE_DATA_DIR: data,
+          PATH: [join(data, "shims"), process.env.PATH ?? ""].join(delimiter),
+        });
+        assert.match(out, /npm:snyk\s+pinned\s+latest → 1\.1305\.1/);
+        assert.equal(
+          readFileSync(join(dir, "mise.toml"), "utf8"),
+          '[tools]\n"npm:snyk" = "1.1305.1"\n',
+        );
+      } finally {
+        rmSync(machine, { recursive: true, force: true });
+        f.cleanup();
+      }
+    },
+  );
 });

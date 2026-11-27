@@ -39,6 +39,12 @@ export interface GeneratedConfig {
  * refuses a bare name such as `semgrep` as untriageable. Socket uses the npm
  * backend ref directly. All are looked up at check time by `resolveToolBin` (mise-first), so they run even though
  * mise shims aren't on kit's PATH.
+ *
+ * `latest` here is policy, not a version handed to mise: for an `npm:`/`pipx:` tool it means the
+ * newest stable release public for the cooling period (`[supply_chain] min_release_age_days`,
+ * default 14). `kit install` resolves it to that exact version first and refuses when it cannot;
+ * mise itself would resolve `npm:` latest by running `npm view` through its own shim, which can
+ * recurse without bound (`mise-version.ts`).
  */
 export const DEFAULT_SECURITY_SCANNERS: Record<string, string> = {
   "pipx:semgrep": "latest",
