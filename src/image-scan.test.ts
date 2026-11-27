@@ -198,20 +198,6 @@ describe("collectImages reports incomplete Dockerfile inventory", () => {
       }
     }));
 
-  it("finds Dockerfiles in ordinary nested source trees without a gap", () =>
-    inProject(
-      {
-        "crates/core/src/bin/topics/assets/note.txt": "x\n",
-        "apps/api/docker/prod/Dockerfile": "FROM e:1\n",
-      },
-      (dir) => {
-        assert.deepEqual(collectImages(dir, dockerfileOptions), {
-          images: [{ ref: "e:1", source: "Dockerfile" }],
-          skipped: [],
-        });
-      },
-    ));
-
   it("reports the depth limit and keeps images in scope", () =>
     inProject(
       {
@@ -419,4 +405,20 @@ describe("skipped references carry no terminal control characters", () => {
       }
     },
   );
+});
+
+describe("collectImages walks ordinary source trees", () => {
+  it("finds Dockerfiles in ordinary nested source trees without a gap", () =>
+    inProject(
+      {
+        "crates/core/src/bin/topics/assets/note.txt": "x\n",
+        "apps/api/docker/prod/Dockerfile": "FROM e:1\n",
+      },
+      (dir) => {
+        assert.deepEqual(collectImages(dir, dockerfileOptions), {
+          images: [{ ref: "e:1", source: "Dockerfile" }],
+          skipped: [],
+        });
+      },
+    ));
 });
