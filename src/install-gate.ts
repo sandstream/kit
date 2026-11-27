@@ -20,6 +20,7 @@
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
 import { refIsBareName, shadowedBins } from "./install-gate-cwd.js";
+import { npxBinRefusal } from "./install-gate-npx-bin.js";
 import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
 import * as requirements from "./install-gate-requirements.js";
 import { toolArgsCommand } from "./install-gate-payload.js";
@@ -1259,6 +1260,8 @@ async function gateVerdict(
   const bare = cwd ? bareRefusal(command, cwd, probe) : undefined;
   if (bare) return { block: true, reason: bare, checked: [] };
   const shadowed = shadowedBins(command, probe.runnerBinCandidates, cwd);
+  const binRefused = npxBinRefusal(probe, shadowed, cwd); // a bin named after another package
+  if (binRefused) return { block: true, reason: binRefused, checked: [] };
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
   const checked: GateVerdict[] = [];
   for (const ref of refs) {
