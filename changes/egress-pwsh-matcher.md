@@ -1,0 +1,3 @@
+### Security
+
+- **Claude Code's PowerShell tool now reaches the opt-in `kit gate-egress` too.** `kit agent-config --broker-gate` installed the egress gate with the matcher `Bash`, although the gate reads PowerShell's `Invoke-WebRequest`, `Invoke-RestMethod` and `Test-NetConnection`. A command Claude Code ran through its `PowerShell` tool (the only shell on Windows without Git Bash) never reached it. The gate is now matched to `Bash|PowerShell`, like `gate-bash`. Where the egress gate is wired, a `Bash`-only entry fails `enforcement gate liveness` in `kit check`, and `kit agent-config --broker-gate` widens it in place without adding a second entry. Not run on macOS or on Windows with a live Claude Code. Found by kit-research#239.

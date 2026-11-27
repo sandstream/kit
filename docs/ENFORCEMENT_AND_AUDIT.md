@@ -18,6 +18,9 @@ Deterministic, fail-closed, zero-LLM:
   In Claude Code, `gate-bash` is matched to `Bash|PowerShell`: both tools run shell commands, and
   on Windows without Git Bash only `PowerShell` exists. A `Bash`-only matcher, which kit wrote before
   2026-11-27, fails `enforcement gate liveness` in `kit check`; `kit agent-config` widens it in place.
+  The opt-in `gate-egress` reads shell commands too (PowerShell's `Invoke-WebRequest` among them)
+  and gets the same matcher. Where it is wired, a `Bash`-only entry fails the same row, and
+  `kit agent-config --broker-gate` widens it.
 
   `gate-bash` reads the pending command as a shell would, which means it follows installs into
   `$(…)`, backticks, `sh -c '…'`, the Windows shells (`cmd /c …`, `powershell`/`pwsh -Command …`
