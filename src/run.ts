@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { parse as parseToml } from "smol-toml";
 import { parseEnvFile } from "./env-inspect.js";
 import {
   createRedactingLineWriter,
@@ -132,11 +133,38 @@ async function terminateProcessTree(
   }
 }
 
+/** Values kit must redact: secret-shaped env values, plus every value declared in `[secrets.keys]`. */
+interface KnownSecrets {
+  known: string[];
+  declared: string[];
+}
+
+/**
+ * Values of the keys `.kit.toml` declares in `[secrets.keys]`, whatever their names: kit wrote them
+ * to `.env.local` itself, so it holds them and must not log them. An unreadable config declares none;
+ * the governed path refuses an invalid config before this runs.
+ */
+async function declaredSecretValues(cwd: string, env: Record<string, string>): Promise<string[]> {
+  let keys: Record<string, { value?: unknown }>;
+  try {
+    const raw = parseToml(await readFile(resolve(cwd, ".kit.toml"), "utf-8")) as {
+      secrets?: { keys?: Record<string, { value?: unknown }> };
+    };
+    keys = raw.secrets?.keys ?? {};
+  } catch {
+    return [];
+  }
+  const values: unknown[] = [];
+  for (const [name, declaration] of Object.entries(keys))
+    values.push(env[name], declaration?.value);
+  return values.filter((value): value is string => typeof value === "string" && value !== "");
+}
+
 async function loadCommandEnvironment(
   cwd: string,
   inheritEnv: boolean,
   overrides: Record<string, string>,
-): Promise<{ env: Record<string, string>; knownSecrets: string[] }> {
+): Promise<{ env: Record<string, string>; knownSecrets: KnownSecrets }> {
   const env: Record<string, string> = inheritEnv
     ? { ...(process.env as Record<string, string>) }
     : {};
@@ -147,7 +175,10 @@ async function loadCommandEnvironment(
     // .env.local is optional.
   }
   Object.assign(env, overrides);
-  const knownSecrets = secretValuesFromEnv(env);
+  const knownSecrets = {
+    known: secretValuesFromEnv(env),
+    declared: await declaredSecretValues(cwd, env),
+  };
   return { env, knownSecrets };
 }
 
@@ -162,7 +193,7 @@ export async function redactArgumentsForEnvironment(
     options.inheritEnv ?? true,
     options.envOverrides ?? {},
   );
-  return commandArgs.map((arg) => redactSecrets(arg, knownSecrets));
+  return commandArgs.map((arg) => redactSecrets(arg, knownSecrets.known, knownSecrets.declared));
 }
 
 type ProcessOptions = Required<
@@ -186,15 +217,24 @@ class CommandOutput {
   constructor(
     private readonly maxBytes: number,
     private readonly stream: boolean,
-    private readonly knownSecrets: string[],
+    private readonly secrets: KnownSecrets,
   ) {
+    const { known, declared } = secrets;
     this.writers = {
-      stdout: createRedactingLineWriter((text) => {
-        if (stream) process.stdout.write(text);
-      }, knownSecrets),
-      stderr: createRedactingLineWriter((text) => {
-        if (stream) process.stderr.write(text);
-      }, knownSecrets),
+      stdout: createRedactingLineWriter(
+        (text) => {
+          if (stream) process.stdout.write(text);
+        },
+        known,
+        declared,
+      ),
+      stderr: createRedactingLineWriter(
+        (text) => {
+          if (stream) process.stderr.write(text);
+        },
+        known,
+        declared,
+      ),
     };
   }
 
@@ -212,6 +252,10 @@ class CommandOutput {
     return this.maxBytes > 0 && chunk.length > remaining;
   }
 
+  private redact(text: string): string {
+    return redactSecrets(text, this.secrets.known, this.secrets.declared);
+  }
+
   private flush(): void {
     this.writers.stdout.flush();
     this.writers.stderr.flush();
@@ -226,14 +270,14 @@ class CommandOutput {
     for (const detail of diagnostics) this.appendText("stderr", `\n[kit] ${detail}`);
     this.flush();
     return {
-      stdout: redactSecrets(this.text.stdout, this.knownSecrets),
-      stderr: redactSecrets(this.text.stderr, this.knownSecrets),
+      stdout: this.redact(this.text.stdout),
+      stderr: this.redact(this.text.stderr),
     };
   }
 
   spawnError(error: Error): RunResult {
     this.flush();
-    const message = redactSecrets(error.message, this.knownSecrets);
+    const message = this.redact(error.message);
     if (this.stream) console.error(`Failed to execute command: ${message}`);
     return { exitCode: 127, stdout: "", stderr: message };
   }
@@ -267,7 +311,7 @@ class CommandProcess {
   constructor(
     private readonly opts: ProcessOptions,
     env: Record<string, string>,
-    knownSecrets: string[],
+    knownSecrets: KnownSecrets,
   ) {
     const [command, ...args] = opts.commandArgs;
     this.child = spawn(command, args, {

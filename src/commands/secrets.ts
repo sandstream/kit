@@ -22,6 +22,7 @@ import { planMigration, commentOutInFile, type PostMigrateMode } from "../secret
 import { formatEvidencedSecret } from "../finding-evidence.js";
 import { cmdSecretsRotate, pickBackendOpts } from "../secrets-rotate-cli.js";
 import {
+  keyNameMetadata,
   recordSecretWrite,
   SECRET_WRITE_OPS,
   writeSecretRecorded,
@@ -195,9 +196,11 @@ export async function cmdSecrets(): Promise<boolean> {
     {
       operation: "secrets.generate",
       operationType: "write",
+      // Key NAMES only, never values, so `kit audit secrets` can attribute the read per key.
       metadata: {
         store: secretsConfig.store,
         template: secretsConfig.template,
+        ...keyNameMetadata(Object.keys(secretsConfig.keys ?? {})),
       },
       // Declared effects (scope-needs adoption): kit's OWN direct effect is the
       // .env.local write plus materializing the named keys — both statically

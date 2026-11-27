@@ -7,7 +7,8 @@
  * re-merging the same source adds nothing. `file_index` is NOT merged (it tracks
  * machine-local file paths). Deterministic; no model calls.
  */
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { upsertSession } from "./db.js";
@@ -143,7 +144,7 @@ export function mergeDb(
 ): MergeResult {
   if (!existsSync(sourcePath)) throw new Error(`source memory db not found: ${sourcePath}`);
   const mapProject = createProjectMapper(opts);
-  const src = new DatabaseSync(sourcePath, { readOnly: true });
+  const src = openSqlite(sourcePath, { readOnly: true });
   const out: MergeResult = {
     sessions: 0,
     messages: 0,

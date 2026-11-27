@@ -139,19 +139,27 @@ export function extractCountClaims(text: string, file: string): CountClaim[] {
 }
 
 /**
- * README.md, CLAUDE.md, AGENTS.md, docs/*.md and the generated command contract (whose
- * summaries are `kit help`, where "12 self-hardening rules" sat) that exist.
+ * README.md, CLAUDE.md, AGENTS.md, docs/*.md, docs/adr/*.md and the generated command
+ * contract (whose summaries are `kit help`, where "12 self-hardening rules" sat) that exist.
+ * The ADRs are read because ADR-0002's title states the dependency floor as a count
+ * (kit-research#233, E2); a dated amendment that tells the old count marks its line.
  */
 function countClaimDocs(repoRoot: string): string[] {
   const docs = ["README.md", "CLAUDE.md", "AGENTS.md", "contracts/kit.opencli.json"];
-  try {
-    for (const name of readdirSync(join(repoRoot, "docs")).sort()) {
-      if (name.endsWith(".md")) docs.push(`docs/${name}`);
-    }
-  } catch {
-    // no docs/ — the root files are still read
-  }
+  for (const dir of ["docs", "docs/adr"]) docs.push(...markdownIn(repoRoot, dir));
   return docs.filter((d) => readOrNull(join(repoRoot, d)) !== null);
+}
+
+/** `<dir>/*.md` under the repo root, sorted; none when the directory is missing. */
+function markdownIn(repoRoot: string, dir: string): string[] {
+  try {
+    return readdirSync(join(repoRoot, dir))
+      .filter((name) => name.endsWith(".md"))
+      .sort()
+      .map((name) => `${dir}/${name}`);
+  } catch {
+    return [];
+  }
 }
 
 function readOrNull(path: string): string | null {
