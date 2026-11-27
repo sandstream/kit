@@ -156,6 +156,24 @@ describe("skill triage: files a SKILL.md names", () => {
     if (out === null) return;
     assert.ok(!failed(out) && warnings(out) === 0, out);
   });
+
+  // kit-research `auto-ontology-vs-kit`: the URL strip ate the `)` closing a Markdown link, so the
+  // link rule read the next word as a bundled file ("SKILL.md names before, which is not there").
+  it("reads no file out of the word after a link to a URL", async (t) => {
+    const text = "See [the docs](https://h.example.invalid/docs) before you start.";
+    const out = await triage(skill(t, { "SKILL.md": head(text) }), t);
+    if (out === null) return;
+    assert.ok(!failed(out) && warnings(out) === 0, out);
+  });
+
+  it("still names a missing bundled file next to a link to a URL", async (t) => {
+    const text =
+      "See [docs](https://h.example.invalid/d) or <https://h.example.invalid/e> then [f](references/f.md).";
+    const out = await triage(skill(t, { "SKILL.md": head(text) }), t);
+    if (out === null) return;
+    assert.match(out, /SKILL\.md names references\/f\.md, which is not there/, out);
+    assert.equal(warnings(out), 1, out);
+  });
 });
 
 describe("plugin triage: a script that sends a credential as a request body", () => {
