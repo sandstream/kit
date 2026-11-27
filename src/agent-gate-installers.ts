@@ -180,7 +180,7 @@ export async function installInstallGateAmazonQ(
 // ---------------------------------------------------------------------------------------- Kiro
 
 /** kit's standalone Kiro hook file (IDE 1.0, CLI V3, Kiro Web). */
-export const KIRO_HOOK_FILE = ".kiro/hooks/kit-install-gate.json";
+const KIRO_HOOK_FILE = ".kiro/hooks/kit-install-gate.json";
 
 type KiroHook = { trigger?: unknown; matcher?: unknown; action?: { command?: unknown } };
 
@@ -328,8 +328,16 @@ export async function installInstallGateCursor(
 type DroidHandler = { type?: string; command?: unknown; onFailure?: string };
 type DroidGroup = { matcher?: string; hooks?: DroidHandler[] };
 
-const hasKitHandler = (g: DroidGroup): boolean =>
+/** Droid's shell tool. kit's handler counts as wired only under this matcher. */
+const DROID_SHELL_MATCHER = "Execute";
+
+const holdsKitHandler = (g: DroidGroup): boolean =>
   g?.hooks?.some((h) => isKitGateCommand(h?.command)) ?? false;
+
+/** A group that runs kit's gate on shell calls: kit's exact line under the Execute matcher. A kit
+ *  line under any other matcher never fires on a shell call, so it does not count as wired. */
+const hasKitHandler = (g: DroidGroup): boolean =>
+  g?.matcher === DROID_SHELL_MATCHER && holdsKitHandler(g);
 
 /**
  * Move kit's own handlers out of the `hooks` wrapper an older kit wrote into `hooks.json`. Only
@@ -339,10 +347,10 @@ function liftWrappedKitHandlers(doc: Record<string, unknown>, pre: DroidGroup[])
   const wrapper = doc.hooks as { PreToolUse?: unknown } | undefined;
   if (!wrapper || typeof wrapper !== "object" || !Array.isArray(wrapper.PreToolUse)) return;
   const wrapped = wrapper.PreToolUse as DroidGroup[];
-  for (const group of wrapped.filter(hasKitHandler)) {
+  for (const group of wrapped.filter(holdsKitHandler)) {
     const kit = (group.hooks ?? []).filter((h) => isKitGateCommand(h?.command));
     group.hooks = (group.hooks ?? []).filter((h) => !isKitGateCommand(h?.command));
-    if (!pre.some(hasKitHandler)) pre.push({ matcher: group.matcher, hooks: kit });
+    if (!pre.some(hasKitHandler)) pre.push({ matcher: DROID_SHELL_MATCHER, hooks: kit });
   }
   wrapper.PreToolUse = wrapped.filter((g) => (g.hooks ?? []).length > 0);
   if ((wrapper.PreToolUse as unknown[]).length === 0) delete wrapper.PreToolUse;
@@ -358,6 +366,28 @@ function droidHandlers(doc: Record<string, unknown>): DroidHandler[] {
       : []),
   ];
   return groups.flatMap((g) => g?.hooks ?? []);
+}
+
+/** The Droid hook file to edit: the scoped file, or the legacy one when only it exists. */
+function droidHookFile(cwd: string): string {
+  const scopeFile = ".factory/hooks.json";
+  const legacyFile = ".factory/hooks/hooks.json";
+  const useLegacy = !existsSync(resolve(cwd, scopeFile)) && existsSync(resolve(cwd, legacyFile));
+  return useLegacy ? legacyFile : scopeFile;
+}
+
+/** Ensure kit's Execute handler exists and every kit handler fails closed. */
+function wireDroidGate(doc: Record<string, unknown>, pre: DroidGroup[]): void {
+  liftWrappedKitHandlers(doc, pre);
+  if (!pre.some(hasKitHandler)) {
+    pre.push({
+      matcher: DROID_SHELL_MATCHER,
+      hooks: [{ type: "command", command: kitGateInvocation() }],
+    });
+  }
+  for (const h of pre.flatMap((g) => g?.hooks ?? [])) {
+    if (isKitGateCommand(h?.command)) h.onFailure = "block";
+  }
 }
 
 /**
@@ -380,13 +410,11 @@ export async function installInstallGateDroid(
   cwd: string = process.cwd(),
 ): Promise<HookInstallResult> {
   const scopeFile = ".factory/hooks.json";
-  const legacyFile = ".factory/hooks/hooks.json";
   if (await readOnly()) return { file: scopeFile, action: "skipped", detail: "read-only mode" };
   if (!existsSync(resolve(cwd, ".factory"))) {
     return { file: scopeFile, action: "skipped", detail: "no Factory Droid project detected" };
   }
-  const useLegacy = !existsSync(resolve(cwd, scopeFile)) && existsSync(resolve(cwd, legacyFile));
-  const file = useLegacy ? legacyFile : scopeFile;
+  const file = droidHookFile(cwd);
   const path = resolve(cwd, file);
   const raw = await readText(path);
   const doc = parseObject(raw);
@@ -394,13 +422,7 @@ export async function installInstallGateDroid(
     return { file, action: "failed", detail: "PreToolUse in hooks.json is not a list" };
   }
   const pre = (doc.PreToolUse ??= []) as DroidGroup[];
-  liftWrappedKitHandlers(doc, pre);
-  if (!pre.some(hasKitHandler)) {
-    pre.push({ matcher: "Execute", hooks: [{ type: "command", command: kitGateInvocation() }] });
-  }
-  for (const h of pre.flatMap((g) => g?.hooks ?? [])) {
-    if (isKitGateCommand(h?.command)) h.onFailure = "block";
-  }
+  wireDroidGate(doc, pre);
   const flag = lookalikeNote(droidHandlers(doc).filter((h) => isGateLookalike(h?.command)).length);
   const r = await writeIfChanged(path, raw, doc);
   const detail = joinNotes(

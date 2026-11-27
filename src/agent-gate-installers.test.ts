@@ -23,15 +23,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installAiderRules, installInstallGateCodex, kitGateInvocation } from "./agent-config.js";
 import {
-  installAiderRules,
   installInstallGateAmazonQ,
-  installInstallGateCodex,
   installInstallGateCursor,
   installInstallGateDroid,
   installInstallGateKiro,
-  kitGateInvocation,
-} from "./agent-config.js";
+} from "./agent-gate-installers.js";
 import { extractCommandFromHookPayload } from "./install-gate.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -187,6 +185,22 @@ describe("row 3: Cursor and Droid fail closed", () => {
       { matcher: "Execute", hooks: [{ type: "command", command: KIT, onFailure: "block" }] },
     ]);
     assert.equal((await installInstallGateDroid(dir)).action, "unchanged");
+  });
+
+  it("Droid: kit's line under a non-shell matcher does not count as wired", async (t) => {
+    const decoy = { matcher: "Read", hooks: [{ type: "command", command: KIT }] };
+    for (const files of [
+      { ".factory/hooks.json": { PreToolUse: [decoy] } },
+      { ".factory/hooks.json": { hooks: { PreToolUse: [decoy] } } },
+    ]) {
+      const dir = project(t, files);
+      await installInstallGateDroid(dir);
+      const pre = read(dir, ".factory/hooks.json").PreToolUse as { matcher: string; hooks: { command: string }[] }[];
+      assert.ok(
+        pre.some((g) => g.matcher === "Execute" && g.hooks.some((h) => h.command === KIT)),
+        JSON.stringify(pre),
+      );
+    }
   });
 
   it("Droid: fixes a legacy hooks/hooks.json in place while hooks.json is absent", async (t) => {

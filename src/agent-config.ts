@@ -34,7 +34,6 @@ import type { HookInstallResult } from "./agent-gate-installers.js";
 export { kitGateInvocation, kitSubcommandInvocation } from "./kit-gate-command.js";
 export type { HookInstallResult } from "./agent-gate-installers.js";
 export {
-  KIRO_HOOK_FILE,
   installInstallGateAmazonQ,
   installInstallGateCursor,
   installInstallGateDroid,
