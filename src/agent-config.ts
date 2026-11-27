@@ -26,7 +26,7 @@ export {
   installInstallGateCline,
   installInstallGateGemini,
   installInstallGateOpenCode,
-} from "./agent-gate-installers.js";
+} from "./agent-gate-contracts.js";
 export { kitGateInvocation, kitSubcommandInvocation } from "./kit-gate-command.js";
 export type { HookInstallResult } from "./agent-gate-installers.js";
 export {
@@ -37,14 +37,16 @@ export {
 } from "./agent-gate-installers.js";
 import {
   installInstallGateAmazonQ,
-  installInstallGateAntigravity,
-  installInstallGateCline,
   installInstallGateCursor,
   installInstallGateDroid,
-  installInstallGateGemini,
   installInstallGateKiro,
-  installInstallGateOpenCode,
 } from "./agent-gate-installers.js";
+import {
+  installInstallGateAntigravity,
+  installInstallGateCline,
+  installInstallGateGemini,
+  installInstallGateOpenCode,
+} from "./agent-gate-contracts.js";
 export { renderOpenCodeInstallGate } from "./opencode-gate.js";
 import type { kitConfig } from "./config.js";
 
