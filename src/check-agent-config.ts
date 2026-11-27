@@ -41,6 +41,8 @@ export async function checkAgentConfig(
   const { runAgentPreload } = await import("./agent-preload.js");
   const { runAgentEndpoint } = await import("./agent-endpoint.js");
   const { runRuleLedger } = await import("./agent-rule-ledger.js");
+  const { checkCodexHookTrust } = await import("./codex-hook-trust.js");
+  const { checkAiderCommitVerify } = await import("./check-aider-commit-verify.js");
   return [
     ...runAgentAudit(root),
     ...checkInstructionSecrets(root),
@@ -55,5 +57,9 @@ export async function checkAgentConfig(
     ...runAgentPreload(root, home, env),
     ...runAgentEndpoint(root, home, env),
     ...runRuleLedger(root, home, env, { record: !isReadOnlyMode() }).results,
+    // An installed gate the agent does not run is a false green: Codex needs the user to trust it.
+    ...checkCodexHookTrust(root, home, env),
+    // Aider commits with --no-verify by default, past kit's git hooks.
+    ...checkAiderCommitVerify(root, home, env),
   ];
 }

@@ -115,13 +115,17 @@ function stdoutDeny(message: string): boolean {
 }
 
 /**
- * Allow. Antigravity requires a `decision` on every PreToolUse reply. `notes` name what the
- * allowed command runs untriaged (install-gate-notes.ts); they go to stderr, never to the
- * stdout verdict.
+ * Allow. Antigravity requires a `decision` on every PreToolUse reply, and Cursor a `permission`.
+ * `notes` name what the allowed command runs untriaged (install-gate-notes.ts); they go to stderr,
+ * never to the stdout verdict.
  */
 function stdoutAllow(notes: readonly string[] = []): boolean {
   for (const note of notes) process.stderr.write(`kit install-gate: note: ${note}\n`);
-  if (gateFormat() === "antigravity") console.log(JSON.stringify({ decision: "allow" }));
+  const format = gateFormat();
+  if (format === "antigravity") console.log(JSON.stringify({ decision: "allow" }));
+  // Cursor with failClosed: true treats a hook with no output as failed and blocks the call
+  // (cursor.com/docs/agent/hooks), so its allow is an explicit verdict. Deny stays exit 2.
+  else if (format === "cursor") console.log(JSON.stringify({ permission: "allow" }));
   return true;
 }
 
