@@ -185,19 +185,15 @@ export function gateSettingsWriteRefusal(
   read: (path: string) => string | null = readOrNull,
   codexHome: string | undefined = process.env.CODEX_HOME,
 ): string | null {
-  const input = ((payload ?? {}) as { tool_input?: Record<string, unknown> }).tool_input ?? {};
-  const filePath = typeof input.file_path === "string" ? input.file_path : "";
-  if (!filePath) return null;
-  const abs = resolve(cwd, filePath);
-  if (isCodexRulesPath(abs, codexHome)) {
-    const rules = read(abs);
-    return codexRulesWriteRefusal(rules, resultingText(rules ?? "", input), basename(abs));
-  }
+  const write = writeOf(payload, cwd);
+  if (!write) return null;
+  const { input, abs } = write;
+  if (isCodexRulesPath(abs, codexHome)) return codexWriteRefusal(abs, input, read);
   const targets = settingsTargets(cwd, home);
   const target = targets.find((t) => sameTarget(t, abs));
   if (!target) return null;
   const current = read(target);
-  const wired = current === null ? [] : (kitGateCommands(current) ?? []);
+  const wired = kitGateCommands(current ?? "") ?? [];
   const next = resultingText(current ?? "", input);
   const removal =
     removalRefusal(wired, next, basename(target)) ??
@@ -206,6 +202,25 @@ export function gateSettingsWriteRefusal(
   const gated = wired.length > 0 || targets.some((t) => wiresGate(read(t)));
   if (!gated || next === null) return null;
   return addedHookRefusal(current ?? "", next, basename(target));
+}
+
+/** The tool input and the absolute path it writes, or null when it names no file. */
+function writeOf(
+  payload: unknown,
+  cwd: string,
+): { input: Record<string, unknown>; abs: string } | null {
+  const input = ((payload ?? {}) as { tool_input?: Record<string, unknown> }).tool_input ?? {};
+  const filePath = typeof input.file_path === "string" ? input.file_path : "";
+  return filePath ? { input, abs: resolve(cwd, filePath) } : null;
+}
+
+function codexWriteRefusal(
+  abs: string,
+  input: Record<string, unknown>,
+  read: (path: string) => string | null,
+): string | null {
+  const rules = read(abs);
+  return codexRulesWriteRefusal(rules, resultingText(rules ?? "", input), basename(abs));
 }
 
 function wiresGate(text: string | null): boolean {
