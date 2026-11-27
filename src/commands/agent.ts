@@ -232,6 +232,7 @@ async function cmdAgentConfig(): Promise<boolean> {
       } else {
         console.log(`    ${c.dim}· ${agent} skipped: ${result.detail ?? result.action}${c.reset}`);
       }
+      if (result.notice) console.log(`      ${c.yellow}!${c.reset} ${result.notice}`);
     }
     // The git-hook floor's bootstrap, as a hook instead of a line of prose (#671).
     const start = await installSessionStartCheck();

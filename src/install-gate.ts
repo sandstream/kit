@@ -23,7 +23,7 @@ import { refIsBareName, shadowedBins } from "./install-gate-cwd.js";
 import { npxBinRefusal } from "./install-gate-npx-bin.js";
 import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
 import * as requirements from "./install-gate-requirements.js";
-import { toolArgsCommand } from "./install-gate-payload.js";
+import { clineCommands, toolArgsCommand } from "./install-gate-payload.js";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
 import {
   claudePluginInstall,
@@ -1284,33 +1284,46 @@ async function gateVerdict(
 }
 
 /**
- * Extract the shell command from an agent's PreToolUse-style hook payload,
+ * Extract the shell commands from an agent's PreToolUse-style hook payload,
  * across every wire shape kit's `gate-bash` handler supports:
  *   - Claude Code / Codex / Amazon Q / Gemini / Droid / Augment → `tool_input.command`
  *   - Cursor `beforeShellExecution`            → top-level `command`
- *   - Cline `PreToolUse`                       → `preToolUse.parameters.command`
- *     (verified against @cline/shared `PreToolUseData {toolName, parameters}`)
+ *   - Cline `PreToolUse` (`run_commands`)      → `tool_call.input.commands`, or
+ *     `preToolUse.parameters.commands` as JSON text; every command (`clineCommands`)
  *   - Antigravity `run_command` hook          → `toolCall.args.CommandLine`
  *   - Sourcegraph Amp permissions delegate    → `arguments.command`
- * Tolerates array-form (`[bin, ...args]`) by joining on spaces. Returns "" when
+ * Tolerates array-form (`[bin, ...args]`) by joining on spaces. Returns [] when
  * the tool call carries no shell command (→ the gate allows it). Pure.
  */
-export function extractCommandFromHookPayload(payload: unknown): string {
+export function extractCommandsFromHookPayload(payload: unknown): string[] {
   const p = (payload ?? {}) as {
     tool_input?: { command?: unknown };
     command?: unknown;
-    preToolUse?: { parameters?: { command?: unknown } };
     toolCall?: { args?: { CommandLine?: unknown } };
     arguments?: { command?: unknown };
   };
+  if (p.tool_input?.command === undefined) {
+    const cline = clineCommands(payload);
+    if (cline !== undefined) return cline;
+  }
   const raw =
     p.tool_input?.command ??
-    p.preToolUse?.parameters?.command ??
     p.toolCall?.args?.CommandLine ??
     p.arguments?.command ??
     p.command ??
     toolArgsCommand(payload);
-  if (typeof raw === "string") return raw;
-  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string").join(" ");
-  return "";
+  if (typeof raw === "string") return raw ? [raw] : [];
+  if (Array.isArray(raw)) {
+    const joined = raw.filter((x): x is string => typeof x === "string").join(" ");
+    return joined ? [joined] : [];
+  }
+  return [];
+}
+
+/**
+ * The shell command of a hook payload as one string; several commands (Cline's `run_commands`)
+ * are joined by newlines, so a gate that reads one command still sees each of them. Pure.
+ */
+export function extractCommandFromHookPayload(payload: unknown): string {
+  return extractCommandsFromHookPayload(payload).join("\n");
 }

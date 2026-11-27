@@ -777,6 +777,8 @@ export interface HookInstallResult {
   file: string;
   action: "created" | "updated" | "unchanged" | "skipped" | "failed";
   detail?: string;
+  /** A step the person must take before the agent runs the wired gate at all. */
+  notice?: string;
 }
 
 interface SettingsHookCmd {
@@ -1317,10 +1319,22 @@ export async function installInstallGateKiro(
 }
 
 /**
+ * Gemini CLI runs no settings hook in an untrusted folder, user-level hooks included
+ * (google-gemini/gemini-cli `packages/core/src/hooks/hookRegistry.ts:171-186`, commit 60f8082b), and
+ * folder trust is on by default (`packages/cli/src/config/settingsSchema.ts`, `folderTrust.enabled`).
+ * `/permissions trust` (`packages/cli/src/ui/commands/permissionsCommand.ts:23-30`) records the
+ * folder in `~/.gemini/trustedFolders.json`.
+ */
+export const GEMINI_TRUST_NOTICE =
+  "Gemini CLI runs this gate only in a trusted folder. In Gemini CLI, run `/permissions trust` in this folder (it is saved in ~/.gemini/trustedFolders.json).";
+
+/**
  * Gemini CLI install-gate: a `BeforeTool` hook in `.gemini/settings.json` (same
  * nested hooks > Event > matcher > hooks[] shape as Claude Code). Gemini passes
- * the command in tool_input.command and blocks on exit 2 — so `kit gate-bash`
- * works unchanged. Idempotent; preserves other settings/hooks.
+ * the command in tool_input.command. When a hook prints JSON, the JSON decides and the
+ * exit code is ignored (`packages/core/src/hooks/hookRunner.ts:451-489`), so the gate runs
+ * with `--format gemini`: a stdout `{"decision":"deny"}` plus stderr and exit 2. An older kit
+ * hook line is refreshed in place. Idempotent; preserves other settings/hooks.
  */
 export async function installInstallGateGemini(
   cwd: string = process.cwd(),
@@ -1332,6 +1346,7 @@ export async function installInstallGateGemini(
   if (!existsSync(resolve(cwd, ".gemini"))) {
     return { file, action: "skipped", detail: "no Gemini CLI project detected" };
   }
+  const notice = GEMINI_TRUST_NOTICE;
   let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
   let existed = false;
   try {
@@ -1342,14 +1357,17 @@ export async function installInstallGateGemini(
   }
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.BeforeTool ??= []);
-  if (pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")))) {
-    return { file, action: "unchanged", detail: "install-gate already wired" };
+  const desired = `${kitGateInvocation()} --format gemini`;
+  const kitHook = pre.flatMap((g) => g.hooks ?? []).find((h) => h.command?.includes("gate-bash"));
+  if (kitHook?.command === desired) {
+    return { file, action: "unchanged", detail: "install-gate already wired", notice };
   }
-  pre.push({ matcher: "", hooks: [{ type: "command", command: kitGateInvocation() }] });
+  if (kitHook) kitHook.command = desired;
+  else pre.push({ matcher: "", hooks: [{ type: "command", command: desired }] });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-    return { file, action: existed ? "updated" : "created" };
+    return { file, action: existed ? "updated" : "created", notice };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
   }
@@ -1440,12 +1458,13 @@ async function writeOpenCodePlugin(path: string, content: string, replace: boole
 
 /**
  * OpenCode install-gate: unlike the other agents (which register a hook *command*
- * in a config file), OpenCode enforces via a JS **plugin** that hooks
- * `tool.execute.before` and BLOCKS by throwing — the verified contract from
- * `@opencode-ai/plugin` (opencode-ai@1.17.x). We write a small managed plugin to
- * `.opencode/plugin/kit-install-gate.js` that pipes the bash command into
- * `kit gate-bash` and throws when it exits non-zero (exit 2 = deny). Exact current
- * output is idempotent; stale kit-managed output is upgraded without overwriting an
+ * in a config file), OpenCode enforces via a JS **plugin** that blocks a tool call by
+ * throwing. We write one managed plugin to `.opencode/plugin/kit-install-gate.js` that both
+ * plugin APIs load: OpenCode 2.x (`export default { id, setup }`, `ctx.tool.hook("execute.before")`)
+ * and OpenCode 1.4+ (`default.server`, `tool.execute.before`); see opencode-gate.ts for the
+ * source evidence. It pipes the shell command into `kit gate-bash` and throws when that exits
+ * non-zero (exit 2 = deny). Exact current output is idempotent; stale kit-managed output (the
+ * V1-only plugin, which OpenCode 2.x does not load) is upgraded without overwriting an
  * independently managed gate.
  */
 export async function installInstallGateOpenCode(
@@ -1653,15 +1672,95 @@ export async function installInstallGateAugment(
   }
 }
 
+/** The name of kit's hook in Antigravity's `hooks.json`, whose top-level keys are hook names. */
+export const ANTIGRAVITY_HOOK_NAME = "kit-install-gate";
+
+interface AntigravityHook {
+  enabled?: boolean;
+  [event: string]: unknown;
+}
+
+/** True when a hook group runs kit's gate. */
+function runsKitGate(group: SettingsHookGroup): boolean {
+  return (group.hooks ?? []).some(
+    (h) => typeof h.command === "string" && h.command.includes("gate-bash"),
+  );
+}
+
+/**
+ * Move kit's gate out of the `{"hooks": {...}}` shape older kit versions wrote. Antigravity reads
+ * that as one hook named `hooks`, so the user's other groups in it keep running there; only kit's
+ * group leaves, and the `hooks` key goes when nothing else is left in it. Returns true on a change.
+ */
+function migrateLegacyAntigravity(config: Record<string, unknown>): boolean {
+  const legacy = config.hooks;
+  if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) return false;
+  const events = legacy as Record<string, unknown>;
+  const pre = events.PreToolUse;
+  if (!Array.isArray(pre)) return false;
+  const kept = (pre as SettingsHookGroup[]).filter((g) => !runsKitGate(g));
+  if (kept.length === pre.length) return false;
+  if (kept.length > 0) events.PreToolUse = kept;
+  else delete events.PreToolUse;
+  const rest = Object.keys(events).filter((k) => k !== "enabled");
+  if (rest.length === 0) delete config.hooks;
+  return true;
+}
+
+/** Read `.agents/hooks.json`: an object, or nothing yet. Never overwrites what it cannot parse. */
+async function readAntigravityConfig(
+  path: string,
+  file: string,
+): Promise<{ config: Record<string, unknown>; existed: boolean } | HookInstallResult> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { config: {}, existed: false };
+    return { file, action: "failed", detail: `cannot read ${file}: ${String(err)}` };
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return { config: parsed as Record<string, unknown>, existed: true };
+    }
+  } catch {
+    /* reported below */
+  }
+  return { file, action: "failed", detail: `${file} is not a JSON object; refusing overwrite` };
+}
+
+/** kit's named Antigravity hook, enabled, with its gate line set to `desired`. */
+function withKitAntigravityGate(
+  current: AntigravityHook | undefined,
+  groups: SettingsHookGroup[],
+  kitHook: SettingsHookCmd | undefined,
+  desired: string,
+): AntigravityHook {
+  if (kitHook && current) {
+    kitHook.command = desired;
+    return { ...current, enabled: true };
+  }
+  return {
+    ...(current ?? {}),
+    enabled: true,
+    PreToolUse: [
+      ...groups,
+      { matcher: "run_command", hooks: [{ type: "command", command: desired, timeout: 30 }] },
+    ],
+  };
+}
+
 /**
  * Google Antigravity install-gate: a `PreToolUse` hook in the workspace-scoped
  * `.agents/hooks.json` (preferred over the global ~/.gemini/config/hooks.json to
- * keep kit's per-project pattern). Distinct from the Gemini CLI gate: event key
- * `"PreToolUse"` (not `BeforeTool`), matcher `"run_command"`. Antigravity carries
- * the command at `toolCall.args.CommandLine` — handled by the extended
- * `extractCommandFromHookPayload` — and blocks on exit 2, so `kit gate-bash`
- * works unchanged. Idempotent; preserves other hooks. Detected via a repo
- * `.agents/` dir.
+ * keep kit's per-project pattern). The file's top-level keys are hook names:
+ * `{"kit-install-gate": {"enabled": true, "PreToolUse": [{"matcher": "run_command", "hooks": [...]}]}}`
+ * (https://antigravity.google/docs/hooks.md, fetched 2026-11-26; Antigravity is closed source).
+ * Antigravity carries the command at `toolCall.args.CommandLine` and reads a required stdout
+ * `decision`; its exit-code meaning is not documented, so `--format antigravity` writes the
+ * decision and also exits 2 on a deny. Migrates kit's older `{"hooks": {...}}` entry without
+ * dropping the user's hooks. Idempotent. Detected via a repo `.agents/` dir.
  */
 export async function installInstallGateAntigravity(
   cwd: string = process.cwd(),
@@ -1673,27 +1772,25 @@ export async function installInstallGateAntigravity(
   if (!existsSync(resolve(cwd, ".agents"))) {
     return { file, action: "skipped", detail: "no Antigravity (.agents/) project detected" };
   }
-  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
-  let existed = false;
-  try {
-    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
-    existed = true;
-  } catch {
-    settings = {};
-  }
-  const hooks = (settings.hooks ??= {});
-  const pre = (hooks.PreToolUse ??= []);
-  // Antigravity reads a required stdout `decision`, so the gate runs with `--format antigravity`.
+  const read = await readAntigravityConfig(path, file);
+  if ("action" in read) return read;
+  const { config, existed } = read;
+  const migrated = migrateLegacyAntigravity(config);
   const desired = `${kitGateInvocation()} --format antigravity`;
-  const kitHook = pre.flatMap((g) => g.hooks ?? []).find((h) => h.command?.includes("gate-bash"));
-  if (kitHook?.command === desired) {
+  const current = config[ANTIGRAVITY_HOOK_NAME] as AntigravityHook | undefined;
+  const groups = Array.isArray(current?.PreToolUse)
+    ? (current.PreToolUse as SettingsHookGroup[])
+    : [];
+  const kitHook = groups
+    .flatMap((g) => g.hooks ?? [])
+    .find((h) => h.command?.includes("gate-bash"));
+  if (!migrated && current?.enabled !== false && kitHook?.command === desired) {
     return { file, action: "unchanged", detail: "install-gate already wired" };
   }
-  if (kitHook) kitHook.command = desired;
-  else pre.push({ matcher: "run_command", hooks: [gateHook(desired)] });
+  config[ANTIGRAVITY_HOOK_NAME] = withKitAntigravityGate(current, groups, kitHook, desired);
   try {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    await writeFile(path, JSON.stringify(config, null, 2) + "\n", "utf-8");
     return { file, action: existed ? "updated" : "created" };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };

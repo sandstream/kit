@@ -1029,8 +1029,11 @@ describe("installInstallGateAntigravity", () => {
       mkdirSync(join(dir, ".agents"), { recursive: true });
       const r1 = await installInstallGateAntigravity(dir);
       assert.equal(r1.action, "created");
+      // Antigravity's hooks.json is keyed by hook name (https://antigravity.google/docs/hooks.md).
       const s = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf-8"));
-      const groups = s.hooks.PreToolUse;
+      assert.equal(s.hooks, undefined, "no legacy {hooks:{...}} entry");
+      const groups = s["kit-install-gate"].PreToolUse;
+      assert.equal(s["kit-install-gate"].enabled, true);
       assert.ok(Array.isArray(groups) && groups.length === 1);
       assert.equal(groups[0].matcher, "run_command");
       assert.ok(groups[0].hooks[0].command.endsWith("gate-bash --format antigravity"));
@@ -1038,7 +1041,7 @@ describe("installInstallGateAntigravity", () => {
       const r2 = await installInstallGateAntigravity(dir);
       assert.equal(r2.action, "unchanged");
       const s2 = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf-8"));
-      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+      assert.equal(s2["kit-install-gate"].PreToolUse.length, 1, "no duplicate group on re-run");
     } finally {
       rmTemp(dir);
     }
@@ -1137,7 +1140,8 @@ describe("installInstallGateGemini", () => {
       const r1 = await installInstallGateGemini(dir);
       assert.equal(r1.action, "created");
       const s = JSON.parse(readFileSync(join(dir, ".gemini", "settings.json"), "utf-8"));
-      assert.ok(s.hooks.BeforeTool[0].hooks[0].command.endsWith("gate-bash"));
+      // A stdout JSON decision, which Gemini CLI reads before the exit code.
+      assert.ok(s.hooks.BeforeTool[0].hooks[0].command.endsWith("gate-bash --format gemini"));
       assert.equal((await installInstallGateGemini(dir)).action, "unchanged");
     } finally {
       rmTemp(dir);

@@ -50,35 +50,53 @@ export async function cmdGateBash(): Promise<boolean> {
       : `${lead}Triage it first: \`kit triage …\`, or install via \`kit pkg <eco>:<name>\`.`;
 
   // Agent-agnostic command extraction (Claude/Codex/Amazon Q/Gemini tool_input.command,
-  // Cursor top-level command, Cline preToolUse.parameters.command) — shared pure helper.
-  const { decideBashGate, extractCommandFromHookPayload } = await import("../install-gate.js");
-  const command = extractCommandFromHookPayload(payload);
-  if (!command) {
+  // Cursor top-level command, Cline run_commands `commands`) — shared pure helper. Cline sends
+  // several commands in one call, and each one must pass.
+  const { decideBashGate, extractCommandsFromHookPayload } = await import("../install-gate.js");
+  const { clineShellCallUnreadable } = await import("../install-gate-payload.js");
+  if (clineShellCallUnreadable(payload)) {
+    const reason =
+      "kit install-gate: cannot read the commands of this Cline run_commands call, so it is blocked. Send the commands as a list of strings.";
+    await auditGateDeny("gate-bash", reason, sessionIdOf(payload));
+    if (stdoutDeny(reason)) return true;
+    writeSync(2, `${reason}\n`);
+    process.exit(2); // PreToolUse deny
+  }
+  const commands = extractCommandsFromHookPayload(payload);
+  if (commands.length === 0) {
     return stdoutAllow(); // no shell command in this tool call → allow
   }
   const { trailCommandRefusal } = await import("../trail-guard.js");
   const { homedir } = await import("node:os");
-  if (await refuseTrail("gate-bash", trailCommandRefusal(command, homedir()), payload)) return true;
   const { gateSettingsCommandRefusal } = await import("../gate-self-edit.js");
-  const selfEdit = gateSettingsCommandRefusal(command, process.cwd(), homedir());
-  if (await refuseTrail("gate-bash", selfEdit, payload)) return true;
-  const verdict = await decideBashGate(command, undefined, process.cwd());
-  if (verdict.block) {
-    await auditGateDeny("gate-bash", verdict.reason, sessionIdOf(payload));
-    // Cline and Antigravity read a stdout JSON verdict and exit 0; every other agent
-    // uses the exit-2 PreToolUse deny.
-    if (stdoutDeny(`kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`)) {
+  const notes: string[] = [];
+  const checked: Awaited<ReturnType<typeof decideBashGate>>["checked"] = [];
+  for (const command of commands) {
+    if (await refuseTrail("gate-bash", trailCommandRefusal(command, homedir()), payload)) {
       return true;
     }
-    writeSync(
-      2,
-      `kit install-gate: BLOCKED: ${verdict.reason}${triageAdvice(verdict.reason, "\n")}\n`,
-    );
-    process.exit(2); // PreToolUse deny
+    const selfEdit = gateSettingsCommandRefusal(command, process.cwd(), homedir());
+    if (await refuseTrail("gate-bash", selfEdit, payload)) return true;
+    const verdict = await decideBashGate(command, undefined, process.cwd());
+    if (verdict.block) {
+      await auditGateDeny("gate-bash", verdict.reason, sessionIdOf(payload));
+      // Cline reads a stdout JSON verdict and exits 0. Antigravity and Gemini CLI get a stdout
+      // decision too, and then the exit-2 PreToolUse deny that every other agent uses.
+      if (stdoutDeny(`kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`)) {
+        return true;
+      }
+      writeSync(
+        2,
+        `kit install-gate: BLOCKED: ${verdict.reason}${triageAdvice(verdict.reason, "\n")}\n`,
+      );
+      process.exit(2); // PreToolUse deny
+    }
+    checked.push(...verdict.checked);
+    notes.push(...(verdict.notes ?? []));
   }
   const { writePassWarnings } = await import("../triage-warnings.js");
-  await writePassWarnings("kit install-gate", verdict.checked);
-  return stdoutAllow(verdict.notes);
+  await writePassWarnings("kit install-gate", checked);
+  return stdoutAllow(notes);
 }
 
 /**
@@ -102,16 +120,23 @@ async function refuseTrail(
 }
 
 /**
- * A deny on stdout for the harnesses whose contract is stdout JSON: Cline's `{cancel: true}`
- * (HookOutputSchema), and Antigravity's required `decision` (its docs give no exit-code meaning).
+ * A deny on stdout for the harnesses whose contract is stdout JSON. Cline: `{cancel: true}`
+ * (HookOutputSchema), and the gate then exits 0; returns true. Antigravity: a required `decision`
+ * (its docs give no exit-code meaning). Gemini CLI: when stdout parses as JSON, the JSON decides
+ * and the exit code is ignored (google-gemini/gemini-cli `packages/core/src/hooks/hookRunner.ts:451-489`,
+ * commit 60f8082b). For those two the decision is written and false is returned, so the caller
+ * still writes stderr and exits 2. Written synchronously: the caller exits right after.
  */
 function stdoutDeny(message: string): boolean {
   const format = gateFormat();
-  if (format === "cline") console.log(JSON.stringify({ cancel: true, errorMessage: message }));
-  else if (format === "antigravity")
-    console.log(JSON.stringify({ decision: "deny", reason: message }));
-  else return false;
-  return true;
+  if (format === "cline") {
+    console.log(JSON.stringify({ cancel: true, errorMessage: message }));
+    return true;
+  }
+  if (format === "antigravity" || format === "gemini") {
+    writeSync(1, `${JSON.stringify({ decision: "deny", reason: message })}\n`);
+  }
+  return false;
 }
 
 /**
@@ -200,10 +225,7 @@ async function readHookPayload(): Promise<unknown | null> {
 
 /** Deny helper for the broker gates: Cline stdout-JSON contract or exit-2 PreToolUse deny. */
 async function gateDeny(label: string, message: string): Promise<boolean> {
-  if (gateFormat() === "cline") {
-    console.log(JSON.stringify({ cancel: true, errorMessage: `kit ${label}: ${message}` }));
-    return true;
-  }
+  if (stdoutDeny(`kit ${label}: ${message}`)) return true;
   writeSync(2, `kit ${label}: BLOCKED — ${message}\n`);
   process.exit(2); // PreToolUse deny
 }
