@@ -163,7 +163,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "secrets list":
     "List key names by backend with expiry/rotation metadata; never values (--backend, --json)",
   "secrets incident":
-    "Vendor incident: rotation plan per key + keyed-hash snapshot; --verify reports changed/unchanged/unresolvable",
+    "Vendor incident: rotation plan per key + evidence plan (the store's own access-record query per key, printed only; --since <ISO>) + keyed-hash snapshot; --verify reports changed/unchanged/unresolvable",
   "secrets validate":
     "Verify every declared key resolves in vault. --auto pulls from .env.template",
   "env list": "List configured environments ([env.<name>])",
