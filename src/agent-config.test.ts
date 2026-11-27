@@ -543,7 +543,7 @@ describe("installCodexKitProfile", () => {
 });
 
 describe("installInstallGate", () => {
-  it("writes a PreToolUse Bash gate to .claude/settings.json, idempotently", async () => {
+  it("writes a PreToolUse Bash|PowerShell gate to .claude/settings.json, idempotently", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-gate-"));
     try {
       mkdirSync(join(dir, ".claude"), { recursive: true });
@@ -552,7 +552,7 @@ describe("installInstallGate", () => {
       const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
       const groups = s.hooks.PreToolUse;
       assert.ok(Array.isArray(groups) && groups.length === 1);
-      assert.equal(groups[0].matcher, "Bash");
+      assert.equal(groups[0].matcher, "Bash|PowerShell");
       assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
 
       const r2 = await installInstallGate(dir);
@@ -1273,7 +1273,10 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
   const settings = (cmds: string[]) =>
     JSON.stringify({
       hooks: {
-        PreToolUse: cmds.map((c) => ({ matcher: "x", hooks: [{ type: "command", command: c }] })),
+        PreToolUse: cmds.map((c) => ({
+          matcher: "Bash|PowerShell",
+          hooks: [{ type: "command", command: c }],
+        })),
       },
     });
   const mark = (dir: string) => writeFileSync(join(dir, ".claude/.kit-gates-installed"), "x\n");
@@ -1356,6 +1359,7 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
         envGate: true,
         egressGate: false,
         problems: [],
+        staleMatchers: [],
       });
     });
   });
@@ -1378,6 +1382,7 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
             envGate: true,
             egressGate: false,
             problems: [],
+            staleMatchers: [],
           });
         });
       });

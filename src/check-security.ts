@@ -372,6 +372,16 @@ export async function checkGateLiveness(
       detail: "enforcement gates not installed in this checkout",
     };
   }
+  const stale = [...new Set(live.staleMatchers ?? [])];
+  if (live.installGate && stale.length > 0) {
+    return {
+      category,
+      name,
+      status: "fail",
+      severity: "high",
+      detail: `install-gate (gate-bash) matcher ${stale.map((m) => JSON.stringify(m)).join(", ")} does not select both of Claude Code's shell tools (Bash, PowerShell), so a command run through the missing one is not gated. Run: kit agent-config`,
+    };
+  }
   if (missing.length === 0) {
     return { category, name, status: "pass", detail: "PreToolUse enforcement gates wired" };
   }

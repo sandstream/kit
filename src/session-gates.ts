@@ -37,7 +37,10 @@ export interface SessionGatesDeps {
 
 function wiredHere(root: string): boolean {
   const live = gateLiveness(root);
-  return live.everInstalled && live.installGate && live.envGate && live.problems.length === 0;
+  const stale = live.staleMatchers ?? [];
+  return (
+    live.everInstalled && live.installGate && live.envGate && !live.problems.length && !stale.length
+  );
 }
 
 const REAL: SessionGatesDeps = {

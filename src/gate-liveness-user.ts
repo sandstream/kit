@@ -10,6 +10,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { groupsIn } from "./gate-settings.js";
+import { staleGateBashMatchers } from "./gate-bash-matcher.js";
 import {
   GATE_SUBCOMMANDS,
   commandIncludesSubcommand,
@@ -46,5 +47,9 @@ export function withUserGates(live: GateLiveness, home: string = homedir()): Gat
     envGate: live.envGate || has("gate-env"),
     egressGate: live.egressGate || has("gate-egress"),
     problems: [...live.problems, ...commands.flatMap((cmd) => hookCommandProblems(cmd))],
+    staleMatchers: [
+      ...(live.staleMatchers ?? []),
+      ...staleGateBashMatchers(groupsIn(userSettingsPath(home))),
+    ],
   };
 }
