@@ -55,21 +55,32 @@ export interface McpTriageResult {
 }
 
 const SCHEMA_TEXT_KEYS = ["description", "title", "default"] as const;
+/** Per-value enum docs: VS Code's `enumDescriptions` and the `x-` spellings OpenAPI tools emit. */
+const ENUM_DESCRIPTION_KEYS = [
+  "enumDescriptions",
+  "markdownEnumDescriptions",
+  "x-enumDescriptions",
+  "x-enum-descriptions",
+] as const;
 const SCHEMA_CHILD_LISTS = ["anyOf", "oneOf", "allOf", "prefixItems"] as const;
 const SCHEMA_CHILD_MAPS = ["properties", "$defs", "definitions", "patternProperties"] as const;
 const MAX_SCHEMA_DEPTH = 32;
 
+/** One readable string in a schema. `prose` marks a description (of the node or of an enum value). */
+interface SchemaText {
+  path: string;
+  text: string;
+  prose: boolean;
+}
+
 /**
  * Collect every string a client or model can read from a JSON schema: `description`,
- * `title`, string `default`s and `examples`, through properties, items, unions
- * (`anyOf`/`oneOf`/`allOf`) and `$defs`. Pydantic and FastMCP put nested models in unions
- * (an `Optional[Model]` parameter) and in `$defs`, so a walk of `properties` alone misses them.
+ * `title`, string `default`s and `examples`, enum value descriptions, through properties,
+ * items, unions (`anyOf`/`oneOf`/`allOf`) and `$defs`. Pydantic and FastMCP put nested models
+ * in unions (an `Optional[Model]` parameter) and in `$defs`, so a walk of `properties` alone
+ * misses them. The walk stops at depth `MAX_SCHEMA_DEPTH`.
  */
-function collectSchemaDescriptions(
-  schema: unknown,
-  path = "",
-  depth = 0,
-): { path: string; text: string }[] {
+function collectSchemaDescriptions(schema: unknown, path = "", depth = 0): SchemaText[] {
   if (!schema || typeof schema !== "object" || depth > MAX_SCHEMA_DEPTH) return [];
   const obj = schema as Record<string, unknown>;
   const out = ownSchemaTexts(obj, path);
@@ -82,19 +93,25 @@ function collectSchemaDescriptions(
 const joinPath = (path: string, suffix: string): string => (path ? `${path}.${suffix}` : suffix);
 
 /** The text fields of one schema node, without its children. */
-function ownSchemaTexts(
-  obj: Record<string, unknown>,
-  path: string,
-): { path: string; text: string }[] {
-  const out: { path: string; text: string }[] = [];
+function ownSchemaTexts(obj: Record<string, unknown>, path: string): SchemaText[] {
+  const out: SchemaText[] = [];
   for (const key of SCHEMA_TEXT_KEYS) {
     const v = obj[key];
     if (typeof v !== "string") continue;
-    out.push({ path: key === "description" ? path || "schema" : joinPath(path, key), text: v });
+    const prose = key === "description";
+    out.push({ path: prose ? path || "schema" : joinPath(path, key), text: v, prose });
   }
   const examples = Array.isArray(obj.examples) ? obj.examples : [];
   for (const v of examples) {
-    if (typeof v === "string") out.push({ path: joinPath(path, "examples"), text: v });
+    if (typeof v === "string")
+      out.push({ path: joinPath(path, "examples"), text: v, prose: false });
+  }
+  for (const key of ENUM_DESCRIPTION_KEYS) {
+    const list = Array.isArray(obj[key]) ? (obj[key] as unknown[]) : [];
+    list.forEach((v, i) => {
+      if (typeof v === "string")
+        out.push({ path: joinPath(path, `${key}[${i}]`), text: v, prose: true });
+    });
   }
   return out;
 }
@@ -208,17 +225,28 @@ const DANGEROUS_CAPABILITY =
 const SECRET_PARAM =
   /(^|[_-])(token|secret|password|passwd|api[_-]?key|apikey|credential|private[_-]?key)([_-]|$)/i;
 
-/** The field whose text implies arbitrary exec or deletion, name first, or null. */
-function dangerousField(tool: McpToolDef): "name" | "description" | null {
-  if (DANGEROUS_CAPABILITY.test(tool.name ?? "")) return "name";
-  return DANGEROUS_CAPABILITY.test(tool.description ?? "") ? "description" : null;
+/**
+ * The fields whose text implies arbitrary exec or deletion: the name or else the description,
+ * then each parameter description (enum value descriptions included) as `param:<path>`.
+ * A server can say "one item with spaces is run as a shell line" on a parameter as well as
+ * on the tool (kit-research shrink-anything-vs-kit).
+ */
+function dangerousFields(tool: McpToolDef): string[] {
+  const out: string[] = [];
+  if (DANGEROUS_CAPABILITY.test(tool.name ?? "")) out.push("name");
+  else if (DANGEROUS_CAPABILITY.test(tool.description ?? "")) out.push("description");
+  for (const { path, text, prose } of collectSchemaDescriptions(tool.inputSchema)) {
+    const field = `param:${path}`;
+    if (prose && !out.includes(field) && DANGEROUS_CAPABILITY.test(text)) out.push(field);
+  }
+  return out;
 }
 
 /**
  * Static MCP-Security-Checklist findings over tool defs (SlowMist / OWASP MCP Top 10).
  * Deterministic + heuristic-confidence — advisory review signals, NOT verdict-flipping:
- *  - dangerous-capability: a tool name/description implying arbitrary exec/deletion
- *    (confirm least-privilege + human approval).
+ *  - dangerous-capability: a tool name/description, or a parameter description, implying
+ *    arbitrary exec/deletion (confirm least-privilege + human approval).
  *  - secret-as-parameter: a parameter shaped like a credential (inject at the boundary,
  *    do not accept as a tool arg — MCP01).
  *  - undocumented: a tool with no description (cannot be triaged; MCP checklist).
@@ -229,11 +257,10 @@ export function checklistFindings(tools: McpToolDef[]): McpToolFinding[] {
   const findings: McpToolFinding[] = [];
   for (const tool of tools) {
     const name = tool.name || "(unnamed)";
-    const dangerous = dangerousField(tool);
-    if (dangerous) {
+    for (const field of dangerousFields(tool)) {
       findings.push({
         tool: name,
-        field: dangerous,
+        field,
         label: "dangerous-capability (confirm least-privilege + human approval)",
         confidence: "heuristic",
       });
