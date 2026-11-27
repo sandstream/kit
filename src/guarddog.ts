@@ -203,20 +203,28 @@ function indicatorCount(results: Record<string, unknown>): number {
   return count;
 }
 
-function countIndicators(result: Record<string, unknown>): ScannerReport {
-  const { issues, errors, results } = result;
-  const issueCount =
-    typeof issues === "number" && Number.isSafeInteger(issues) && issues >= 0 ? issues : undefined;
-  const messages = scannerRecord(errors) ? Object.values(errors) : undefined;
+function issueTotal(issues: unknown): number | undefined {
+  return typeof issues === "number" && Number.isSafeInteger(issues) && issues >= 0
+    ? issues
+    : undefined;
+}
+
+/** The indicator count, and whether kit could read the per-rule results. */
+function ruleCount(issueCount: number | undefined, results: unknown) {
   const ruleResults = scannerRecord(results) ? Object.values(results) : undefined;
-  const readable =
-    issueCount !== undefined &&
-    scannerRecord(results) &&
-    validRuleResults(ruleResults, issueCount > 0);
+  if (issueCount !== undefined && validRuleResults(ruleResults, issueCount > 0)) {
+    return { count: indicatorCount(results as Record<string, unknown>), readable: true };
+  }
   // Results kit cannot read keep GuardDog's own count.
-  const count = readable
-    ? indicatorCount(results)
-    : Math.max(issueCount ?? 0, ruleResults?.some(hasRuleFinding) ? 1 : 0);
+  const hasFinding = ruleResults?.some(hasRuleFinding) ?? false;
+  return { count: Math.max(issueCount ?? 0, hasFinding ? 1 : 0), readable: false };
+}
+
+function countIndicators(result: Record<string, unknown>): ScannerReport {
+  const { errors, results } = result;
+  const issueCount = issueTotal(result.issues);
+  const messages = scannerRecord(errors) ? Object.values(errors) : undefined;
+  const { count, readable } = ruleCount(issueCount, results);
   if (issueCount === undefined || !messages || !messages.every(reportText)) {
     return { count, gap: "malformed" };
   }
