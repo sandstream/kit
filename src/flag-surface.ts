@@ -62,14 +62,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--yes",
   ],
   adr: ["--emit", "--json", "--min-support", "--root"],
-  "agent-audit": [
-    "--accept-rules",
-    "--accept-user-surfaces",
-    "--attest",
-    "--json",
-    "--mode",
-    "--no-auto-install",
-  ],
+  "agent-audit": ["--accept-rules", "--accept-user-surfaces", "--json"],
   "agent-config": [
     "--apply",
     "--broker-gate",
@@ -312,14 +305,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   guard: [],
   "guard-observe": [],
   heal: ["--agent", "--dry-run"],
-  health: [
-    "--accept-rules",
-    "--accept-user-surfaces",
-    "--attest",
-    "--json",
-    "--mode",
-    "--no-auto-install",
-  ],
+  health: ["--accept-user-surfaces", "--attest", "--json", "--mode", "--no-auto-install"],
   hooks: ["--force"],
   identity: ["--public"],
   ingest: ["--json"],
@@ -652,23 +638,9 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   slopsquat: ["--fail-on"],
   standards: ["--category", "--enforce", "--json"],
-  status: [
-    "--accept-rules",
-    "--accept-user-surfaces",
-    "--attest",
-    "--json",
-    "--mode",
-    "--no-auto-install",
-  ],
+  status: ["--accept-user-surfaces", "--attest", "--json", "--mode", "--no-auto-install"],
   statusline: ["--json", "--mode"],
-  "supply-chain": [
-    "--accept-rules",
-    "--accept-user-surfaces",
-    "--attest",
-    "--json",
-    "--mode",
-    "--no-auto-install",
-  ],
+  "supply-chain": ["--accept-user-surfaces", "--attest", "--json", "--mode", "--no-auto-install"],
   team: [
     "--apply",
     "--broker-gate",
@@ -702,6 +674,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
 
 /** Declared flags that accept no value. Missing commands have no value contract. */
 export const COMMAND_BARE_FLAGS: Record<string, readonly string[]> = {
+  "agent-audit": ["--accept-rules", "--accept-user-surfaces", "--json"],
   "create-plugin": ["--skip-install"],
   governance: [],
   guard: [],

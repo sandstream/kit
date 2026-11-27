@@ -280,6 +280,15 @@ describe("kit agent-audit (real CLI)", () => {
       run().stdout,
       /allow +Codex +project +\.codex\/rules\/default\.rules {2}prefix_rule: git status/,
     );
+    writeFileSync(
+      join(s.root, ".codex", "rules", "default.rules"),
+      'prefix_rule(pattern=["git", "status"])\nprefix_rule(pattern=["git", "log"])\n',
+    );
+    assert.match(run().stdout, /new allow rules .*prefix_rule: git log/);
+    const accepted = run("--accept-rules");
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.match(accepted.stdout, /accepted \d+ agent rule\(s\)/);
+    assert.match(run().stdout, /none added or removed since accepted/);
     assert.match(
       trailCommandRefusal("kit agent-audit --accept-rules", s.home) ?? "",
       /a person does that/,
