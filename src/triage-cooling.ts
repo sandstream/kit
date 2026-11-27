@@ -304,17 +304,32 @@ export interface CoolingDeps {
   locator?: InstallLocator;
 }
 
-async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
+/** A registry answer with its status, so a 404 (no such name) reads apart from a failure. */
+export interface RegistryDoc {
+  status: number;
+  body: unknown;
+}
+
+/** GET or POST a registry document: its status and JSON body, or null when it could not be read. */
+export async function fetchRegistryDoc(
+  url: string,
+  init?: RequestInit,
+): Promise<RegistryDoc | null> {
   try {
     const res = await fetch(url, {
       ...init,
       headers: { "content-type": "application/json", "user-agent": "kit-triage/1.0" },
       signal: AbortSignal.timeout(15_000),
     });
-    return res.ok ? await res.json() : null;
+    return { status: res.status, body: res.ok ? await res.json() : null };
   } catch {
     return null;
   }
+}
+
+async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
+  const doc = await fetchRegistryDoc(url, init);
+  return doc && doc.status >= 200 && doc.status < 300 ? doc.body : null;
 }
 
 export async function airGapView(cwd: string): Promise<AirGapView> {
@@ -435,10 +450,10 @@ interface RegistryView {
 }
 
 /** Where to read one package's release times, or why it must not be read. */
-function registrySource(
+export function registrySource(
   type: string,
   pkg: string,
-  deps: CoolingDeps,
+  deps: Pick<CoolingDeps, "env">,
   air: AirGapView,
 ): { url: string; parse: (doc: unknown) => RegistryView | null } | { skip: string } {
   const npm = type === "npm";
