@@ -48,7 +48,9 @@ export interface Ledger {
   notCovered: string[];
 }
 
-const ACCEPT = "kit agent-audit --accept-rules";
+/** The acceptance flag, read by `kit agent-audit` only (its flag contract lists it). */
+export const ACCEPT_RULES_FLAG = "--accept-rules";
+const ACCEPT = `kit agent-audit ${ACCEPT_RULES_FLAG}`;
 const HARNESSES: Harness[] = ["Claude Code", "Codex", "Cursor CLI", "Gemini CLI"];
 
 export function ruleBaselinePath(home: string): string {

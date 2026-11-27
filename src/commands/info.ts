@@ -135,7 +135,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
     return true;
   }
   const ledgerMod = await import("../agent-rule-ledger.js");
-  if (hasFlag(process.argv, "--accept-rules")) {
+  if (hasFlag(process.argv, ledgerMod.ACCEPT_RULES_FLAG)) {
     const n = ledgerMod.acceptRules(process.cwd(), homedir(), process.env);
     console.log(`kit agent-audit: accepted ${n} agent rule(s) as the baseline`);
     return true;

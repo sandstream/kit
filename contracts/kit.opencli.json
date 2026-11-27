@@ -96,12 +96,9 @@
       "x-kit-accepted-flags": [
         "--accept-rules",
         "--accept-user-surfaces",
-        "--attest",
         "--env",
         "--help",
         "--json",
-        "--mode",
-        "--no-auto-install",
         "--non-interactive",
         "--read-only",
         "--readonly",
@@ -110,7 +107,10 @@
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-flags-without-values": [
+        "--accept-rules",
+        "--accept-user-surfaces",
         "--help",
+        "--json",
         "--non-interactive",
         "--version"
       ],
@@ -1346,7 +1346,6 @@
       "kind": "command",
       "summary": "Deep environment health diagnostics — granular pass/fail across tools, services, config",
       "x-kit-accepted-flags": [
-        "--accept-rules",
         "--accept-user-surfaces",
         "--attest",
         "--env",
@@ -3309,7 +3308,6 @@
       "kind": "command",
       "summary": "Adoption checklist — what's set up across kit + the next step for each gap",
       "x-kit-accepted-flags": [
-        "--accept-rules",
         "--accept-user-surfaces",
         "--attest",
         "--env",
@@ -3350,7 +3348,6 @@
       "kind": "command",
       "summary": "Install-time supply-chain triage: install-scripts, lockfile-drift, dep-confusion, slopsquat",
       "x-kit-accepted-flags": [
-        "--accept-rules",
         "--accept-user-surfaces",
         "--attest",
         "--env",
