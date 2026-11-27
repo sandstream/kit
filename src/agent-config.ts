@@ -609,8 +609,9 @@ function upsertCodexKitProfileBlock(existing: string): {
 }
 
 /**
- * Codex has no Claude-style command allowlist surface. The low-friction,
- * current Codex-native equivalent is a personal profile selected explicitly by
+ * Codex's command allowlist is `prefix_rule(..., decision="allow")` in its rules
+ * files, which kit does not write. The low-friction Codex-native surface kit uses
+ * is a personal profile selected explicitly by
  * `codex --profile kit`: workspace-write sandbox, on-request approvals.
  *
  * This writes under CODEX_HOME / ~/.codex, never into repo config, because
