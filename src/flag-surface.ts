@@ -100,6 +100,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--limit",
     "--operation",
     "--require-external",
+    "--since",
     "--since-days",
     "--strict",
     "--target",

@@ -117,7 +117,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "security prescan-diff":
     "Diff two prescan reports — surface new regressions + fixed findings since baseline",
   "audit secrets":
-    "Forensics: who/what touched each key + when (reads audit log); --target <platform> lists the keys kit pushed there",
+    "Forensics: who/what touched each key + when (reads audit log); --target <platform> lists the keys kit pushed there; --key <NAME> --since <ISO> answers whether NAME was read or written through kit since then, from a verified chain (exit 1 when it does not verify)",
   "audit verify":
     "Verify the audit chain and HMAC seal. --all --strict requires at least one verified log. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
   "audit anchor":
