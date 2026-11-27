@@ -1,4 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
+import { adapterFetch } from "./fetch-timeout.js";
 
 interface NeonProject {
   id: string;
@@ -73,7 +74,7 @@ export const neonDbAdapter: ServiceAdapter = {
 
     let project: NeonProjectResponse;
     try {
-      const resp = await fetch("https://api.neon.tech/v2/projects", {
+      const resp = await adapterFetch("https://api.neon.tech/v2/projects", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,

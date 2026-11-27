@@ -7,6 +7,7 @@
  * reader for the Cline stdout-JSON contract) is used only here, so it stays
  * module-private.
  */
+import { writeSync } from "node:fs";
 
 /**
  * `kit gate-bash` — PreToolUse install-gate handler. Reads a coding agent's
@@ -42,7 +43,9 @@ export async function cmdGateBash(): Promise<boolean> {
   // triage. Appending it there is what made a correct block read as a mis-parse (#501), so the
   // advice follows the reason instead of being stapled to every refusal.
   const triageAdvice = (reason: string, lead = ". "): string =>
-    /COMMAND SUBSTITUTION|UNVERIFIED COMMAND|UNVERIFIED SOURCE|cannot be undone/.test(reason)
+    /COMMAND SUBSTITUTION|UNVERIFIED COMMAND|UNVERIFIED SOURCE|cannot be undone|approvals off/.test(
+      reason,
+    )
       ? ""
       : `${lead}Triage it first: \`kit triage …\`, or install via \`kit pkg <eco>:<name>\`.`;
 
@@ -67,7 +70,6 @@ export async function cmdGateBash(): Promise<boolean> {
     if (stdoutDeny(`kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`)) {
       return true;
     }
-    const { writeSync } = await import("node:fs");
     writeSync(
       2,
       `kit install-gate: BLOCKED: ${verdict.reason}${triageAdvice(verdict.reason, "\n")}\n`,
@@ -92,7 +94,6 @@ async function refuseTrail(
   await auditGateDeny(gate, `trail-guard: ${reason}`, sessionIdOf(payload));
   const message = `kit trail-guard: ${reason}. If this is intended, run it yourself (in Claude Code, prefix it with !).`;
   if (stdoutDeny(message)) return true;
-  const { writeSync } = await import("node:fs");
   writeSync(
     2,
     `kit trail-guard: BLOCKED: ${reason}\nIf this is intended, run it yourself (in Claude Code, prefix it with !).\n`,
@@ -166,7 +167,6 @@ export async function cmdGateEnv(): Promise<boolean> {
       );
       return true;
     }
-    const { writeSync } = await import("node:fs");
     writeSync(
       2,
       `kit env-gate: BLOCKED: ${verdict.reason}\nNever write secrets to .env* in plaintext. Resolve them with \`kit secrets\` (vault-backed), or use a placeholder in .env.example.\n`,
@@ -204,7 +204,6 @@ async function gateDeny(label: string, message: string): Promise<boolean> {
     console.log(JSON.stringify({ cancel: true, errorMessage: `kit ${label}: ${message}` }));
     return true;
   }
-  const { writeSync } = await import("node:fs");
   writeSync(2, `kit ${label}: BLOCKED — ${message}\n`);
   process.exit(2); // PreToolUse deny
 }
@@ -221,7 +220,6 @@ async function stopInEffect(label: string): Promise<boolean> {
   const reason = `kit panic --stop is in effect since ${stop.since} (${stop.reason}): every gated tool call is refused. A person runs \`kit panic --resume\` to lift it.`;
   await auditGateDeny(label, reason);
   if (stdoutDeny(`kit ${label}: ${reason}`)) return true;
-  const { writeSync } = await import("node:fs");
   writeSync(2, `kit ${label}: BLOCKED — ${reason}\n`);
   process.exit(2); // PreToolUse deny
 }
@@ -232,26 +230,68 @@ async function stopInEffect(label: string): Promise<boolean> {
  * Exit 1 is a NON-BLOCKING error per the PreToolUse contract, i.e. the tool call would proceed —
  * so an internal fault (e.g. `process.cwd()` throwing ENOENT because the cwd was removed
  * mid-run) would silently ALLOW the very operation the gate exists to mediate. A security gate
- * must fail closed: on any fault, block. Cline uses its stdout {cancel:true} contract instead of
- * exit 2. Returns the handler's boolean when it does not throw.
+ * must fail closed: on any fault, block. Cline and Antigravity get their stdout-JSON deny instead
+ * of exit 2 (see denyGateFault). Returns the handler's boolean when it does not throw.
  */
 export async function runGateFailClosed(
   label: string,
   handler: () => boolean | Promise<boolean>,
+  io: GateDenyIo = GATE_DENY_IO,
 ): Promise<boolean> {
   try {
     if (await stopInEffect(label)) return false;
     return await handler();
   } catch (err) {
-    const reason = `gate error (fail-closed): ${err instanceof Error ? err.message : String(err)}`;
-    if (gateFormat() === "cline") {
-      console.log(JSON.stringify({ cancel: true, errorMessage: `kit ${label}: ${reason}` }));
-      return false;
-    }
-    const { writeSync } = await import("node:fs");
-    writeSync(2, `kit ${label}: BLOCKED — ${reason}\n`);
-    process.exit(2); // PreToolUse deny — never let an internal fault fail open
+    return denyGateFault(label, err, io);
   }
+}
+
+/** What the fault deny writes with. Injectable so a test can make each writer fail. */
+export interface GateDenyIo {
+  /** The stdout-JSON deny for Cline / Antigravity; false when the harness reads exit 2. */
+  stdoutDeny: (message: string) => boolean;
+  writeStderr: (text: string) => void;
+  exit: (code: number) => never;
+}
+
+// Everything here is loaded with this module: `writeSync` is a static import and `process` is
+// always present. A deny that first has to load a module fails exactly when module loading is
+// the fault (kit-research#233 E3: every payload exited 1, i.e. allowed, in a V8-snapshot build).
+const GATE_DENY_IO: GateDenyIo = {
+  stdoutDeny,
+  writeStderr: (text) => writeSync(2, text),
+  exit: (code) => process.exit(code),
+};
+
+/** The fault's message, or a fixed text when even reading it throws. */
+function faultMessage(err: unknown): string {
+  try {
+    return err instanceof Error ? err.message : String(err);
+  } catch {
+    return "unprintable error";
+  }
+}
+
+/**
+ * DENY after an internal gate fault, whatever else fails. The stdout-JSON harnesses get their
+ * `{cancel}` / `{decision: "deny"}` and the handler returns false; every other harness gets the
+ * reason on stderr and exit 2, the only PreToolUse exit code that blocks (exit 1 is a
+ * non-blocking error: the tool call would run). If writing the deny throws, a fixed line goes to
+ * `process.stderr` and the exit is still 2.
+ */
+export function denyGateFault(label: string, err: unknown, io: GateDenyIo = GATE_DENY_IO): false {
+  try {
+    const reason = `gate error (fail-closed): ${faultMessage(err)}`;
+    if (io.stdoutDeny(`kit ${label}: ${reason}`)) return false;
+    io.writeStderr(`kit ${label}: BLOCKED — ${reason}\n`);
+  } catch {
+    try {
+      process.stderr.write(`kit ${label}: BLOCKED — gate error (fail-closed)\n`);
+    } catch {
+      /* nothing left to write with; the exit code below still denies */
+    }
+  }
+  return io.exit(2); // PreToolUse deny — never let an internal fault fail open
 }
 
 /**

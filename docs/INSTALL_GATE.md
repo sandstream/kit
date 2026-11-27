@@ -98,8 +98,23 @@ is an install, and the gate blocks it (exit 2) until `kit triage release <url>` 
 The receipt binds the URL; the digest of the file `kit triage release` checked is recorded beside it, but the gate cannot see the bytes a later
 download receives. A download in one tool call and its execution in a later one are separate commands, so the gate does not chain them.
 A `releases/latest/download` URL never passes triage: triage the tag's URL. The same reading applies when the command arrives through
-the `PowerShell` tool name; in Claude Code the `gate-bash` hook is registered for the `Bash` tool. Tested on Linux; the
+the `PowerShell` tool name; in Claude Code the `gate-bash` hook is registered for the `Bash` and `PowerShell` tools. Tested on Linux; the
 PowerShell and Windows-path cases are tests that also run on the Windows CI shards. No CI job runs macOS, so macOS is unverified.
+
+## A bin named after another package
+
+A plain `npx <name>` (also `npm exec`, `pnpm dlx`, `yarn dlx`, `bunx`) with no local install fetches the
+unscoped npm name `<name>`. When `<name>` is a bin of a scoped package, that is usually a different package.
+`@metaharness/redblue` ships a bin `redblue`, and `npx redblue` without it installed runs an unrelated 2017 package.
+
+- `kit triage npm <pkg>` asks the registry about every bin of `<pkg>` whose name is not `<pkg>` itself.
+  It reports `other` (another package owns the name, with its version, maintainers and creation date) or
+  `unclaimed` (the name is free, so anyone can register it) as a warning. A bin named after the package itself is `same`.
+- Both findings are written to `.kit-triage.jsonl` as `npm-bin` records, whatever the verdict. They are not pass receipts.
+- The gate refuses the runner when a record names `<name>`, and says which scoped package to install or to run with `npx -p @scope/pkg <name>`.
+- A local `node_modules/.bin/<name>` still allows it, as before, unless the command may change directory first.
+  A `kit triage npm <name>` PASS newer than the record also allows it: that is how you say you mean the unscoped package.
+- Without a record the gate triages `<name>` as before. It cannot know a README meant another package until that package has been triaged in this directory.
 
 ## Limits
 

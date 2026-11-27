@@ -21,6 +21,7 @@ import {
   installInstallGate,
   type HookInstallResult,
 } from "./agent-config.js";
+import { staleGateBashMatchersFor } from "./gate-bash-matcher.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
 
@@ -37,7 +38,8 @@ export interface SessionGatesDeps {
 
 function wiredHere(root: string): boolean {
   const live = gateLiveness(root);
-  return live.everInstalled && live.installGate && live.envGate && live.problems.length === 0;
+  const wired = live.everInstalled && live.installGate && live.envGate && !live.problems.length;
+  return wired && staleGateBashMatchersFor(root).length === 0; // a `Bash`-only matcher is a hole
 }
 
 const REAL: SessionGatesDeps = {

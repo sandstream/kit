@@ -460,3 +460,25 @@ describe("the detector's declared bound", () => {
     assert.deepEqual(findSecrets(source), []);
   });
 });
+
+describe("redactSecrets declared values", () => {
+  it("redacts a long declared value by substring, whatever its env name", () => {
+    assert.equal(redactSecrets("x=salt-0002-abcdef", [], ["salt-0002-abcdef"]), "x=[REDACTED]");
+  });
+
+  it("redacts a short declared value only as an exact token", () => {
+    const out = redactSecrets("pin 4821, 48219, v4821x, (4821)", [], ["4821"]);
+    assert.equal(out, "pin [REDACTED], 48219, v4821x, ([REDACTED])");
+  });
+
+  it("treats regex characters in a short declared value literally and skips blank values", () => {
+    assert.equal(
+      redactSecrets("a+b a.b axb", [], ["a+b", "a.b", " "]),
+      "[REDACTED] [REDACTED] axb",
+    );
+  });
+
+  it("still ignores short values that are only secret-shaped by name", () => {
+    assert.equal(redactSecrets("enabled 1", ["1"]), "enabled 1");
+  });
+});

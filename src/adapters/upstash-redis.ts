@@ -1,4 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
+import { adapterFetch } from "./fetch-timeout.js";
 
 interface UpstashDatabase {
   database_id: string;
@@ -65,7 +66,7 @@ export const upstashRedisAdapter: ServiceAdapter = {
     // Create database
     let db: UpstashDatabase;
     try {
-      const resp = await fetch("https://api.upstash.com/v2/redis/database", {
+      const resp = await adapterFetch("https://api.upstash.com/v2/redis/database", {
         method: "POST",
         headers: {
           Authorization: `Basic ${auth}`,

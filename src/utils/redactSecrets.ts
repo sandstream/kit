@@ -281,13 +281,41 @@ export function secretValuesFromEnv(env: Readonly<Record<string, string | undefi
     .map(([, value]) => value!);
 }
 
-export function redactSecrets(input: string, knownSecrets: Iterable<string> = []): string {
+/**
+ * Redact declared values too short for substring matching (a 4-digit PIN) only where they stand
+ * as a whole token, so `4821` goes but `48219` and `v4821x` stay readable.
+ */
+function redactShortTokens(input: string, values: readonly string[]): string {
+  if (values.length === 0) return input;
+  const alternation = [...values]
+    .sort((a, b) => b.length - a.length)
+    .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  const token = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${alternation})(?![\\p{L}\\p{N}_])`, "gu");
+  return input.replace(token, "[REDACTED]");
+}
+
+/**
+ * `knownSecrets` are values whose names look secret; below 8 characters they are too likely to be
+ * ordinary words to redact. `declaredSecrets` are values of keys declared in `[secrets.keys]`:
+ * redacted at any length, by substring from 8 characters and as an exact token below that.
+ */
+export function redactSecrets(
+  input: string,
+  knownSecrets: Iterable<string> = [],
+  declaredSecrets: Iterable<string> = [],
+): string {
   if (!input) return input;
   let out = input;
-  const literals = [...new Set(knownSecrets)]
+  const declared = [...new Set(declaredSecrets)].filter((value) => value.trim() !== "");
+  const literals = [...new Set([...knownSecrets, ...declared])]
     .filter((value) => value.length >= MIN_KNOWN_SECRET_LENGTH)
     .sort((a, b) => b.length - a.length);
   for (const value of literals) out = out.split(value).join("[REDACTED]");
+  out = redactShortTokens(
+    out,
+    declared.filter((value) => value.length < MIN_KNOWN_SECRET_LENGTH),
+  );
   for (const { re, replacement } of SECRET_PATTERNS) {
     out = out.replace(re, replacement ?? "[REDACTED]");
   }
@@ -299,22 +327,24 @@ export function redactSecrets(input: string, knownSecrets: Iterable<string> = []
 export function createRedactingLineWriter(
   write: (text: string) => void,
   knownSecrets: Iterable<string> = [],
+  declaredSecrets: Iterable<string> = [],
 ): { append: (text: string) => void; flush: () => void } {
   const secrets = [...knownSecrets];
+  const declared = [...declaredSecrets];
   let pending = "";
   return {
     append(text: string): void {
       pending += text;
       let newline = pending.indexOf("\n");
       while (newline !== -1) {
-        write(redactSecrets(pending.slice(0, newline + 1), secrets));
+        write(redactSecrets(pending.slice(0, newline + 1), secrets, declared));
         pending = pending.slice(newline + 1);
         newline = pending.indexOf("\n");
       }
     },
     flush(): void {
       if (!pending) return;
-      write(redactSecrets(pending, secrets));
+      write(redactSecrets(pending, secrets, declared));
       pending = "";
     },
   };

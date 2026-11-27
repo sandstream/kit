@@ -2,6 +2,7 @@
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { runTriage, listTriageTools, type TriageType } from "../triage.js";
+import { recordNpxBins } from "../triage-npm-bins.js";
 import { SKIPPED_COMMITS_LOG } from "../hooks.js";
 import { triageMcpTools, extractToolDefs } from "../mcp-triage.js";
 import { discoverPlugins } from "../agent-sbom.js";
@@ -162,6 +163,8 @@ async function evaluate(
   if (deep && type === "skill") return evaluateDeepSkill(target, sandbox);
   const result = await runTriage(type, target);
   console.log(result.output);
+  if (!(await recordNpxBins(process.cwd(), result.npxBins)))
+    console.error(`${c.dim}(npm-bin record append failed)${c.reset}`);
   if (type === "skill") {
     const { skillInstructionLines } = await import("../triage-skill-instructions.js");
     const lines = skillInstructionLines(target);

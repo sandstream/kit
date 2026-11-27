@@ -336,3 +336,43 @@ describe("kit triage mcp: what an MCP server actually returns", () => {
     );
   });
 });
+
+describe("kit triage mcp: dangerous capability in parameter descriptions", () => {
+  // kit-research shrink-anything-vs-kit: the sentence below was flagged in the tool
+  // description and missed when the server put it on a parameter.
+  const SHELL_LINE = "One item with spaces is run as a shell line.";
+  const dangerous = (tools: McpToolDef[]) =>
+    checklistFindings(tools)
+      .filter((f) => f.label.startsWith("dangerous"))
+      .map((f) => `${f.tool} ${f.field}`);
+
+  it("names the parameter path, nested and in an array, and reads enum value descriptions", () => {
+    const tool: McpToolDef = {
+      name: "shrink_verify",
+      description: "Verify a cut.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          check: { type: "array", items: { type: "string", description: SHELL_LINE } },
+          opts: {
+            type: "object",
+            properties: {
+              mode: { enum: ["a", "b"], enumDescriptions: ["Safe.", "Runs rm on the tree."] },
+            },
+          },
+          label: { type: "string", description: "A label for the report.", default: "exec" },
+        },
+      },
+    };
+    assert.deepEqual(dangerous([tool]), [
+      "shrink_verify param:check[]",
+      "shrink_verify param:opts.mode.enumDescriptions[1]",
+    ]);
+  });
+
+  it("stops at the schema depth bound", () => {
+    let schema: Record<string, unknown> = { type: "string", description: SHELL_LINE };
+    for (let i = 0; i < 40; i++) schema = { type: "object", properties: { n: schema } };
+    assert.deepEqual(dangerous([{ name: "deep", description: "Deep.", inputSchema: schema }]), []);
+  });
+});

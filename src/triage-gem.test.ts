@@ -116,7 +116,7 @@ describe("triageGem", () => {
     const r = await triageGem("/nonexistent", "strutil-core", d);
     assert.equal(r.passed, false);
     assert.match(r.output, /x CRITICAL: cooling: 1\.0\.1 was published 0 days ago/);
-    assert.match(r.output, /TRIAGE HELD: cooling period$/);
+    assert.match(r.output, /Critical issues: 1\nWarnings: \d+\nTRIAGE HELD: cooling period$/);
   });
 
   it("passes an old, much-used release and says what it did not read", async () => {
