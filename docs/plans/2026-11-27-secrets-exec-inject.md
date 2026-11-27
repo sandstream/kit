@@ -34,8 +34,8 @@ in the store, and hand it to one process at a time through a path kit records (`
    - `kit run` gains `--inject` (and `[secrets] inject = true`). It resolves `[secrets.keys]` into the
      child's environment through `generateSecrets`' resolver, with no file. Each run records
      `secrets.read` with `via: "kit run"` (#1126), and the values join #1113's redaction list.
-   - `kit secrets --write-env-file` is accepted as an explicit spelling of today's default.
-   - `kit secrets --no-write-env-file` resolves and reports without writing.
+   - A new `--write-env-file` flag on `kit secrets` is accepted as an explicit spelling of today's default (proposed, not yet a flag).
+   - A new `--no-write-env-file` flag on `kit secrets` resolves and reports without writing (proposed).
    - Docs teach `kit run -- next dev` / `kit run -- vite` / `kit run -- <cmd>` as the recommended
      path.
 2. **Deprecation notice, one release:** when `kit secrets` or `kit run` finds a `.env.local` whose
@@ -48,7 +48,7 @@ in the store, and hand it to one process at a time through a path kit records (`
    - MCP `kit_secrets` follows the CLI, keeps `written` in its JSON, and adds `injected`.
    - The changelog carries a `BREAKING` entry, and `contracts/public-surface.json` is reviewed.
 
-**Fail closed:** if a value cannot be resolved, or its read cannot be recorded, `kit run --inject`
+**Fail closed:** if a value cannot be resolved, or its read cannot be recorded, the proposed `--inject` mode of `kit run`
 does not start the child. It never falls back silently to a stale `.env.local`.
 
 **Windows:** env injection goes through `spawn`'s `env` option, which works the same on Windows.
@@ -61,7 +61,7 @@ test it on `win32`. Today's `.env.local` merge in `run.ts` does not fold.
 > `kit secrets` no longer needs to write `.env.local`. Run your dev server through kit so it gets
 > the values in its environment: `kit run -- next dev`, `kit run -- vite`, `kit run -- npm test`.
 > Next.js and Vite take `process.env` ahead of `.env.local`, so nothing else changes. A tool that
-> only reads the file still works with `kit secrets --write-env-file`. Then delete the old
+> only reads the file still works when `kit secrets` is given `--write-env-file`. Then delete the old
 > `.env.local`: every read of it was invisible to kit and to your vault's audit log.
 
 ## Conflict (why this stops at a draft)
