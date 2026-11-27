@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { closeSync, mkdtempSync, openSync, readSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import { StringDecoder } from "node:string_decoder";
 
 const protocolOptions = ["-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never"];
@@ -268,7 +269,7 @@ function* materializeSnapshots(dir: string, blobs: Iterable<string>): Generator<
 
 function* indexedSnapshots(dir: string, file: string): Generator<string> {
   const temporary = mkdtempSync(join(tmpdir(), "kit-memory-history-"));
-  const index = new DatabaseSync(join(temporary, "history.db"));
+  const index = openSqlite(join(temporary, "history.db"));
   try {
     recordHistory(dir, file, join(temporary, "history.log"), index);
     const rows = index.prepare("SELECT blob FROM snapshots ORDER BY last_seen").iterate();

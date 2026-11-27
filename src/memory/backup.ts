@@ -44,7 +44,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import { getMemoryDbPath, getMemoryDir } from "./db.js";
 import { identityOf, sameIdentity } from "../utils/same-file.js";
 import { assertRecoveryCompatible } from "./pal-check-storage.js";
@@ -185,7 +185,7 @@ function withMemoryDbSnapshot<T>(
   try {
     const snapshot = join(dir, "memory.db");
     writeFileSync(snapshot, "", { flag: "wx", mode: 0o600 });
-    const db = new DatabaseSync(srcPath, { readOnly: true });
+    const db = openSqlite(srcPath, { readOnly: true });
     try {
       // SQLite reads committed WAL frames under one snapshot without migrating
       // or checkpointing the source. Keep auxiliary temporary data in memory.
