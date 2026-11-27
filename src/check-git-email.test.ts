@@ -60,6 +60,10 @@ describe("checkGitEmail", () => {
     assert.match(row?.detail ?? "", /a\*\*\*@example\.com/);
     assert.doesNotMatch(JSON.stringify(row), /alice/);
     assert.ok((row?.suggestion ?? "").includes("@users.noreply.github.com"), row?.suggestion);
+    // The title is read with the status after it ("<name>: warn"), so it must not assert the
+    // opposite of what the row found; the detail says what was found.
+    assert.doesNotMatch(row?.name ?? "", /\bis a no-reply\b/, row?.name);
+    assert.match(row?.detail ?? "", /^not a no-reply address/);
   });
 
   it("passes a GitHub no-reply address", async (t) => {
