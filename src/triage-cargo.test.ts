@@ -103,7 +103,7 @@ describe("triageCargo against a stub crates.io", () => {
     assert.match(r.output, /triaged 0\.1\.0, 1 version\(s\), 12 downloads in total/);
     assert.match(r.output, /x CRITICAL: cooling: 0\.1\.0 was published 1 days ago, limit 14/);
     assert.match(r.output, /! WARNING: new crate: first published 1 day\(s\) ago/);
-    assert.match(r.output, /TRIAGE HELD: cooling period$/);
+    assert.match(r.output, /Critical issues: 1\nWarnings: \d+\nTRIAGE HELD: cooling period$/);
   });
 
   it("only warns when the project turns enforcement off", async () => {

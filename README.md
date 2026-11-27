@@ -97,8 +97,8 @@ The 7.x line starts with one breaking change to the skill fingerprint.
 - **7.5.0: kit gates more, and says what it could not check.** The agent gates refuse commands that
   cannot be undone (a force push, a push to `main`, `git reset --hard`) and decoded or downloaded text
   piped into an interpreter. They also gate `gem install` and `bundle add`, and read installs run
-  through Windows shells. `kit agent-config --user` writes deny rules, the sandbox and gate hooks for
-  every checkout on the machine, `kit hooks gates` wires the gates at session start, `kit panic --stop`
+  through Windows shells. `kit agent-config` writes deny rules and the sandbox, `--user` writes the gate
+  hooks for every checkout on the machine, `kit hooks gates` wires the gates at session start, `kit panic --stop`
   halts every gated agent until `--resume`, and `kit gate-limits` caps time, tool calls and child
   agents per session. `kit check` has new rows: a planted agent hook, browser scripts, an AI dev server
   beyond loopback, `.worktreeinclude` copying `.env`, Docker images against published IOCs, and a

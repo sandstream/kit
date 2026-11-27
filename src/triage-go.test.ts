@@ -102,7 +102,7 @@ describe("triageGo against a stub module proxy", () => {
     assert.equal(r.passed, false);
     assert.match(r.output, /triaged v0\.1\.0 of module example\.com\/fast-anything/);
     assert.match(r.output, /x CRITICAL: cooling: v0\.1\.0 was published 1 days ago, limit 14/);
-    assert.match(r.output, /TRIAGE HELD: cooling period$/);
+    assert.match(r.output, /Critical issues: 1\nWarnings: \d+\nTRIAGE HELD: cooling period$/);
   });
 
   it("finds the module that holds the package, passes an old release and says what rests on what", async () => {

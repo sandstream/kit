@@ -15,6 +15,10 @@ Deterministic, fail-closed, zero-LLM:
 - **PreToolUse gates** — `gate-bash`, `gate-env` block un-triaged installs and plaintext-secret
   writes _before_ they land.
 
+  In Claude Code, `gate-bash` is matched to `Bash|PowerShell`: both tools run shell commands, and
+  on Windows without Git Bash only `PowerShell` exists. A `Bash`-only matcher, which kit wrote before
+  2026-11-27, fails `enforcement gate liveness` in `kit check`; `kit agent-config` widens it in place.
+
   `gate-bash` reads the pending command as a shell would, which means it follows installs into
   `$(…)`, backticks, `sh -c '…'`, the Windows shells (`cmd /c …`, `powershell`/`pwsh -Command …`
   and `-EncodedCommand`), process substitution and here-strings. **Here-document bodies are
@@ -34,6 +38,20 @@ Deterministic, fail-closed, zero-LLM:
   `git commit -n`) on a hook-running subcommand, a `core.hooksPath` override or change, `HUSKY=0`,
   and deleting or disabling a hook file. kit's commit checks run in those hooks, and skipping them
   is a person's decision. Reading `core.hooksPath` is allowed.
+
+  It refuses a nested coding agent started with its approvals off, for the same reason: it skips a
+  control. Covered, each flag from the vendor's own CLI reference (`src/nested-agent-bypass.ts`):
+  `claude --dangerously-skip-permissions` or `--permission-mode bypassPermissions`; `codex
+  --dangerously-bypass-approvals-and-sandbox`, `--yolo`, or `-a never` with `-s
+  danger-full-access`; `gemini --yolo`, `-y` or `--approval-mode yolo`; `qwen --yolo` or
+  `--approval-mode yolo`; Cursor's `agent --force` / `--yolo`; `copilot --allow-all-tools`,
+  `--allow-all`, `--yolo` or `COPILOT_ALLOW_ALL`; `kiro-cli --trust-all-tools`; and `droid
+  --skip-permissions-unsafe`. It reads through `sh -c`, `env`, `sudo`, `xargs`, `npx` / `npm exec`
+  / `pnpm dlx`, `$(…)`, `cmd /c` and PowerShell `-Command` / `-EncodedCommand`. The refusal names
+  the flag and how to run the same agent with approvals on. Not covered: flags no vendor documents
+  (Codex `--full-auto`, Amp's `--dangerously-allow-all`, OpenCode, Augment's `auggie`), Cline's
+  CLI, which approves everything by default when given a prompt, and approval settings in a
+  config file or `-c` override rather than on the command line.
 
   This is a correction, not a design note. Every line of a here-document used to be scanned as its
   own command, and the gate blocked kit's own PR description because the prose contained
@@ -120,6 +138,32 @@ After the local pre-commit checks pass, the commit hook adds a `Kit-Hook-Tree` t
 CI compares the trailer with the committed tree and warns with the affected commit IDs.
 The trailer is advisory. A contributor can construct it, and commits from other tools
 can lack it. The required CI gates still judge the change.
+
+## kit's deny rules, still where it wrote them
+
+`kit agent-config` writes twelve Claude Code deny rules into the project `.claude/settings.json`:
+the credential directories (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`), `.env` and
+`.env.*` with `.env.example` carved back out, the four force-push forms and `git reset --hard`.
+`kit agent-config --user` writes gate hooks only, no deny rule.
+
+The `deny rule liveness` row of `kit check` reads them back:
+
+- It applies where `kit agent-config` wrote the deny rules (its marker
+  `.claude/.kit-deny-rules-installed`, or any kit deny rule in `.claude/settings.json`). It skips
+  elsewhere: a fresh clone, CI, or a checkout whose gates came from `kit setup` or `kit hooks gates`,
+  which write no deny rule.
+- It fails when any of the twelve is missing from `.claude/settings.json`, or when that file does
+  not parse. The detail names each missing rule. `kit agent-config` appends the missing ones and
+  keeps the rest.
+- Claude Code applies deny rules before allow rules, in every scope. An allow rule in
+  `.claude/settings.local.json` (the file a "don't ask again" answer writes) that matches one of
+  kit's deny rules does nothing while that deny rule is there. The row names such an allow in the
+  failure when its deny rule is missing, and in the passing detail otherwise.
+
+"Matches" is decided on one concrete call per deny rule (`git push origin main --force`,
+`~/.ssh/id_ed25519`): an allow of the same tool that would let that call through matches. The row
+does not read user-scope or managed settings, and it does not cover Codex, Cursor, Gemini or other
+harnesses' rule files, where kit writes no deny rule.
 
 ## Verify a Vercel token
 

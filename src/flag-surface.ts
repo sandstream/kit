@@ -62,7 +62,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--yes",
   ],
   adr: ["--emit", "--json", "--min-support", "--root"],
-  "agent-audit": ["--accept-user-surfaces", "--attest", "--json", "--mode", "--no-auto-install"],
+  "agent-audit": ["--accept-rules", "--accept-user-surfaces", "--json"],
   "agent-config": [
     "--apply",
     "--broker-gate",
@@ -656,14 +656,19 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   tools: ["--accept", "--auth", "--json", "--latest"],
   triage: [
+    "--accept-unverified",
     "--checksum",
+    "--cosign-key",
     "--deep",
     "--json",
+    "--minisign-key",
     "--pin",
+    "--repo",
     "--sandbox",
     "--scan-bytes",
     "--team-id",
     "--tools",
+    "--url",
   ],
   upgrade: ["--self"],
   upstream: ["--enforce", "--json"],
@@ -676,6 +681,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
 
 /** Declared flags that accept no value. Missing commands have no value contract. */
 export const COMMAND_BARE_FLAGS: Record<string, readonly string[]> = {
+  "agent-audit": ["--accept-rules", "--accept-user-surfaces", "--json"],
   "create-plugin": ["--skip-install"],
   governance: [],
   guard: [],

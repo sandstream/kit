@@ -18,6 +18,7 @@
 import { runTriage, type TriageType, type TriageResult } from "./triage.js";
 import { appendTriagePass } from "./triage-receipt.js";
 import { warningsField } from "./triage-warnings.js";
+import { recordNpxBins, type NpxBinFact } from "./triage-npm-bins.js";
 
 /** Core language runtimes managed by mise core — the trusted base, not triaged. */
 export const CORE_RUNTIMES = new Set([
@@ -105,12 +106,15 @@ export interface GateVerdict {
 export interface GateDeps {
   runTriage: (type: TriageType, target: string) => Promise<TriageResult>;
   recordPass?: (type: TriageType, target: string, triagedSpec: string) => Promise<void>;
+  /** Write the npm bin-name facts of a triage, pass or not (triage-npm-bins.ts). */
+  recordBins?: (facts: NpxBinFact[]) => Promise<unknown>;
 }
 
 const defaultDeps: GateDeps = {
   runTriage,
   recordPass: (type, target, triagedSpec) =>
     appendTriagePass({ type, target, sandbox: false, triagedSpec }),
+  recordBins: (facts) => recordNpxBins(process.cwd(), facts),
 };
 
 function receiptTarget(type: TriageType, target: string): string {
@@ -167,6 +171,7 @@ export async function gateInstall(
     };
   }
   const res = await deps.runTriage(t.type, t.target);
+  if (res.npxBins?.length) await deps.recordBins?.(res.npxBins);
   if (res.passed) {
     try {
       await deps.recordPass?.(t.type, receiptTarget(t.type, t.target), t.target);
