@@ -17,6 +17,9 @@
  *   - **Shell:** a segment that names the settings file and starts with a command that changes
  *     files (`sed`, `mv`, `rm`, `tee`, …) or redirects into it is refused, because its effect
  *     cannot be computed here.
+ * Permission rules (`gate-self-edit-rules.ts`, kit-research `prismor-always-allowed-rules-vs-kit`):
+ * a write that removes one of kit's deny rules, or adds an allow that matches one, is refused the
+ * same way, and so is a write that adds an allow rule to a Codex `.codex/rules/*.rules` file.
  * Not refused: `kit agent-config`, which a person or the agent runs as a process, and anything
  * outside the gated tools (a script written earlier, another process). That is what the
  * `enforcement evidence` row checks afterwards.
@@ -25,6 +28,12 @@ import { readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
 import { GATE_SUBCOMMANDS, commandIncludesSubcommand } from "./agent-config-hook-liveness.js";
+import {
+  codexRulesWriteRefusal,
+  denyRuleWriteRefusal,
+  isCodexRulesPath,
+} from "./gate-self-edit-rules.js";
+import { heldKitDenyRules, permissionListsOf } from "./kit-deny-rules.js";
 
 const KIT_GATES = GATE_SUBCOMMANDS;
 
@@ -165,24 +174,34 @@ function removalRefusal(wired: string[], next: string | null, name: string): str
   return null;
 }
 
-/** Why a file write is refused, or null: it removes a kit gate, or adds a hook next to one. */
+/**
+ * Why a file write is refused, or null: it removes a kit gate or a kit deny rule, adds a hook next
+ * to a gate, adds an allow that matches a kit deny rule, or adds an allow rule to a Codex rules file.
+ */
 export function gateSettingsWriteRefusal(
   payload: unknown,
   cwd: string,
   home: string,
   read: (path: string) => string | null = readOrNull,
+  codexHome: string | undefined = process.env.CODEX_HOME,
 ): string | null {
   const input = ((payload ?? {}) as { tool_input?: Record<string, unknown> }).tool_input ?? {};
   const filePath = typeof input.file_path === "string" ? input.file_path : "";
   if (!filePath) return null;
   const abs = resolve(cwd, filePath);
+  if (isCodexRulesPath(abs, codexHome)) {
+    const rules = read(abs);
+    return codexRulesWriteRefusal(rules, resultingText(rules ?? "", input), basename(abs));
+  }
   const targets = settingsTargets(cwd, home);
   const target = targets.find((t) => sameTarget(t, abs));
   if (!target) return null;
   const current = read(target);
   const wired = current === null ? [] : (kitGateCommands(current) ?? []);
   const next = resultingText(current ?? "", input);
-  const removal = removalRefusal(wired, next, basename(target));
+  const removal =
+    removalRefusal(wired, next, basename(target)) ??
+    denyRuleWriteRefusal(current, next, basename(target), home);
   if (removal) return removal;
   const gated = wired.length > 0 || targets.some((t) => wiresGate(read(t)));
   if (!gated || next === null) return null;
@@ -217,26 +236,48 @@ function commandWord(segment: string): string {
 
 const SETTINGS_NAME = /\.claude[\\/]settings(?:\.local)?\.json/i;
 
-/** Why a shell command is refused, or null. Only when a settings file here wires a kit gate. */
+/**
+ * A Codex rules file named in a shell command: `.codex/rules/...`, or `rules/<name>.rules` (as in
+ * `$CODEX_HOME/rules/default.rules`). A file reached through `cd` alone is not seen.
+ */
+const CODEX_RULES_NAME = /\.codex[\\/]rules\b|(?:^|[\s"'=\\/])rules[\\/][^\s"'\\/;|&<>]*\.rules\b/i;
+
+/** Whether a segment of a shell command changes a file whose name matches `name`. */
+function segmentWritesInto(command: string, name: RegExp): boolean {
+  for (const segment of command.split(/&&|\|\||[;|\n]/)) {
+    if (!name.test(segment)) continue;
+    const redirect = /\d?>{1,2}\|?\s*("[^"]*"|'[^']*'|\S+)/g;
+    const into = [...segment.matchAll(redirect)].some((m) => name.test(m[1] ?? ""));
+    if (MUTATING.has(commandWord(segment)) || into) return true;
+  }
+  return false;
+}
+
+/** A settings text that wires a kit gate or holds a kit deny rule. */
+function guarded(text: string | null): boolean {
+  if (text === null) return false;
+  if ((kitGateCommands(text) ?? []).length > 0) return true;
+  return heldKitDenyRules(permissionListsOf(text)?.deny ?? []).length > 0;
+}
+
+/**
+ * Why a shell command is refused, or null. A write to a settings file is refused where one of them
+ * wires a kit gate or holds a kit deny rule; a write to a Codex rules file always is, because its
+ * effect cannot be computed and an allow rule there runs commands outside Codex's sandbox.
+ */
 export function gateSettingsCommandRefusal(
   command: string,
   cwd: string,
   home: string,
   read: (path: string) => string | null = readOrNull,
 ): string | null {
+  if (CODEX_RULES_NAME.test(command) && segmentWritesInto(command, CODEX_RULES_NAME)) {
+    return "the command changes a Codex rules file, where an allow rule runs commands without a prompt; a person edits it, not the agent";
+  }
   if (!SETTINGS_NAME.test(command)) return null;
-  const wired = settingsTargets(cwd, home).some((t) => {
-    const text = read(t);
-    return text !== null && (kitGateCommands(text) ?? []).length > 0;
-  });
-  if (!wired) return null;
-  for (const segment of command.split(/&&|\|\||[;|\n]/)) {
-    if (!SETTINGS_NAME.test(segment)) continue;
-    const redirect = /\d?>{1,2}\|?\s*("[^"]*"|'[^']*'|\S+)/g;
-    const into = [...segment.matchAll(redirect)].some((m) => SETTINGS_NAME.test(m[1] ?? ""));
-    if (MUTATING.has(commandWord(segment)) || into) {
-      return "the command changes a settings file that holds kit's gate hooks; run `kit agent-config` to change them";
-    }
+  if (!settingsTargets(cwd, home).some((t) => guarded(read(t)))) return null;
+  if (segmentWritesInto(command, SETTINGS_NAME)) {
+    return "the command changes a settings file that holds kit's gate hooks or deny rules; run `kit agent-config` to change them";
   }
   return null;
 }
