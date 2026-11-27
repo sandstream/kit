@@ -14,6 +14,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
 import { gateSettingsFile, preToolUseGroups } from "./gate-settings.js";
+import { GATE_BASH_MATCHER, widenGateBashMatchers } from "./gate-bash-matcher.js";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
 import { portableGateCommand, portableGatesMode } from "./portable-gate.js";
@@ -608,8 +609,9 @@ function upsertCodexKitProfileBlock(existing: string): {
 }
 
 /**
- * Codex has no Claude-style command allowlist surface. The low-friction,
- * current Codex-native equivalent is a personal profile selected explicitly by
+ * Codex's command allowlist is `prefix_rule(..., decision="allow")` in its rules
+ * files, which kit does not write. The low-friction Codex-native surface kit uses
+ * is a personal profile selected explicitly by
  * `codex --profile kit`: workspace-write sandbox, on-request approvals.
  *
  * This writes under CODEX_HOME / ~/.codex, never into repo config, because
@@ -801,6 +803,7 @@ function refreshSettingsGateCommand(
   groups: SettingsHookGroup[],
   sub: string,
   desired: string,
+  widen?: (groups: SettingsHookGroup[]) => boolean, // also repair a stale matcher
 ): { found: boolean; updated: boolean } {
   let found = false;
   let updated = false;
@@ -816,6 +819,7 @@ function refreshSettingsGateCommand(
       }
     }
   }
+  if (found && widen?.(groups)) updated = true;
   return { found, updated };
 }
 
@@ -919,7 +923,8 @@ export function gateLiveness(
  * agent auto-mode (the rules-file block only *advises*; an agent can otherwise run
  * `npm install evil` directly and its postinstall fires before any commit). Opt-in
  * and idempotent (keyed on a hook command ending in `gate-bash`); preserves any
- * other hooks. Only wired for Claude Code today (the settings schema we know).
+ * other hooks. Only wired for Claude Code today (the settings schema we know). Matcher and its
+ * repair of an older `Bash`-only entry: src/gate-bash-matcher.ts.
  */
 export async function installInstallGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
   const file = await gateSettingsFile(cwd);
@@ -943,7 +948,7 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
   const desired = settingsGateInvocation("gate-bash", cwd);
-  const existing = refreshSettingsGateCommand(pre, "gate-bash", desired);
+  const existing = refreshSettingsGateCommand(pre, "gate-bash", desired, widenGateBashMatchers);
   if (existing.found) {
     markGatesInstalled(cwd); // gate present → record it for liveness (idempotent)
     if (existing.updated) {
@@ -957,7 +962,7 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
     return { file, action: "unchanged", detail: "install-gate already wired" };
   }
 
-  pre.push({ matcher: "Bash", hooks: [gateHook(desired)] });
+  pre.push({ matcher: GATE_BASH_MATCHER, hooks: [gateHook(desired)] });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");

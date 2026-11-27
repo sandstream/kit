@@ -43,6 +43,23 @@ export const KIT_DENY_RULES: string[] = [
   ...GIT_DENY_RULES,
 ];
 
+/**
+ * Machine-local marker that `kit agent-config` wrote the deny rules here (gitignored `.claude/`,
+ * beside the gate marker). The `deny rule liveness` row keys off it, so a checkout whose gates came
+ * from `kit setup` or `kit hooks gates`, which write no deny rule, is not failed for lacking them.
+ */
+export function denyRulesMarkerPath(cwd: string = process.cwd()): string {
+  return resolve(cwd, ".claude", ".kit-deny-rules-installed");
+}
+
+async function markDenyRules(cwd: string): Promise<void> {
+  try {
+    await writeFile(denyRulesMarkerPath(cwd), new Date().toISOString() + "\n", "utf-8");
+  } catch {
+    /* advisory: a failed marker never fails the install */
+  }
+}
+
 export type SandboxState =
   "enabled" | "already-enabled" | "user-disabled" | "skipped-win32" | "not-written";
 
@@ -139,10 +156,14 @@ export async function installStrictSettings(
     merged.moved ||
     sandbox.added.length > 0 ||
     sandbox.state === "enabled";
-  if (!changed) return { ...result, sandbox: sandbox.state, action: "unchanged" };
+  if (!changed) {
+    await markDenyRules(cwd);
+    return { ...result, sandbox: sandbox.state, action: "unchanged" };
+  }
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    await markDenyRules(cwd);
     return { ...result, sandbox: sandbox.state, action: existed ? "updated" : "created" };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

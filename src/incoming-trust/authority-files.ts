@@ -12,7 +12,8 @@ import {
 } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import {
   privateDirIsControlled,
   privateFileIsControlled,
@@ -201,7 +202,7 @@ export function withIncomingDatabase<T>(
   if (entry(`${path}-wal`) || entry(`${path}-shm`)) fail();
   const file = databaseFile(path, create);
   if (!file) return null;
-  const db = new DatabaseSync(path, { readOnly: !write });
+  const db = openSqlite(path, { readOnly: !write });
   let transaction = false;
   try {
     assertLocations(path, file.info, dir, parent);

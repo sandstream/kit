@@ -10,6 +10,10 @@
  * block: `kit agent-audit` warned, `kit check` printed "agent-audit: no issues" (kit-research
  * `dragos-canary-prompts-vs-kit`). Both rows are part of this view now.
  *
+ * The agent rule ledger's findings (new allow rules, removed deny or ask rules, unparsed rules)
+ * are here too: removing kit's own deny rules changed no row of `kit check` (kit-research
+ * `prismor-always-allowed-rules-vs-kit`).
+ *
  * `instruction-file secrets` sits next to agent-audit: the files every harness loads as
  * instructions (AGENTS.md, CLAUDE.md, .cursorrules, GEMINI.md, Copilot's), read for keys.
  */
@@ -33,6 +37,7 @@ export async function checkAgentConfig(
   const { isReadOnlyMode } = await import("./read-only-mode.js");
   const { runAgentPreload } = await import("./agent-preload.js");
   const { runAgentEndpoint } = await import("./agent-endpoint.js");
+  const { runRuleLedger } = await import("./agent-rule-ledger.js");
   return [
     ...runAgentAudit(root),
     ...checkInstructionSecrets(root),
@@ -45,5 +50,6 @@ export async function checkAgentConfig(
     ...checkPlaintextCredentials(home),
     ...runAgentPreload(root, home, env),
     ...runAgentEndpoint(root, home, env),
+    ...runRuleLedger(root, home, env, { record: !isReadOnlyMode() }).results,
   ];
 }
