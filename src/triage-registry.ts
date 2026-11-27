@@ -129,15 +129,19 @@ export async function releaseCooling(
   });
 }
 
-/** The report and its verdict. A cooling hold is its own verdict, not a failure: the release may pass once it is old enough. */
+/**
+ * The report and its verdict. `Critical issues` counts every CRITICAL printed, the cooling hold
+ * included, as npm and pip do (`withCoolingLines`). The verdict still keeps the hold apart: a hold
+ * alone is `TRIAGE HELD`, not `TRIAGE FAILED`, because the release may pass once it is old enough.
+ */
 export function releaseVerdict(lines: string[], cooling: CoolingResult): ReleaseTriageResult {
-  const critical = lines.filter(
-    (l) => l.includes(" x CRITICAL:") && !cooling.lines.includes(l),
-  ).length;
+  const isCritical = (l: string) => l.includes(" x CRITICAL:");
+  const critical = lines.filter(isCritical).length;
+  const failing = lines.filter((l) => isCritical(l) && !cooling.lines.includes(l)).length;
   const warnings = lines.filter((l) => l.includes(" ! WARNING:")).length;
-  const passed = critical === 0 && !cooling.held;
+  const passed = failing === 0 && !cooling.held;
   const verdict =
-    critical > 0 ? "TRIAGE FAILED" : cooling.held ? "TRIAGE HELD: cooling period" : "TRIAGE PASSED";
+    failing > 0 ? "TRIAGE FAILED" : cooling.held ? "TRIAGE HELD: cooling period" : "TRIAGE PASSED";
   const summary = `Critical issues: ${critical}\nWarnings: ${warnings}\n${verdict}`;
   return { passed, output: `${lines.join("\n")}\n\n${summary}` };
 }
