@@ -36,4 +36,5 @@
   entry, leaves the look-alike as it is and names it. The Codex steps show the exact command to
   trust. "Exactly" means one of the strings kit writes on this machine, not a path that looks like
   kit: `/tmp/kit gate-bash` or `./node_modules/x/cli.js gate-bash` are look-alikes. When kit lifts
-  its Droid handler out of an old wrapper, a foreign handler in the same group stays where it was.
+  its Droid handler out of an old wrapper, a foreign handler in the same group stays where it was. kit's Droid handler counts as wired only under the
+  `Execute` matcher; a kit line planted under another matcher never fires on a shell call.
