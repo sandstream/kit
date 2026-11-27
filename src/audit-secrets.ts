@@ -15,6 +15,7 @@ import { resolve } from "node:path";
 import type { AuditEvent } from "./audit.js";
 import { SECRET_WRITE_OPS } from "./secrets-write-record.js";
 import { INCIDENT_AUDIT_OP } from "./secrets-incident.js";
+import { SECRET_READ_OP } from "./secrets-read-record.js";
 
 export interface SecretAccessEntry {
   timestamp: string;
@@ -31,9 +32,13 @@ export interface SecretAuditReport {
 
 const AUDIT_FILE = ".kit-audit.jsonl";
 
-/** The writes are recorded by `src/secrets-write-record.ts`, under these same names. */
+/**
+ * The writes are recorded by `src/secrets-write-record.ts` and the reads by
+ * `src/secrets-read-record.ts`, under these same names.
+ */
 const SECRET_OPERATIONS = new Set<string>([
   "secrets.generate",
+  SECRET_READ_OP,
   ...Object.values(SECRET_WRITE_OPS),
   INCIDENT_AUDIT_OP,
   "services.login",
@@ -132,6 +137,8 @@ function summarizeEvent(e: AuditEvent): string {
   if (typeof meta.store === "string") parts.push(`store=${meta.store}`);
   if (typeof meta.target === "string") parts.push(`target=${meta.target}`);
   if (typeof meta.source === "string") parts.push(`source=${meta.source}`);
+  if (typeof meta.via === "string") parts.push(`via=${meta.via}`);
+  if (typeof meta.harness === "string") parts.push(`harness=${meta.harness}`);
   if (e.error) parts.push(`error=${e.error.split("\n")[0]}`);
   if (e.environment) parts.push(`env=${e.environment}`);
   return parts.join("  ");

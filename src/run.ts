@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { parse as parseToml } from "smol-toml";
 import { parseEnvFile } from "./env-inspect.js";
+import { recordSecretRead } from "./secrets-read-record.js";
 import {
   createRedactingLineWriter,
   redactSecrets,
@@ -27,6 +28,8 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Cap captured stdout+stderr; kill once exceeded (default 10 MiB). 0 disables. */
   maxOutputBytes?: number;
+  /** `[governance.agent]`, stamped on the record of the `.env.local` names handed to the child. */
+  agent?: { id?: string; name?: string };
 }
 
 export interface RunResult {
@@ -164,13 +167,16 @@ async function loadCommandEnvironment(
   cwd: string,
   inheritEnv: boolean,
   overrides: Record<string, string>,
-): Promise<{ env: Record<string, string>; knownSecrets: KnownSecrets }> {
+): Promise<{ env: Record<string, string>; knownSecrets: KnownSecrets; fromEnvLocal: string[] }> {
   const env: Record<string, string> = inheritEnv
     ? { ...(process.env as Record<string, string>) }
     : {};
+  let fromEnvLocal: string[] = [];
   try {
     const content = await readFile(resolve(cwd, ".env.local"), "utf-8");
-    Object.assign(env, parseEnvFile(content));
+    const parsed = parseEnvFile(content);
+    fromEnvLocal = Object.keys(parsed).filter((name) => !Object.hasOwn(overrides, name));
+    Object.assign(env, parsed);
   } catch {
     // .env.local is optional.
   }
@@ -179,7 +185,7 @@ async function loadCommandEnvironment(
     known: secretValuesFromEnv(env),
     declared: await declaredSecretValues(cwd, env),
   };
-  return { env, knownSecrets };
+  return { env, knownSecrets, fromEnvLocal };
 }
 
 /** Redact raw arguments before a caller adds display quotes or JSON escapes. */
@@ -449,8 +455,17 @@ export async function executeCommand(opts: RunOptions): Promise<RunResult> {
     maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
   } = opts;
   if (commandArgs.length === 0) throw new Error("No command provided");
-  const { env, knownSecrets } = await loadCommandEnvironment(cwd, inheritEnv, envOverrides);
+  const { env, knownSecrets, fromEnvLocal } = await loadCommandEnvironment(
+    cwd,
+    inheritEnv,
+    envOverrides,
+  );
   if (parentSignal) throw new Error(`Cannot start a command during ${parentSignal} cleanup`);
+  // The names kit hands the child from .env.local, recorded before the spawn; unrecordable → throw.
+  await recordSecretRead(
+    { keys: fromEnvLocal, storeOf: () => ".env.local", via: "kit run" },
+    { cwd, agent: opts.agent },
+  );
   return new CommandProcess(
     { commandArgs, cwd, streamOutput, stdin, timeoutMs, maxOutputBytes },
     env,

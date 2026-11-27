@@ -1,7 +1,9 @@
 import { readFile, writeFile, access } from "node:fs/promises";
 import { devNull } from "node:os";
-import type { SecretsConfig } from "./config.js";
+import { dirname, resolve } from "node:path";
+import type { InfisicalConfig, SecretKeyConfig, SecretsConfig } from "./config.js";
 import { resolveViaBackend, resetInfisicalCache } from "./secret-backends.js";
+import { recordSecretRead, type SecretReader } from "./secrets-read-record.js";
 import { secureFile } from "./utils/secure-perms.js";
 
 export interface SecretResolveResult {
@@ -13,6 +15,41 @@ export interface SecretResolveResult {
    *  is a display placeholder, not a real secret, so it's never written to
    *  .env.local. Lets the writer skip these without sniffing the value string. */
   managed?: boolean;
+}
+
+export interface WriteOpts {
+  vault?: string;
+  project?: string;
+  region?: string;
+  vaultPath?: string;
+}
+
+export interface WriteResult {
+  ok: boolean;
+  ref?: string;
+  detail: string;
+}
+
+export interface SecretBackend {
+  /** Read a secret value for `name` using its `config`. Never throws — failures
+   *  come back as `{ resolved: false, detail }`. */
+  resolve(
+    name: string,
+    config: SecretKeyConfig,
+    infisicalConfig?: InfisicalConfig,
+    cwd?: string,
+  ): Promise<SecretResolveResult>;
+  /** Write a secret. Absent ⇒ the backend is read-only (migration unsupported).
+   *  May throw; callers wrap it so the error is redacted before surfacing.
+   *
+   *  Value handling: where the CLI supports it, the value is fed via stdin so it
+   *  never lands in argv / the process table (vault `kv put -`, aws/gcp
+   *  `file:///dev/stdin` / `--data-file=-`). The 1Password, Infisical, Doppler and
+   *  Azure CLIs only accept the value as a `key=value` / `--value` argv token for
+   *  these operations, so it is briefly visible in `ps` there — an inherent CLI
+   *  limitation. The error path is covered regardless: writeSecretToBackend redacts
+   *  the held plaintext by exact substring before any failure message is surfaced. */
+  write?(key: string, value: string, opts: WriteOpts): Promise<WriteResult>;
 }
 
 /** Interpolate {{KEY}} placeholders in a template string with resolved values. */
@@ -31,9 +68,29 @@ async function loadTemplate(templatePath: string): Promise<string | null> {
   }
 }
 
+/**
+ * Record the read of every declared key (`src/secrets-read-record.ts`) in `read.cwd`'s chain, or
+ * else the output file's directory, then reset the Infisical bulk-fetch cache for this call. Throws,
+ * before anything is resolved, when the read cannot be recorded.
+ */
+async function beginRead(
+  keys: Record<string, SecretKeyConfig>,
+  outputPath: string,
+  read: Partial<SecretReader> = {},
+): Promise<void> {
+  const cwd = read.cwd ?? (outputPath === devNull ? process.cwd() : dirname(resolve(outputPath)));
+  const storeOf = (name: string) => keys[name]!.source;
+  await recordSecretRead(
+    { keys: Object.keys(keys), storeOf, via: read.via ?? "kit secrets" },
+    { ...read, cwd },
+  );
+  resetInfisicalCache();
+}
+
 export async function generateSecrets(
   secrets: SecretsConfig,
   outputPath: string = ".env.local",
+  read?: Partial<SecretReader>,
 ): Promise<{
   results: SecretResolveResult[];
   written: boolean;
@@ -41,13 +98,12 @@ export async function generateSecrets(
   skipped?: "nothing-resolved";
 }> {
   const results: SecretResolveResult[] = [];
-
   if (!secrets.keys) {
     return { results, written: false, fromTemplate: false };
   }
 
-  // Reset the Infisical bulk-fetch cache for each generateSecrets call.
-  resetInfisicalCache();
+  // Record the read (or throw), then reset the Infisical bulk-fetch cache for this call.
+  await beginRead(secrets.keys, outputPath, read);
 
   for (const [name, config] of Object.entries(secrets.keys)) {
     results.push(await resolveViaBackend(name, config, secrets.infisical));

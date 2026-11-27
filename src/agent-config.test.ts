@@ -830,15 +830,17 @@ describe("installInstallGateCodex", () => {
       const dir = mkdtempSync(join(tmpdir(), "kit-codexgate-stale-"));
       try {
         mkdirSync(join(dir, ".codex"), { recursive: true });
+        // The HOME-baked wrapper path an older kit wrote on this machine: kit's own, so refreshed.
+        const stale = `${join(home, ".kit", "bin", "kit")} gate-bash`;
         writeFileSync(
           join(dir, ".codex", "config.toml"),
-          'model = "gpt-5"\n\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = \'/root/.kit/bin/kit gate-bash\'\n',
+          `model = "gpt-5"\n\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${stale}'\n`,
         );
         const r = await installInstallGateCodex(dir);
         assert.equal(r.action, "updated");
         const txt = readFileSync(join(dir, ".codex", "config.toml"), "utf-8");
         assert.ok(txt.includes(`command = '${kitGateInvocation()}'`));
-        assert.ok(!txt.includes("/root/.kit/bin/kit"));
+        assert.ok(!txt.includes(stale));
       } finally {
         rmTemp(dir);
       }
@@ -929,43 +931,25 @@ describe("installInstallGateDroid", () => {
       const r1 = await installInstallGateDroid(dir);
       assert.equal(r1.action, "created");
       const s = JSON.parse(readFileSync(join(dir, ".factory", "hooks.json"), "utf-8"));
-      const groups = s.hooks.PreToolUse;
+      // A standalone hooks.json is keyed directly by event name, no `hooks` wrapper
+      // (docs.factory.com/reference/hooks-reference.md, "Structure").
+      const groups = s.PreToolUse;
       assert.ok(Array.isArray(groups) && groups.length === 1);
       // the ONE adaptation vs Claude/Codex: matcher is "Execute", not "Bash"
       assert.equal(groups[0].matcher, "Execute");
       assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+      assert.equal(groups[0].hooks[0].onFailure, "block");
 
       const r2 = await installInstallGateDroid(dir);
       assert.equal(r2.action, "unchanged");
       const s2 = JSON.parse(readFileSync(join(dir, ".factory", "hooks.json"), "utf-8"));
-      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+      assert.equal(s2.PreToolUse.length, 1, "no duplicate group on re-run");
     } finally {
       rmTemp(dir);
     }
   });
 
-  it("treats a legacy .factory/hooks/hooks.json gate as already-wired", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-droidgate-legacy-"));
-    try {
-      mkdirSync(join(dir, ".factory", "hooks"), { recursive: true });
-      writeFileSync(
-        join(dir, ".factory", "hooks", "hooks.json"),
-        JSON.stringify({
-          hooks: {
-            PreToolUse: [
-              { matcher: "Execute", hooks: [{ type: "command", command: "/x/cli.js gate-bash" }] },
-            ],
-          },
-        }),
-      );
-      const r = await installInstallGateDroid(dir);
-      assert.equal(r.action, "unchanged");
-      // must NOT create a second scope-root file
-      assert.equal(existsSync(join(dir, ".factory", "hooks.json")), false);
-    } finally {
-      rmTemp(dir);
-    }
-  });
+  // The legacy .factory/hooks/hooks.json case: src/agent-gate-wiring.test.ts (row 3).
 
   it("skips when no Factory Droid project is present (no false-green)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-droidgate2-"));
@@ -1162,7 +1146,8 @@ describe("installInstallGateCursor", () => {
       assert.equal(r1.action, "created");
       const c = JSON.parse(readFileSync(join(dir, ".cursor", "hooks.json"), "utf-8"));
       assert.equal(c.version, 1);
-      assert.ok(c.hooks.beforeShellExecution[0].command.endsWith("gate-bash"));
+      assert.ok(c.hooks.beforeShellExecution[0].command.endsWith("gate-bash --format cursor"));
+      assert.equal(c.hooks.beforeShellExecution[0].failClosed, true);
       assert.equal((await installInstallGateCursor(dir)).action, "unchanged");
     } finally {
       rmTemp(dir);

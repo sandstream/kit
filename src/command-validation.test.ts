@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { createCliContractFixture } from "./cli-contract.test-support.js";
 
@@ -61,7 +61,15 @@ it("keeps the supported secrets sync preview functional without writing values",
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Would sync/);
   assert.ok(!result.stdout.includes("public-fixture-value"));
-  assert.deepEqual(snapshot(), before);
+  // The preview still reads the values, so the one change is the audit record of that read
+  // (key names only, src/secrets-read-record.ts).
+  const isAuditLog = (path: string) => basename(path).startsWith(".kit-audit.jsonl");
+  const after = snapshot();
+  const log = readFileSync(join(cwd, ".kit-audit.jsonl"), "utf-8");
+  assert.match(log, /"operation":"secrets.read".*"name":"KIT_SYNTHETIC_VALUE"/);
+  assert.ok(!log.includes("public-fixture-value"));
+  for (const path of Object.keys(after)) if (isAuditLog(path)) delete after[path];
+  assert.deepEqual(after, before);
 });
 
 it("passes a child command's dry-run argument through kit run", () => {

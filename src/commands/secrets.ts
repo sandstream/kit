@@ -51,7 +51,8 @@ import { generateSecrets } from "../secrets.js";
 import { syncSecrets } from "../secrets-sync.js";
 import { withGovernance } from "../governance-middleware.js";
 import { vaultMeta } from "../vault-meta.js";
-import { vaultCliInstalled, resolveViaBackend } from "../secret-backends.js";
+import { vaultCliInstalled } from "../secret-backends.js";
+import { readBy, resolveRecorded } from "../secrets-read-record.js";
 import { writeOneCliPlaceholder } from "./onecli-env-file.js";
 import { cmdSecretsInventory } from "../secrets-incident-cli.js";
 
@@ -78,7 +79,7 @@ async function cmdSecretsValidate(): Promise<boolean> {
   ): Promise<boolean> => {
     if (source === "env") return Boolean(process.env[key]);
     if (source === "config") return Boolean(cfg.value);
-    const r = await resolveViaBackend(key, cfg, config.secrets?.infisical);
+    const r = await resolveRecorded(key, cfg, readBy("kit secrets validate", config));
     return r.resolved && Boolean(r.value);
   };
 
@@ -191,6 +192,8 @@ export async function cmdSecrets(): Promise<boolean> {
     `${c.bold}${c.cyan}Generating secrets...${c.reset}  ${c.dim}(env=${activeEnv})${c.reset}\n`,
   );
 
+  const generate = () =>
+    generateSecrets(secretsConfig, ".env.local", readBy("kit secrets", config));
   return await withGovernance(
     config,
     {
@@ -214,7 +217,7 @@ export async function cmdSecrets(): Promise<boolean> {
       },
     },
     async () => {
-      const { results, written, fromTemplate, skipped } = await generateSecrets(secretsConfig);
+      const { results, written, fromTemplate, skipped } = await generate();
       let allOk = true;
 
       for (const r of results) {
@@ -463,7 +466,7 @@ async function readSecretValueFromVault(
       keys: { [keyName]: config.secrets.keys![keyName] },
     };
     void writeFileSync; // keep import for future expansion
-    await generateSecrets(isolated, tmpEnv);
+    await generateSecrets(isolated, tmpEnv, readBy("kit secrets onecli", config, process.cwd()));
     secureFile(tmpEnv); // materialized plaintext secret → owner-only
     const content = readFileSync(tmpEnv, "utf-8");
     // Escape the key before interpolating into the regex — every other regex
