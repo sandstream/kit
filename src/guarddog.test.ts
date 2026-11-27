@@ -223,3 +223,42 @@ it("retains real findings on complete, malformed-sibling, failed, and partial sc
     assert.equal(r.evidenceStatus, "partial");
   }
 });
+
+it("counts threat and metadata findings, not GuardDog 3 capability inventory", () => {
+  const hit = (location: string) => [{ location, code: "", message: "Example match" }];
+  const inventory = {
+    "capability-network-outbound": hit("package/a.js:1"),
+    "capability-process-spawn": hit("package/b.js:2"),
+    "threat-network-exfiltration": {},
+  };
+  const inventoryResult = { ...clean, issues: 2, results: inventory };
+  const capabilityOnly = entry("a", "1.0.0", inventoryResult);
+  const quiet = classifyGuardDog(run(JSON.stringify([capabilityOnly, entry("b", "2.1.0")])), npm);
+  assert.equal(quiet.status, "pass");
+  assert.equal(quiet.evidenceStatus, "complete-empty");
+
+  const threats = {
+    ...inventory,
+    "threat-runtime-obfuscation": hit("package/c.js:3"),
+    typosquatting: "Package name is similar to a popular package",
+  };
+  const mixed = entry("a", "1.0.0", { ...clean, issues: 4, results: threats });
+  const found = classifyGuardDog(run(JSON.stringify([mixed, entry("b", "2.1.0")])), npm);
+  assert.equal(found.status, "fail");
+  assert.equal(found.evidenceStatus, "complete");
+  assert.match(found.detail, /^2 malware indicator\(s\)/);
+
+  // A rule error still leaves coverage unverified; capability inventory does not turn it into a hit.
+  const errored = { ...inventoryResult, errors: { metadata_mismatch: "failed to run rule" } };
+  const partial = classifyGuardDog(
+    run(JSON.stringify([entry("a", "1.0.0", errored), entry("b", "2.1.0")])),
+    npm,
+  );
+  assert.equal(partial.status, "warn");
+  assert.equal(partial.evidenceStatus, "partial");
+  assert.equal(partial.scanIncomplete, true);
+  // Results kit cannot read keep GuardDog's own count.
+  const unreadable = entry("a", "1.0.0", { issues: 2, errors: {}, results: { x: 5 } });
+  const kept = classifyGuardDog(run(JSON.stringify([unreadable, entry("b", "2.1.0")])), npm);
+  assert.match(kept.detail, /^2 malware indicator\(s\)/);
+});

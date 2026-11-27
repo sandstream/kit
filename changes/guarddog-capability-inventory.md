@@ -1,0 +1,3 @@
+### Fixed
+
+- **GuardDog no longer counts its own capability inventory as malware indicators.** GuardDog 3 reports `capability-*` rules (code that can spawn a process, open a connection or read a file) in its `issues` total, so a scan of kit's own twelve direct dependencies reported 54 indicators: 50 were capability hits such as `Promise.resolve(` and `exec(` in type declarations. GuardDog's risk engine forms a risk only from a threat rule. Kit now counts threat and metadata rule findings, and keeps GuardDog's total when it cannot read the per-rule results. An incomplete scan still leaves coverage unverified and fails the strict gate.

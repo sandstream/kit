@@ -224,6 +224,9 @@ GuardDog writes an array of dependency results to stdout.
 A successful empty array verifies an empty manifest within the selected scope.
 A missing target or report, malformed output, package omissions and scanner errors leave coverage unverified.
 Kit retains reported malware indicators and the strict security gate fails when coverage is unverified.
+GuardDog 3 `capability-*` rules list what package code can do, such as spawning processes or opening connections.
+Kit does not count them as malware indicators, because GuardDog forms a risk only from a threat rule.
+Threat and metadata rule findings count. A report kit cannot read keeps GuardDog's own `issues` count.
 The check runs GuardDog each time. The report has no artifact digest or ruleset identity for reuse.
 Kit ignores legacy GuardDog verdict files.
 
