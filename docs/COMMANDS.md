@@ -574,7 +574,7 @@ The selected environment overlay applies to configuration, including governance.
 Kit validates supported sections in every declared overlay, then validates the effective configuration.
 Supported overlay sections are `tools`, `services`, `secrets`, `skills`, and `governance`.
 Other overlay sections remain stored but do not apply.
-The child receives the parent environment plus values from `.env.local`, when that file exists.
+The child receives the parent environment plus values from `.env.local`, when that file exists; their key names are first recorded as a `secrets.read` event ([data flow](DATA_FLOW.md#secret-reads-secretsread)).
 This command does not fetch vault values or generate environment files.
 
 Enabled governance checks permissions, revocation, budget, and configured secret expiration before execution.

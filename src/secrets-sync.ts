@@ -8,6 +8,7 @@ import { execPinned } from "./vendor-cli-pin.js";
 import { secureFile } from "./utils/secure-perms.js";
 import { safeErrorMessage } from "./secrets-migrate.js";
 import { recordSecretWrite, SECRET_WRITE_OPS } from "./secrets-write-record.js";
+import type { SecretReader } from "./secrets-read-record.js";
 
 export interface SyncResult {
   target: string;
@@ -59,6 +60,11 @@ export function failedKeyNames(failed: string[]): string[] {
     .filter((k): k is string => k !== undefined);
 }
 
+/** The read `kit secrets sync` records: the project's chain, since the output is discarded. */
+function syncReader(cwd: string): SecretReader {
+  return { via: "kit secrets sync", cwd };
+}
+
 async function syncSecretsTo(
   secrets: SecretsConfig,
   options: SecretsSyncOptions,
@@ -68,7 +74,7 @@ async function syncSecretsTo(
   // Resolve all secrets using the existing generate logic (reads from stores).
   // Discard the written output to the platform null device (os.devNull): a literal
   // "/dev/null" becomes "D:\dev\null" on Windows → ENOENT (#43).
-  const { results } = await generateSecrets(secrets, devNull);
+  const { results } = await generateSecrets(secrets, devNull, syncReader(projectPath));
 
   const resolved: Record<string, string> = {};
   for (const r of results) {

@@ -4,6 +4,7 @@ import type { SecretsConfig, SecretKeyConfig, InfisicalConfig } from "./config.j
 import { check1PasswordStatus } from "./onepassword.js";
 import { checkInfisicalStatus } from "./infisical-status.js";
 import { resolveViaBackend } from "./secret-backends.js";
+import { recordSecretRead } from "./secrets-read-record.js";
 import { execPinned } from "./vendor-cli-pin.js";
 
 export interface SecretStatus {
@@ -381,6 +382,22 @@ async function templateIsPresent(cwd: string, template: string): Promise<boolean
   }
 }
 
+/**
+ * The availability probes below fetch each vault-backed value (`op read`, `get-secret-value`, …)
+ * to see that it resolves, so they are reads: record the names first. `env` and `config` keys are
+ * looked up in this process, not fetched from a store.
+ */
+async function recordVaultProbes(
+  keys: Record<string, SecretKeyConfig>,
+  cwd: string,
+): Promise<void> {
+  const fetched = Object.keys(keys).filter((n) => !["env", "config"].includes(keys[n]!.source));
+  await recordSecretRead(
+    { keys: fetched, storeOf: (name) => keys[name]!.source, via: "kit check" },
+    { cwd },
+  );
+}
+
 export async function checkSecrets(
   secrets: SecretsConfig,
   cwd = process.cwd(),
@@ -392,6 +409,7 @@ export async function checkSecrets(
   const opCache: OnePasswordCache = { status: null };
 
   if (secrets.keys) {
+    await recordVaultProbes(secrets.keys, cwd);
     for (const [name, config] of Object.entries(secrets.keys)) {
       let result: Omit<SecretStatus, "name" | "source">;
 

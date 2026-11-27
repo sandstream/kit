@@ -56,7 +56,7 @@ export async function executeGovernedCommand(
     // Explicit URLs and curl/wget host arguments are visible. Other effects remain unmediated.
     egressTargets: extractHostsFromArgs(opts.commandArgs),
   };
-  const operation = () => executeCommand({ ...opts, cwd });
+  const operation = () => executeCommand({ ...opts, cwd, agent: config.governance?.agent });
   const governanceOptions = { cwd, assessResult: assessRunResult };
   if (!opts.interactiveApproval) {
     return runGovernedBrokered(config, context, operation, governanceOptions);
