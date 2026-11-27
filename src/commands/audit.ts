@@ -60,6 +60,14 @@ async function cmdAuditSecretsTarget(target: string, args: string[]): Promise<bo
   return true;
 }
 
+/** `--since <ISO>` asks one question of the verified chain (audit-secrets-query.ts); else the view. */
+async function cmdAuditSecretsOrQuery(): Promise<boolean> {
+  const args = process.argv.slice(4); // after "audit secrets"
+  if (!args.some((a) => a === "--since" || a.startsWith("--since="))) return cmdAuditSecrets();
+  const { cmdAuditSecretsQuery } = await import("./audit-secrets-query.js");
+  return cmdAuditSecretsQuery(args, await resolveAuditLogPath());
+}
+
 async function cmdAuditSecrets(): Promise<boolean> {
   const args = process.argv.slice(4); // after "audit secrets"
   const target = flagValue(args, "--target");
@@ -502,7 +510,7 @@ async function cmdAuditAnchor(): Promise<boolean> {
 
 /** Subcommands dispatched by name; each reads its own flags from argv. */
 const AUDIT_SUBCOMMANDS = new Map<string, () => Promise<boolean>>([
-  ["secrets", cmdAuditSecrets],
+  ["secrets", cmdAuditSecretsOrQuery],
   ["transcripts", () => cmdAuditTranscripts()],
 ]);
 
