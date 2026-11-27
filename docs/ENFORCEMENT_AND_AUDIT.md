@@ -39,6 +39,20 @@ Deterministic, fail-closed, zero-LLM:
   and deleting or disabling a hook file. kit's commit checks run in those hooks, and skipping them
   is a person's decision. Reading `core.hooksPath` is allowed.
 
+  It refuses a nested coding agent started with its approvals off, for the same reason: it skips a
+  control. Covered, each flag from the vendor's own CLI reference (`src/nested-agent-bypass.ts`):
+  `claude --dangerously-skip-permissions` or `--permission-mode bypassPermissions`; `codex
+  --dangerously-bypass-approvals-and-sandbox`, `--yolo`, or `-a never` with `-s
+  danger-full-access`; `gemini --yolo`, `-y` or `--approval-mode yolo`; `qwen --yolo` or
+  `--approval-mode yolo`; Cursor's `agent --force` / `--yolo`; `copilot --allow-all-tools`,
+  `--allow-all`, `--yolo` or `COPILOT_ALLOW_ALL`; `kiro-cli --trust-all-tools`; and `droid
+  --skip-permissions-unsafe`. It reads through `sh -c`, `env`, `sudo`, `xargs`, `npx` / `npm exec`
+  / `pnpm dlx`, `$(…)`, `cmd /c` and PowerShell `-Command` / `-EncodedCommand`. The refusal names
+  the flag and how to run the same agent with approvals on. Not covered: flags no vendor documents
+  (Codex `--full-auto`, Amp's `--dangerously-allow-all`, OpenCode, Augment's `auggie`), Cline's
+  CLI, which approves everything by default when given a prompt, and approval settings in a
+  config file or `-c` override rather than on the command line.
+
   This is a correction, not a design note. Every line of a here-document used to be scanned as its
   own command, and the gate blocked kit's own PR description because the prose contained
   `` `npx tsc --noEmit` `` — a false block, which is what teaches people to reach for `--no-verify`.
