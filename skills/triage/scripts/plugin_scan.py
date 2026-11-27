@@ -63,10 +63,68 @@ def _load_json(rep, path, label):
         return None
 
 
-def _pinned(spec):
-    """True when a runner's package argument names a version: name@1.2.3 or @scope/name@1.2.3."""
-    body = spec[1:] if spec.startswith("@") else spec
-    return "@" in body and body.rsplit("@", 1)[1][:1].isdigit()
+# Pinning per ecosystem; the twin of `pinned` in src/agent-audit-mcp-launch.ts, tested on the same
+# launches (src/mcp-runner-pins.test-support.ts). kit-research `auto-ontology-vs-kit`: "a digit after
+# the last @" called `uvx --from x==1.3.0` unpinned and a branch named `@2026-dev` pinned.
+_PYPI_RUNNERS = ("uvx", "pipx run")
+_SOURCE_OPTS = {"--from", "--package", "--spec"}
+_VALUE_OPTS = {"--python", "--with", "--with-editable", "--with-requirements", "--index", "--index-url",
+               "--extra-index-url", "--default-index", "--registry"}
+_SEMVER = r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
+_PEP440 = r"\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:\+[a-z0-9.]+)?"
+_NPM_PIN = re.compile(r"(?:@[\w.-]+/)?[\w.-]+@" + _SEMVER)
+_PYPI_PIN = re.compile(r"[A-Za-z0-9][\w.-]*(?:\[[\w,.-]*\])?(?:==|@)" + _PEP440, re.I)
+_COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}", re.I)
+_GIT_SOURCE = re.compile(r"git\+|git://|^(?:github|gitlab|bitbucket):|://")
+_ARG = re.compile(r"[^\s\"';|&)]+|[;|&)]")
+
+
+def _runner_spec(runner, rest):
+    """The package a runner starts, from the text after it: the value of `--from`, `--package` or
+    `--spec` (`-p` for an npm runner) given before it, or its first operand. uv's `-p` and
+    `--python` take a value that is not the package."""
+    pypi = runner in _PYPI_RUNNERS
+    args = []
+    for tok in _ARG.findall(rest):
+        if tok in ";|&)":
+            break
+        args.append(tok)
+    i = 0
+    while i < len(args):
+        name, eq, val = args[i].partition("=")
+        if not args[i].startswith("-"):
+            return args[i]
+        if name in _SOURCE_OPTS or (name == "-p" and not pypi):
+            return val if eq else (args[i + 1] if i + 1 < len(args) else None)
+        i += 2 if not eq and (name in _VALUE_OPTS or (name == "-p" and pypi)) else 1
+    return None
+
+
+def _git_source(spec, pypi):
+    return bool(_GIT_SOURCE.search(spec)) or (not pypi and "#" in spec)
+
+
+def _git_ref(spec, pypi):
+    """The ref a git source names: after `#` for npm, after the last `@` of the URL path for uv/pip."""
+    if not pypi:
+        return spec.partition("#")[2]
+    url = spec[spec.index("git+"):] if "git+" in spec else spec
+    path = url.split("#", 1)[0].partition("://")[2]
+    return path.rpartition("@")[2] if "@" in path else ""
+
+
+def _pinned(spec, pypi=False):
+    """True when a runner's package is pinned: npm `name@1.2.3` (an exact semver), PyPI `name==1.2.3`
+    or uv's `name@1.2.3`, a git source by a full 40- or 64-hex commit. Anything else is unpinned."""
+    if _git_source(spec, pypi):
+        return bool(_COMMIT.fullmatch(_git_ref(spec, pypi)))
+    return bool((_PYPI_PIN if pypi else _NPM_PIN).fullmatch(spec))
+
+
+def _pin_advice(spec, pypi):
+    if _git_source(spec, pypi):
+        return f"pin a full commit ({'@' if pypi else '#'}<commit>)"
+    return f"pin an exact version ({'name==1.2.3' if pypi else 'name@1.2.3'})"
 
 
 def _hook_sources(plugin_dir, manifest):
@@ -198,10 +256,15 @@ def _scan_script(rep, rel, text):
     evidence ({"credential-payload"}); every finding is also reported here."""
     hits = set()
     for n, line in enumerate(text.splitlines(), 1):
-        code = line.split("#", 1)[0] if not line.lstrip().startswith("#!") else ""
+        # A shell comment starts a word; `github:o/r#<commit>` keeps its ref.
+        code = re.split(r"(?:^|\s)#", line, maxsplit=1)[0] if not line.lstrip().startswith("#!") else ""
         for m in RUNNER.finditer(code):
-            if not _pinned(m.group(3)) and not m.group(3).startswith("$"):
-                rep.warn(f"{rel}:{n}: `{m.group(1)} {m.group(3)}` runs the newest published version on every call (unpinned)")
+            runner = " ".join(m.group(1).split())
+            spec = _runner_spec(runner, code[m.end(1):])
+            pypi = runner in _PYPI_RUNNERS
+            if spec and not spec.startswith("$") and not _pinned(spec, pypi):
+                rep.warn(f"{rel}:{n}: `{runner} {spec}` runs the newest published version on every call "
+                         f"(unpinned) -- {_pin_advice(spec, pypi)}")
         if UPLOAD.search(code):
             rep.warn(f"{rel}:{n}: uploads a local file's contents over the network")
         if any(p.search(code) for p in CRED_PAYLOAD):

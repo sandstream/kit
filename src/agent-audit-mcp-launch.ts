@@ -14,7 +14,8 @@
  *     `kit triage skill` warned on that entry and `kit agent-audit` passed it, on purpose
  *     (see `auditMcpStdio`: a failure on every `npx` config is noise). Both now say "unpinned";
  *     here it is a low warning, not a failure. The runner list and the pinned test are the triage
- *     skill's (`skills/triage/scripts/plugin_scan.py`, `RUNNER` and `_pinned`).
+ *     skill's (`skills/triage/scripts/plugin_scan.py`, `RUNNER`, `_runner_spec` and `_pinned`);
+ *     `src/mcp-runner-pins.test-support.ts` holds the launches both are tested on.
  *
  * Read as data: nothing is resolved or run. Pure, except the directory check behind `python -m`.
  */
@@ -136,15 +137,78 @@ const TWO_WORD = new Map([
   ["pipx", "run"],
 ]);
 
-/** The triage skill's `_pinned`: `name@1.2.3` or `@scope/name@1.2.3`. */
-function pinned(spec: string): boolean {
-  const body = spec.startsWith("@") ? spec.slice(1) : spec;
-  const at = body.lastIndexOf("@");
-  return at >= 0 && /^\d/.test(body.slice(at + 1));
+/** Where a runner's package comes from: uvx and pipx install from PyPI, the rest from npm. */
+const PYPI_RUNNERS = new Set(["uvx", "pipx run"]);
+/** Options that name the package (`uvx --from x==1`, `npx -p x@1 x-cli`, `pipx run --spec x`). */
+const SOURCE_OPTS = new Set(["--from", "--package", "--spec"]);
+/** Options whose value is not the package (`uvx --python 3.12 x`). `-p` is uv's `--python`. */
+const VALUE_OPTS = new Set([
+  "--python",
+  "--with",
+  "--with-editable",
+  "--with-requirements",
+  "--index",
+  "--index-url",
+  "--extra-index-url",
+  "--default-index",
+  "--registry",
+]);
+
+/** The package a runner starts: the value of a source option given before it, or the first operand. */
+function runnerSpec(runner: string, args: string[]): string | undefined {
+  const pypi = PYPI_RUNNERS.has(runner);
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith("-")) return a;
+    const eq = a.indexOf("=");
+    const name = eq < 0 ? a : a.slice(0, eq);
+    if (SOURCE_OPTS.has(name) || (name === "-p" && !pypi))
+      return eq < 0 ? args[i + 1] : a.slice(eq + 1);
+    if (eq < 0 && (VALUE_OPTS.has(name) || (name === "-p" && pypi))) i++;
+  }
+  return undefined;
 }
 
-/** `npx -y pkg`, `uvx pkg`, `pnpm dlx pkg` without a version: the runner and the package. */
-export function unpinnedRunner(l: McpLaunch): string | null {
+const SEMVER = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`;
+const PEP440 = String.raw`\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:\+[a-z0-9.]+)?`;
+const NPM_PIN = new RegExp(String.raw`^(?:@[\w.-]+/)?[\w.-]+@${SEMVER}$`);
+const PYPI_PIN = new RegExp(
+  String.raw`^[A-Za-z0-9][\w.-]*(?:\[[\w,.-]*\])?(?:==|@)${PEP440}$`,
+  "i",
+);
+const COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+const GIT_SOURCE = /git\+|git:\/\/|^(?:github|gitlab|bitbucket):|:\/\//;
+
+/** A git or URL source: `git+https://…`, `github:o/r#…`; for npm also any spec with a `#` ref. */
+function gitSource(spec: string, pypi: boolean): boolean {
+  return GIT_SOURCE.test(spec) || (!pypi && spec.includes("#"));
+}
+
+/** The ref a git source names: after `#` for npm, after the last `@` of the URL path for uv and pip. */
+function gitRef(spec: string, pypi: boolean): string {
+  if (!pypi) return spec.split("#")[1] ?? "";
+  const url = spec.includes("git+") ? spec.slice(spec.indexOf("git+")) : spec;
+  const path = url.split("#")[0].split("://")[1] ?? "";
+  return path.includes("@") ? path.slice(path.lastIndexOf("@") + 1) : "";
+}
+
+/**
+ * The triage skill's `_pinned`, per ecosystem: npm `name@1.2.3` (an exact semver, not `^1`, `1`
+ * or `latest`), PyPI `name==1.2.3` or uv's `name@1.2.3` (not `>=` or `~=`), and a git source only
+ * by a full 40- or 64-hex commit. Anything else, ambiguous included, is unpinned.
+ */
+function pinned(spec: string, pypi: boolean): boolean {
+  if (gitSource(spec, pypi)) return COMMIT.test(gitRef(spec, pypi));
+  return (pypi ? PYPI_PIN : NPM_PIN).test(spec);
+}
+
+function pinAdvice(spec: string, pypi: boolean): string {
+  if (gitSource(spec, pypi)) return `pin a full commit (${pypi ? "@" : "#"}<commit>)`;
+  return `pin an exact version (${pypi ? "name==1.2.3" : "name@1.2.3"})`;
+}
+
+/** An unpinned runner launch: what it shows (`runner spec`) and how to pin it, or null. */
+function unpinned(l: McpLaunch): { shown: string; advice: string } | null {
   const cmd = bin(l.command);
   let rest = l.argv;
   let runner = cmd;
@@ -152,9 +216,15 @@ export function unpinnedRunner(l: McpLaunch): string | null {
     runner = `${cmd} ${l.argv[0]}`;
     rest = l.argv.slice(1);
   } else if (!RUNNERS.has(cmd)) return null;
-  const spec = rest.find((a) => !/^-{1,2}[\w-]+$/.test(a));
-  if (!spec || spec.startsWith("$") || pinned(spec)) return null;
-  return `${runner} ${spec}`;
+  const spec = runnerSpec(runner, rest);
+  const pypi = PYPI_RUNNERS.has(runner);
+  if (!spec || spec.startsWith("$") || pinned(spec, pypi)) return null;
+  return { shown: `${runner} ${spec}`, advice: pinAdvice(spec, pypi) };
+}
+
+/** `npx -y pkg`, `uvx pkg`, `pnpm dlx pkg` without a pin: the runner and the package. */
+export function unpinnedRunner(l: McpLaunch): string | null {
+  return unpinned(l)?.shown ?? null;
 }
 
 /** Rows for one project config: repository code at session start, and unpinned runners. */
@@ -174,16 +244,15 @@ export function mcpLaunchRows(view: string, root: string, rel: string): Security
           "review changes to that code like a hook; or run a pinned, installed release of the server instead",
       });
     }
-    const runner = unpinnedRunner(l);
+    const runner = unpinned(l);
     if (runner) {
       rows.push({
         category: "exposure",
         name: `unpinned MCP runner "${name}" in ${rel}`,
         status: "warn",
         severity: "low",
-        detail: `\`${shown(runner)}\` runs the newest published version at every session start (unpinned), as \`kit triage skill\` reports it`,
-        suggestion:
-          "pin a version (name@1.2.3) so a new release is a change you make, not one that arrives",
+        detail: `\`${shown(runner.shown)}\` runs the newest published version at every session start (unpinned), as \`kit triage skill\` reports it`,
+        suggestion: `${runner.advice} so a new release is a change you make, not one that arrives`,
       });
     }
   }

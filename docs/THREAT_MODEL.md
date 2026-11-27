@@ -242,7 +242,13 @@ Those are a separate supply chain worth understanding:
   commit or branch puts there runs before anyone reads it. A package runner
   without a version (`npx -y <pkg>`, `uvx <pkg>`) runs whatever was published
   last. `kit agent-audit` warns (low) on both, and calls the runner unpinned
-  as `kit triage skill` does. Neither fails: building your own server, or
+  as `kit triage skill` does. Pinned means, per ecosystem: npm
+  `name@1.2.3` (an exact semver, not `^1.2.3`, `1` or `latest`), PyPI
+  `name==1.2.3` or uv's `name@1.2.3` (not `>=` or `~=`), and a git source only
+  by a full 40- or 64-hex commit (`git+https://…@<commit>`, npm
+  `github:o/r#<commit>`); a branch or tag is not a pin, and anything ambiguous
+  is unpinned. The package is read from `uvx --from`, `npx -p`/`--package` and
+  `pipx run --spec` when given. Neither fails: building your own server, or
   running a well-known one through `npx`, is common, and a failure on every
   such config would be noise.
 
