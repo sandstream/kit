@@ -1,6 +1,16 @@
 {
   "version": 1,
   "commands": {
+    "agent-audit": {
+      "flags": ["--accept-rules", "--accept-user-surfaces", "--json"],
+      "reason": "Agent-audit prints JSON and accepts the rule or user-surface baseline. Status mode, attestation and tool installation do not apply.",
+      "tests": [
+        "src/agent-rule-ledger.test.ts",
+        "src/user-surface-drift.test.ts",
+        "src/trail-guard-accept.test.ts"
+      ],
+      "bareFlags": ["--accept-rules", "--accept-user-surfaces", "--json"]
+    },
     "create-plugin": {
       "flags": ["--skip-install"],
       "reason": "Only --skip-install controls this handler. Clone and setup flags do not apply.",

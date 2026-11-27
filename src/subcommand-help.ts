@@ -210,6 +210,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Read a pasted install prompt (argument or stdin) for planted attacks, the URLs and hosts it names and repos it clones; fetches nothing",
   "triage pkg":
     "Check a macOS installer package: checksum, publisher Team ID, notarization. Does not install it",
+  "triage release":
+    "A prebuilt release archive or binary before it is extracted, run or put on PATH: checksum, signature (minisign or cosign with your key), GitHub release age and repository, archive members. Records a release receipt in .kit-triage.jsonl. Never runs the file",
   "triage brew":
     "Homebrew formula or cask: resolves the upstream repository, then scores it as kit triage repo does",
   "triage mcp":

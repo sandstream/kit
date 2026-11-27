@@ -23,7 +23,7 @@
  * than the rule is worth. A test is the smaller, honest mechanism: it is deterministic, it
  * runs in CI already, and it fails the moment the claim stops being true.
  *
- * ADDING A DEPENDENCY IS AN ADR-LEVEL ACT. If a fifth is genuinely needed, amend or
+ * ADDING A DEPENDENCY IS AN ADR-LEVEL ACT. If another is genuinely needed, amend or
  * supersede ADR-0002 in the same PR and update the list below. Editing this list alone to
  * make the suite green is the failure this test exists to catch.
  */

@@ -372,6 +372,17 @@ export async function checkGateLiveness(
       detail: "enforcement gates not installed in this checkout",
     };
   }
+  const { staleGateBashMatchersFor } = await import("./gate-bash-matcher.js");
+  const stale = staleGateBashMatchersFor(cwd ?? process.cwd());
+  if (live.installGate && stale.length > 0) {
+    return {
+      category,
+      name,
+      status: "fail",
+      severity: "high",
+      detail: `install-gate (gate-bash) matcher ${stale.map((m) => JSON.stringify(m)).join(", ")} does not select both of Claude Code's shell tools (Bash, PowerShell), so a command run through the missing one is not gated. Run: kit agent-config`,
+    };
+  }
   if (missing.length === 0) {
     return { category, name, status: "pass", detail: "PreToolUse enforcement gates wired" };
   }
@@ -2388,6 +2399,7 @@ async function appendHostSecurityChecks(
   results.push(await checkMemoryInjection(), await checkMemoryHooksLiveness());
   results.push(await checkTranscriptSecrets(undefined, root));
   results.push(await checkGateLiveness(root), await checkGitHookFloor(root));
+  results.push(await (await import("./check-deny-rules.js")).checkKitDenyRules(root));
   results.push(await checkDeviceIdOverride());
   results.push(await (await import("./check-docker-ioc.js")).checkDockerIocs());
 }
