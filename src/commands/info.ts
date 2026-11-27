@@ -134,6 +134,12 @@ export async function cmdAgentAudit(): Promise<boolean> {
     console.log(`kit agent-audit: accepted ${n} user-level agent file(s) as the baseline`);
     return true;
   }
+  const ledgerMod = await import("../agent-rule-ledger.js");
+  if (hasFlag(process.argv, "--accept-rules")) {
+    const n = ledgerMod.acceptRules(process.cwd(), homedir(), process.env);
+    console.log(`kit agent-audit: accepted ${n} agent rule(s) as the baseline`);
+    return true;
+  }
   const { isReadOnlyMode } = await import("../read-only-mode.js");
   const { runAgentAudit } = await import("../agent-audit.js");
   const { runAgentTrifecta } = await import("../agent-trifecta.js");
@@ -150,10 +156,17 @@ export async function cmdAgentAudit(): Promise<boolean> {
     ...runAgentEndpoint(process.cwd(), homedir(), process.env),
     ...runAgentSkillPosture(process.cwd(), homedir(), process.env),
   ];
+  const ledger = ledgerMod.runRuleLedger(process.cwd(), homedir(), process.env, {
+    record: !isReadOnlyMode(),
+  });
+  results.push(...ledger.results);
   const fails = results.filter((r) => r.status === "fail").length;
 
   if (jsonMode) {
-    console.log(JSON.stringify({ ok: fails === 0, results }, null, 2));
+    const { rows: rules, read, notCovered } = ledger;
+    console.log(
+      JSON.stringify({ ok: fails === 0, results, rules, ledger: { read, notCovered } }, null, 2),
+    );
     return fails === 0;
   }
 
@@ -170,6 +183,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
     console.log(`  ${mark} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
     if (r.suggestion) console.log(`      ${c.dim}${r.suggestion}${c.reset}`);
   }
+  for (const line of ledgerMod.ledgerLines(ledger)) console.log(`  ${c.dim}${line}${c.reset}`);
   if (fails > 0) console.log(`${c.red}${fails} fail${c.reset}`);
   return fails === 0;
 }

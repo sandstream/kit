@@ -38,6 +38,8 @@ adapters for the surfaces each agent exposes. Support today, per agent:
 
 > The git-hook layer enforces at the VCS boundary regardless of agent; the rules-file block is **advisory** (it reminds the agent); only the blocking-gate hook **enforces** before an action runs.
 
+**Saved permission rules.** `kit agent-audit` lists every saved allow, ask and deny rule it can read, one row each (harness, scope, file, rule, kind, a class from the lethal-trifecta tables, first-seen date): Claude Code's `permissions` in user, project, local and managed settings; Codex `prefix_rule(...)` in `$CODEX_HOME/rules/*.rules` and `.codex/rules/*.rules`, read as text and never evaluated; Cursor CLI's `~/.cursor/cli-config.json` and `.cursor/cli.json`; and Gemini CLI's `tools.allowed`, `tools.exclude`, `autoAccept` and `auto_edit`. A new allow rule or a removed deny or ask rule is reported against `~/.kit/agent-rules.json` until a person runs `kit agent-audit --accept-rules`. Antigravity, Copilot CLI and the other harnesses' rule stores are not read, and the output names them.
+
 `kit check`, grouped status tables with a pass/fail summary:
 
 ```text

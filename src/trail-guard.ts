@@ -18,7 +18,8 @@
  *     - `kit audit anchor` and `kit panic`, which re-seal or rotate on the agent's behalf;
  *     - `kit mcp callback`, which carries an OAuth authorization code a model should not see;
  *     - `kit agent-audit --accept-user-surfaces`, which accepts changed user-level skills as read
- *       (an acceptance the audited party can give itself is not one).
+ *       (an acceptance the audited party can give itself is not one), and
+ *       `kit agent-audit --accept-rules`, which accepts changed allow, ask and deny rules.
  *
  * Reading the log (`cat`, `kit audit verify`) and running the `~/.kit/bin/kit` wrapper stay
  * allowed. A person runs the refused commands themselves (with `!` in Claude Code). Out of
@@ -112,6 +113,9 @@ export function trailCommandRefusal(command: string, home: string): string | nul
   }
   if (/(^|[\s/\\"'])kit(?:\.cmd)?["']?\s+mcp\s+callback\b/i.test(command)) {
     return "`kit mcp callback` carries an OAuth authorization code; a person runs it in their own terminal, so the code never passes through the agent";
+  }
+  if (/--accept-rules\b/.test(command) && /(^|[\s/\\"'])kit(?:\.cmd)?["']?\s/i.test(command)) {
+    return "`kit agent-audit --accept-rules` accepts added allow rules and removed deny or ask rules; a person does that, not the agent whose permissions changed";
   }
   if (
     /--accept-user-surfaces\b/.test(command) &&

@@ -94,6 +94,7 @@
       "kind": "command",
       "summary": "Audit agent, MCP, and hook configs for secrets, risky grants, and writes",
       "x-kit-accepted-flags": [
+        "--accept-rules",
         "--accept-user-surfaces",
         "--attest",
         "--env",
@@ -1345,6 +1346,7 @@
       "kind": "command",
       "summary": "Deep environment health diagnostics — granular pass/fail across tools, services, config",
       "x-kit-accepted-flags": [
+        "--accept-rules",
         "--accept-user-surfaces",
         "--attest",
         "--env",
@@ -3307,6 +3309,7 @@
       "kind": "command",
       "summary": "Adoption checklist — what's set up across kit + the next step for each gap",
       "x-kit-accepted-flags": [
+        "--accept-rules",
         "--accept-user-surfaces",
         "--attest",
         "--env",
@@ -3347,6 +3350,7 @@
       "kind": "command",
       "summary": "Install-time supply-chain triage: install-scripts, lockfile-drift, dep-confusion, slopsquat",
       "x-kit-accepted-flags": [
+        "--accept-rules",
         "--accept-user-surfaces",
         "--attest",
         "--env",
