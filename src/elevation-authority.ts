@@ -1,7 +1,8 @@
 import { closeSync, lstatSync, mkdirSync, openSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "./utils/sqlite.js";
 import {
   privateDirIsControlled,
   privateFileIsControlled,
@@ -70,7 +71,7 @@ function withAuthority<T>(write: boolean, operation: (db: DatabaseSync) => T): T
   if (!before.isFile() || before.nlink !== 1n || !privateFileIsControlled(path)) {
     throw new Error(UNAVAILABLE);
   }
-  const db = new DatabaseSync(path, { readOnly: !write });
+  const db = openSqlite(path, { readOnly: !write });
   try {
     if (!sameIdentity(before, lstatSync(path, { bigint: true }))) throw new Error(UNAVAILABLE);
     db.exec("PRAGMA busy_timeout = 5000");

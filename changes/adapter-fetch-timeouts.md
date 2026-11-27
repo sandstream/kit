@@ -1,0 +1,3 @@
+### Fixed
+
+- **`kit add` no longer hangs when a vendor provisioning API stalls.** The Upstash, Neon and PlanetScale adapters (and the Cloudflare R2 token call) sent their `fetch` calls with no timeout, so an endpoint that accepted the connection and never answered left `kit add` waiting forever. Each call now passes `AbortSignal.timeout(15_000)`, the value kit's other vendor REST calls use, and a stalled call fails `provision()` with its usual "Failed to reach … API" error. A test points each adapter at a local server that never answers. `docs/DATA_FLOW.md` states the bound. Found by kit-research#239.

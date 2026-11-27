@@ -105,12 +105,21 @@ describe("releaseCooling and releaseVerdict", () => {
     osv: { skipped: "not asked" },
   });
 
-  it("holds a young release by default, and the hold is its own verdict", async () => {
+  it("holds a young release by default and counts the hold, which stays its own verdict", async () => {
     const cooling = await releaseCooling("/nonexistent", deps(null), release(1));
     assert.equal(cooling.held, true);
     const result = releaseVerdict(["  . triaged 1.0.0", ...cooling.lines], cooling);
     assert.equal(result.passed, false);
-    assert.match(result.output, /Critical issues: 0\nWarnings: 0\nTRIAGE HELD: cooling period$/);
+    assert.match(result.output, /x CRITICAL: cooling: /);
+    assert.match(result.output, /Critical issues: 1\nWarnings: 0\nTRIAGE HELD: cooling period$/);
+  });
+
+  it("counts the hold next to another critical, and the other critical fails the triage", async () => {
+    const cooling = await releaseCooling("/nonexistent", deps(null), release(1));
+    const mal = "  x CRITICAL: malicious package: MAL-1 (OSV)";
+    const result = releaseVerdict([mal, ...cooling.lines], cooling);
+    assert.equal(result.passed, false);
+    assert.match(result.output, /Critical issues: 2\nWarnings: 0\nTRIAGE FAILED$/);
   });
 
   it("takes the limit and the enforcement from the environment", async () => {

@@ -12,7 +12,7 @@
  * is secret-dense (it indexes private transcripts): it lives only under ~/.kit/ with
  * 0600 perms and is never committed. Redaction / encryption is stage B7.
  */
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, statSync } from "node:fs";

@@ -70,6 +70,21 @@ are held to the same rule, with the same message. `pip-sync` with no file reads 
 The gate does not triage transitive dependencies, and a receipt matches a package by name, not by version.
 Receipts are per directory, so triage from the directory you install in.
 
+## A bin named after another package
+
+A plain `npx <name>` (also `npm exec`, `pnpm dlx`, `yarn dlx`, `bunx`) with no local install fetches the
+unscoped npm name `<name>`. When `<name>` is a bin of a scoped package, that is usually a different package.
+`@metaharness/redblue` ships a bin `redblue`, and `npx redblue` without it installed runs an unrelated 2017 package.
+
+- `kit triage npm <pkg>` asks the registry about every bin of `<pkg>` whose name is not `<pkg>` itself.
+  It reports `other` (another package owns the name, with its version, maintainers and creation date) or
+  `unclaimed` (the name is free, so anyone can register it) as a warning. A bin named after the package itself is `same`.
+- Both findings are written to `.kit-triage.jsonl` as `npm-bin` records, whatever the verdict. They are not pass receipts.
+- The gate refuses the runner when a record names `<name>`, and says which scoped package to install or to run with `npx -p @scope/pkg <name>`.
+- A local `node_modules/.bin/<name>` still allows it, as before, unless the command may change directory first.
+  A `kit triage npm <name>` PASS newer than the record also allows it: that is how you say you mean the unscoped package.
+- Without a record the gate triages `<name>` as before. It cannot know a README meant another package until that package has been triaged in this directory.
+
 ## Limits
 
 This command inspection does not replace dependency checks after a Git update.
