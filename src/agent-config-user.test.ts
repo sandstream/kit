@@ -40,7 +40,7 @@ describe("installUserGates", () => {
       const pre = read(home).hooks?.PreToolUse ?? [];
       assert.deepEqual(
         pre.map((g) => g.matcher),
-        ["Bash", "Write|Edit|NotebookEdit"],
+        ["Bash|PowerShell", "Write|Edit|NotebookEdit"],
       );
       for (const g of pre) assert.equal(g.hooks[0].onFailure, "block");
       assert.equal(userGateCommands(home).length, 2);

@@ -543,7 +543,7 @@ describe("installCodexKitProfile", () => {
 });
 
 describe("installInstallGate", () => {
-  it("writes a PreToolUse Bash gate to .claude/settings.json, idempotently", async () => {
+  it("writes a PreToolUse Bash|PowerShell gate to .claude/settings.json, idempotently", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-gate-"));
     try {
       mkdirSync(join(dir, ".claude"), { recursive: true });
@@ -552,7 +552,7 @@ describe("installInstallGate", () => {
       const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
       const groups = s.hooks.PreToolUse;
       assert.ok(Array.isArray(groups) && groups.length === 1);
-      assert.equal(groups[0].matcher, "Bash");
+      assert.equal(groups[0].matcher, "Bash|PowerShell");
       assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
 
       const r2 = await installInstallGate(dir);
