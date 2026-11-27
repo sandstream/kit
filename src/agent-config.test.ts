@@ -1273,10 +1273,7 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
   const settings = (cmds: string[]) =>
     JSON.stringify({
       hooks: {
-        PreToolUse: cmds.map((c) => ({
-          matcher: "Bash|PowerShell",
-          hooks: [{ type: "command", command: c }],
-        })),
+        PreToolUse: cmds.map((c) => ({ matcher: "x", hooks: [{ type: "command", command: c }] })),
       },
     });
   const mark = (dir: string) => writeFileSync(join(dir, ".claude/.kit-gates-installed"), "x\n");
@@ -1359,7 +1356,6 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
         envGate: true,
         egressGate: false,
         problems: [],
-        staleMatchers: [],
       });
     });
   });
@@ -1382,7 +1378,6 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
             envGate: true,
             egressGate: false,
             problems: [],
-            staleMatchers: [],
           });
         });
       });

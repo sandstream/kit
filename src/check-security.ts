@@ -372,7 +372,8 @@ export async function checkGateLiveness(
       detail: "enforcement gates not installed in this checkout",
     };
   }
-  const stale = [...new Set(live.staleMatchers ?? [])];
+  const { staleGateBashMatchersFor } = await import("./gate-bash-matcher.js");
+  const stale = staleGateBashMatchersFor(cwd ?? process.cwd());
   if (live.installGate && stale.length > 0) {
     return {
       category,

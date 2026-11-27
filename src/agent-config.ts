@@ -14,11 +14,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
 import { gateSettingsFile, preToolUseGroups } from "./gate-settings.js";
-import {
-  GATE_BASH_MATCHER,
-  staleGateBashMatchers,
-  widenGateBashMatchers,
-} from "./gate-bash-matcher.js";
+import { GATE_BASH_MATCHER, widenGateBashMatchers } from "./gate-bash-matcher.js";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
 import { portableGateCommand, portableGatesMode } from "./portable-gate.js";
@@ -806,6 +802,7 @@ function refreshSettingsGateCommand(
   groups: SettingsHookGroup[],
   sub: string,
   desired: string,
+  widen?: (groups: SettingsHookGroup[]) => boolean, // also repair a stale matcher
 ): { found: boolean; updated: boolean } {
   let found = false;
   let updated = false;
@@ -821,6 +818,7 @@ function refreshSettingsGateCommand(
       }
     }
   }
+  if (found && widen?.(groups)) updated = true;
   return { found, updated };
 }
 
@@ -877,8 +875,6 @@ export interface GateLiveness {
   egressGate: boolean;
   /** Hook rows exist but cannot reliably spawn; these produce harness-level code 127 noise. */
   problems: string[];
-  /** `gate-bash` matchers that miss a Claude Code shell tool (`Bash`-only misses `PowerShell`). */
-  staleMatchers?: string[];
 }
 
 /** Machine-local marker recording that kit installed the gates here (gitignored, beside them). */
@@ -917,31 +913,7 @@ export function gateLiveness(
     envGate: has("gate-env"),
     egressGate: has("gate-egress"),
     problems: allGateCommands.flatMap((cmd) => hookCommandProblems(cmd)),
-    staleMatchers: staleGateBashMatchers(pre),
   };
-}
-
-/**
- * The install-gate is already in `settings`: widen a `Bash`-only matcher (it misses PowerShell)
- * and write the file when that or the command refresh changed anything.
- */
-async function refreshInstallGate(
-  file: string,
-  path: string,
-  settings: { hooks?: Record<string, SettingsHookGroup[]> },
-  commandUpdated: boolean,
-): Promise<HookInstallResult> {
-  const widened = widenGateBashMatchers(settings.hooks?.PreToolUse ?? []);
-  if (!commandUpdated && !widened) {
-    return { file, action: "unchanged", detail: "install-gate already wired" };
-  }
-  try {
-    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-    const what = widened ? "matcher widened to PowerShell" : "command refreshed";
-    return { file, action: "updated", detail: `install-gate hook ${what}` };
-  } catch (err) {
-    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-  }
 }
 
 /**
@@ -950,9 +922,8 @@ async function refreshInstallGate(
  * agent auto-mode (the rules-file block only *advises*; an agent can otherwise run
  * `npm install evil` directly and its postinstall fires before any commit). Opt-in
  * and idempotent (keyed on a hook command ending in `gate-bash`); preserves any
- * other hooks. Only wired for Claude Code today (the settings schema we know). The matcher is
- * `Bash|PowerShell`, Claude Code's two shell tools (src/gate-bash-matcher.ts); a `Bash`-only
- * matcher from an older kit is widened here, which is how `kit agent-config` repairs it.
+ * other hooks. Only wired for Claude Code today (the settings schema we know). Matcher and its
+ * repair of an older `Bash`-only entry: src/gate-bash-matcher.ts.
  */
 export async function installInstallGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
   const file = await gateSettingsFile(cwd);
@@ -976,10 +947,18 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
   const desired = settingsGateInvocation("gate-bash", cwd);
-  const existing = refreshSettingsGateCommand(pre, "gate-bash", desired);
+  const existing = refreshSettingsGateCommand(pre, "gate-bash", desired, widenGateBashMatchers);
   if (existing.found) {
     markGatesInstalled(cwd); // gate present → record it for liveness (idempotent)
-    return await refreshInstallGate(file, path, settings, existing.updated);
+    if (existing.updated) {
+      try {
+        await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+        return { file, action: "updated", detail: "install-gate hook command refreshed" };
+      } catch (err) {
+        return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    return { file, action: "unchanged", detail: "install-gate already wired" };
   }
 
   pre.push({ matcher: GATE_BASH_MATCHER, hooks: [gateHook(desired)] });

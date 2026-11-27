@@ -8,10 +8,12 @@
  * register the Bash tool at all. A hook that matches only `Bash` never fires there."
  *
  * kit wrote `Bash` alone until 2026-11, so an installed gate can be stale: `kit check` names it
- * through gate liveness, and `kit agent-config` widens it in place. Pure.
+ * through gate liveness, and `kit agent-config` widens it in place.
  */
+import { resolve } from "node:path";
 import { commandIncludesSubcommand } from "./agent-config-hook-liveness.js";
-import type { PreToolUseGroup } from "./gate-settings.js";
+import { groupsIn, preToolUseGroups, type PreToolUseGroup } from "./gate-settings.js";
+import { userSettingsPath } from "./gate-liveness-user.js";
 
 /** The matcher kit writes for `gate-bash`: an exact-name list, not a regular expression. */
 export const GATE_BASH_MATCHER = "Bash|PowerShell";
@@ -45,6 +47,16 @@ const coversShells = (g: PreToolUseGroup): boolean =>
 /** The matchers of `gate-bash` groups that miss a Claude Code shell tool. */
 export function staleGateBashMatchers(groups: PreToolUseGroup[]): string[] {
   return groups.filter((g) => holdsGateBash(g) && !coversShells(g)).map((g) => g.matcher ?? "");
+}
+
+/**
+ * Stale `gate-bash` matchers in the project's `.claude/settings*.json` and the user-level
+ * `~/.claude/settings.json`, each once.
+ */
+export function staleGateBashMatchersFor(cwd: string, home?: string): string[] {
+  const project = preToolUseGroups(resolve(cwd, ".claude", "settings.json"));
+  const user = groupsIn(userSettingsPath(home));
+  return [...new Set(staleGateBashMatchers([...project, ...user]))];
 }
 
 /**
