@@ -33,7 +33,9 @@ function groupCommands(group: unknown): string[] {
 /**
  * `[event, command]` for every hook command in a settings JSON text. Claude Code, Codex and Gemini
  * CLI nest commands under `hooks.<Event>[].hooks[]`; Cursor's `.cursor/hooks.json` lists them flat
- * under `hooks.<event>[]`. Both shapes are read.
+ * under `hooks.<event>[]`. Both shapes are read. Factory Droid's standalone `hooks.json` has no
+ * `hooks` wrapper: it is keyed directly by event name (docs.factory.com/reference/hooks-reference.md,
+ * "Structure"), so top-level PascalCase keys holding a list are read as events too.
  */
 export function hookCommands(json: string): Array<[string, string]> {
   let obj: unknown;
@@ -42,13 +44,19 @@ export function hookCommands(json: string): Array<[string, string]> {
   } catch {
     return [];
   }
-  const hooks = (obj as { hooks?: unknown })?.hooks;
-  if (!hooks || typeof hooks !== "object") return [];
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return [];
   const out: Array<[string, string]> = [];
-  for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
-    if (!Array.isArray(groups)) continue;
-    for (const g of groups) for (const cmd of groupCommands(g)) out.push([event, cmd]);
+  const read = (map: Record<string, unknown>, isEvent: (key: string) => boolean) => {
+    for (const [event, groups] of Object.entries(map)) {
+      if (!isEvent(event) || !Array.isArray(groups)) continue;
+      for (const g of groups) for (const cmd of groupCommands(g)) out.push([event, cmd]);
+    }
+  };
+  const hooks = (obj as { hooks?: unknown }).hooks;
+  if (hooks && typeof hooks === "object" && !Array.isArray(hooks)) {
+    read(hooks as Record<string, unknown>, () => true);
   }
+  read(obj as Record<string, unknown>, (key) => /^[A-Z][A-Za-z]+$/.test(key));
   return out;
 }
 

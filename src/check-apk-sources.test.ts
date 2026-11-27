@@ -238,7 +238,8 @@ it(
 
 it("reports a directory beyond the search depth as unverified", async (t) => {
   const root = repo(t);
-  const directory = join(root, "one", "two", "three", "four");
+  // One level past the Dockerfile walk's depth limit (image-scan MAX_DEPTH = 16).
+  const directory = join(root, ...Array.from({ length: 17 }, (_, i) => `d${i}`));
   mkdirSync(directory, { recursive: true });
   writeFileSync(
     join(directory, "Dockerfile"),

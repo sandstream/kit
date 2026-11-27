@@ -70,6 +70,37 @@ are held to the same rule, with the same message. `pip-sync` with no file reads 
 The gate does not triage transitive dependencies, and a receipt matches a package by name, not by version.
 Receipts are per directory, so triage from the directory you install in.
 
+## Prebuilt binaries and release archives
+
+A download alone is allowed. A download that the same command then extracts and runs, makes executable, builds or puts on PATH
+is an install, and the gate blocks it (exit 2) until `kit triage release <url>` has recorded a receipt for that exact URL in
+`.kit-triage.jsonl` in the directory the command runs in, within the last 7 days. The message names the URL and the command, for example
+`kit triage release https://h.example/releases/v1.2.3/tool-linux-amd64.tar.gz`.
+
+- **Fetches:** `curl -o`/`-O` (also `-J`, `--remote-name`, `--url`), `wget` (with or without `-O`), `gh release download -R <o/r> <tag> -p <asset>`,
+  PowerShell `Invoke-WebRequest`/`iwr`/`Invoke-RestMethod`/`curl`/`wget` with `-OutFile`, and `Start-BitsTransfer`. A fetch to stdout piped
+  into `tar x`, `gunzip` or similar counts as fetched and extracted.
+- **Extractions:** `tar`/`bsdtar` with `x`, `unzip`, `7z x`, `gunzip`/`xz -d`/`bunzip2`/`unzstd`, and `Expand-Archive`. Extraction alone
+  is allowed, except into an install location (`-C /usr/local`, `/opt`, any `bin` directory, `~/.local`, `C:\Program Files`, `$env:ProgramFiles`).
+- **Steps that make it an install:** `chmod` with an execute bit or `Unblock-File` on a fetched or extracted file; running it (`./tool`,
+  `sh x.sh`, `python x.py`, `Start-Process`, `& .\x.exe`, `msiexec /i`); `mv`, `cp`, `ln`, `rsync`, `Move-Item` or `Copy-Item` onto PATH
+  (`/usr/local/bin` and other `bin` directories, `~`, `$HOME`, `/home/*`, `/Users/*`, `$env:LOCALAPPDATA`, `%LOCALAPPDATA%`, `C:\Program Files`);
+  and `install` anywhere, since it sets the mode. A rename (`mv a.tgz b.tgz`) keeps the file's origin.
+- **Source tarballs count.** `./configure`, `make` and `cmake` run build files that came in the download. A build after `cd` into the extracted
+  tree, or with `make -C <dir>`, is treated as running the fetched code. A build in your own tree after extracting a dataset next to it is not,
+  and neither is `python train.py`: a bare script name only counts once the command has `cd`'d into the extracted tree.
+- **Fail-closed:** a chain whose URL or file name the shell expands (`curl -o x $URL`), `gh release download` with a glob or without `-R` and a
+  tag, `curl -K`, `wget -i`, or a move to a destination the shell expands is refused as unverifiable. With no directory to read receipts from,
+  the chain is refused.
+- **Not chains:** `chmod +x ./scripts/build.sh` with no download in the command, `git clone`, and a download whose file is only read
+  (`jq . a.json`).
+
+The receipt binds the URL; the digest of the file `kit triage release` checked is recorded beside it, but the gate cannot see the bytes a later
+download receives. A download in one tool call and its execution in a later one are separate commands, so the gate does not chain them.
+A `releases/latest/download` URL never passes triage: triage the tag's URL. The same reading applies when the command arrives through
+the `PowerShell` tool name; in Claude Code the `gate-bash` hook is registered for the `Bash` and `PowerShell` tools. Tested on Linux; the
+PowerShell and Windows-path cases are tests that also run on the Windows CI shards. No CI job runs macOS, so macOS is unverified.
+
 ## A bin named after another package
 
 A plain `npx <name>` (also `npm exec`, `pnpm dlx`, `yarn dlx`, `bunx`) with no local install fetches the

@@ -32,7 +32,13 @@ it("CLI masks raw secret arguments before audit JSON escaping", async (t) => {
   denyNetwork(fixture.cwd);
   const result = fixture.run(["run", "--", process.execPath, "-e", "process.exit(0)", secret]);
   assert.equal(result.status, 0, result.stderr);
-  const events = await readAuditLog(join(fixture.cwd, ".kit-audit.jsonl"));
+  const all = await readAuditLog(join(fixture.cwd, ".kit-audit.jsonl"));
+  // The .env.local names handed to the child are recorded too (src/secrets-read-record.ts).
+  assert.deepEqual(
+    all.filter((e) => e.operation === "secrets.read").map((e) => e.metadata?.name),
+    ["API_TOKEN"],
+  );
+  const events = all.filter((e) => e.operation !== "secrets.read");
   assert.equal(events.length, 3);
   for (const event of events) {
     const command = String(event.metadata?.command);
@@ -170,7 +176,9 @@ it("MCP masks parsed secret arguments in both audit and response text", async (t
   assert.match(response, /Command:.*REDACTED/);
   assert.ok(!response.includes(secret));
   assert.ok(!response.includes(JSON.stringify(secret)));
-  const events = await readAuditLog(join(target, ".kit-audit.jsonl"));
+  const events = (await readAuditLog(join(target, ".kit-audit.jsonl"))).filter(
+    (e) => e.operation !== "secrets.read",
+  );
   assert.equal(events.length, 1);
   assert.match(String(events[0].metadata?.command), /REDACTED/);
   assert.ok(!String(events[0].metadata?.command).includes(JSON.stringify(secret)));
