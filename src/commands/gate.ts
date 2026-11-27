@@ -42,7 +42,9 @@ export async function cmdGateBash(): Promise<boolean> {
   // triage. Appending it there is what made a correct block read as a mis-parse (#501), so the
   // advice follows the reason instead of being stapled to every refusal.
   const triageAdvice = (reason: string, lead = ". "): string =>
-    /COMMAND SUBSTITUTION|UNVERIFIED COMMAND|UNVERIFIED SOURCE|cannot be undone/.test(reason)
+    /COMMAND SUBSTITUTION|UNVERIFIED COMMAND|UNVERIFIED SOURCE|cannot be undone|approvals off/.test(
+      reason,
+    )
       ? ""
       : `${lead}Triage it first: \`kit triage …\`, or install via \`kit pkg <eco>:<name>\`.`;
 
