@@ -8,6 +8,7 @@ import { writeCheckDetail } from "./check-detail-store.js";
 import { repairLocalProject } from "./fix-local.js";
 import { generateSecrets } from "./secrets.js";
 import { keyNameMetadata } from "./secrets-write-record.js";
+import { readBy } from "./secrets-read-record.js";
 import { generateMcpInit } from "./mcp-init.js";
 import { redactArgumentsForEnvironment, requireWorkingDirectory } from "./run.js";
 import { executeGovernedCommand } from "./run-governance.js";
@@ -364,7 +365,8 @@ function register_kit_secrets(server: StdioMcpServer): void {
             // declarable effect here; egress/env are not kit's to claim.
             fsWrites: [envLocalPath],
           },
-          () => generateSecrets(config.secrets!, envLocalPath),
+          () =>
+            generateSecrets(config.secrets!, envLocalPath, readBy("mcp kit_secrets", config, cwd)),
           { cwd: cwd ?? process.cwd() },
         );
         if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");

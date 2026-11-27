@@ -9,7 +9,7 @@ import {
   stat,
   lstat,
 } from "node:fs/promises";
-import { constants, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { constants, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
@@ -25,6 +25,26 @@ import {
   hookCommandProblems,
 } from "./agent-config-hook-liveness.js";
 import { renderOpenCodeInstallGate } from "./opencode-gate.js";
+import {
+  isKitGateCommand,
+  kitGateInvocation,
+  kitSubcommandInvocation,
+} from "./kit-gate-command.js";
+import type { HookInstallResult } from "./agent-gate-installers.js";
+export { kitGateInvocation, kitSubcommandInvocation } from "./kit-gate-command.js";
+export type { HookInstallResult } from "./agent-gate-installers.js";
+export {
+  installInstallGateAmazonQ,
+  installInstallGateCursor,
+  installInstallGateDroid,
+  installInstallGateKiro,
+} from "./agent-gate-installers.js";
+import {
+  installInstallGateAmazonQ,
+  installInstallGateCursor,
+  installInstallGateDroid,
+  installInstallGateKiro,
+} from "./agent-gate-installers.js";
 export { renderOpenCodeInstallGate } from "./opencode-gate.js";
 import type { kitConfig } from "./config.js";
 
@@ -276,11 +296,15 @@ export function detectAgentTargets(cwd: string = process.cwd()): AgentTarget[] {
 export function upsertKitBlock(
   content: string,
   userRules?: UserRulesProfile | null,
+  agentNote?: string,
 ): {
   next: string;
   action: "created" | "appended" | "updated" | "unchanged";
 } {
-  const block = `${KIT_BLOCK_BEGIN}\n\n${buildKitInstruction(userRules)}\n\n${KIT_BLOCK_END}`;
+  const body = agentNote
+    ? `${buildKitInstruction(userRules)}\n\n${agentNote}`
+    : buildKitInstruction(userRules);
+  const block = `${KIT_BLOCK_BEGIN}\n\n${body}\n\n${KIT_BLOCK_END}`;
   const begin = content.indexOf(KIT_BLOCK_BEGIN);
   const end = content.indexOf(KIT_BLOCK_END);
 
@@ -435,6 +459,14 @@ export function mergeAiderRead(existing: string): {
 }
 
 /**
+ * Aider commits with `git commit --no-verify` unless `git-commit-verify` is on
+ * (Aider-AI/aider 5dc9490b, aider/args.py:491-496 default False, aider/repo.py:278-279), so kit's
+ * git hooks never see its commits. `kit check` warns about it (check-aider-commit-verify.ts).
+ */
+export const AIDER_COMMIT_VERIFY_NOTE =
+  "Aider: kit's git hooks run on your commits only with `git-commit-verify: true` in `.aider.conf.yml`. Without it, Aider commits with `--no-verify` and skips them.";
+
+/**
  * Aider rules — a BESPOKE installer (not an `AGENT_TARGETS` row). Aider does NOT
  * auto-read any rules file, so dropping `CONVENTIONS.md` alone is a no-op. This
  * does TWO things idempotently: (1) writes the managed kit block into
@@ -468,7 +500,7 @@ export async function installAiderRules(
   } catch {
     existing = "";
   }
-  const { next, action } = upsertKitBlock(existing, userRules);
+  const { next, action } = upsertKitBlock(existing, userRules, AIDER_COMMIT_VERIFY_NOTE);
   try {
     if (action !== "unchanged") await writeFile(convPath, next, "utf-8");
   } catch (err) {
@@ -726,57 +758,11 @@ export async function installKitPermissions(
 }
 
 /**
- * The gate command for a non-login hook shell. Mirrors the memory-hook invocation
- * (`kitHookInvocation`): prefer the self-healing wrapper at the STABLE path
- * `~/.kit/bin/kit`. Repo-shared command strings use `$HOME` rather than baking the
- * current machine's home directory; the wrapper itself remains machine-local and
- * may safely contain absolute node/kit paths.
- *
- * Two concrete wins over baking `<node> <cli.js>` straight into every agent's config:
- *   1. It restores the tool PATH a non-login hook shell drops (npm-global bin, mise
- *      shims). The gate shells out to `python3` (triage) and `git`; without that
- *      PATH those fail — triage then fail-closes and BLOCKS legitimate installs
- *      (false-block spam), the opposite of what we want operators to live with.
- *   2. There is ONE stable path to refresh. If node moves (nvm/volta/fnm) or kit
- *      relocates, `ensureKitWrapper` rewrites the single wrapper in place and every
- *      agent's hook — which all point at `~/.kit/bin/kit` — is fixed at once; no
- *      per-agent re-wiring, and no stale absolute node path frozen into a config
- *      file that would make the PreToolUse hook fail to spawn (a silent false green).
- * Fall back to an absolute `<node> <cli.js>`, then a bare `kit` (relies on PATH —
- * the last resort, kept only so the string is never empty).
- */
-export function kitGateInvocation(): string {
-  return kitSubcommandInvocation("gate-bash");
-}
-
-/** Same stable-wrapper resolution for any kit subcommand baked into a hook. */
-export function kitSubcommandInvocation(sub: string): string {
-  // The POSIX wrapper cannot run in a native Windows hook shell. Use the
-  // executable entrypoint directly until the Windows shim can be refreshed.
-  if (process.platform === "win32") {
-    const entry = process.argv[1];
-    if (entry) return `"${process.execPath}" "${resolve(entry)}" ${sub}`;
-    return `kit.cmd ${sub}`;
-  }
-  const wrapper = kitWrapperPath();
-  if (existsSync(wrapper)) return `"$HOME/.kit/bin/kit" ${sub}`;
-  const entry = process.argv[1];
-  if (entry) return `${process.execPath} ${resolve(entry)} ${sub}`;
-  return `kit ${sub}`; // last resort — relies on PATH
-}
-
-/**
  * The gate command for the Claude settings file of `cwd`: the portable line when the repository
  * commits its gates (src/portable-gate.ts), the machine's own wrapper otherwise.
  */
 function settingsGateInvocation(sub: string, cwd: string): string {
   return portableGatesMode(cwd) ? portableGateCommand(sub) : kitSubcommandInvocation(sub);
-}
-
-export interface HookInstallResult {
-  file: string;
-  action: "created" | "updated" | "unchanged" | "skipped" | "failed";
-  detail?: string;
 }
 
 interface SettingsHookCmd {
@@ -829,7 +815,11 @@ function replaceTomlGateCommand(content: string, sub: string, desired: string): 
     `^([ \\t]*command[ \\t]*=[ \\t]*)(["'])([^\\n]*\\b${escapedSub}\\b[^\\n]*)\\2([ \\t]*)$`,
     "gm",
   );
-  return content.replace(commandLine, `$1'${desired}'$4`);
+  return content.replace(
+    commandLine,
+    (line, lead: string, _q: string, cmd: string, tail: string) =>
+      sub === "gate-bash" && !isKitGateCommand(cmd) ? line : `${lead}'${desired}'${tail}`,
+  );
 }
 
 function codexGateCommands(cwd: string): string[] {
@@ -1143,10 +1133,27 @@ export async function installBrokerGates(cwd: string = process.cwd()): Promise<H
  * (matcher `^Bash$`) that runs `kit gate-bash` and exits 2 to block. We APPEND
  * the TOML block as text rather than parse→stringify, so the user's existing
  * config + comments are preserved; idempotent via a `gate-bash` text check.
+ *
+ * Writing the hook does not make Codex run it: Codex runs a project hook only in a trusted project
+ * and only after the user trusts that hook (src/codex-hook-trust.ts cites the code). The result's
+ * `next` names those steps until both hold. kit never writes the trust: that is the user's decision.
+ *
+ * The matcher stays `^Bash$`. Codex's `apply_patch` also fires PreToolUse, but sends the raw patch
+ * text in `tool_input.command` (codex-rs/core/src/tools/handlers/apply_patch.rs:370-375), which
+ * gate-bash would read as a shell command. A file-write gate for it is separate work.
  */
 export async function installInstallGateCodex(
   cwd: string = process.cwd(),
 ): Promise<HookInstallResult> {
+  const result = await writeInstallGateCodex(cwd);
+  if (result.action === "skipped" || result.action === "failed") return result;
+  const { codexGateStatus, codexActivationSteps } = await import("./codex-hook-trust.js");
+  const status = codexGateStatus(cwd, homedir(), process.env);
+  const next = status ? codexActivationSteps(resolve(cwd), status) : [];
+  return next.length > 0 ? { ...result, next } : result;
+}
+
+async function writeInstallGateCodex(cwd: string): Promise<HookInstallResult> {
   const file = ".codex/config.toml";
   const path = resolve(cwd, file);
   const { isReadOnlyMode } = await import("./read-only-mode.js");
@@ -1164,156 +1171,37 @@ export async function installInstallGateCodex(
     existing = "";
   }
   const desired = kitGateInvocation();
-  if (existing.includes("gate-bash")) {
+  const { codexGateHooks, codexLookalikeCount } = await import("./codex-hook-trust.js");
+  const lookalikes = codexLookalikeCount(existing);
+  const flag =
+    lookalikes > 0
+      ? `; left ${lookalikes} gate-bash look-alike hook(s) untouched: not kit's, do not trust them`
+      : "";
+  if (codexGateHooks(replaceTomlGateCommand(existing, "gate-bash", desired)).length > 0) {
     const next = replaceTomlGateCommand(existing, "gate-bash", desired);
     if (next !== existing) {
       try {
         await writeFile(path, next, "utf-8");
-        return { file, action: "updated", detail: "install-gate hook command refreshed" };
+        return { file, action: "updated", detail: `install-gate hook command refreshed${flag}` };
       } catch (err) {
         return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
       }
     }
-    return { file, action: "unchanged", detail: "install-gate already wired" };
+    return { file, action: "unchanged", detail: `install-gate already wired${flag}` };
   }
   // Single-quoted TOML literal — the invocation has double quotes, but no single quotes.
   const block = `\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${desired}'\n`;
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, existing + block, "utf-8");
-    return { file, action: existed ? "updated" : "created" };
+    return {
+      file,
+      action: existed ? "updated" : "created",
+      ...(flag ? { detail: flag.slice(2) } : {}),
+    };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
   }
-}
-
-/**
- * Amazon Q install-gate: add a `hooks.preToolUse` entry (matcher `execute_bash`)
- * to each agent config under `.amazonq/cli-agents/*.json`. Amazon Q keeps hooks
- * per-agent, so we wire every existing agent file; if none are present we skip
- * (honest about the per-agent layout rather than guessing a path). Idempotent.
- */
-export async function installInstallGateAmazonQ(
-  cwd: string = process.cwd(),
-): Promise<HookInstallResult> {
-  const dir = ".amazonq/cli-agents";
-  const dirPath = resolve(cwd, dir);
-  const { isReadOnlyMode } = await import("./read-only-mode.js");
-  if (isReadOnlyMode()) return { file: dir, action: "skipped", detail: "read-only mode" };
-  let agentFiles: string[];
-  try {
-    agentFiles = readdirSync(dirPath)
-      .filter((f) => f.endsWith(".json"))
-      .map((f) => join(dirPath, f));
-  } catch {
-    agentFiles = [];
-  }
-  if (agentFiles.length === 0) {
-    return { file: dir, action: "skipped", detail: "no Amazon Q agent config found" };
-  }
-
-  let wired = 0;
-  let already = 0;
-  for (const p of agentFiles) {
-    let agent: {
-      hooks?: Record<string, { matcher?: string; command: string }[]>;
-      [k: string]: unknown;
-    };
-    try {
-      agent = JSON.parse(await readFile(p, "utf-8"));
-    } catch {
-      continue; // skip unparseable agent file
-    }
-    const hooks = (agent.hooks ??= {});
-    const pre = (hooks.preToolUse ??= []);
-    if (pre.some((h) => typeof h?.command === "string" && h.command.endsWith("gate-bash"))) {
-      already++;
-      continue;
-    }
-    pre.push({ matcher: "execute_bash", command: kitGateInvocation() });
-    try {
-      await writeFile(p, JSON.stringify(agent, null, 2) + "\n", "utf-8");
-      wired++;
-    } catch {
-      /* best-effort per file */
-    }
-  }
-  if (wired === 0) {
-    return {
-      file: dir,
-      action: "unchanged",
-      detail: `install-gate already wired (${already} agent[s])`,
-    };
-  }
-  return { file: dir, action: "updated", detail: `wired ${wired} Amazon Q agent config(s)` };
-}
-
-/**
- * AWS Kiro (CLI) install-gate: add a `hooks.preToolUse` entry (matcher
- * `execute_bash`) to each Kiro agent config under `.kiro/agents/*.json`. Kiro CLI
- * is Amazon-Q-lineage — same agent-config hook schema (`hooks.preToolUse` array of
- * `{matcher, command}`), same `tool_input.command` STDIN, same exit-2-blocks — so
- * `kit gate-bash` works unchanged. Like Amazon Q, hooks are per-agent, so we wire
- * every existing agent file and SKIP (honestly, no false-green) when none exist
- * rather than write a partial/invalid agent config. Idempotent.
- */
-export async function installInstallGateKiro(
-  cwd: string = process.cwd(),
-): Promise<HookInstallResult> {
-  const dir = ".kiro/agents";
-  const dirPath = resolve(cwd, dir);
-  const { isReadOnlyMode } = await import("./read-only-mode.js");
-  if (isReadOnlyMode()) return { file: dir, action: "skipped", detail: "read-only mode" };
-  let agentFiles: string[];
-  try {
-    agentFiles = readdirSync(dirPath)
-      .filter((f) => f.endsWith(".json"))
-      .map((f) => join(dirPath, f));
-  } catch {
-    agentFiles = [];
-  }
-  if (agentFiles.length === 0) {
-    return {
-      file: dir,
-      action: "skipped",
-      detail: "no Kiro agent config found (create .kiro/agents/*.json first)",
-    };
-  }
-
-  let wired = 0;
-  let already = 0;
-  for (const p of agentFiles) {
-    let agent: {
-      hooks?: Record<string, { matcher?: string; command: string }[]>;
-      [k: string]: unknown;
-    };
-    try {
-      agent = JSON.parse(await readFile(p, "utf-8"));
-    } catch {
-      continue; // skip unparseable agent file
-    }
-    const hooks = (agent.hooks ??= {});
-    const pre = (hooks.preToolUse ??= []);
-    if (pre.some((h) => typeof h?.command === "string" && h.command.endsWith("gate-bash"))) {
-      already++;
-      continue;
-    }
-    pre.push({ matcher: "execute_bash", command: kitGateInvocation() });
-    try {
-      await writeFile(p, JSON.stringify(agent, null, 2) + "\n", "utf-8");
-      wired++;
-    } catch {
-      /* best-effort per file */
-    }
-  }
-  if (wired === 0) {
-    return {
-      file: dir,
-      action: "unchanged",
-      detail: `install-gate already wired (${already} agent[s])`,
-    };
-  }
-  return { file: dir, action: "updated", detail: `wired ${wired} Kiro agent config(s)` };
 }
 
 /**
@@ -1349,50 +1237,6 @@ export async function installInstallGateGemini(
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-    return { file, action: existed ? "updated" : "created" };
-  } catch (err) {
-    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/**
- * Cursor install-gate: a `beforeShellExecution` hook in `.cursor/hooks.json`.
- * Cursor passes the shell command at top-level `command` and blocks on exit 2
- * (equivalent to returning `{permission:"deny"}`), so `kit gate-bash` works.
- * Idempotent; preserves other hooks.
- */
-export async function installInstallGateCursor(
-  cwd: string = process.cwd(),
-): Promise<HookInstallResult> {
-  const file = ".cursor/hooks.json";
-  const path = resolve(cwd, file);
-  const { isReadOnlyMode } = await import("./read-only-mode.js");
-  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
-  if (!existsSync(resolve(cwd, ".cursor"))) {
-    return { file, action: "skipped", detail: "no Cursor project detected" };
-  }
-  let cfg: {
-    version?: number;
-    hooks?: Record<string, { command: string }[]>;
-    [k: string]: unknown;
-  } = {};
-  let existed = false;
-  try {
-    cfg = JSON.parse(await readFile(path, "utf-8")) as typeof cfg;
-    existed = true;
-  } catch {
-    cfg = {};
-  }
-  cfg.version ??= 1;
-  const hooks = (cfg.hooks ??= {});
-  const pre = (hooks.beforeShellExecution ??= []);
-  if (pre.some((h) => h.command?.endsWith("gate-bash"))) {
-    return { file, action: "unchanged", detail: "install-gate already wired" };
-  }
-  pre.push({ command: kitGateInvocation() });
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
     return { file, action: existed ? "updated" : "created" };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
@@ -1541,66 +1385,6 @@ exec ${kitGateInvocation()} --format cline
     await writeFile(path, script, { encoding: "utf-8", mode: 0o755 });
     const { chmod } = await import("node:fs/promises");
     await chmod(path, 0o755).catch(() => {}); // ensure +x even when overwriting; no-op on non-POSIX
-    return { file, action: existed ? "updated" : "created" };
-  } catch (err) {
-    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/**
- * Factory Droid install-gate: a `PreToolUse` hook in `.factory/hooks.json`. Droid
- * is Claude-Code-compatible and uses the same nested `{hooks:{PreToolUse:[{matcher,
- * hooks:[{type:"command",command}]}]}}` shape — the ONE adaptation is the shell
- * matcher is `"Execute"` (not `"Bash"`). Droid passes the command at
- * `tool_input.command` and blocks on exit 2, so `kit gate-bash` works unchanged.
- * Idempotent (keyed on a `gate-bash` command); also treats the legacy
- * `.factory/hooks/hooks.json` as already-wired so we don't double-install.
- * Preserves any other hooks/settings.
- */
-export async function installInstallGateDroid(
-  cwd: string = process.cwd(),
-): Promise<HookInstallResult> {
-  const file = ".factory/hooks.json";
-  const path = resolve(cwd, file);
-  const { isReadOnlyMode } = await import("./read-only-mode.js");
-  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
-  if (!existsSync(resolve(cwd, ".factory"))) {
-    return { file, action: "skipped", detail: "no Factory Droid project detected" };
-  }
-
-  // Legacy location: if a prior hooks file already carries the gate, do nothing.
-  const legacy = resolve(cwd, ".factory/hooks/hooks.json");
-  if (existsSync(legacy)) {
-    try {
-      if ((await readFile(legacy, "utf-8")).includes("gate-bash")) {
-        return {
-          file: ".factory/hooks/hooks.json",
-          action: "unchanged",
-          detail: "install-gate already wired",
-        };
-      }
-    } catch {
-      // unreadable legacy file → fall through and write the scope-root file
-    }
-  }
-
-  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
-  let existed = false;
-  try {
-    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
-    existed = true;
-  } catch {
-    settings = {};
-  }
-  const hooks = (settings.hooks ??= {});
-  const pre = (hooks.PreToolUse ??= []);
-  if (pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")))) {
-    return { file, action: "unchanged", detail: "install-gate already wired" };
-  }
-  pre.push({ matcher: "Execute", hooks: [{ type: "command", command: kitGateInvocation() }] });
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
     return { file, action: existed ? "updated" : "created" };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
