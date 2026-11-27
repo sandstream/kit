@@ -31,7 +31,9 @@ export interface SkippedImage {
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$/;
 const IMAGE_TIMEOUT_MS = 600_000;
 const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "vendor", "target", "coverage"]);
-const MAX_DEPTH = 3;
+// Same depth as the browser-script walk. MAX_ENTRIES bounds the cost, so a shallow
+// limit only produced "incomplete" for ordinary source trees with no Dockerfile.
+const MAX_DEPTH = 16;
 const MAX_ENTRIES = 5000;
 const MAX_DOCKERFILES = 50;
 
