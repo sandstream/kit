@@ -830,15 +830,17 @@ describe("installInstallGateCodex", () => {
       const dir = mkdtempSync(join(tmpdir(), "kit-codexgate-stale-"));
       try {
         mkdirSync(join(dir, ".codex"), { recursive: true });
+        // The HOME-baked wrapper path an older kit wrote on this machine: kit's own, so refreshed.
+        const stale = `${join(home, ".kit", "bin", "kit")} gate-bash`;
         writeFileSync(
           join(dir, ".codex", "config.toml"),
-          'model = "gpt-5"\n\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = \'/root/.kit/bin/kit gate-bash\'\n',
+          `model = "gpt-5"\n\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${stale}'\n`,
         );
         const r = await installInstallGateCodex(dir);
         assert.equal(r.action, "updated");
         const txt = readFileSync(join(dir, ".codex", "config.toml"), "utf-8");
         assert.ok(txt.includes(`command = '${kitGateInvocation()}'`));
-        assert.ok(!txt.includes("/root/.kit/bin/kit"));
+        assert.ok(!txt.includes(stale));
       } finally {
         rmTemp(dir);
       }
@@ -947,33 +949,7 @@ describe("installInstallGateDroid", () => {
     }
   });
 
-  it("fixes a legacy .factory/hooks/hooks.json gate in place, without a second file", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-droidgate-legacy-"));
-    try {
-      mkdirSync(join(dir, ".factory", "hooks"), { recursive: true });
-      writeFileSync(
-        join(dir, ".factory", "hooks", "hooks.json"),
-        JSON.stringify({
-          hooks: {
-            PreToolUse: [
-              {
-                matcher: "Execute",
-                hooks: [{ type: "command", command: "/usr/bin/node /x/cli.js gate-bash" }],
-              },
-            ],
-          },
-        }),
-      );
-      // The wrapped shape never matched Droid's event-keyed file, so it is lifted and fails closed.
-      const r = await installInstallGateDroid(dir);
-      assert.equal(r.action, "updated");
-      assert.equal((await installInstallGateDroid(dir)).action, "unchanged");
-      // must NOT create a second scope-root file (it would hide the legacy file's other hooks)
-      assert.equal(existsSync(join(dir, ".factory", "hooks.json")), false);
-    } finally {
-      rmTemp(dir);
-    }
-  });
+  // The legacy .factory/hooks/hooks.json case: src/agent-gate-wiring.test.ts (row 3).
 
   it("skips when no Factory Droid project is present (no false-green)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-droidgate2-"));

@@ -50,7 +50,7 @@ function readConf(path: string): string | null {
 }
 
 /** The effective setting: env first, then repo `.aider.conf.yml`, then the home one. */
-export function effectiveAiderCommitVerify(
+function effectiveAiderCommitVerify(
   root: string,
   home: string,
   env: Record<string, unknown>,

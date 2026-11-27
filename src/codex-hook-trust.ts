@@ -198,7 +198,7 @@ export type CodexHookTrust = "trusted" | "untrusted" | "modified" | "disabled";
 
 /** The trust of one gate hook, read from the user config's text. `configKeys` are the
  *  comparison keys of the project's `.codex/config.toml` path. Pure. */
-export function codexHookTrust(
+function codexHookTrust(
   hook: CodexGateHook,
   userToml: string,
   configKeys: Set<string>,

@@ -34,4 +34,6 @@
   (`curl … | sh; kit gate-bash`). kit no longer copies such a command to a new matcher (Amazon Q,
   Kiro), migrates it (Cursor, Droid, Kiro) or asks the user to trust it (Codex); it adds its own
   entry, leaves the look-alike as it is and names it. The Codex steps show the exact command to
-  trust.
+  trust. "Exactly" means one of the strings kit writes on this machine, not a path that looks like
+  kit: `/tmp/kit gate-bash` or `./node_modules/x/cli.js gate-bash` are look-alikes. When kit lifts
+  its Droid handler out of an old wrapper, a foreign handler in the same group stays where it was.
