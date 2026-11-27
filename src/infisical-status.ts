@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { exec } from "./utils/exec.js";
-import { resolveToolBin } from "./utils/resolveTool.js";
+import { resolvePinnedLaunch, VendorCliPinRefusal, type Launch } from "./vendor-cli-pin.js";
 
 const STATUS_ARGS = ["login", "status", "--json", "--silent", "--telemetry=false"];
 const KEYRING = "infisical login (keyring)";
@@ -273,23 +273,37 @@ export async function checkInfisicalStatus(
     );
   }
   const flagToken = args.some((arg) => arg === "--token" || arg.startsWith("--token="));
+  let bin: Launch;
   try {
-    const bin = (await resolveToolBin(command)) ?? command;
-    const { stdout } = await exec(bin, args, { timeout: 15_000, cwd, env });
+    // Behind the vendor-CLI pin, through the resolver every other `infisical` call uses.
+    bin = await resolvePinnedLaunch(command, cwd);
+  } catch (error) {
+    if (!(error instanceof VendorCliPinRefusal)) throw error;
+    return unverified("infisical refused by the vendor-CLI pin (kit check --category security).");
+  }
+  try {
+    const { stdout } = await exec(bin.file, [...bin.prefix, ...args], {
+      timeout: 15_000,
+      cwd,
+      env,
+    });
     return statusResult(stdout, 0, domain, flagToken, env);
   } catch (error) {
-    const stdout =
-      error instanceof Error && "stdout" in error && typeof error.stdout === "string"
-        ? error.stdout
-        : "";
-    const exitCode =
-      error instanceof Error &&
-      "code" in error &&
-      typeof error.code === "number" &&
-      !("killed" in error && error.killed) &&
-      !("signal" in error && error.signal)
-        ? error.code
-        : null;
+    const { stdout, exitCode } = failedRun(error);
     return statusResult(stdout, exitCode, domain, flagToken, env);
   }
+}
+
+/** What a failed `execFile` left: its stdout, and its exit code unless it was killed or signalled. */
+function failedRun(error: unknown): { stdout: string; exitCode: number | null } {
+  if (!(error instanceof Error)) return { stdout: "", exitCode: null };
+  const stdout = "stdout" in error && typeof error.stdout === "string" ? error.stdout : "";
+  const exitCode =
+    "code" in error &&
+    typeof error.code === "number" &&
+    !("killed" in error && error.killed) &&
+    !("signal" in error && error.signal)
+      ? error.code
+      : null;
+  return { stdout, exitCode };
 }
