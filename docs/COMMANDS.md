@@ -208,7 +208,7 @@ severity = "warn"
 | `kit env list`                   | List configured environments (`[env.<name>]`).                                                |
 | `kit env switch <env>`           | Activate env in `.kit/active-env.json`.                                                       |
 | `kit env current`                | Print active env.                                                                             |
-| `kit env diff --compare <other>` | Drift report between two `.env*` files (values shown as sha256:8 prefixes — never plaintext). |
+| `kit env diff --compare <other>` | Drift report between two `.env*` files (a changed key is reported as "differs"; no value or hash of one is printed). |
 
 ## Deploy Env
 
