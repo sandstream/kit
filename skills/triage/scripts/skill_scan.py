@@ -403,20 +403,24 @@ def _concealed_credential_payload(rep, signals, label):
 
 # A file the skill bundles, as SKILL.md names it: a relative Markdown link, or a path that starts
 # with ./ or one of the folders skills bundle files in. A bare `procedure.md` is not counted: it
-# reads the same as a file of the user's project. URLs and `${VAR}/` prefixes are removed first.
+# reads the same as a file of the user's project. `${VAR}/` prefixes are removed first; links are
+# read before URLs are removed, and a link whose target has a scheme is not a file. A URL ends at
+# `)`, `>` or whitespace: kit-research `auto-ontology-vs-kit` saw `[docs](https://…) before` lose
+# the link's `)` to the URL and report "names before, which is not there".
 _NAMED_LINK = re.compile(r"\]\(\s*<?([^)\s>]+)")
 _NAMED_PATH = re.compile(r"(?<![\w./:-])((?:\./|(?:scripts|references|reference|assets|templates|"
                          r"examples|resources)/)[\w./-]*[\w-])")
+_URL = re.compile(r"[A-Za-z][\w+.-]*://[^\s)>]+")
 
 
 def _named_paths(text):
-    text = re.sub(r"\$?\{[^}\s]*\}/", "", re.sub(r"[A-Za-z][\w+.-]*://\S+", " ", text))
+    text = re.sub(r"\$?\{[^}\s]*\}/", "", text)
     out = []
     for m in _NAMED_LINK.finditer(text):
         target = re.split(r"[#?]", m.group(1), 1)[0]
         if target and ":" not in target and not target.startswith("/"):
             out.append(target)
-    out += [m.group(1) for m in _NAMED_PATH.finditer(text)]
+    out += [m.group(1) for m in _NAMED_PATH.finditer(_URL.sub(" ", text))]
     return list(dict.fromkeys(p[2:] if p.startswith("./") else p for p in out))
 
 
