@@ -25,6 +25,7 @@ import {
   hookCommandProblems,
 } from "./agent-config-hook-liveness.js";
 import { renderOpenCodeInstallGate } from "./opencode-gate.js";
+import { isKitGateCommand } from "./kit-gate-command.js";
 export { renderOpenCodeInstallGate } from "./opencode-gate.js";
 import type { kitConfig } from "./config.js";
 
@@ -837,13 +838,38 @@ function refreshSettingsGateCommand(
   return { found, updated };
 }
 
+/**
+ * True when `command` is exactly a gate-bash line kit writes (src/kit-gate-command.ts). A command
+ * that only mentions gate-bash may come from a repo-committed config; kit never copies, migrates or
+ * asks the user to trust it.
+ */
+function isOwnGateBash(command: unknown): command is string {
+  return (
+    typeof command === "string" &&
+    isKitGateCommand(command, "gate-bash", [kitGateInvocation(), portableGateCommand("gate-bash")])
+  );
+}
+
+/** A gate-bash look-alike: mentions the subcommand but is not a command kit writes. */
+function isGateLookalike(command: unknown): boolean {
+  return (
+    typeof command === "string" &&
+    commandIncludesSubcommand(command, "gate-bash") &&
+    !isOwnGateBash(command)
+  );
+}
+
 function replaceTomlGateCommand(content: string, sub: string, desired: string): string {
   const escapedSub = sub.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const commandLine = new RegExp(
     `^([ \\t]*command[ \\t]*=[ \\t]*)(["'])([^\\n]*\\b${escapedSub}\\b[^\\n]*)\\2([ \\t]*)$`,
     "gm",
   );
-  return content.replace(commandLine, `$1'${desired}'$4`);
+  return content.replace(
+    commandLine,
+    (line, lead: string, _q: string, cmd: string, tail: string) =>
+      sub === "gate-bash" && !isOwnGateBash(cmd) ? line : `${lead}'${desired}'${tail}`,
+  );
 }
 
 function codexGateCommands(cwd: string): string[] {
@@ -1195,24 +1221,34 @@ async function writeInstallGateCodex(cwd: string): Promise<HookInstallResult> {
     existing = "";
   }
   const desired = kitGateInvocation();
-  if (existing.includes("gate-bash")) {
+  const { codexGateHooks, codexLookalikeCount } = await import("./codex-hook-trust.js");
+  const lookalikes = codexLookalikeCount(existing);
+  const flag =
+    lookalikes > 0
+      ? `; left ${lookalikes} gate-bash look-alike hook(s) untouched: not kit's, do not trust them`
+      : "";
+  if (codexGateHooks(replaceTomlGateCommand(existing, "gate-bash", desired)).length > 0) {
     const next = replaceTomlGateCommand(existing, "gate-bash", desired);
     if (next !== existing) {
       try {
         await writeFile(path, next, "utf-8");
-        return { file, action: "updated", detail: "install-gate hook command refreshed" };
+        return { file, action: "updated", detail: `install-gate hook command refreshed${flag}` };
       } catch (err) {
         return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
       }
     }
-    return { file, action: "unchanged", detail: "install-gate already wired" };
+    return { file, action: "unchanged", detail: `install-gate already wired${flag}` };
   }
   // Single-quoted TOML literal — the invocation has double quotes, but no single quotes.
   const block = `\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${desired}'\n`;
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, existing + block, "utf-8");
-    return { file, action: existed ? "updated" : "created" };
+    return {
+      file,
+      action: existed ? "updated" : "created",
+      ...(flag ? { detail: flag.slice(2) } : {}),
+    };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
   }
@@ -1245,10 +1281,9 @@ function upsertLegacyAgentGate(agent: { hooks?: unknown }): number | null {
   if (hooks.preToolUse === undefined) hooks.preToolUse = [];
   if (!Array.isArray(hooks.preToolUse)) return null;
   const pre = hooks.preToolUse as LegacyAgentHook[];
-  const ours = pre.filter(
-    (h) => typeof h?.command === "string" && commandIncludesSubcommand(h.command, "gate-bash"),
-  );
-  const command = ours[0]?.command ?? kitGateInvocation();
+  // Only an exact kit line is ours; a look-alike is left alone and never copied (see isOwnGateBash).
+  const ours = pre.filter((h) => isOwnGateBash(h?.command));
+  const command = kitGateInvocation();
   let added = 0;
   for (const matcher of AMAZONQ_SHELL_MATCHERS) {
     if (ours.some((h) => h.matcher === matcher)) continue;
@@ -1413,11 +1448,7 @@ async function upsertKiroStandaloneGate(
     matcher?: unknown;
     action?: { type?: unknown; command?: unknown };
   }[];
-  const ours = hooks.find(
-    (h) =>
-      typeof h?.action?.command === "string" &&
-      commandIncludesSubcommand(h.action.command, "gate-bash"),
-  );
+  const ours = hooks.find((h) => isOwnGateBash(h?.action?.command));
   if (ours) {
     // Keep the command kit wrote before (a portable or refreshed line); fix only the contract.
     ours.trigger = "PreToolUse";
@@ -1517,9 +1548,8 @@ export async function installInstallGateCursor(
   cfg.version ??= 1;
   const hooks = (cfg.hooks ??= {});
   const pre = (hooks.beforeShellExecution ??= []);
-  const ours = pre.filter(
-    (h) => typeof h?.command === "string" && commandIncludesSubcommand(h.command, "gate-bash"),
-  );
+  const ours = pre.filter((h) => isOwnGateBash(h?.command));
+  const lookalikes = pre.filter((h) => isGateLookalike(h?.command)).length;
   let changed = false;
   for (const h of ours) {
     if (!/--format[ =]cursor\b/.test(h.command)) {
@@ -1531,8 +1561,9 @@ export async function installInstallGateCursor(
       changed = true;
     }
   }
+  const flag = lookalikes > 0 ? `; left ${lookalikes} gate-bash look-alike hook(s) untouched` : "";
   if (ours.length > 0 && !changed) {
-    return { file, action: "unchanged", detail: "install-gate already wired" };
+    return { file, action: "unchanged", detail: `install-gate already wired${flag}` };
   }
   if (ours.length === 0) {
     pre.push({ command: `${kitGateInvocation()} --format cursor`, failClosed: true });
@@ -1544,10 +1575,14 @@ export async function installInstallGateCursor(
       return {
         file,
         action: "updated",
-        detail: "install-gate now fails closed (failClosed: true)",
+        detail: `install-gate now fails closed (failClosed: true)${flag}`,
       };
     }
-    return { file, action: existed ? "updated" : "created" };
+    return {
+      file,
+      action: existed ? "updated" : "created",
+      ...(flag ? { detail: flag.slice(2) } : {}),
+    };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
   }
@@ -1745,10 +1780,9 @@ export async function installInstallGateDroid(
   } catch {
     doc = {};
   }
-  const isGateGroup = (g: SettingsHookGroup) =>
-    g?.hooks?.some(
-      (h) => typeof h?.command === "string" && commandIncludesSubcommand(h.command, "gate-bash"),
-    ) ?? false;
+  // Only a group holding an exact kit line is kit's; a look-alike is left as it is.
+  const isGateGroup = (g: SettingsHookGroup): boolean =>
+    g?.hooks?.some((h) => isOwnGateBash(h?.command)) ?? false;
   if (doc.PreToolUse !== undefined && !Array.isArray(doc.PreToolUse)) {
     return { file, action: "failed", detail: "PreToolUse in hooks.json is not a list" };
   }
@@ -1772,7 +1806,7 @@ export async function installInstallGateDroid(
   }
   for (const group of pre.filter(isGateGroup)) {
     for (const h of group.hooks ?? []) {
-      if (typeof h?.command === "string" && commandIncludesSubcommand(h.command, "gate-bash")) {
+      if (isOwnGateBash(h?.command)) {
         h.onFailure = "block";
       }
     }

@@ -31,6 +31,7 @@ import type { SecurityCheckResult } from "./check-security.js";
 import { codexHome } from "./agent-audit-user.js";
 import { codexTrusts, pathKey, rootKeys } from "./check-pretrusted.js";
 import { commandIncludesSubcommand } from "./agent-config-hook-liveness.js";
+import { isKitGateCommand } from "./kit-gate-command.js";
 
 /** Codex's default command-hook timeout in seconds (`discovery.rs:1040`). */
 const DEFAULT_TIMEOUT_SEC = 600;
@@ -107,13 +108,14 @@ export interface CodexGateHook {
   groupIndex: number;
   handlerIndex: number;
   hash: string;
+  /** The exact command Codex will show in /hooks, and the user is asked to trust. */
+  command: string;
 }
 
-/** The kit `gate-bash` PreToolUse handlers in a Codex config's text. Pure. */
-export function codexGateHooks(
+/** PreToolUse command handlers in a Codex config's text, with their indexes. Pure. */
+function preToolUseHandlers(
   configToml: string,
-  platform: NodeJS.Platform = process.platform,
-): CodexGateHook[] {
+): { groupIndex: number; handlerIndex: number; matcher?: string; handler: CodexCommandHandler }[] {
   let cfg: unknown;
   try {
     cfg = parseToml(configToml);
@@ -122,18 +124,54 @@ export function codexGateHooks(
   }
   const groups = (cfg as { hooks?: { PreToolUse?: unknown } })?.hooks?.PreToolUse;
   if (!Array.isArray(groups)) return [];
-  const found: CodexGateHook[] = [];
+  const found: ReturnType<typeof preToolUseHandlers> = [];
   groups.forEach((group: { matcher?: unknown; hooks?: unknown }, groupIndex) => {
     if (!Array.isArray(group?.hooks)) return;
     const matcher = typeof group.matcher === "string" ? group.matcher : undefined;
     group.hooks.forEach((handler: CodexCommandHandler, handlerIndex) => {
       if (handler?.type !== "command" || typeof handler.command !== "string") return;
-      if (!commandIncludesSubcommand(handler.command, "gate-bash")) return;
-      const hash = codexCommandHookHash("pre_tool_use", matcher, handler, platform);
-      found.push({ groupIndex, handlerIndex, hash });
+      found.push({ groupIndex, handlerIndex, matcher, handler });
     });
   });
   return found;
+}
+
+/** The command Codex runs for a handler on `platform` (`discovery.rs:690-694`). Pure. */
+function effectiveCommand(handler: CodexCommandHandler, platform: NodeJS.Platform): string {
+  const windows = handler.commandWindows ?? handler.command_windows;
+  return platform === "win32" && typeof windows === "string" ? windows : String(handler.command);
+}
+
+/**
+ * kit's own `gate-bash` PreToolUse handlers: the command Codex runs is exactly a line kit writes
+ * (src/kit-gate-command.ts). A handler that only mentions gate-bash is not kit's, and kit never
+ * asks the user to trust it. Pure.
+ */
+export function codexGateHooks(
+  configToml: string,
+  platform: NodeJS.Platform = process.platform,
+): CodexGateHook[] {
+  return preToolUseHandlers(configToml)
+    .filter(({ handler }) => isKitGateCommand(effectiveCommand(handler, platform), "gate-bash"))
+    .map(({ groupIndex, handlerIndex, matcher, handler }) => ({
+      groupIndex,
+      handlerIndex,
+      hash: codexCommandHookHash("pre_tool_use", matcher, handler, platform),
+      command: effectiveCommand(handler, platform),
+    }));
+}
+
+/** PreToolUse handlers that mention gate-bash but are not a line kit writes. Pure. */
+export function codexLookalikeCount(
+  configToml: string,
+  platform: NodeJS.Platform = process.platform,
+): number {
+  return preToolUseHandlers(configToml).filter(({ handler }) => {
+    const command = effectiveCommand(handler, platform);
+    return (
+      commandIncludesSubcommand(command, "gate-bash") && !isKitGateCommand(command, "gate-bash")
+    );
+  }).length;
 }
 
 /** `[hooks.state."<key>"]` entries of a user config, keyed by Codex's own key string. Pure. */
@@ -200,6 +238,8 @@ function configPathKeys(root: string): Set<string> {
 /** What Codex will do with kit's gate in `root`; null when kit's Codex gate is not there. */
 export interface CodexGateStatus {
   projectTrusted: boolean;
+  /** Handlers that mention gate-bash but are not kit's: never to be trusted as kit's gate. */
+  lookalikes: number;
   hooks: (CodexGateHook & { trust: CodexHookTrust })[];
   /** How the user config was named in output (`~/.codex` or `$CODEX_HOME`). */
   shown: string;
@@ -213,12 +253,14 @@ export function codexGateStatus(
   const project = readText(join(root, ".codex", "config.toml"));
   if (project === null) return null;
   const hooks = codexGateHooks(project);
-  if (hooks.length === 0) return null;
+  const lookalikes = codexLookalikeCount(project);
+  if (hooks.length === 0 && lookalikes === 0) return null;
   const codex = codexHome(home, env);
   const user = readText(join(codex.dir, "config.toml")) ?? "";
   const keys = configPathKeys(root);
   return {
     projectTrusted: codexTrusts(user, rootKeys(root)),
+    lookalikes,
     hooks: hooks.map((h) => ({ ...h, trust: codexHookTrust(h, user, keys) })),
     shown: codex.shown,
   };
@@ -227,6 +269,11 @@ export function codexGateStatus(
 /** The steps a person takes to make Codex run kit's gate; empty when it already runs. Pure. */
 export function codexActivationSteps(root: string, status: CodexGateStatus): string[] {
   const steps: string[] = [];
+  if (status.hooks.length === 0) {
+    steps.push(
+      "Run `kit agent-config` to add kit's own gate-bash hook; the one in .codex/config.toml is not kit's.",
+    );
+  }
   if (!status.projectTrusted) {
     steps.push(
       `Codex ignores .codex/config.toml until you trust this project: start \`codex\` in ${root} and accept the trust prompt (Codex stores it in ${status.shown}/config.toml).`,
@@ -239,8 +286,14 @@ export function codexActivationSteps(root: string, status: CodexGateStatus): str
       : pending.some((h) => h.trust === "disabled")
         ? "the hook is turned off in Codex"
         : "Codex runs a new hook only after you trust it";
+    const commands = pending.map((h) => `\`${h.command}\``).join(" or ");
     steps.push(
-      `In Codex, open /hooks (or answer the startup hook review) and trust the PreToolUse hook \`kit gate-bash\` from .codex/config.toml: ${why}.`,
+      `In Codex, open /hooks (or answer the startup hook review) and trust the PreToolUse hook in .codex/config.toml whose command is exactly ${commands}: ${why}. Trust no other hook as kit's gate.`,
+    );
+  }
+  if (status.lookalikes > 0) {
+    steps.push(
+      `Do not trust the ${status.lookalikes} other PreToolUse hook(s) in .codex/config.toml that mention gate-bash: their command is not one kit writes. Read them, and remove any you did not add.`,
     );
   }
   if (steps.length > 0) {
@@ -270,16 +323,19 @@ export function checkCodexHookTrust(
       },
     ];
   }
-  const states = status.hooks.map((h) => h.trust).join(", ");
+  const states = status.hooks.map((h) => h.trust).join(", ") || "not kit's";
+  const lookalikes =
+    status.lookalikes > 0 ? `; ${status.lookalikes} gate-bash look-alike hook(s), not kit's` : "";
+  const runs = status.hooks.length > 0 && status.hooks.every((h) => h.trust === "trusted");
   return [
     {
       category: "exposure",
       name: "codex install-gate trust",
       status: "warn",
       severity: "medium",
-      detail: `kit's gate-bash hook is in .codex/config.toml, but Codex does not run it: project ${
+      detail: `kit's gate-bash hook in .codex/config.toml: project ${
         status.projectTrusted ? "trusted" : "not trusted"
-      }, hook ${states}. Codex installs run ungated`,
+      }, hook ${states}${lookalikes}. ${runs && status.projectTrusted ? "kit's gate runs" : "Codex installs run ungated"}`,
       suggestion: steps.join(" "),
     },
   ];

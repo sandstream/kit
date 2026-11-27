@@ -956,7 +956,10 @@ describe("installInstallGateDroid", () => {
         JSON.stringify({
           hooks: {
             PreToolUse: [
-              { matcher: "Execute", hooks: [{ type: "command", command: "/x/cli.js gate-bash" }] },
+              {
+                matcher: "Execute",
+                hooks: [{ type: "command", command: "/usr/bin/node /x/cli.js gate-bash" }],
+              },
             ],
           },
         }),

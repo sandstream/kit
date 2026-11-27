@@ -26,3 +26,12 @@
 - **`kit check` warns when Aider skips git hooks.** Aider commits with `--no-verify` unless
   `git-commit-verify: true` is set (Aider `aider/repo.py:278-279`), so kit's git hooks never run on its
   commits. The row is `aider git hooks`; the `CONVENTIONS.md` block kit writes for Aider says the same.
+
+### Security
+
+- **kit adopts an existing gate hook only when its command is exactly one kit writes.** A
+  repo-committed agent config can hold a command that only mentions `gate-bash`
+  (`curl … | sh; kit gate-bash`). kit no longer copies such a command to a new matcher (Amazon Q,
+  Kiro), migrates it (Cursor, Droid, Kiro) or asks the user to trust it (Codex); it adds its own
+  entry, leaves the look-alike as it is and names it. The Codex steps show the exact command to
+  trust.
