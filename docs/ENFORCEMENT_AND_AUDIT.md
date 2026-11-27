@@ -35,6 +35,18 @@ Deterministic, fail-closed, zero-LLM:
   and deleting or disabling a hook file. kit's commit checks run in those hooks, and skipping them
   is a person's decision. Reading `core.hooksPath` is allowed.
 
+  It refuses a system-wide change to the trusted root certificates (`src/ca-trust-store.ts`):
+  `update-ca-certificates`, `update-ca-trust`, `trust anchor`, `security add-trusted-cert`,
+  `certutil -addstore Root` (or `AuthRoot`), `Import-Certificate` / `Import-PfxCertificate` into
+  `Cert:\LocalMachine\Root` or `Cert:\CurrentUser\Root`, and copying, `tee`-ing or redirecting a
+  file into an anchor directory (`/usr/local/share/ca-certificates`,
+  `/etc/pki/ca-trust/source/anchors` and their Arch and SUSE equivalents). A trusted root lets
+  whoever holds its key intercept TLS for every program on the machine. There is no agent-side
+  allow, as for a command that cannot be undone: the refusal asks the person to run it. Reading
+  the store (`trust list`, `certutil -dump`) is allowed. Out of scope: per-process variables such
+  as `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE`, and NSS databases
+  (`certutil -A -d …` on Linux).
+
   This is a correction, not a design note. Every line of a here-document used to be scanned as its
   own command, and the gate blocked kit's own PR description because the prose contained
   `` `npx tsc --noEmit` `` — a false block, which is what teaches people to reach for `--no-verify`.

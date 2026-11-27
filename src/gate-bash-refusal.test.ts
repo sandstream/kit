@@ -73,6 +73,14 @@ describe("gate-bash refusal wording (compiled CLI)", () => {
     assert.equal(gateBash("git push origin feature").exitCode, 0);
   });
 
+  it("refuses a system-wide CA trust change, names it, asks for the person, no triage advice", () => {
+    const r = gateBash("sudo update-ca-certificates");
+    assert.equal(r.exitCode, 2);
+    assert.match(r.stderr, /trusted root certificates \(update-ca-certificates\)/);
+    assert.match(r.stderr, /Ask the person to run it themselves/);
+    assert.doesNotMatch(r.stderr, /Triage it first/);
+  });
+
   it("still allows a commit message whose backticks are single-quoted (no substitution)", () => {
     const r = gateBash("git commit -qam 'naming the permission `deployment:env:view` here'");
     assert.equal(r.exitCode, 0, r.stderr);
