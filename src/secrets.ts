@@ -1,7 +1,7 @@
 import { readFile, writeFile, access } from "node:fs/promises";
 import { devNull } from "node:os";
 import { dirname, resolve } from "node:path";
-import type { SecretKeyConfig, SecretsConfig } from "./config.js";
+import type { InfisicalConfig, SecretKeyConfig, SecretsConfig } from "./config.js";
 import { resolveViaBackend, resetInfisicalCache } from "./secret-backends.js";
 import { recordSecretRead, type SecretReader } from "./secrets-read-record.js";
 import { secureFile } from "./utils/secure-perms.js";
@@ -15,6 +15,41 @@ export interface SecretResolveResult {
    *  is a display placeholder, not a real secret, so it's never written to
    *  .env.local. Lets the writer skip these without sniffing the value string. */
   managed?: boolean;
+}
+
+export interface WriteOpts {
+  vault?: string;
+  project?: string;
+  region?: string;
+  vaultPath?: string;
+}
+
+export interface WriteResult {
+  ok: boolean;
+  ref?: string;
+  detail: string;
+}
+
+export interface SecretBackend {
+  /** Read a secret value for `name` using its `config`. Never throws — failures
+   *  come back as `{ resolved: false, detail }`. */
+  resolve(
+    name: string,
+    config: SecretKeyConfig,
+    infisicalConfig?: InfisicalConfig,
+    cwd?: string,
+  ): Promise<SecretResolveResult>;
+  /** Write a secret. Absent ⇒ the backend is read-only (migration unsupported).
+   *  May throw; callers wrap it so the error is redacted before surfacing.
+   *
+   *  Value handling: where the CLI supports it, the value is fed via stdin so it
+   *  never lands in argv / the process table (vault `kv put -`, aws/gcp
+   *  `file:///dev/stdin` / `--data-file=-`). The 1Password, Infisical, Doppler and
+   *  Azure CLIs only accept the value as a `key=value` / `--value` argv token for
+   *  these operations, so it is briefly visible in `ps` there — an inherent CLI
+   *  limitation. The error path is covered regardless: writeSecretToBackend redacts
+   *  the held plaintext by exact substring before any failure message is surfaced. */
+  write?(key: string, value: string, opts: WriteOpts): Promise<WriteResult>;
 }
 
 /** Interpolate {{KEY}} placeholders in a template string with resolved values. */

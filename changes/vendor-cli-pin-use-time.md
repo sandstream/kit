@@ -1,0 +1,3 @@
+### Security
+
+- **Every secret read and write kit makes through a vendor CLI now goes through the vendor-CLI pin.** `kit check`'s secret rows, the secret backends (`op read`, `op item edit/create`, `infisical`, `bw`, `doppler`, `vault`, `aws`, `gcloud`, `az`), `kit secrets vault-migrate`, the 1Password expiry probe (`op item get`) and `kit secrets sync`'s `gh secret set` now run a pinned CLI only as its verified realpath. A pinned CLI whose file or SHA-256 no longer matches `.kit/cli-lock.json` is refused before it runs, with no fallback to another binary on PATH, and the process exits non-zero with the expected and actual hash and path and `kit tools pin --accept <tool>`. An unpinned CLI runs exactly as before (kit-research#232).

@@ -11,6 +11,8 @@
  *   version cannot be read, since then a new release cannot be told apart from a swap.
  * - warn: the version changed (a new release); the row prints the new hash and the accept command.
  * - warn: the CLI resolves to a different file than the pinned one (PATH shadowing).
+ * - fail: win32 npm shim — the `.cmd` shim changed while the program it starts did not (a shim
+ *   edited to start something else), or the shim cannot be read (kit cannot run the CLI at all).
  * - warn: unpinned — kit runs whatever the tool is first on PATH; the row prints the pin command.
  * - pass: the pinned file, hash and version.
  * - skip: the project uses no vault/cloud CLI and nothing is pinned, or the CLI is not installed.
@@ -26,13 +28,17 @@ import {
   projectVendorClis,
   readAllPins,
   readCliVersion,
+  sameShim,
   samePath,
+  ShimUnreadable,
   type CliIdentity,
+  type Launch,
   type Measured,
   type PinDeps,
 } from "./vendor-cli-pin.js";
 
 type Row = SecurityCheckResult;
+type VersionOf = (bin: string | Launch) => Promise<string | null>;
 
 function row(tool: string, status: Row["status"], detail: string, extra: Partial<Row> = {}): Row {
   return { category: "supply-chain", name: `vendor CLI: ${tool}`, status, detail, ...extra };
@@ -57,9 +63,9 @@ async function changedHashRow(
   pin: CliIdentity,
   m: Measured,
   moved: string,
-  versionOf: (bin: string) => Promise<string | null>,
+  versionOf: VersionOf,
 ): Promise<Row> {
-  const version = await versionOf(m.realpath);
+  const version = await versionOf(m.launch);
   if (version !== null && version !== pin.version) {
     return row(
       tool,
@@ -81,13 +87,28 @@ async function changedHashRow(
   );
 }
 
+/** Win32: the shim changed but the program it starts did not — it may now start something else. */
+function shimChangedRow(tool: string, pin: CliIdentity, m: Measured): Row {
+  const was = pin.shim ? `${pin.shim.path} ${short(pin.shim.sha256)}` : "no shim";
+  const now = m.shim ? `${m.shim.path} ${short(m.shim.sha256)}` : "no shim";
+  return row(
+    tool,
+    "fail",
+    `${tool}'s Windows .cmd shim changed (pinned ${was}; now ${now}) — possible tampering. kit refuses to run it until accepted`,
+    {
+      severity: "high",
+      suggestion: `Read the shim before trusting it; only then: ${accept(tool)}`,
+    },
+  );
+}
+
 /** One tool's row. `versionOf` is only called when the hash changed. */
 async function judgeVendorCli(
   tool: string,
   pins: Record<string, CliIdentity>,
   m: Measured | null,
   deps: Pick<PinDeps, "home" | "platform" | "arch">,
-  versionOf: (bin: string) => Promise<string | null> = readCliVersion,
+  versionOf: VersionOf = readCliVersion,
 ): Promise<Row> {
   const key = platformKey(deps);
   const pin = pins[key];
@@ -101,6 +122,7 @@ async function judgeVendorCli(
   const isMoved = !samePath(pinnedPath, m.realpath, deps.platform);
   const moved = isMoved ? `; resolves to ${m.realpath}, pinned ${pin.path}` : "";
   if (m.sha256 !== pin.sha256) return changedHashRow(tool, pin, m, moved, versionOf);
+  if (!sameShim(pin, m, deps)) return shimChangedRow(tool, pin, m);
   if (isMoved) {
     return row(
       tool,
@@ -120,7 +142,7 @@ export async function checkVendorCliPins(
   cwd: string,
   secrets: { store?: string; keys?: Record<string, { source?: string }> } | undefined,
   deps: PinDeps = defaultPinDeps(cwd),
-  versionOf?: (bin: string) => Promise<string | null>,
+  versionOf?: VersionOf,
 ): Promise<Row[]> {
   const all = await readAllPins(cwd);
   const tools = [...new Set([...projectVendorClis(secrets ?? {}), ...Object.keys(all)])].sort();
@@ -136,7 +158,16 @@ export async function checkVendorCliPins(
   }
   const rows: Row[] = [];
   for (const tool of tools) {
-    const m = await measureCli(tool, deps).catch(() => null);
+    let m: Measured | null;
+    try {
+      m = await measureCli(tool, deps);
+    } catch (err) {
+      if (err instanceof ShimUnreadable) {
+        rows.push(row(tool, "fail", err.message, { severity: "high" }));
+        continue;
+      }
+      m = null;
+    }
     rows.push(await judgeVendorCli(tool, all[tool] ?? {}, m, deps, versionOf));
   }
   return rows;
