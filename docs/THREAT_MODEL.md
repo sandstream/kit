@@ -235,6 +235,16 @@ Those are a separate supply chain worth understanding:
   Nothing is installed, so no install gate sees it. `kit agent-audit` names
   each one it finds in its environment and in Claude Code's `settings.json`
   `env` blocks; it cannot see shell rc files it is not run from.
+- **Project MCP servers** start with every agent session once approved. When
+  a committed `.mcp.json` (or `.codex/config.toml`, `.cursor/mcp.json`, …)
+  runs the checkout's own code (`go run ./…`, `cargo run`, `node ./…`,
+  `python -m <a package in the checkout>`, `npm run`, `uv run`), whatever a
+  commit or branch puts there runs before anyone reads it. A package runner
+  without a version (`npx -y <pkg>`, `uvx <pkg>`) runs whatever was published
+  last. `kit agent-audit` warns (low) on both, and calls the runner unpinned
+  as `kit triage skill` does. Neither fails: building your own server, or
+  running a well-known one through `npx`, is common, and a failure on every
+  such config would be noise.
 
 How to harden host CLIs (kit cannot do this for you):
 
