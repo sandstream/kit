@@ -1,7 +1,12 @@
 import type { ToolConfig } from "./config.js";
 import { checkTools, type ToolStatus } from "./check-tools.js";
 import { gateInstall, type GateVerdict } from "./triage-gate.js";
+import { resolveMiseVersion, type MiseVersion } from "./mise-version.js";
 import { exec } from "./utils/exec.js";
+import { identityOf, sameIdentity } from "./utils/same-file.js";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export interface InstallResult {
   name: string;
@@ -92,9 +97,47 @@ export async function ensureScannersInstalled(
   return installTools(scanners, deps);
 }
 
-async function miseInstall(
+/** How `miseInstall` runs mise and finds the project. Injected so no test spawns mise. */
+export interface MiseExecDeps {
+  exec: (
+    file: string,
+    args: string[],
+    opts: { timeout: number; env: NodeJS.ProcessEnv },
+  ) => Promise<{ stdout: string; stderr: string }>;
+  cwd: () => string;
+  home: () => string;
+}
+
+const defaultMiseExecDeps: MiseExecDeps = {
+  exec: (file, args, opts) => exec(file, args, opts),
+  cwd: () => process.cwd(),
+  home: () => homedir(),
+};
+
+/**
+ * The config file `mise use` writes, or null when the project folder is the home folder.
+ *
+ * Without `--global` or `--path`, `mise use` writes `mise.toml` in the current folder, "or global
+ * config if cwd is home directory" (`mise help use`, mise v2026.6.11). kit ran it with neither, so a
+ * run from `~` wrote the user's global `~/.config/mise/config.toml`. kit now always passes
+ * `--path <file>` ("Specify a path to a config file or directory"), and refuses in the home
+ * folder, where even `~/mise.toml` would apply to every project below it. An existing `.mise.toml`
+ * is reused when there is no `mise.toml`, so kit does not create a second config beside it.
+ */
+export function miseUseTarget(cwd: string, home: string): string | null {
+  if (sameIdentity(identityOf(cwd), identityOf(home))) return null;
+  const plain = join(cwd, "mise.toml");
+  const dotted = join(cwd, ".mise.toml");
+  return !existsSync(plain) && existsSync(dotted) ? dotted : plain;
+}
+
+/** Backends whose `latest` mise resolves through a package manager kit must never let it run. */
+const NO_LATEST_SCHEMES = /^(npm|pipx|pip):/i;
+
+export async function miseInstall(
   tool: string,
   version: string,
+  deps: MiseExecDeps = defaultMiseExecDeps,
 ): Promise<{ ok: boolean; detail: string }> {
   // Read-only mode: `mise install`/`mise use` mutate the toolchain. Refuse + audit.
   const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
@@ -102,18 +145,32 @@ async function miseInstall(
     const refusal = await refuseWrite("mise-install", { tool, version });
     return { ok: false, detail: refusal.reason };
   }
-  const versionArg = version === "latest" ? "latest" : version;
+  // Defence in depth: installTools resolves `latest` first (mise-version.ts). A caller that
+  // reaches this with `latest` for npm:/pipx: is refused, because mise would resolve it by running
+  // `npm view` through its own shim, which recurses without bound.
+  if (version.trim() === "latest" && NO_LATEST_SCHEMES.test(tool)) {
+    return {
+      ok: false,
+      detail: `kit never hands "latest" to mise for ${tool}; resolve it to an exact version first`,
+    };
+  }
+  const target = miseUseTarget(deps.cwd(), deps.home());
+  if (!target) {
+    return {
+      ok: false,
+      detail:
+        "refusing to run `mise use` in the home folder: it would write the global mise config. Run kit from the project folder.",
+    };
+  }
+  const spec = `${tool}@${version}`;
   try {
-    await exec("mise", ["install", `${tool}@${versionArg}`], {
-      timeout: 120_000,
-      env: { ...process.env },
-    });
-    // Activate the tool in the current project
-    await exec("mise", ["use", `${tool}@${versionArg}`], {
+    await deps.exec("mise", ["install", spec], { timeout: 120_000, env: { ...process.env } });
+    // Activate the tool in this project's config file only, never the global one.
+    await deps.exec("mise", ["use", "--path", target, spec], {
       timeout: 30_000,
       env: { ...process.env },
     });
-    return { ok: true, detail: `Installed ${tool}@${versionArg} via mise` };
+    return { ok: true, detail: `Installed ${spec} via mise (${target})` };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     const stderr =
@@ -133,9 +190,16 @@ export interface InstallDeps {
   checkTools: (tools: ToolConfig) => Promise<ToolStatus[]>;
   miseInstall: (tool: string, version: string) => Promise<{ ok: boolean; detail: string }>;
   gateInstall: (tool: string) => Promise<GateVerdict>;
+  /** What version mise gets: `latest` becomes the newest cooled release, or a refusal. */
+  resolveVersion: (tool: string, version: string) => Promise<MiseVersion>;
 }
 
-const defaultDeps: InstallDeps = { checkTools, miseInstall, gateInstall };
+const defaultDeps: InstallDeps = {
+  checkTools,
+  miseInstall: (tool, version) => miseInstall(tool, version),
+  gateInstall,
+  resolveVersion: (tool, version) => resolveMiseVersion(tool, version),
+};
 
 /**
  * Install missing tools via mise. WATERTIGHT: every third-party tool is run
@@ -173,14 +237,24 @@ export async function installTools(
       continue;
     }
 
-    const verdict = opts.skipTriage ? undefined : await deps.gateInstall(status.name);
+    // `latest` is policy, not a version: resolve it to the newest cooled release, or refuse.
+    // Never fall back to handing mise `latest` (mise-version.ts says why).
+    const resolved = await deps.resolveVersion(status.name, status.required);
+    if (resolved.kind === "refused") {
+      results.push({ name: status.name, action: "failed", detail: resolved.reason });
+      continue;
+    }
+    // Triage the exact version kit installs, not whatever the registry calls latest today.
+    const gateRef =
+      resolved.kind === "resolved" ? `${status.name}@${resolved.version}` : status.name;
+    const verdict = opts.skipTriage ? undefined : await deps.gateInstall(gateRef);
     if (verdict?.decision === "blocked") {
       results.push({ name: status.name, action: "blocked", detail: verdict.reason });
       continue;
     }
     const warned = warningsOf(verdict);
 
-    const { ok, detail } = await deps.miseInstall(status.name, status.required);
+    const { ok, detail } = await deps.miseInstall(status.name, resolved.version);
     if (!ok) {
       results.push({ name: status.name, action: "failed", detail, ...warned });
       continue;

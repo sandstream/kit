@@ -163,8 +163,11 @@ function ageDays(iso: string | undefined, now: number): number | undefined {
   return Number.isNaN(at) ? undefined : Math.floor((now - at) / DAY_MS);
 }
 
-/** The newest stable version that has been public for at least `limit` days. */
-function newestOlder(
+/**
+ * The newest stable version that has been public for at least `limit` days. The triage cooling
+ * line names it, and `mise-version.ts` resolves a `latest` pin in `[tools]` to it.
+ */
+export function newestOlder(
   versions: string[],
   times: Record<string, string>,
   limit: number,

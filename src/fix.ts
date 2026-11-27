@@ -1,4 +1,5 @@
 import { installTools } from "./install.js";
+import { checkMiseLatest, pinMiseLatest } from "./check-mise-latest.js";
 import {
   readkitMeta,
   readSkillsLock,
@@ -239,6 +240,36 @@ function developerBlock(fields: Omit<HitlBlock, "owner">): HitlBlock {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Before step 1: pin `npm:` tools that a mise config holds at `latest` while npm is mise's shim
+ * (the fork loop, `check-mise-latest.ts`). Silent when there is nothing to pin.
+ */
+async function fixMiseLatest(cwd: string, state: FixState): Promise<void> {
+  const [row] = checkMiseLatest(cwd);
+  if (row?.status !== "warn") return;
+  console.log(`${c.bold}mise config${c.reset}`);
+  for (const o of await pinMiseLatest(cwd)) {
+    if ("to" in o) {
+      console.log(
+        `  ${c.green}✓${c.reset} ${o.tool}  ${c.green}pinned${c.reset}  ${c.dim}latest → ${o.to} in ${o.file}${c.reset}`,
+      );
+      state.fixed++;
+    } else {
+      console.log(`  ${c.red}✗${c.reset} ${o.tool}  ${c.dim}${o.reason}${c.reset}`);
+      state.manual.push(
+        developerBlock({
+          blocker: `${o.tool} is pinned to latest in a mise config while npm is mise's shim`,
+          reason: "mise resolves it by running npm view through its own shim, which loops",
+          steps: [o.reason, "Run `kit check --category security`."],
+          respondWith: `${o.tool} pinned to an exact version`,
+          agentContinuesWith: "kit check --category security",
+        }),
+      );
+    }
+  }
+  console.log();
 }
 
 /** Step 1: install the tools that `[tools]` declares and that are missing. */
@@ -538,6 +569,7 @@ async function runFixPipeline(config: kitConfig, cwd: string): Promise<boolean> 
   }
 
   const state: FixState = { fixed: 0, manual: [] };
+  await fixMiseLatest(cwd, state);
   await fixTools(config, state);
   await fixLockFiles(config, cwd, state);
   await fixServices(config, state);
