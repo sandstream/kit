@@ -99,6 +99,8 @@ describe("parseDockerfileImages", () => {
 });
 
 const dockerfileOptions = { configured: [], fromDockerfiles: true };
+/** A path exactly as deep as the Dockerfile walk goes. */
+const DEEP = Array.from({ length: 16 }, (_, i) => `d${i}`).join("/");
 const chmodSkip = process.platform === "win32" || process.getuid?.() === 0;
 
 function inProject(files: Record<string, string>, body: (dir: string) => void): void {
@@ -196,19 +198,33 @@ describe("collectImages reports incomplete Dockerfile inventory", () => {
       }
     }));
 
+  it("finds Dockerfiles in ordinary nested source trees without a gap", () =>
+    inProject(
+      {
+        "crates/core/src/bin/topics/assets/note.txt": "x\n",
+        "apps/api/docker/prod/Dockerfile": "FROM e:1\n",
+      },
+      (dir) => {
+        assert.deepEqual(collectImages(dir, dockerfileOptions), {
+          images: [{ ref: "e:1", source: "Dockerfile" }],
+          skipped: [],
+        });
+      },
+    ));
+
   it("reports the depth limit and keeps images in scope", () =>
     inProject(
       {
-        "a/b/c/Dockerfile": "FROM a:1 AS base\nFROM scratch\nFROM base\n",
-        "a/b/c/deep\u2028/Dockerfile": "FROM b:1\n",
-        "a/b/c/node_modules/Dockerfile": "FROM c:1\n",
-        "a/b/c/.hidden/Dockerfile": "FROM d:1\n",
+        [`${DEEP}/Dockerfile`]: "FROM a:1 AS base\nFROM scratch\nFROM base\n",
+        [`${DEEP}/deep\u2028/Dockerfile`]: "FROM b:1\n",
+        [`${DEEP}/node_modules/Dockerfile`]: "FROM c:1\n",
+        [`${DEEP}/.hidden/Dockerfile`]: "FROM d:1\n",
       },
       (dir) => {
         assert.deepEqual(collectImages(dir, dockerfileOptions), {
           images: [{ ref: "a:1", source: "Dockerfile" }],
           skipped: [
-            { ref: "a/b/c/deep", reason: "depth limit reached", evidenceStatus: "partial" },
+            { ref: `${DEEP}/deep`, reason: "depth limit reached", evidenceStatus: "partial" },
           ],
         });
       },
