@@ -1,4 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
+import { ADAPTER_FETCH_TIMEOUT_MS } from "./fetch-timeout.js";
 import { exec } from "../utils/exec.js";
 
 /**
@@ -106,6 +107,7 @@ export const cloudflareR2Adapter: ServiceAdapter = {
               permissions: ["admin:read", "admin:write"],
               buckets: [bucketName],
             }),
+            signal: AbortSignal.timeout(ADAPTER_FETCH_TIMEOUT_MS),
           },
         );
 

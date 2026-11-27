@@ -1,4 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
+import { ADAPTER_FETCH_TIMEOUT_MS } from "./fetch-timeout.js";
 
 interface PlanetScaleDatabase {
   id: string;
@@ -87,6 +88,7 @@ export const planetscaleDbAdapter: ServiceAdapter = {
         method: "POST",
         headers,
         body: JSON.stringify({ name: dbName }),
+        signal: AbortSignal.timeout(ADAPTER_FETCH_TIMEOUT_MS),
       });
 
       if (!resp.ok) {
@@ -116,6 +118,7 @@ export const planetscaleDbAdapter: ServiceAdapter = {
           method: "POST",
           headers,
           body: JSON.stringify({ name: `${dbName}-kit`, role: "readwriter" }),
+          signal: AbortSignal.timeout(ADAPTER_FETCH_TIMEOUT_MS),
         },
       );
 

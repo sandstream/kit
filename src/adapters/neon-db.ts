@@ -1,4 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
+import { ADAPTER_FETCH_TIMEOUT_MS } from "./fetch-timeout.js";
 
 interface NeonProject {
   id: string;
@@ -81,6 +82,7 @@ export const neonDbAdapter: ServiceAdapter = {
           Accept: "application/json",
         },
         body: JSON.stringify({ project: { name: projectName } }),
+        signal: AbortSignal.timeout(ADAPTER_FETCH_TIMEOUT_MS),
       });
 
       if (!resp.ok) {
