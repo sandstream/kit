@@ -142,7 +142,9 @@ describe("the mise npm: latest row", () => {
       m.done();
     }
   });
+});
 
+describe("the mise npm: latest row, shim detection", () => {
   it(
     "warns even when a real npm comes first on kit's own PATH (kit runs under mise's node)",
     posixOnly,
