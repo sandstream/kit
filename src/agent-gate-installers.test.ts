@@ -195,7 +195,10 @@ describe("row 3: Cursor and Droid fail closed", () => {
     ]) {
       const dir = project(t, files);
       await installInstallGateDroid(dir);
-      const pre = read(dir, ".factory/hooks.json").PreToolUse as { matcher: string; hooks: { command: string }[] }[];
+      const pre = read(dir, ".factory/hooks.json").PreToolUse as {
+        matcher: string;
+        hooks: { command: string }[];
+      }[];
       assert.ok(
         pre.some((g) => g.matcher === "Execute" && g.hooks.some((h) => h.command === KIT)),
         JSON.stringify(pre),

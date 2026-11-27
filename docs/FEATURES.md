@@ -206,8 +206,8 @@ in to any vault is always your own account action; kit never does it for you.
     - a path that is gone but is in git history (`deleted`);
     - a name that is in `HEAD`'s code but not in the working tree (`removed`);
     - a path that is not in the tree, under a rule that requires it (not "never"), inside a directory that exists (`missing`).
-    An absent name under "never" is the rule obeyed, and an absent bare file name is often one the agent is told to write, so neither is listed without that evidence. Git-ignored paths are skipped.
-    The search is bounded and run once per check: 50,000 tree entries; 20,000 code files of at most 1 MB and 64 MB in all, with prose (`.md`, `.txt`) and instruction files excluded; 100 history lookups. A bound reached makes the row an incomplete scan. A name removed in an earlier commit is not found: the row is meant to run before a commit.
+      An absent name under "never" is the rule obeyed, and an absent bare file name is often one the agent is told to write, so neither is listed without that evidence. Git-ignored paths are skipped.
+      The search is bounded and run once per check: 50,000 tree entries; 20,000 code files of at most 1 MB and 64 MB in all, with prose (`.md`, `.txt`) and instruction files excluded; 100 history lookups. A bound reached makes the row an incomplete scan. A name removed in an earlier commit is not found: the row is meant to run before a commit.
   - **Removed since HEAD.** Each instruction file that differs from `HEAD` (`git diff`, read-only) has its committed strong rule lines compared with the working tree's version of the same file. A line that is gone is `removed`. A line whose "never", "must" or "always" became "avoid", "prefer not", "should" or "try to" is `weakened`. A line that only moved, was reflowed or reworded with its strong word kept (three in five words shared) is not listed. A rule moved to another file is listed, because each harness reads its own file. Line numbers are `HEAD`'s. Outside a git work tree with a commit the row skips.
 
 ### Self-audit
