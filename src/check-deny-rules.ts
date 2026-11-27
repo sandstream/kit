@@ -9,9 +9,10 @@
  * `.claude/settings.local.json`, and no `kit check` row changed. `enforcement gate liveness`
  * checks the hooks only.
  *
- * - **Applies** where kit set this checkout up: the gate marker `kit agent-config` leaves in
- *   `.claude/` is present, or `.claude/settings.json` holds any kit deny rule. Otherwise it skips,
- *   so a fresh clone or CI is not failed for a file that is gitignored.
+ * - **Applies** where `kit agent-config` wrote the deny rules: its marker
+ *   `.claude/.kit-deny-rules-installed` is present, or `.claude/settings.json` holds any kit deny
+ *   rule. Otherwise it skips: a fresh clone or CI, and a checkout whose gates came from `kit setup`
+ *   or `kit hooks gates`, which write no deny rule.
  * - **Fails** when a kit deny rule is missing from `.claude/settings.json` (all of them count:
  *   fail closed, the set is fixed), or when that file no longer parses. The detail names each
  *   missing rule and the repair: `kit agent-config` appends the missing ones and keeps the rest.
@@ -24,7 +25,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { KIT_DENY_RULES } from "./agent-config-strict.js";
+import { KIT_DENY_RULES, denyRulesMarkerPath } from "./agent-config-strict.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import {
   allowsOverridingKitDeny,
@@ -67,12 +68,12 @@ const fail = (detail: string): SecurityCheckResult => ({
   suggestion: REPAIR,
 });
 
-/** The row. `cwd` is the governed root; the gate marker path comes from agent-config. */
+/** The row. `cwd` is the governed root. */
 export async function checkKitDenyRules(cwd: string = process.cwd()): Promise<SecurityCheckResult> {
   const text = readOrNull(resolve(cwd, SETTINGS));
   const lists = text === null ? null : permissionListsOf(text);
-  const { gateMarkerPath } = await import("./agent-config.js");
-  const setUp = existsSync(gateMarkerPath(cwd)) || heldKitDenyRules(lists?.deny ?? []).length > 0;
+  const setUp =
+    existsSync(denyRulesMarkerPath(cwd)) || heldKitDenyRules(lists?.deny ?? []).length > 0;
   if (!setUp) {
     const detail = "kit agent-config has not written deny rules in this checkout";
     return { category: "exposure", name: NAME, status: "skip", detail };

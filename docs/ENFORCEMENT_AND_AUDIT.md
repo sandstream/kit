@@ -130,8 +130,10 @@ the credential directories (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`),
 
 The `deny rule liveness` row of `kit check` reads them back:
 
-- It applies where `kit agent-config` set the checkout up (its gate marker in `.claude/`, or any
-  kit deny rule in `.claude/settings.json`), and skips elsewhere, such as a fresh clone or CI.
+- It applies where `kit agent-config` wrote the deny rules (its marker
+  `.claude/.kit-deny-rules-installed`, or any kit deny rule in `.claude/settings.json`). It skips
+  elsewhere: a fresh clone, CI, or a checkout whose gates came from `kit setup` or `kit hooks gates`,
+  which write no deny rule.
 - It fails when any of the twelve is missing from `.claude/settings.json`, or when that file does
   not parse. The detail names each missing rule. `kit agent-config` appends the missing ones and
   keeps the rest.
