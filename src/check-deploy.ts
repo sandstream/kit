@@ -13,7 +13,7 @@ import {
 import { execFileNoThrow } from "./utils/exec.js";
 import { failedDetail, type ExecResult } from "./utils/execFileNoThrow.js";
 import type { DeployHealthRow } from "./deploy-health.js";
-import { resolveToolBin } from "./utils/resolveTool.js";
+import { resolvePinnedLaunch, VendorCliPinRefusal, type Launch } from "./vendor-cli-pin.js";
 
 export type DeployCheckStatus = "pass" | "fail" | "warn" | "skip";
 export type DeployCheckProvider = "deploy" | "vercel" | "health";
@@ -47,6 +47,8 @@ export interface VercelDeployTarget {
   teamId?: string;
   scope?: string;
   cwd: string;
+  /** The kit project (where `.kit/cli-lock.json` and its vendor-CLI pins live); `cwd` may be a subdir. */
+  projectRoot?: string;
 }
 
 export interface DeployListResult {
@@ -208,6 +210,7 @@ export function buildVercelDeployTargets(
       teamId: config.team_id,
       scope: config.scope,
       cwd: envCwd,
+      projectRoot: cwd,
     };
   });
 }
@@ -268,14 +271,21 @@ async function listVercelEnvNamesViaApi(target: VercelDeployTarget): Promise<Dep
 async function listVercelEnvNames(target: VercelDeployTarget): Promise<DeployListResult> {
   if (process.env.VERCEL_TOKEN) return listVercelEnvNamesViaApi(target);
 
-  const bin = (await resolveToolBin("vercel")) ?? "vercel";
-  const args = ["env", "ls"];
+  let bin: Launch;
+  try {
+    bin = await resolvePinnedLaunch("vercel", target.projectRoot ?? target.cwd);
+  } catch (err) {
+    if (!(err instanceof VendorCliPinRefusal)) throw err;
+    const why = err.message.split("\n")[0]!;
+    return { ok: false, names: [], detail: why, didNotRun: true };
+  }
+  const args = [...bin.prefix, "env", "ls"];
   if (target.remoteEnv) args.push(target.remoteEnv);
   args.push("--format", "json", "--no-color");
   if (target.scope) args.push("--scope", target.scope);
   args.push("--cwd", target.cwd);
 
-  const result = await execFileNoThrow(bin, args, {
+  const result = await execFileNoThrow(bin.file, args, {
     cwd: target.cwd,
     timeout: 20_000,
     env: { ...process.env, NO_COLOR: "1" },

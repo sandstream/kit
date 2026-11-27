@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "sandstream-kit-adapter-sdk";
-import { exec } from "../utils/exec.js";
+import { execPinned } from "../vendor-cli-pin.js";
 
 async function runRailway(
   args: string[],
@@ -7,7 +7,7 @@ async function runRailway(
   env?: Record<string, string>,
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
-    const { stdout, stderr } = await exec("railway", args, {
+    const { stdout, stderr } = await execPinned("railway", args, {
       cwd,
       timeout: 120_000,
       env: { ...process.env, ...env },

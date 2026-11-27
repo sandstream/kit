@@ -38,6 +38,7 @@ import {
 import { resolve, join, relative, extname } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { findSecrets } from "./utils/redactSecrets.js";
+import { mcpLaunchRows } from "./agent-audit-mcp-launch.js";
 import { PS_DOWNLOAD_PIPE_IEX, PS_IEX_OF_DOWNLOAD } from "./utils/powershell-download-exec.js";
 
 /** Plaintext secrets in an agent/MCP config file. */
@@ -140,11 +141,14 @@ export interface StdioMcpFinding {
 
 /**
  * A *stdio* MCP server runs a local `command` (+ args) on every agent startup.
- * We do NOT flag the common-and-legitimate `npx <pkg>` shape (that would warn on
+ * We do NOT fail the common-and-legitimate `npx <pkg>` shape (that would fail
  * almost every config — noise is the #1 reason security tooling gets ignored).
- * We flag only the unambiguous abuse shapes: a malware-pattern command line, or
+ * We fail only the unambiguous abuse shapes: a malware-pattern command line, or
  * an interpreter running INLINE code (a real MCP server is a program, not a
- * `node -e "…"` / `sh -c "…"` one-liner).
+ * `node -e "…"` / `sh -c "…"` one-liner). An `npx`/`uvx` runner without a
+ * pinned version, and a server that runs the checkout's own code, get a low
+ * warning from `mcpLaunchRows` (`agent-audit-mcp-launch.ts`), so this command and
+ * `kit triage skill` both call the same entry unpinned.
  */
 export function auditMcpStdio(json: string): StdioMcpFinding[] {
   let obj: unknown;
@@ -551,6 +555,7 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
         ),
       );
     }
+    out.push(...mcpLaunchRows(view, cwd, rel));
     out.push(...hookScriptRows(view, cwd, rel));
     for (const c of auditSettingsCommands(view)) {
       out.push(
