@@ -100,7 +100,8 @@ function agentAuditPaths(): { files: string[]; dirs: string[] } {
 
 /** Files kit's own `install*Gate*` functions write a gate into, and the settings files Claude's go to. */
 function gateFiles(): string[] {
-  const chunks = source("agent-config.ts").split(/\n(?=export (?:async )?function )/);
+  const text = ["agent-config.ts", "agent-gate-installers.ts"].map(source).join("\n");
+  const chunks = text.split(/\n(?=export (?:async )?function )/);
   const gates = chunks.filter((c) => /^export (?:async )?function install\w*Gate/.test(c));
   return [
     ...gates.flatMap((c) => quoted(c, /\bfile(?: =|:) "([^"]+)"/g)),

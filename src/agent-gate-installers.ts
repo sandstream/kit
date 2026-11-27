@@ -3,7 +3,7 @@
  * OpenCode, Cline and Antigravity. Each installer cites the agent source it follows.
  */
 import { constants, existsSync } from "node:fs";
-import { lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { kitGateInvocation } from "./kit-invocation.js";
@@ -226,12 +226,25 @@ exec ${kitGateInvocation()} --format cline
 `;
   try {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, script, { encoding: "utf-8", mode: 0o755 });
-    const { chmod } = await import("node:fs/promises");
-    await chmod(path, 0o755).catch(() => {}); // ensure +x even when overwriting; no-op on non-POSIX
+    await writeExecutable(path, script);
     return { file, action: existed ? "updated" : "created" };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Write an executable file through a new temporary file and a rename, so the path checked
+ * above is never written in place. The mode is set before the rename (no-op on Windows).
+ */
+async function writeExecutable(path: string, content: string): Promise<void> {
+  const temporary = `${path}.kit-tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
+  try {
+    await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o755 });
+    await chmod(temporary, 0o755).catch(() => {});
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
   }
 }
 

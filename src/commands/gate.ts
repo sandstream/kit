@@ -8,6 +8,7 @@
  * module-private.
  */
 import { writeSync } from "node:fs";
+import type { BashGateVerdict } from "../install-gate.js";
 
 /**
  * `kit gate-bash` — PreToolUse install-gate handler. Reads a coding agent's
@@ -499,9 +500,7 @@ async function gateEachCommand(
   commands: string[],
   payload: unknown,
   triageAdvice: (reason: string, lead?: string) => string,
-): Promise<
-  true | { checked: import("../install-gate.js").BashGateVerdict["checked"]; notes: string[] }
-> {
+): Promise<true | { checked: BashGateVerdict["checked"]; notes: string[] }> {
   const { decideBashGate } = await import("../install-gate.js");
   const { trailCommandRefusal } = await import("../trail-guard.js");
   const { homedir } = await import("node:os");
