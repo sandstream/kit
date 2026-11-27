@@ -408,6 +408,13 @@ that is gone, are reported until a person runs `kit agent-audit --accept-rules`,
 refuse from an agent. This is the trace a permission reply that rewrites the rule files leaves.
 A rule file kit cannot parse is reported, not counted as narrow.
 
+A shell grant that starts another coding agent counts as all three legs, like `Bash(bash:*)`, and is
+named: "nested agent with approvals off" for `Bash(claude --print --dangerously-skip-permissions:*)`
+or a Codex `prefix_rule(pattern=["codex", "exec", "--dangerously-bypass-approvals-and-sandbox"])`,
+and "nested agent with arbitrary flags" for a wildcard such as `Bash(claude:*)` or Cursor's
+`Shell(claude)`. The agents and flags are the table `gate-bash` refuses them by
+(`src/nested-agent-bypass.ts`). An exact command (`Bash(claude --version)`) stays narrow.
+
 The audit cannot see approvals or mode changes made during a session.
 It does not classify every shell command or write-capable MCP tool.
 It places MCP servers by name, so that classification can be wrong.
