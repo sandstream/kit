@@ -43,6 +43,7 @@ import {
 
 import { explainUnverifiable } from "./install-gate-refusals.js";
 import { policyRefusal } from "./install-gate-irreversible.js";
+import { caTrustRefusal } from "./ca-trust-store.js";
 import { nestedAgentRefusal } from "./nested-agent-bypass.js";
 import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
 import { windowsShellBodies } from "./install-gate-shells.js";
@@ -1245,7 +1246,8 @@ async function gateVerdict(
   cwd?: string,
 ): Promise<BashGateVerdict> {
   const heredocs = splitHeredocs(command);
-  const refused = policyRefusal(command, heredocs) ?? nestedAgentRefusal(heredocs);
+  const refused =
+    policyRefusal(command, heredocs) ?? caTrustRefusal(heredocs) ?? nestedAgentRefusal(heredocs);
   if (refused) return { block: true, reason: refused, checked: [] };
   const probe = parseInstallCommand(command);
   const release = releaseRefusal(probe.releaseChains ?? [], cwd);
