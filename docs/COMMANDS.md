@@ -191,6 +191,16 @@ severity = "warn"
 | `kit secrets revoke-old`                                                                                        | Revoke superseded credential after rotation.                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `kit secrets validate [--fix\|--auto]`                                                                          | Verify every declared key resolves in vault. `--auto` pulls from `.env.template`.                                                                                                                                                                                                                                                                                                                                                            |
 
+**Secret reads are recorded.** Whenever kit resolves or hands on a secret, it first appends a
+`secrets.read` event to `.kit-audit.jsonl`, with `[governance]` on or off. That covers `kit secrets`
+(with `sync`, `validate` and `onecli register`), MCP `kit_secrets`, `kit run` and MCP `kit_run` (the
+`.env.local` names given to the child), the exec-broker (the env names it hands over), the vault
+probes in `kit check`, `kit fix` and the branch-protection audit. The event names the keys, the store,
+the kit surface (`via`), the agent harness kit detected (Claude Code or Codex) and
+`[governance.agent]` when the caller has the config. It never holds a value or a digest of one. If
+the event cannot be written, kit does not read the secret. `kit audit secrets` lists the reads per
+key. These are reads through kit only: a process that opens `.env.local` itself leaves no record.
+
 ## Auth + elevation
 
 | Command                                                                  | Purpose                                                                                                                                                                                        |
@@ -585,6 +595,7 @@ Branch-based governance uses the target project's branch.
 Audit command text masks known environment secrets before encoding the arguments.
 They cannot infer every network request, file write, or environment access inside an arbitrary program.
 Governance and resource rules record their own audit events when enabled.
+The names of the `.env.local` keys given to the child are recorded as a `secrets.read` event in every case, before the child starts.
 A nonzero child exit, timeout, or output limit produces a failed completion event.
 
 The CLI streams redacted child output. MCP captures that output as tool result data and closes child standard input.

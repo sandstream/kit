@@ -163,11 +163,13 @@ describe("brokerExec happy path", () => {
       assert.deepEqual(seen, { TOKEN: "t" });
       assert.equal(seen && "REGION" in seen, false);
       assert.equal(seen && "OTHER_SECRET" in seen, false);
-      // authorized (pre-exec) + success (post-exec) entries.
+      // authorized (pre-exec) + the env names handed over + success (post-exec) entries.
       const lines = auditLines();
-      assert.equal(lines.length, 2);
+      assert.equal(lines.length, 3);
       assert.equal((lines[0].metadata as Record<string, unknown>)?.phase, "authorized");
-      assert.equal(lines[1].success, true);
+      const { name, store, via } = lines[1].metadata as Record<string, unknown>;
+      assert.deepEqual([name, store, via], ["TOKEN", "process-env", "exec-broker"]);
+      assert.equal(lines[2].success, true);
     } finally {
       delete process.env.TOKEN;
       delete process.env.REGION;

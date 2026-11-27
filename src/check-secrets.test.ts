@@ -7,12 +7,16 @@ import { checkSecrets } from "./check-secrets.js";
 import type { SecretsConfig } from "./config.js";
 
 let tempDir: string;
+const previousCwd = process.cwd();
 
+// The vault probes record their reads in the cwd's audit log: keep it out of the repository.
 before(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "kit-chksecrets-"));
+  process.chdir(tempDir);
 });
 
 after(async () => {
+  process.chdir(previousCwd);
   await rm(tempDir, { recursive: true, force: true });
 });
 

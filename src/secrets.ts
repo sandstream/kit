@@ -1,7 +1,9 @@
 import { readFile, writeFile, access } from "node:fs/promises";
 import { devNull } from "node:os";
-import type { SecretsConfig } from "./config.js";
+import { dirname, resolve } from "node:path";
+import type { SecretKeyConfig, SecretsConfig } from "./config.js";
 import { resolveViaBackend, resetInfisicalCache } from "./secret-backends.js";
+import { recordSecretRead, type SecretReader } from "./secrets-read-record.js";
 import { secureFile } from "./utils/secure-perms.js";
 
 export interface SecretResolveResult {
@@ -31,9 +33,29 @@ async function loadTemplate(templatePath: string): Promise<string | null> {
   }
 }
 
+/**
+ * Record the read of every declared key (`src/secrets-read-record.ts`) in `read.cwd`'s chain, or
+ * else the output file's directory, then reset the Infisical bulk-fetch cache for this call. Throws,
+ * before anything is resolved, when the read cannot be recorded.
+ */
+async function beginRead(
+  keys: Record<string, SecretKeyConfig>,
+  outputPath: string,
+  read: Partial<SecretReader> = {},
+): Promise<void> {
+  const cwd = read.cwd ?? (outputPath === devNull ? process.cwd() : dirname(resolve(outputPath)));
+  const storeOf = (name: string) => keys[name]!.source;
+  await recordSecretRead(
+    { keys: Object.keys(keys), storeOf, via: read.via ?? "kit secrets" },
+    { ...read, cwd },
+  );
+  resetInfisicalCache();
+}
+
 export async function generateSecrets(
   secrets: SecretsConfig,
   outputPath: string = ".env.local",
+  read?: Partial<SecretReader>,
 ): Promise<{
   results: SecretResolveResult[];
   written: boolean;
@@ -41,13 +63,12 @@ export async function generateSecrets(
   skipped?: "nothing-resolved";
 }> {
   const results: SecretResolveResult[] = [];
-
   if (!secrets.keys) {
     return { results, written: false, fromTemplate: false };
   }
 
-  // Reset the Infisical bulk-fetch cache for each generateSecrets call.
-  resetInfisicalCache();
+  // Record the read (or throw), then reset the Infisical bulk-fetch cache for this call.
+  await beginRead(secrets.keys, outputPath, read);
 
   for (const [name, config] of Object.entries(secrets.keys)) {
     results.push(await resolveViaBackend(name, config, secrets.infisical));
