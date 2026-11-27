@@ -38,7 +38,7 @@ export function kitGateInvocation(): string {
 }
 
 /** `--format` values kit writes for agents with a stdout-JSON contract. */
-const FORMATS = ["cursor", "antigravity", "cline"];
+const FORMATS = ["cursor", "antigravity", "cline", "gemini"];
 
 /**
  * Every exact command kit writes for `sub` on this machine: today's invocation, the `$HOME`

@@ -15,7 +15,7 @@ export interface HookInstallResult {
   file: string;
   action: "created" | "updated" | "unchanged" | "skipped" | "failed";
   detail?: string;
-  /** Steps a person must still take before the agent runs the hook (for example Codex trust). */
+  /** Steps a person must still take before the agent runs the hook (Codex trust, Gemini folder trust). */
   next?: string[];
 }
 
