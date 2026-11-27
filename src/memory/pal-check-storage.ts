@@ -1,4 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import type { PendingAction } from "./pal.js";
 import { storedClaimOwner } from "./pal-state-codec.js";
 
@@ -43,7 +44,7 @@ export function inspectAction(
 
 /** Read-only inspection of staged recovery bytes; legacy verifiers must not gain an execution slot. */
 export function assertRecoveryCompatible(path: string): void {
-  const db = new DatabaseSync(path, { readOnly: true });
+  const db = openSqlite(path, { readOnly: true });
   try {
     const relation = db
       .prepare("PRAGMA table_list")

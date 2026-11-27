@@ -32,7 +32,8 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import { insertMessage, upsertSession } from "./db.js";
 import type { IndexResult } from "./parser.js";
 
@@ -185,7 +186,7 @@ function indexOpenCodeDb(dbPath: string, db: DatabaseSync): IndexResult {
   const result: IndexResult = { files: 0, sessions: 0, messages: 0, toolUses: 0, filesSkipped: 0 };
   let src: DatabaseSync;
   try {
-    src = new DatabaseSync(dbPath, { readOnly: true });
+    src = openSqlite(dbPath, { readOnly: true });
   } catch {
     return result; // locked / unreadable / not-a-db → index nothing rather than crash
   }

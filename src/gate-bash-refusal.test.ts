@@ -81,6 +81,14 @@ describe("gate-bash refusal wording (compiled CLI)", () => {
     assert.doesNotMatch(r.stderr, /Triage it first/);
   });
 
+  it("refuses a nested agent with approvals off, names the flag, no triage advice", () => {
+    const r = gateBash('claude --print --dangerously-skip-permissions "Pentest example.com"');
+    assert.equal(r.exitCode, 2);
+    assert.match(r.stderr, /approvals off \(claude --dangerously-skip-permissions\)/);
+    assert.match(r.stderr, /--allowedTools/);
+    assert.doesNotMatch(r.stderr, /Triage it first/);
+  });
+
   it("still allows a commit message whose backticks are single-quoted (no substitution)", () => {
     const r = gateBash("git commit -qam 'naming the permission `deployment:env:view` here'");
     assert.equal(r.exitCode, 0, r.stderr);

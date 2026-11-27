@@ -10,6 +10,9 @@ The scan uses pattern rules. A complete scan without findings does not prove tha
 The scanner selects `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` (Codex), `GEMINI.md`, and `SKILL.md`.
 It also selects `.cursorrules`, `.windsurfrules`, `copilot-instructions.md`, and `.cursor/rules/*.mdc`.
 It selects every `.md` under `.claude/rules/`, `.claude/commands/`, and `.claude/agents/` (Claude Code).
+In a plugin root, a directory that holds `.claude-plugin/plugin.json` (Claude Code) or
+`.codex-plugin/plugin.json` (Codex), it selects every `.md` under `commands/` and `agents/`, which the
+harness loads as slash commands and subagents. `commands/` and `agents/` outside a plugin root are not selected.
 An explicit file target is read regardless of its name.
 
 Beside each `SKILL.md` it also reads the `.md` files the skill links (`[x](PHASE2.md)`) or names
