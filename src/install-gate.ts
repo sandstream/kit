@@ -1272,6 +1272,14 @@ async function gateVerdict(
   const binRefused = npxBinRefusal(probe, shadowed, cwd); // a bin named after another package
   if (binRefused) return { block: true, reason: binRefused, checked: [] };
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
+  return triageRefs(refs, deps);
+}
+
+/** Triage each registry target in turn; the first blocked one blocks the command. */
+async function triageRefs(
+  refs: ReturnType<typeof parseInstallCommand>["refs"],
+  deps?: GateDeps,
+): Promise<BashGateVerdict> {
   const checked: GateVerdict[] = [];
   for (const ref of refs) {
     const v = deps ? await gateInstall(ref, deps) : await gateInstall(ref);

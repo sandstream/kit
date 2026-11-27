@@ -49,7 +49,7 @@ describe("release binary gate: the measured G1 chain", () => {
     assert.match(
       v.reason,
       new RegExp(
-        `Run \`kit triage release ${URL_.replace(/[.?]/g, "\\$&")}\` first \\(fail-closed\\)$`,
+        `Run \`kit triage release ${URL_.replace(/[\\.?*+^$()[\]{}|]/g, "\\$&")}\` first \\(fail-closed\\)$`,
       ),
     );
   });
