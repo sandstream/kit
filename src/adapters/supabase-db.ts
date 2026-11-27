@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
-import { exec } from "../utils/exec.js";
+import { execPinned } from "../vendor-cli-pin.js";
 
 /**
  * Supabase Database Adapter
@@ -21,7 +21,7 @@ export const supabaseDbAdapter: ServiceAdapter = {
       }
 
       // Check if supabase is linked
-      const { stdout } = await exec("supabase", ["status"], {
+      const { stdout } = await execPinned("supabase", ["status"], {
         cwd: context.projectPath,
         timeout: 10_000,
       });
@@ -36,9 +36,7 @@ export const supabaseDbAdapter: ServiceAdapter = {
     try {
       // Step 1: Check if supabase CLI is installed and authenticated
       try {
-        await exec("supabase", ["--version"], {
-          timeout: 5_000,
-        });
+        await execPinned("supabase", ["--version"], { timeout: 5_000 });
       } catch {
         return {
           success: false,
@@ -49,13 +47,14 @@ export const supabaseDbAdapter: ServiceAdapter = {
 
       // Step 2: Check if already initialized
       try {
-        await exec("supabase", ["status"], {
+        await execPinned("supabase", ["status"], {
           cwd: context.projectPath,
           timeout: 10_000,
         });
 
         // Already initialized, get existing credentials
-        const { stdout: statusOutput } = await exec("supabase", ["status", "--output", "json"], {
+        const statusArgs = ["status", "--output", "json"];
+        const { stdout: statusOutput } = await execPinned("supabase", statusArgs, {
           cwd: context.projectPath,
           timeout: 10_000,
         });
@@ -87,7 +86,7 @@ export const supabaseDbAdapter: ServiceAdapter = {
 
       // Step 3: Initialize Supabase if not already done
       try {
-        await exec("supabase", ["init"], {
+        await execPinned("supabase", ["init"], {
           cwd: context.projectPath,
           timeout: 10_000,
         });
@@ -96,7 +95,7 @@ export const supabaseDbAdapter: ServiceAdapter = {
       }
 
       // Step 4: Start local Supabase (for development)
-      const { stdout: startOutput } = await exec("supabase", ["start"], {
+      const { stdout: startOutput } = await execPinned("supabase", ["start"], {
         cwd: context.projectPath,
         timeout: 120_000, // Starting Supabase can take a while
       });
