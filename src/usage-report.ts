@@ -32,6 +32,7 @@ import { createRequire } from "node:module";
 
 import { groupRefusals, type ReasonGroup } from "./refusal-reasons.js";
 import { NEGATIVE_CONTROL_SESSION } from "./usage-prove-env.js";
+import { openSqlite } from "./utils/sqlite.js";
 
 export interface CoverageFacts {
   /** When the run these numbers come from happened, or null when no run is on disk. */
@@ -354,12 +355,9 @@ export function memoryFromDb(windowDays = 7): MemoryFacts {
 
   try {
     // node:sqlite, read-only: this command must never be able to mutate the store it reports on.
-    // createRequire rather than a static import: the module is experimental and prints a warning
-    // on load, and this whole function must degrade to "unknown" on a runtime that lacks it.
-    const { DatabaseSync } = createRequire(import.meta.url)(
-      "node:sqlite",
-    ) as typeof import("node:sqlite");
-    const opened = new DatabaseSync(path, { readOnly: true });
+    // Loaded lazily (utils/sqlite.ts): the module is experimental and prints a warning on load,
+    // and this whole function must degrade to "unknown" on a runtime that lacks it.
+    const opened = openSqlite(path, { readOnly: true });
     db = opened;
     const one = (sql: string): Record<string, unknown> =>
       (opened.prepare(sql).get() ?? {}) as Record<string, unknown>;

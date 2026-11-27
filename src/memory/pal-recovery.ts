@@ -9,7 +9,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 
 function hasSqliteHeader(path: string): boolean {
   let fd: number;
@@ -50,11 +51,11 @@ export function assertActionDeletionsPreserved(staged: string, destination: stri
     const snapshot = join(directory, "destination.db");
     copyFileSync(destination, snapshot);
     chmodSync(snapshot, 0o600);
-    local = new DatabaseSync(snapshot, { readOnly: true });
+    local = openSqlite(snapshot, { readOnly: true });
     if (!tableExists(local, "pal_tombstones")) return;
     const deleted = local.prepare("SELECT sync_id FROM pal_tombstones").all();
     if (!deleted.length) return;
-    incoming = new DatabaseSync(staged, { readOnly: true });
+    incoming = openSqlite(staged, { readOnly: true });
     if (!tableExists(incoming, "pal_tombstones"))
       throw new Error("Restore would discard task deletion records; use kit memory sync instead");
     const tombstone = incoming.prepare("SELECT 1 FROM pal_tombstones WHERE sync_id=?");

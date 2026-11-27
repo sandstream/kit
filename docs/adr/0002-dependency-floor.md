@@ -30,7 +30,7 @@ must argue its case in a PR that updates this ADR.
 and compare every answer. The installed production tree goes from 92 packages to 2. The floor is
 now `smol-toml` and `zod`. Plan and evidence: `docs/plans/2026-11-18-few-dependencies.md`.
 
-## Amended 2026-11-18: three runtime deps
+## Amended 2026-11-18: three runtime deps <!-- kit-self-audit: allow-count -->
 
 `@upstash/redis` is removed. No production code imported it: the Upstash adapter calls
 `api.upstash.com` with the global `fetch`, and `service-registry.ts` only holds the package name
@@ -51,7 +51,7 @@ and `kit adr check` reported `✓ 4 enforced ADR(s) — no new violations`.
 
 The block below is a **deny-list of twelve named packages, matched at the import level in
 `src/**`**. It cannot see a dependency that is not on the list, and it cannot see one that
-has been added to the manifest but not yet imported. The title says "four runtime deps";
+has been added to the manifest but not yet imported. The title then said "four runtime deps"; <!-- kit-self-audit: allow-count -->
 the rule says "not these twelve".
 
 The floor is **not expressible in the `kit-enforce` grammar**, for two structural reasons:
