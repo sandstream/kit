@@ -50,7 +50,7 @@ export interface NpxBinDeps {
   getDoc: (url: string) => Promise<RegistryDoc | null>;
 }
 
-export const defaultNpxBinDeps: NpxBinDeps = {
+const defaultNpxBinDeps: NpxBinDeps = {
   env: process.env,
   airGap: airGapView,
   getDoc: (url) => fetchRegistryDoc(url),
@@ -111,7 +111,7 @@ async function lookupBin(
 }
 
 /** The report line for one fact, in triage.py's format. */
-export function binLine(fact: NpxBinFact): string {
+function binLine(fact: NpxBinFact): string {
   const { bin, package: pkg } = fact;
   const fix = `install ${pkg} first, or run npx -p ${pkg} ${bin}`;
   if (fact.state === "same") return `  . npx bin ${bin}: the package's own name`;
