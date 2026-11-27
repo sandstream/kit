@@ -1,0 +1,3 @@
+### Fixed
+
+- **A cooling-period CRITICAL now counts in the summary of `kit triage gem`, `kit triage cargo` and `kit triage go`, as it does for npm and pip.** With enforcement on (the default), `kit triage cargo shrink-anything` printed `x CRITICAL: cooling: …` above `Critical issues: 0`. The registry verdict left the hold out of the count on purpose ("a cooling hold is its own verdict, not a failure"), while npm and pip have counted it since `changes/triage-cooling-count.md`. The count now includes every CRITICAL printed. The verdict still keeps the hold apart: a hold alone is `TRIAGE HELD: cooling period`, and only another critical makes it `TRIAGE FAILED`. Found by kit-research's `shrink-anything-vs-kit` note.

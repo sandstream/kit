@@ -16,7 +16,8 @@
  * A raw .db export is also accepted directly (no passphrase needed) for the
  * git-tracked-plaintext transport.
  */
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,7 +62,7 @@ function scanIncoming(
 ): { label: string }[] {
   if (allowUnsafe || process.env.KIT_MEMORY_ALLOW_UNSAFE === "1") return [];
   let high: { label: string }[];
-  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const db = openSqlite(dbPath, { readOnly: true });
   try {
     high = scanDbForInjection(db, observe && ((occurrence) => observe(db, occurrence)), {
       replayableOnly: authenticated,

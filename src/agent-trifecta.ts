@@ -15,6 +15,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
+import { nestedAgentBypass, nestedAgentCli } from "./nested-agent-bypass.js";
 
 export interface Legs {
   vector: string[];
@@ -89,9 +90,28 @@ function split(grant: string): { name: string; arg: string | null } {
   return { name: grant.slice(0, open), arg: grant.slice(open + 1, -1).trim() };
 }
 
+export type NestedAgentKind = "approvals off" | "arbitrary flags";
+
+/**
+ * A shell grant that starts another coding agent (kit-research `artex-cc-vs-kit`): with its
+ * approvals off (`claude --print --dangerously-skip-permissions:*`, `codex exec --yolo`), or with a
+ * wildcard that lets any flag follow, approvals-off ones included (`claude:*`, `codex exec *`).
+ * Either runs code nobody approves, so it holds all three legs, like `Bash(bash:*)`. An exact
+ * command (`claude --version`) is narrow. The agents and flags are the gate's own table
+ * (`nested-agent-bypass.ts`). Pure.
+ */
+export function nestedAgentGrant(arg: string | null): NestedAgentKind | null {
+  if (arg === null) return null;
+  const words = arg.replace(/:\*$/, " *").split(/\s+/).filter(Boolean);
+  const literal = words.filter((w) => !w.includes("*"));
+  if (literal.length && nestedAgentBypass(literal)) return "approvals off";
+  const starts = words.length > 0 && nestedAgentCli(words[0]) !== null;
+  return starts && words.length > literal.length ? "arbitrary flags" : null;
+}
+
 function bashLegs(grant: string, arg: string | null, out: Legs): void {
   const first = (arg ?? "*").split(" ")[0].replace(":*", "");
-  if (arg === null || first === "*" || first === "") {
+  if (arg === null || first === "*" || first === "" || nestedAgentGrant(arg)) {
     out.vector.push(grant);
     out.payload.push(grant);
     out.egress.push(grant);
@@ -263,9 +283,59 @@ function writeGrants(grants: string[]): string[] {
       name === "*" ||
       ["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(name) ||
       ((name === "Bash" || name === "PowerShell") &&
-        (arg === null || arg === "*" || arg === "" || fileCommand))
+        (arg === null || arg === "*" || arg === "" || fileCommand || !!nestedAgentGrant(arg)))
     );
   });
+}
+
+/**
+ * The class of one rule, or of the alternatives one rule allows together, from the same tables the
+ * trifecta and the write row use: which legs it holds, whether it writes, and whether the table
+ * could not place it. Pure; used by the per-rule ledger.
+ */
+export function grantClass(grants: string[]): string {
+  const legs = legsOf(grants);
+  const parts: string[] = [];
+  if (legs.vector.length && legs.payload.length && legs.egress.length) parts.push("all three legs");
+  else {
+    if (legs.vector.length) parts.push("untrusted input");
+    if (legs.payload.length) parts.push("private data");
+    if (legs.egress.length) parts.push("way out");
+  }
+  if (writeGrants(grants).length) parts.push("writes");
+  const nested = nestedKinds(grants);
+  if (nested.length) parts.push(`nested agent with ${nested[0]}`);
+  if (legs.unknown.length) parts.push("unclassified");
+  return parts.join(", ") || "narrow";
+}
+
+/** The nested-agent kinds among Bash grants, approvals off first. */
+function nestedKinds(grants: string[]): NestedAgentKind[] {
+  const kinds = new Set<NestedAgentKind>();
+  for (const g of grants) {
+    const { name, arg } = split(g);
+    const kind = name === "Bash" ? nestedAgentGrant(arg) : null;
+    if (kind) kinds.add(kind);
+  }
+  return (["approvals off", "arbitrary flags"] as const).filter((k) => kinds.has(k));
+}
+
+/** A named row per unit whose grants start a nested agent, worst kind first. */
+function nestedRow(unit: string, grants: string[]): SecurityCheckResult | null {
+  const kind = nestedKinds(grants)[0];
+  if (!kind) return null;
+  const hits = grants.filter(
+    (g) => split(g).name === "Bash" && nestedAgentGrant(split(g).arg) === kind,
+  );
+  return {
+    category: "exposure",
+    name: `nested agent with ${kind}: ${unit}`,
+    status: "warn",
+    severity: kind === "approvals off" ? "high" : "medium",
+    detail: `declared permissions let this unit start another coding agent ${kind === "approvals off" ? "that runs every command without asking anyone" : "with any flags, including the ones that turn its approvals off"}: ${hits.slice(0, 3).map(shown).join(", ")}`,
+    suggestion:
+      "remove the allow rule, or narrow it to an exact command without a wildcard; a nested agent run unattended is the person's decision",
+  };
 }
 
 function preapprovedWrites(grants: string[], blocked: Set<string>): string[] {
@@ -337,6 +407,8 @@ export function runAgentTrifecta(root: string, home: string): SecurityCheckResul
   for (const u of units) {
     const write = writeRow(u.unit, u.approvedWrites);
     if (write) rows.push(write);
+    const nested = nestedRow(u.unit, u.grants);
+    if (nested) rows.push(nested);
     const legs = legsOf(u.grants);
     legs.unknown.forEach((g) => unknown.add(g));
     const row = unitRow(u.unit, legs);
@@ -357,7 +429,7 @@ export function runAgentTrifecta(root: string, home: string): SecurityCheckResul
       category: "exposure",
       name: "lethal trifecta",
       status: "pass",
-      detail: `no agent holds untrusted input, private data and a way out together in the declared grants (${units.length} unit(s) checked). Approvals and auto mode decided at run time are not visible here`,
+      detail: `no Claude Code session or subagent holds untrusted input, private data and a way out together in its declared grants (${units.length} unit(s) checked: ~/.claude/settings.json, .claude/settings.json, .claude/settings.local.json and the agents in .claude/agents). Other harnesses' rules are listed with their class under "agent rules", not counted here. Approvals and auto mode decided at run time are not visible here`,
     });
   }
   return rows;

@@ -1,4 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { assertSupportedMemorySchema } from "./db-schema.js";
@@ -26,7 +27,7 @@ function enableWal(db: DatabaseSync): void {
 
 /** Return a migrated connection; failed startup rolls back and closes it. */
 export function openMigratedDb(path: string, migrate: (db: DatabaseSync) => void): DatabaseSync {
-  const db = new DatabaseSync(path);
+  const db = openSqlite(path);
   try {
     db.exec("PRAGMA busy_timeout = 5000");
     assertSupportedMemorySchema(db);
@@ -56,8 +57,8 @@ export function openMigratedDb(path: string, migrate: (db: DatabaseSync) => void
 
 /** Read-only WAL opens can need sidecars. Retry immutable only when both are absent. */
 export function openReadOnlyDb(path: string): DatabaseSync {
-  if (path === ":memory:") return new DatabaseSync(path);
-  let db = new DatabaseSync(path, { readOnly: true });
+  if (path === ":memory:") return openSqlite(path);
+  let db = openSqlite(path, { readOnly: true });
   try {
     db.prepare("SELECT name FROM sqlite_master LIMIT 1").get();
   } catch (err) {
@@ -71,7 +72,7 @@ export function openReadOnlyDb(path: string): DatabaseSync {
     const uri = pathToFileURL(path);
     uri.searchParams.set("mode", "ro");
     uri.searchParams.set("immutable", "1");
-    db = new DatabaseSync(uri.href);
+    db = openSqlite(uri.href);
   }
   try {
     assertSupportedMemorySchema(db);

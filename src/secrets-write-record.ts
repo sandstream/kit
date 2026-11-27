@@ -33,24 +33,28 @@ export interface SecretWrite {
   ok: boolean;
 }
 
+/**
+ * Key NAMES as audit metadata, in the shape `kit audit secrets` attributes: `name` for one key,
+ * `names` for several. Not `key`/`keys`: the audit log redacts every metadata field whose name
+ * contains "key", "secret" or "token" (sanitizeMetadata in audit.ts), which would leave the view
+ * grouping every event under "[REDACTED]". Pure.
+ */
+export function keyNameMetadata(keys: readonly string[]): { name: string } | { names: string[] } {
+  const unique = [...new Set(keys)];
+  return unique.length === 1 ? { name: unique[0]! } : { names: unique };
+}
+
 /** The audit event for one write. Carries no value and no error text (which could echo one). Pure. */
 export function secretWriteEvent(
   op: SecretWriteOp,
   write: SecretWrite,
   env: Record<string, string | undefined> = process.env,
 ): Omit<AuditEvent, "timestamp"> {
-  const keys = [...new Set(write.keys)];
   return {
     operation: op,
     environment: env.KIT_ENV ?? env.NODE_ENV ?? "unknown",
     success: write.ok,
-    // `name`/`names`, not `key`/`keys`: the audit log redacts every metadata field whose name
-    // contains "key", "secret" or "token" (sanitizeMetadata in audit.ts), which would leave the
-    // view grouping every write under "[REDACTED]".
-    metadata: {
-      ...(keys.length === 1 ? { name: keys[0] } : { names: keys }),
-      target: write.target,
-    },
+    metadata: { ...keyNameMetadata(write.keys), target: write.target },
   };
 }
 

@@ -94,13 +94,11 @@
       "kind": "command",
       "summary": "Audit agent, MCP, and hook configs for secrets, risky grants, and writes",
       "x-kit-accepted-flags": [
+        "--accept-rules",
         "--accept-user-surfaces",
-        "--attest",
         "--env",
         "--help",
         "--json",
-        "--mode",
-        "--no-auto-install",
         "--non-interactive",
         "--read-only",
         "--readonly",
@@ -109,7 +107,10 @@
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-flags-without-values": [
+        "--accept-rules",
+        "--accept-user-surfaces",
         "--help",
+        "--json",
         "--non-interactive",
         "--version"
       ],
@@ -3412,7 +3413,7 @@
         },
         "pin": {
           "kind": "command",
-          "summary": "Pin the vault/cloud CLIs (op, infisical, bw, doppler, vault, aws, gcloud, az, gh) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
+          "summary": "Pin the vault, cloud and deploy CLIs kit hands secrets or credentials through (op, infisical, bw, doppler, vault, aws, gcloud, az, gh, eas, dotenvx, vercel, supabase, fly, flyctl, railway, wrangler, stripe) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -3590,6 +3591,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
         },
+        "release": {
+          "kind": "command",
+          "summary": "A prebuilt release archive or binary before it is extracted, run or put on PATH: checksum, signature (minisign or cosign with your key), GitHub release age and repository, archive members. Records a release receipt in .kit-triage.jsonl. Never runs the file",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "repo": {
           "kind": "command",
           "summary": "GitHub repo evaluation",
@@ -3630,19 +3640,24 @@
       "kind": "group",
       "summary": "Security evaluation before installing packages, images, or skills",
       "x-kit-accepted-flags": [
+        "--accept-unverified",
         "--checksum",
+        "--cosign-key",
         "--deep",
         "--env",
         "--help",
         "--json",
+        "--minisign-key",
         "--non-interactive",
         "--pin",
         "--read-only",
         "--readonly",
+        "--repo",
         "--sandbox",
         "--scan-bytes",
         "--team-id",
         "--tools",
+        "--url",
         "--version"
       ],
       "x-kit-args-modeled": true,
