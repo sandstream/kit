@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 
 import { repoCodeLaunch, unpinnedRunner, type McpLaunch } from "./agent-audit-mcp-launch.js";
 import { runAgentAudit } from "./agent-audit.js";
+import { PIN_CASES } from "./mcp-runner-pins.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function checkout(t: { after(fn: () => void): void }, files: Record<string, string>): string {
@@ -72,6 +73,26 @@ describe("unpinnedRunner (the triage skill's runner list and pinned test)", () =
     assert.equal(unpinnedRunner(launch("npx", "-y", "@scope/x@1.2.3")), null);
     assert.equal(unpinnedRunner(launch("uvx", "x@0.3.0")), null);
     assert.equal(unpinnedRunner(launch("node", "x")), null);
+  });
+
+  it("pins per ecosystem: npm semver, PyPI ==, a git source by its full commit", () => {
+    for (const [command, args, want] of PIN_CASES) {
+      assert.equal(unpinnedRunner(launch(command, ...args)), want, [command, ...args].join(" "));
+    }
+  });
+
+  it("advises a commit for a git source and an exact version otherwise", (t) => {
+    const root = checkout(t, {
+      ".mcp.json": JSON.stringify({
+        mcpServers: {
+          git: { command: "uvx", args: ["--from", "git+https://github.com/o/r.git@main", "r"] },
+          pypi: { command: "uvx", args: ["--from", "r>=1", "r"] },
+        },
+      }),
+    });
+    const advice = runAgentAudit(root).map((r) => r.suggestion ?? "");
+    assert.match(advice.join("\n"), /pin a full commit \(@<commit>\)/);
+    assert.match(advice.join("\n"), /pin an exact version \(name==1\.2\.3\)/);
   });
 });
 

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 import { warmPython } from "./python-warmup.test-support.js";
+import { PIN_CASES } from "./mcp-runner-pins.test-support.js";
 
 // The first python3 start of a cold Windows job can outlast the 30 s per-run limit.
 before(() => warmPython());
@@ -91,6 +92,20 @@ describe("triage skill <plugin>: the MCP servers a plugin registers", () => {
     if (out === null) return;
     assert.match(out, /MCP server 'own' runs `node \$\{CLAUDE_PLUGIN_ROOT\}\/server\.js`/, out);
     assert.doesNotMatch(out, /from PATH on every session/);
+  });
+
+  it("pins per ecosystem, on the same launches as kit agent-audit", async (t) => {
+    const servers = Object.fromEntries(
+      PIN_CASES.map(([command, args], i) => [`s${i}`, { command, args }]),
+    );
+    const out = await triagePlugin(t, {
+      ".claude-plugin/plugin.json": MANIFEST,
+      ".mcp.json": mcp(servers),
+    });
+    if (out === null) return;
+    const warned = [...out.matchAll(/'s\d+'[^`\n]*: `([^`]+)` runs the newest/g)].map((m) => m[1]);
+    const want = PIN_CASES.map(([, , shown]) => shown).filter((s): s is string => s !== null);
+    assert.deepEqual(warned.sort(), want.sort(), out);
   });
 
   it("says 0 for a plugin without one", async (t) => {
