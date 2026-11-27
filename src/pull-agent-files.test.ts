@@ -120,7 +120,9 @@ describe("agentFileKind covers what kit reads and writes elsewhere", () => {
   it("names every file kit's agent config writes a gate into", () => {
     const files = gateFiles();
     assert.ok(files.length >= 8, "extraction found too few gate files");
-    for (const f of files) assert.notEqual(agentFileKind(f), null, f);
+    // Some installers name a directory of agent files (`.amazonq/cli-agents`): a file in it counts.
+    for (const f of files)
+      assert.notEqual(agentFileKind(f) ?? agentFileKind(`${f}/x.json`), null, f);
   });
 
   it("names the Codex, Cursor and Droid hook files as hooks", () => {

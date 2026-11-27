@@ -1,0 +1,3 @@
+### Added
+
+- **`kit gha-audit` names `permissions: write-all` as write to every scope.** A workflow-level `write-all` was reported only as its `id-token: write` part, and a job-level one only when no step used an OIDC token. Contents, packages, actions and pull-request write were never named. A new row flags `write-all` at workflow level and on each job that sets it. The row lists the scopes it grants and suggests a read-only `GITHUB_TOKEN` (`permissions: contents: read` or `{}`) as the default, with each write scope granted only on the job that needs it. The `id-token` rows are unchanged. A workflow with no `permissions:` block is still not reported, because its token follows a repository or organisation default that the file does not show. Found by kit-research#239.

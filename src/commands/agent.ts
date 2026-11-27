@@ -26,6 +26,23 @@ import { agentConfigPlanStep } from "../agent-config-plan.js";
 import { describeUserGates, installUserGates } from "../agent-config-user.js";
 import { ensureKitWrapper } from "../kit-wrapper.js";
 import { isReadOnlyMode } from "../read-only-mode.js";
+import type { GateInstallEntry } from "../agent-config.js";
+
+/** One gate install row, plus any step the user must still take before the agent runs it. */
+function printGateInstall({ agent, result }: GateInstallEntry): void {
+  if (result.action === "created" || result.action === "updated") {
+    const detail = result.detail ? ` (${result.detail})` : "";
+    console.log(`    ${c.green}✓${c.reset} ${agent} ${c.dim}→ ${result.file}${detail}${c.reset}`);
+  } else if (result.action === "unchanged") {
+    console.log(`    ${c.dim}= ${agent} already wired (${result.file})${c.reset}`);
+  } else {
+    console.log(`    ${c.dim}· ${agent} skipped: ${result.detail ?? result.action}${c.reset}`);
+  }
+  // A written hook the agent will not run yet (Codex trust): say what the user must do.
+  for (const step of result.next ?? []) {
+    console.log(`      ${c.yellow}!${c.reset} ${agent}: ${step}`);
+  }
+}
 
 export async function cmdSkills(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
@@ -222,7 +239,7 @@ async function cmdAgentConfig(): Promise<boolean> {
     console.log(
       `\n  ${c.bold}PreToolUse gates${c.reset} ${c.dim}(block un-triaged installs + plaintext .env* secrets before they happen; --no-install-gate to skip):${c.reset}`,
     );
-    printGateInstalls(await installAllInstallGates());
+    for (const entry of await installAllInstallGates()) printGateInstall(entry);
     // The git-hook floor's bootstrap, as a hook instead of a line of prose (#671).
     const start = await installSessionStartCheck();
     const shown = start.action === "skipped" ? `skipped: ${start.detail}` : start.action;
@@ -376,21 +393,5 @@ export async function cmdTeam(): Promise<boolean> {
     const error = err as Error;
     console.error(`${c.red}Error: ${error.message}${c.reset}`);
     return false;
-  }
-}
-
-/** One line per agent whose install gate was wired, and the step a person still has to take. */
-function printGateInstalls(entries: Awaited<ReturnType<typeof installAllInstallGates>>): void {
-  for (const { agent, result } of entries) {
-    if (result.action === "created" || result.action === "updated") {
-      console.log(
-        `    ${c.green}✓${c.reset} ${agent} ${c.dim}→ ${result.file}${result.detail ? ` (${result.detail})` : ""}${c.reset}`,
-      );
-    } else if (result.action === "unchanged") {
-      console.log(`    ${c.dim}= ${agent} already wired (${result.file})${c.reset}`);
-    } else {
-      console.log(`    ${c.dim}· ${agent} skipped: ${result.detail ?? result.action}${c.reset}`);
-    }
-    if (result.notice) console.log(`      ${c.yellow}!${c.reset} ${result.notice}`);
   }
 }

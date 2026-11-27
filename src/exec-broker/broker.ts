@@ -28,6 +28,7 @@ import { resolve } from "node:path";
 import { checkFsWriteRealpath } from "./realpath-check.js";
 import type { OperationContext } from "../governance-middleware.js";
 import { appendAuditEventDirect } from "../audit.js";
+import { recordSecretRead } from "../secrets-read-record.js";
 import { checkEgress, checkFsWrite, scopeEnv } from "./decisions.js";
 import { brokerPolicyPath, loadBrokerPolicy, policyFsRoots, type BrokerPolicy } from "./policy.js";
 
@@ -191,7 +192,7 @@ export async function brokerExec<T>(
 
   // All gates passed → execute with the scoped env, then audit success/failure.
   try {
-    const result = await run(scopedEnv);
+    const result = await runRecorded(run, scopedEnv, cwd);
     await audit(context, true, undefined, undefined, cwd);
     return { ok: true, result, scopedEnv };
   } catch (err) {
@@ -199,6 +200,20 @@ export async function brokerExec<T>(
     await audit(context, false, reason, undefined, cwd);
     return { ok: false, reason };
   }
+}
+
+/**
+ * Record the env names handed to `run()` as a secret read (`src/secrets-read-record.ts`), then run.
+ * A read that cannot be recorded throws, so `run()` never starts. Names only, never values.
+ */
+async function runRecorded<T>(
+  run: (scopedEnv: Record<string, string>) => Promise<T>,
+  scopedEnv: Record<string, string>,
+  cwd: string | undefined,
+): Promise<T> {
+  const keys = Object.keys(scopedEnv);
+  await recordSecretRead({ keys, storeOf: () => "process-env", via: "exec-broker" }, { cwd });
+  return run(scopedEnv);
 }
 
 /**

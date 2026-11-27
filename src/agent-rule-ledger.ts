@@ -184,6 +184,25 @@ function findingResults(rows: LedgerRow[]): SecurityCheckResult[] {
       suggestion: "check these by hand; kit reads rule files as text and never evaluates them",
     });
   }
+  for (const kind of ["approvals off", "arbitrary flags"]) {
+    const hits = rows.filter(
+      (r) =>
+        r.kind === "allow" &&
+        r.harness !== "Claude Code" &&
+        r.class.includes(`nested agent with ${kind}`),
+    );
+    if (!hits.length) continue;
+    out.push({
+      category: "exposure",
+      name: `agent rules: nested agent with ${kind}`,
+      status: "warn",
+      severity: kind === "approvals off" ? "high" : "medium",
+      hasFindings: true,
+      detail: `${listed(hits.map(where))}. Each starts another coding agent without a prompt${kind === "approvals off" ? ", and that agent asks no one either" : ", with any flags"}`,
+      suggestion:
+        "remove the rule or make it prompt; a nested agent run unattended is the person's decision",
+    });
+  }
   const wide = rows.filter(
     (r) =>
       r.kind === "allow" && r.harness !== "Claude Code" && r.class.startsWith("all three legs"),
