@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "sandstream-kit-adapter-sdk";
-import { exec } from "../utils/exec.js";
+import { execPinned } from "../vendor-cli-pin.js";
 
 async function runFly(
   args: string[],
@@ -7,7 +7,7 @@ async function runFly(
   env?: Record<string, string>,
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
-    const { stdout, stderr } = await exec("fly", args, {
+    const { stdout, stderr } = await execPinned("fly", args, {
       cwd,
       timeout: 120_000,
       env: { ...process.env, ...env },

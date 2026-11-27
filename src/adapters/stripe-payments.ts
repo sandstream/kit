@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
-import { exec } from "../utils/exec.js";
+import { execPinned } from "../vendor-cli-pin.js";
 
 /**
  * Stripe Payments Adapter
@@ -21,7 +21,7 @@ export const stripePaymentsAdapter: ServiceAdapter = {
       }
 
       // Check if stripe CLI is authenticated
-      const { stdout } = await exec("stripe", ["config", "--list"], {
+      const { stdout } = await execPinned("stripe", ["config", "--list"], {
         timeout: 10_000,
       });
 
@@ -35,7 +35,7 @@ export const stripePaymentsAdapter: ServiceAdapter = {
     try {
       // Step 1: Ensure Stripe CLI is authenticated
       try {
-        const { stdout: configOutput } = await exec("stripe", ["config", "--list"], {
+        const { stdout: configOutput } = await execPinned("stripe", ["config", "--list"], {
           timeout: 10_000,
         });
 
@@ -58,7 +58,7 @@ export const stripePaymentsAdapter: ServiceAdapter = {
       }
 
       // Step 2: Get API keys
-      const { stdout: apiKeysOutput } = await exec("stripe", ["config", "--list"], {
+      const { stdout: apiKeysOutput } = await execPinned("stripe", ["config", "--list"], {
         timeout: 10_000,
       });
 
@@ -80,7 +80,7 @@ export const stripePaymentsAdapter: ServiceAdapter = {
 
       if (!publishableKey) {
         try {
-          await exec("stripe", ["api", "/v1/accounts", "--method", "get"], {
+          await execPinned("stripe", ["api", "/v1/accounts", "--method", "get"], {
             timeout: 10_000,
           });
 
@@ -96,7 +96,7 @@ export const stripePaymentsAdapter: ServiceAdapter = {
       const projectName = context.projectName || "default";
 
       try {
-        const { stdout: productsOutput } = await exec(
+        const { stdout: productsOutput } = await execPinned(
           "stripe",
           ["products", "list", "--limit", "1"],
           {
@@ -106,7 +106,7 @@ export const stripePaymentsAdapter: ServiceAdapter = {
 
         // If no products, create a sample one
         if (!productsOutput.includes("prod_")) {
-          await exec(
+          await execPinned(
             "stripe",
             [
               "products",
