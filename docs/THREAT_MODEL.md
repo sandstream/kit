@@ -203,9 +203,10 @@ yours — kit ships no default value.
 
 kit pins and triages what **it** manages: mise-installed tools (versioned in
 `.kit.toml`), project dependencies (`kit triage` before install, bumblebee per
-release), and its own actions (SHA-pinned in CI). For the vault and cloud CLIs it
-hands secrets through (`op`, `infisical`, `bw`, `doppler`, `vault`, `aws`,
-`gcloud`, `az`, `gh`), `kit tools pin` records the resolved realpath, SHA-256 and
+release), and its own actions (SHA-pinned in CI). For the vault, cloud and deploy
+CLIs it hands secrets or credentials through (`op`, `infisical`, `bw`, `doppler`,
+`vault`, `aws`, `gcloud`, `az`, `gh`, `eas`, `dotenvx`, `vercel`, `supabase`,
+`fly`/`flyctl`, `railway`, `wrangler`, `stripe`), `kit tools pin` records the resolved realpath, SHA-256 and
 reported version in `.kit/cli-lock.json`. From then on kit verifies that **the
 binary is the one your team accepted**: `kit check` fails a hash change without a
 version change and warns on a new version or a different resolved file, and kit
@@ -234,6 +235,16 @@ Those are a separate supply chain worth understanding:
   Nothing is installed, so no install gate sees it. `kit agent-audit` names
   each one it finds in its environment and in Claude Code's `settings.json`
   `env` blocks; it cannot see shell rc files it is not run from.
+- **Project MCP servers** start with every agent session once approved. When
+  a committed `.mcp.json` (or `.codex/config.toml`, `.cursor/mcp.json`, …)
+  runs the checkout's own code (`go run ./…`, `cargo run`, `node ./…`,
+  `python -m <a package in the checkout>`, `npm run`, `uv run`), whatever a
+  commit or branch puts there runs before anyone reads it. A package runner
+  without a version (`npx -y <pkg>`, `uvx <pkg>`) runs whatever was published
+  last. `kit agent-audit` warns (low) on both, and calls the runner unpinned
+  as `kit triage skill` does. Neither fails: building your own server, or
+  running a well-known one through `npx`, is common, and a failure on every
+  such config would be noise.
 
 How to harden host CLIs (kit cannot do this for you):
 

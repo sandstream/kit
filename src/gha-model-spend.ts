@@ -8,7 +8,7 @@
  *
  * Flagged, like `id-token: write` in gha-id-token.ts: the grant at workflow level, where every
  * job without its own `permissions:` gets it, including jobs added later. `write-all` is left to
- * the id-token rule, which already reports it. A grant on one job is the intended shape and is
+ * gha-write-all.ts, which reports it as write to every scope. A grant on one job is the intended shape and is
  * not reported. Deterministic line scan, no YAML dependency.
  */
 import type { SecurityCheckResult } from "./check-security.js";

@@ -15,7 +15,9 @@
  * `prismor-always-allowed-rules-vs-kit`).
  *
  * `instruction-file secrets` sits next to agent-audit: the files every harness loads as
- * instructions (AGENTS.md, CLAUDE.md, .cursorrules, GEMINI.md, Copilot's), read for keys.
+ * instructions (AGENTS.md, CLAUDE.md, .cursorrules, GEMINI.md, Copilot's), read for keys. The
+ * instruction-constraint rows read the same files for rule lines that name missing code or that
+ * the working tree dropped since HEAD.
  */
 import { homedir } from "node:os";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -32,6 +34,7 @@ export async function checkAgentConfig(
   const { checkWorktreeInclude } = await import("./check-worktreeinclude.js");
   const { checkGitEmail } = await import("./check-git-email.js");
   const { checkInstructionSecrets } = await import("./check-instruction-secrets.js");
+  const { checkInstructionConstraints } = await import("./check-instruction-constraints.js");
   const { checkPlaintextCredentials } = await import("./check-plaintext-credentials.js");
   const { userSurfaceDriftRows } = await import("./user-surface-drift.js");
   const { isReadOnlyMode } = await import("./read-only-mode.js");
@@ -41,6 +44,7 @@ export async function checkAgentConfig(
   return [
     ...runAgentAudit(root),
     ...checkInstructionSecrets(root),
+    ...checkInstructionConstraints(root),
     ...runUserAgentAudit(root, home, env),
     ...userSurfaceDriftRows(home, env, !isReadOnlyMode()),
     ...checkMcpLoopbackToken(root),

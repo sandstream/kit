@@ -8,6 +8,7 @@
  *     commit SHA (tj-actions/changed-files CVE-2025-30066, ~23k repos).
  *   - "pwn request": a privileged trigger (`pull_request_target`, `workflow_run`,
  *     `issue_comment`) plus a step that brings pull-request code in (src/gha-pwn.ts).
+ *   - `permissions: write-all` at workflow or job level: write to every scope (src/gha-write-all.ts).
  *   - `id-token: write` granted at workflow level, or on a job that never uses it (src/gha-id-token.ts).
  *   - `npm ci` / `npm install` without `--ignore-scripts` in a job that holds a secret or
  *     `id-token: write` (src/gha-install-scripts.ts).
@@ -26,6 +27,7 @@ import { auditIdToken } from "./gha-id-token.js";
 import { auditInstallScripts } from "./gha-install-scripts.js";
 import { auditModelSpend } from "./gha-model-spend.js";
 import { auditStaticCloudKeys } from "./gha-static-cloud-keys.js";
+import { auditWriteAll } from "./gha-write-all.js";
 import { auditSecretsDump } from "./gha-secrets-dump.js";
 import { PRT_DEFAULT_BLOCK_DATE, pwnRequest, workflowTriggers } from "./gha-pwn.js";
 
@@ -97,6 +99,7 @@ export function auditWorkflow(content: string, file: string): SecurityCheckResul
   out.push(...pwnRows(content, file));
 
   out.push(...auditSkippableGates(content, file));
+  out.push(...auditWriteAll(content, file));
   out.push(...auditIdToken(content, file));
   out.push(...auditInstallScripts(content, file));
   out.push(...auditStaticCloudKeys(content, file));
@@ -188,7 +191,7 @@ export function runGhaAudit(cwd: string): SecurityCheckResult[] {
       category: "supply-chain",
       name: "gha-audit",
       status: "pass",
-      detail: `${files.length} workflow(s): all actions pinned, no pwn-request, no skippable gate, no wide id-token or model-spend permission, no scripted install with credentials, no static cloud key`,
+      detail: `${files.length} workflow(s): all actions pinned, no pwn-request, no skippable gate, no write-all, no wide id-token or model-spend permission, no scripted install with credentials, no static cloud key`,
     });
   }
   return out;
