@@ -20,7 +20,8 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "../utils/sqlite.js";
 import { insertMessage, upsertSession, isFileIndexed, markFileIndexed } from "./db.js";
 import type { IndexResult } from "./parser.js";
 
@@ -150,7 +151,7 @@ export function indexKiroSessions(db: DatabaseSync): IndexResult {
 
   let src: DatabaseSync;
   try {
-    src = new DatabaseSync(dbPath, { readOnly: true });
+    src = openSqlite(dbPath, { readOnly: true });
   } catch {
     return result; // locked / unreadable → fail-safe
   }

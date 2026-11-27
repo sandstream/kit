@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { cmdEnv } from "./commands/env.js";
 import { diffEnvFiles, formatEnvDiff } from "./env-diff.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -44,7 +46,7 @@ describe("diffEnvFiles", () => {
     }
   });
 
-  it("flags changed values with hash-prefixes (never echoes value)", async () => {
+  it("flags changed values by key only (no value, no hash of it)", async () => {
     const dir = fixture((d) => {
       writeFileSync(join(d, ".env.a"), "API_KEY=value-a\n");
       writeFileSync(join(d, ".env.b"), "API_KEY=value-b\n");
@@ -52,11 +54,7 @@ describe("diffEnvFiles", () => {
     try {
       const diff = await diffEnvFiles(".env.a", ".env.b", dir);
       assert.equal(diff.changed.length, 1);
-      assert.equal(diff.changed[0]!.key, "API_KEY");
-      assert.notEqual(diff.changed[0]!.aHash, diff.changed[0]!.bHash);
-      assert.equal(diff.changed[0]!.aHash.length, 8);
-      // Hashes must NOT contain the value.
-      assert.ok(!diff.changed[0]!.aHash.includes("value"));
+      assert.deepEqual(diff.changed, [{ key: "API_KEY" }]);
     } finally {
       rmTemp(dir);
     }
@@ -96,14 +94,14 @@ describe("formatEnvDiff", () => {
       {
         onlyInA: ["Y"],
         onlyInB: ["Z"],
-        changed: [{ key: "X", aHash: "aaaa1111", bHash: "bbbb2222" }],
+        changed: [{ key: "X" }],
         identicalCount: 1,
       },
       "local",
       "staging",
     );
     assert.match(formatted, /local vs staging/);
-    assert.match(formatted, /X.*aaaa1111.*bbbb2222/);
+    assert.ok(formatted.includes("  ⚠  X  differs"));
     assert.match(formatted, /\+\s+Y/);
     assert.match(formatted, /-\s+Z/);
     assert.match(formatted, /Identical keys: 1/);
@@ -147,7 +145,7 @@ describe("formatEnvDiff — section structure and redaction", () => {
       {
         onlyInA: ["A_ONLY"],
         onlyInB: ["B_ONLY"],
-        changed: [{ key: "SHARED", aHash: "11111111", bHash: "22222222" }],
+        changed: [{ key: "SHARED" }],
         identicalCount: 0,
       },
       "local",
@@ -168,10 +166,7 @@ describe("formatEnvDiff — section structure and redaction", () => {
       {
         onlyInA: ["A1", "A2"],
         onlyInB: ["B1"],
-        changed: [
-          { key: "K1", aHash: "aaaaaaaa", bHash: "bbbbbbbb" },
-          { key: "K2", aHash: "cccccccc", bHash: "dddddddd" },
-        ],
+        changed: [{ key: "K1" }, { key: "K2" }],
         identicalCount: 3,
       },
       "local",
@@ -183,8 +178,8 @@ describe("formatEnvDiff — section structure and redaction", () => {
     assert.ok(lines.includes("Only in staging (1):"));
     // The per-entry line format is what a developer greps for, so pin it whole
     // rather than loosely matching the key.
-    assert.ok(lines.includes("  ⚠  K1  local=aaaaaaaa…  staging=bbbbbbbb…"));
-    assert.ok(lines.includes("  ⚠  K2  local=cccccccc…  staging=dddddddd…"));
+    assert.ok(lines.includes("  ⚠  K1  differs"));
+    assert.ok(lines.includes("  ⚠  K2  differs"));
     assert.ok(lines.includes("  +  A1"));
     assert.ok(lines.includes("  +  A2"));
     assert.ok(lines.includes("  -  B1"));
@@ -195,10 +190,7 @@ describe("formatEnvDiff — section structure and redaction", () => {
       {
         onlyInA: ["ZEBRA", "ALPHA"],
         onlyInB: [],
-        changed: [
-          { key: "ZED", aHash: "11111111", bHash: "22222222" },
-          { key: "ABE", aHash: "33333333", bHash: "44444444" },
-        ],
+        changed: [{ key: "ZED" }, { key: "ABE" }],
         identicalCount: 0,
       },
       "a",
@@ -215,14 +207,14 @@ describe("formatEnvDiff — section structure and redaction", () => {
       {
         onlyInA: ["A_ONLY"],
         onlyInB: ["B_ONLY"],
-        changed: [{ key: "K", aHash: "aaaaaaaa", bHash: "bbbbbbbb" }],
+        changed: [{ key: "K" }],
         identicalCount: 0,
       },
       ".env.local",
       ".env.staging",
     );
     assert.ok(out.startsWith("env-diff .env.local vs .env.staging\n"));
-    assert.ok(out.includes("  ⚠  K  .env.local=aaaaaaaa…  .env.staging=bbbbbbbb…"));
+    assert.ok(out.includes("  ⚠  K  differs"));
     assert.ok(out.includes("Only in .env.local (1):"));
     assert.ok(out.includes("Only in .env.staging (1):"));
   });
@@ -237,19 +229,55 @@ describe("formatEnvDiff — section structure and redaction", () => {
     try {
       const diff = await diffEnvFiles(".env.a", ".env.b", dir);
       const out = formatEnvDiff(diff, "local", "staging");
-      // The whole point of the hash-prefix design: the rendered report is safe
+      // The whole point of the design: the rendered report is safe
       // to paste into a ticket or CI log. Key names may appear, values may not.
       assert.ok(!out.includes(secretA), `formatted output leaked the A value:\n${out}`);
       assert.ok(!out.includes(secretB), `formatted output leaked the B value:\n${out}`);
       assert.ok(!out.includes("sk-live"));
       assert.ok(!out.includes("same"), `formatted output leaked an identical value:\n${out}`);
-      // It still has to be useful: the drifting key is named and both hashes shown.
-      assert.ok(out.includes("API_KEY"));
-      assert.ok(out.includes(diff.changed[0]!.aHash));
-      assert.ok(out.includes(diff.changed[0]!.bHash));
+      // It still has to be useful: the drifting key is named and marked as differing.
+      assert.ok(out.includes("API_KEY  differs"));
       assert.ok(out.includes("Identical keys: 1"));
     } finally {
       rmTemp(dir);
     }
+  });
+});
+
+describe("env diff prints no value-derived data", () => {
+  /** Every 8-hex sha256 prefix of a 4-digit PIN: what an attacker would try against the output. */
+  function pinsRecoverableFrom(text: string): string[] {
+    const found: string[] = [];
+    for (let n = 0; n < 10_000; n++) {
+      const pin = String(n).padStart(4, "0");
+      if (text.includes(createHash("sha256").update(pin).digest("hex").slice(0, 8)))
+        found.push(pin);
+    }
+    return found;
+  }
+
+  it("a 4-digit PIN cannot be recovered from `kit env diff --compare` or formatEnvDiff", async (t) => {
+    const dir = fixture((d) => {
+      writeFileSync(join(d, ".env.local"), "DEMO_PIN=4821\n");
+      writeFileSync(join(d, ".env.staging"), "DEMO_PIN=7395\n");
+    });
+    const previous = { cwd: process.cwd(), argv: process.argv, log: console.log };
+    const printed: string[] = [];
+    t.after(() => {
+      process.chdir(previous.cwd);
+      process.argv = previous.argv;
+      console.log = previous.log;
+      rmTemp(dir);
+    });
+    process.chdir(dir);
+    process.argv = [process.execPath, "kit", "env", "diff", "--compare", "staging"];
+    console.log = (...parts: unknown[]) => printed.push(parts.join(" "));
+    assert.equal(await cmdEnv(), true);
+    const diff = await diffEnvFiles(".env.local", ".env.staging", dir);
+    const output = `${printed.join("\n")}\n${formatEnvDiff(diff, "local", "staging")}`;
+    assert.match(output, /DEMO_PIN/);
+    assert.deepEqual(pinsRecoverableFrom(output), []);
+    assert.match(output, /differs/);
+    assert.deepEqual(diff.changed, [{ key: "DEMO_PIN" }]);
   });
 });

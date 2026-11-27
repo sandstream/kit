@@ -9,7 +9,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "./utils/sqlite.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { sameIdentity } from "./utils/same-file.js";
 
@@ -50,7 +51,7 @@ function openDatabase(path: string): { database: DatabaseSync; stat: BigIntStats
   let database: DatabaseSync | undefined;
   try {
     const stat = validateFile(path);
-    database = new DatabaseSync(path);
+    database = openSqlite(path);
     database.exec("PRAGMA busy_timeout = 0");
     assertSameFile(path, stat);
     return { database, stat };

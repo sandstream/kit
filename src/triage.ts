@@ -15,6 +15,7 @@ import { triageNpmSandbox, type SandboxResult } from "./triage-sandbox.js";
 import { applyCooling } from "./triage-cooling.js";
 import { pipSpecFromAt } from "./triage-cooling-pypi.js";
 import { exec } from "./utils/exec.js";
+import type { NpxBinFact } from "./triage-npm-bins.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -191,6 +192,8 @@ export interface TriageResult {
   type: TriageType;
   passed: boolean;
   output: string;
+  /** npm only: what `npx <bin>` fetches for each bin of the package (triage-npm-bins.ts). */
+  npxBins?: NpxBinFact[];
 }
 
 /**
@@ -424,6 +427,24 @@ const NATIVE_TRIAGE: Partial<
   },
 };
 
+/**
+ * What runs after triage.py, in TypeScript, for every caller alike: the cooling period (Z6), then
+ * for npm the npx bin-name check (a bin named after another package, or nobody's).
+ */
+async function afterScript(
+  cwd: string,
+  type: TriageType,
+  target: string,
+  passed: boolean,
+  output: string,
+): Promise<Omit<TriageResult, "target" | "type">> {
+  const cooled = await applyCooling(cwd, type, target, { passed, output });
+  if (type !== "npm") return cooled;
+  const { npxBinCheck } = await import("./triage-npm-bins.js");
+  const { npxBins, ...checked } = await npxBinCheck(cwd, target, cooled);
+  return { ...checked, ...(npxBins.length ? { npxBins } : {}) };
+}
+
 export async function runTriage(
   type: TriageType,
   target: string,
@@ -461,12 +482,7 @@ export async function runTriage(
     const output = note + stdout + (stderr ? `\n${stderr}` : "");
     const passed = verdictPassed(output);
 
-    // The cooling period (Z6) runs here, not in the frozen triage.py, for every caller alike.
-    return {
-      target,
-      type,
-      ...(await applyCooling(cwd, type, pipSpec ?? target, { passed, output })),
-    };
+    return { target, type, ...(await afterScript(cwd, type, pipSpec ?? target, passed, output)) };
   } catch (error: unknown) {
     const err = error as { stdout?: string; stderr?: string; message?: string };
     const output = (err.stdout || "") + (err.stderr || "") + (err.message || "");

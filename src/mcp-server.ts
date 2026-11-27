@@ -18,6 +18,7 @@ import { isReadOnlyMode } from "./read-only-mode.js";
 import { runGovernedBrokered } from "./governance-middleware.js";
 import { runTriage, type TriageType } from "./triage.js";
 import { recordTriageRun } from "./commands/triage.js";
+import { recordNpxBins } from "./triage-npm-bins.js";
 import { openMemoryDb, searchMessages, getMemoryDbPath, recordQuery } from "./memory/db.js";
 import { searchShared } from "./memory/shared.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
@@ -698,6 +699,7 @@ function register_kit_triage(server: StdioMcpServer): void {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_triage");
       try {
         const result = await runTriage(type as TriageType, target, { cwd });
+        await recordNpxBins(cwd ?? process.cwd(), result.npxBins);
         if (result.passed && target) {
           await recordTriageRun(type, target, false, false, { cwd });
         }

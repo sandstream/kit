@@ -268,6 +268,25 @@ function writeGrants(grants: string[]): string[] {
   });
 }
 
+/**
+ * The class of one rule, or of the alternatives one rule allows together, from the same tables the
+ * trifecta and the write row use: which legs it holds, whether it writes, and whether the table
+ * could not place it. Pure; used by the per-rule ledger.
+ */
+export function grantClass(grants: string[]): string {
+  const legs = legsOf(grants);
+  const parts: string[] = [];
+  if (legs.vector.length && legs.payload.length && legs.egress.length) parts.push("all three legs");
+  else {
+    if (legs.vector.length) parts.push("untrusted input");
+    if (legs.payload.length) parts.push("private data");
+    if (legs.egress.length) parts.push("way out");
+  }
+  if (writeGrants(grants).length) parts.push("writes");
+  if (legs.unknown.length) parts.push("unclassified");
+  return parts.join(", ") || "narrow";
+}
+
 function preapprovedWrites(grants: string[], blocked: Set<string>): string[] {
   const candidates = grants.includes("*") ? ["Edit", "Bash", "PowerShell"] : writeGrants(grants);
   return candidates.filter((grant) => !blocked.has("*") && !blocked.has(split(grant).name));
@@ -357,7 +376,7 @@ export function runAgentTrifecta(root: string, home: string): SecurityCheckResul
       category: "exposure",
       name: "lethal trifecta",
       status: "pass",
-      detail: `no agent holds untrusted input, private data and a way out together in the declared grants (${units.length} unit(s) checked). Approvals and auto mode decided at run time are not visible here`,
+      detail: `no Claude Code session or subagent holds untrusted input, private data and a way out together in its declared grants (${units.length} unit(s) checked: ~/.claude/settings.json, .claude/settings.json, .claude/settings.local.json and the agents in .claude/agents). Other harnesses' rules are listed with their class under "agent rules", not counted here. Approvals and auto mode decided at run time are not visible here`,
     });
   }
   return rows;

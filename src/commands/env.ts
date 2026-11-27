@@ -126,8 +126,8 @@ async function cmdEnvCurrent(): Promise<boolean> {
 
 /**
  * `kit env diff --compare <env>` — surface drift between the local .env.local
- * and a target env file (.env.<env>). Values are never printed — only key
- * presence and short value hashes — so it is safe to run anywhere.
+ * and a target env file (.env.<env>). Values are never printed, nor anything
+ * derived from them — only key presence and "differs" — so it is safe to run anywhere.
  */
 async function cmdEnvDiff(): Promise<boolean> {
   const args = process.argv.slice(2);
@@ -145,7 +145,7 @@ async function cmdEnvDiff(): Promise<boolean> {
   for (const k of res.onlyInB)
     console.log(`  ${c.green}+ ${k}${c.reset} ${c.dim}only in ${b}${c.reset}`);
   for (const ch of res.changed)
-    console.log(`  ${c.yellow}~ ${ch.key}${c.reset} ${c.dim}(${ch.aHash} → ${ch.bHash})${c.reset}`);
+    console.log(`  ${c.yellow}~ ${ch.key}${c.reset} ${c.dim}differs${c.reset}`);
   const drift = res.onlyInA.length + res.onlyInB.length + res.changed.length;
   console.log(
     drift === 0
