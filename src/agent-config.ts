@@ -1,16 +1,5 @@
-import {
-  open,
-  readFile,
-  writeFile,
-  mkdir,
-  readdir,
-  rename,
-  rm,
-  stat,
-  lstat,
-} from "node:fs/promises";
-import { constants, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
 import { gateSettingsFile, preToolUseGroups } from "./gate-settings.js";
@@ -24,13 +13,20 @@ import {
   expandHomePath,
   hookCommandProblems,
 } from "./agent-config-hook-liveness.js";
-import { renderOpenCodeInstallGate } from "./opencode-gate.js";
 import {
   isKitGateCommand,
   kitGateInvocation,
   kitSubcommandInvocation,
 } from "./kit-gate-command.js";
 import type { HookInstallResult } from "./agent-gate-installers.js";
+export {
+  ANTIGRAVITY_HOOK_NAME,
+  GEMINI_TRUST_NOTICE,
+  installInstallGateAntigravity,
+  installInstallGateCline,
+  installInstallGateGemini,
+  installInstallGateOpenCode,
+} from "./agent-gate-contracts.js";
 export { kitGateInvocation, kitSubcommandInvocation } from "./kit-gate-command.js";
 export type { HookInstallResult } from "./agent-gate-installers.js";
 export {
@@ -45,6 +41,12 @@ import {
   installInstallGateDroid,
   installInstallGateKiro,
 } from "./agent-gate-installers.js";
+import {
+  installInstallGateAntigravity,
+  installInstallGateCline,
+  installInstallGateGemini,
+  installInstallGateOpenCode,
+} from "./agent-gate-contracts.js";
 export { renderOpenCodeInstallGate } from "./opencode-gate.js";
 import type { kitConfig } from "./config.js";
 
@@ -1204,45 +1206,6 @@ async function writeInstallGateCodex(cwd: string): Promise<HookInstallResult> {
   }
 }
 
-/**
- * Gemini CLI install-gate: a `BeforeTool` hook in `.gemini/settings.json` (same
- * nested hooks > Event > matcher > hooks[] shape as Claude Code). Gemini passes
- * the command in tool_input.command and blocks on exit 2 — so `kit gate-bash`
- * works unchanged. Idempotent; preserves other settings/hooks.
- */
-export async function installInstallGateGemini(
-  cwd: string = process.cwd(),
-): Promise<HookInstallResult> {
-  const file = ".gemini/settings.json";
-  const path = resolve(cwd, file);
-  const { isReadOnlyMode } = await import("./read-only-mode.js");
-  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
-  if (!existsSync(resolve(cwd, ".gemini"))) {
-    return { file, action: "skipped", detail: "no Gemini CLI project detected" };
-  }
-  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
-  let existed = false;
-  try {
-    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
-    existed = true;
-  } catch {
-    settings = {};
-  }
-  const hooks = (settings.hooks ??= {});
-  const pre = (hooks.BeforeTool ??= []);
-  if (pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")))) {
-    return { file, action: "unchanged", detail: "install-gate already wired" };
-  }
-  pre.push({ matcher: "", hooks: [{ type: "command", command: kitGateInvocation() }] });
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-    return { file, action: existed ? "updated" : "created" };
-  } catch (err) {
-    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-  }
-}
-
 /** The gate command as an argv array (`[node, cli.js, "gate-bash"]`) for execFileSync.
  *  On POSIX the self-healing wrapper is a shebanged, executable sh script that
  *  execFileSync can spawn directly, so prefer it for the same node-version-switch
@@ -1256,139 +1219,6 @@ export function kitGateArgv(): string[] {
   const entry = process.argv[1];
   if (entry) return [process.execPath, resolve(entry), "gate-bash"];
   return ["kit", "gate-bash"]; // last resort — relies on PATH
-}
-
-async function readOpenCodePlugin(path: string): Promise<string> {
-  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  try {
-    if (!(await handle.stat()).isFile()) throw new Error("OpenCode gate path is not a file");
-    return await handle.readFile("utf8");
-  } finally {
-    await handle.close();
-  }
-}
-
-async function writeOpenCodePlugin(path: string, content: string, replace: boolean): Promise<void> {
-  if (!replace) {
-    await writeFile(path, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    return;
-  }
-  const temporary = `${path}.kit-tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
-  try {
-    await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    await rename(temporary, path);
-  } finally {
-    await rm(temporary, { force: true });
-  }
-}
-
-/**
- * OpenCode install-gate: unlike the other agents (which register a hook *command*
- * in a config file), OpenCode enforces via a JS **plugin** that hooks
- * `tool.execute.before` and BLOCKS by throwing — the verified contract from
- * `@opencode-ai/plugin` (opencode-ai@1.17.x). We write a small managed plugin to
- * `.opencode/plugin/kit-install-gate.js` that pipes the bash command into
- * `kit gate-bash` and throws when it exits non-zero (exit 2 = deny). Exact current
- * output is idempotent; stale kit-managed output is upgraded without overwriting an
- * independently managed gate.
- */
-export async function installInstallGateOpenCode(
-  cwd: string = process.cwd(),
-): Promise<HookInstallResult> {
-  const file = ".opencode/plugin/kit-install-gate.js";
-  const path = resolve(cwd, file);
-  const { isReadOnlyMode } = await import("./read-only-mode.js");
-  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
-  const detected =
-    existsSync(resolve(cwd, ".opencode")) ||
-    existsSync(resolve(cwd, "opencode.json")) ||
-    existsSync(resolve(cwd, "opencode.jsonc"));
-  if (!detected) return { file, action: "skipped", detail: "no OpenCode project detected" };
-
-  const plugin = renderOpenCodeInstallGate();
-  let existed = false;
-  try {
-    const info = await lstat(path);
-    existed = true;
-    if (info.isSymbolicLink() || !info.isFile()) {
-      return { file, action: "skipped", detail: "external or symlinked path; refusing overwrite" };
-    }
-    const current = await readOpenCodePlugin(path);
-    if (current === plugin) {
-      return { file, action: "unchanged", detail: "install-gate already wired" };
-    }
-    const managed = current.includes("Generated by `kit agent-config --install-gate`");
-    if (!managed) {
-      return current.includes("gate-bash")
-        ? { file, action: "unchanged", detail: "external install-gate already wired" }
-        : { file, action: "skipped", detail: "external file exists; refusing overwrite" };
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      return {
-        file,
-        action: "failed",
-        detail: err instanceof Error ? err.message : String(err),
-      };
-    }
-  }
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeOpenCodePlugin(path, plugin, existed);
-    return { file, action: existed ? "updated" : "created" };
-  } catch (err) {
-    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/**
- * Cline install-gate: Cline discovers an EXECUTABLE script named exactly the
- * event (`PreToolUse`, no extension) under `.clinerules/hooks/` and runs it as a
- * subprocess, feeding the tool call as JSON on stdin. Unlike the exit-2 agents
- * and OpenCode's plugin-throw, Cline blocks via a **stdout JSON** contract
- * (`{cancel:true,errorMessage}` — `HookOutputSchema`). Verified against
- * @cline/core (`HookConfigFileName.PreToolUse`, `HOOKS_CONFIG_DIRECTORY_NAME`)
- * and @cline/shared (`PreToolUseData {toolName, parameters}`, payload nested
- * under `preToolUse`). We write a tiny sh shim that execs `kit gate-bash
- * --format cline`, which reads that payload and emits the cancel-JSON.
- */
-export async function installInstallGateCline(
-  cwd: string = process.cwd(),
-): Promise<HookInstallResult> {
-  const file = ".clinerules/hooks/PreToolUse";
-  const path = resolve(cwd, file);
-  const { isReadOnlyMode } = await import("./read-only-mode.js");
-  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
-  if (!existsSync(resolve(cwd, ".clinerules")) && !existsSync(resolve(cwd, ".cline"))) {
-    return { file, action: "skipped", detail: "no Cline project detected" };
-  }
-
-  const existed = existsSync(path);
-  if (existed) {
-    try {
-      if ((await readFile(path, "utf-8")).includes("gate-bash")) {
-        return { file, action: "unchanged", detail: "install-gate already wired" };
-      }
-    } catch {
-      // unreadable → overwrite below
-    }
-  }
-
-  const script = `#!/bin/sh
-# kit install-gate (Cline PreToolUse hook). Generated by \`kit agent-config
-# --install-gate\`. Delete this file to disable. Reads the tool call on stdin and
-# blocks an un-triaged install via the {cancel:true} stdout contract.
-exec ${kitGateInvocation()} --format cline
-`;
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, script, { encoding: "utf-8", mode: 0o755 });
-    const { chmod } = await import("node:fs/promises");
-    await chmod(path, 0o755).catch(() => {}); // ensure +x even when overwriting; no-op on non-POSIX
-    return { file, action: existed ? "updated" : "created" };
-  } catch (err) {
-    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-  }
 }
 
 /**
@@ -1428,53 +1258,6 @@ export async function installInstallGateAugment(
     matcher: "bash|launch-process",
     hooks: [{ type: "command", command: kitGateInvocation() }],
   });
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-    return { file, action: existed ? "updated" : "created" };
-  } catch (err) {
-    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/**
- * Google Antigravity install-gate: a `PreToolUse` hook in the workspace-scoped
- * `.agents/hooks.json` (preferred over the global ~/.gemini/config/hooks.json to
- * keep kit's per-project pattern). Distinct from the Gemini CLI gate: event key
- * `"PreToolUse"` (not `BeforeTool`), matcher `"run_command"`. Antigravity carries
- * the command at `toolCall.args.CommandLine` — handled by the extended
- * `extractCommandFromHookPayload` — and blocks on exit 2, so `kit gate-bash`
- * works unchanged. Idempotent; preserves other hooks. Detected via a repo
- * `.agents/` dir.
- */
-export async function installInstallGateAntigravity(
-  cwd: string = process.cwd(),
-): Promise<HookInstallResult> {
-  const file = ".agents/hooks.json";
-  const path = resolve(cwd, file);
-  const { isReadOnlyMode } = await import("./read-only-mode.js");
-  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
-  if (!existsSync(resolve(cwd, ".agents"))) {
-    return { file, action: "skipped", detail: "no Antigravity (.agents/) project detected" };
-  }
-  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
-  let existed = false;
-  try {
-    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
-    existed = true;
-  } catch {
-    settings = {};
-  }
-  const hooks = (settings.hooks ??= {});
-  const pre = (hooks.PreToolUse ??= []);
-  // Antigravity reads a required stdout `decision`, so the gate runs with `--format antigravity`.
-  const desired = `${kitGateInvocation()} --format antigravity`;
-  const kitHook = pre.flatMap((g) => g.hooks ?? []).find((h) => h.command?.includes("gate-bash"));
-  if (kitHook?.command === desired) {
-    return { file, action: "unchanged", detail: "install-gate already wired" };
-  }
-  if (kitHook) kitHook.command = desired;
-  else pre.push({ matcher: "run_command", hooks: [gateHook(desired)] });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
