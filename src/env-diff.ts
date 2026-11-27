@@ -8,20 +8,21 @@
  * Reads via the existing planMigration() path so we honor the same KEY=VALUE
  * parsing (quote-stripping, comment skipping, validation). Output is a
  * diff-summary: only-in-A, only-in-B, value-different-keys. Values
- * themselves are NEVER printed — only key-presence + a hash-prefix to
- * confirm they differ.
+ * themselves are NEVER printed, and neither is anything derived from them:
+ * a changed key is reported as "differs" only. An unsalted hash prefix of a
+ * short value (a 4-digit PIN) is reversed by trying every candidate, so it
+ * would print the value by another name.
  */
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createHash } from "node:crypto";
 import { isValidKeyName } from "./secrets-migrate.js";
 
 export interface EnvDiffResult {
   onlyInA: string[];
   onlyInB: string[];
   /** Keys present in both with different values. */
-  changed: Array<{ key: string; aHash: string; bHash: string }>;
+  changed: Array<{ key: string }>;
   /** Keys with identical values (rendered only as count). */
   identicalCount: number;
 }
@@ -53,10 +54,6 @@ async function parseEnvFile(path: string): Promise<Map<string, string>> {
   return out;
 }
 
-function hashPrefix(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 8);
-}
-
 export async function diffEnvFiles(
   pathA: string,
   pathB: string,
@@ -66,7 +63,7 @@ export async function diffEnvFiles(
   const b = await parseEnvFile(resolve(cwd, pathB));
   const onlyInA: string[] = [];
   const onlyInB: string[] = [];
-  const changed: Array<{ key: string; aHash: string; bHash: string }> = [];
+  const changed: Array<{ key: string }> = [];
   let identicalCount = 0;
   for (const [k, vA] of a) {
     if (!b.has(k)) {
@@ -74,7 +71,7 @@ export async function diffEnvFiles(
     } else {
       const vB = b.get(k)!;
       if (vA === vB) identicalCount++;
-      else changed.push({ key: k, aHash: hashPrefix(vA), bHash: hashPrefix(vB) });
+      else changed.push({ key: k });
     }
   }
   for (const k of b.keys()) {
@@ -94,7 +91,7 @@ export function formatEnvDiff(diff: EnvDiffResult, labelA: string, labelB: strin
   if (diff.changed.length > 0) {
     lines.push(`Changed (${diff.changed.length}):`);
     for (const c of diff.changed) {
-      lines.push(`  ⚠  ${c.key}  ${labelA}=${c.aHash}…  ${labelB}=${c.bHash}…`);
+      lines.push(`  ⚠  ${c.key}  differs`);
     }
     lines.push("");
   }
