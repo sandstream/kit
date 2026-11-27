@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
-import { exec } from "../utils/exec.js";
+import { execPinned } from "../vendor-cli-pin.js";
 
 /**
  * Expo EAS Adapter
@@ -19,7 +19,7 @@ export const expoEasAdapter: ServiceAdapter = {
       if (context.existingEnv.EXPO_TOKEN) {
         // Verify the token is valid
         try {
-          await exec("eas", ["whoami"], {
+          await execPinned("eas", ["whoami"], {
             timeout: 10_000,
             env: { ...process.env, EXPO_TOKEN: context.existingEnv.EXPO_TOKEN },
           });
@@ -40,7 +40,7 @@ export const expoEasAdapter: ServiceAdapter = {
     try {
       // Step 1: Check if EAS CLI is installed
       try {
-        await exec("eas", ["--version"], {
+        await execPinned("eas", ["--version"], {
           timeout: 5_000,
         });
       } catch {
@@ -68,7 +68,7 @@ Or provide EXPO_TOKEN in .env.local`,
 
       // Step 3: Verify the token by running 'eas whoami'
       try {
-        const { stdout: whoamiOutput } = await exec("eas", ["whoami"], {
+        const { stdout: whoamiOutput } = await execPinned("eas", ["whoami"], {
           timeout: 10_000,
           env: { ...process.env, EXPO_TOKEN: expoToken },
         });
@@ -91,7 +91,7 @@ Or provide EXPO_TOKEN in .env.local`,
 
       // Step 4: Check project credentials
       try {
-        await exec("eas", ["credentials"], {
+        await execPinned("eas", ["credentials"], {
           cwd: context.projectPath,
           timeout: 15_000,
           env: { ...process.env, EXPO_TOKEN: expoToken },
@@ -103,7 +103,7 @@ Or provide EXPO_TOKEN in .env.local`,
 
       // Step 5: Verify project structure (optional but helpful)
       try {
-        await exec("eas", ["build", "--list", "--limit", "1"], {
+        await execPinned("eas", ["build", "--list", "--limit", "1"], {
           cwd: context.projectPath,
           timeout: 15_000,
           env: { ...process.env, EXPO_TOKEN: expoToken },
