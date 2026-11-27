@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -10,6 +10,12 @@ import { fileURLToPath } from "node:url";
 import { readSecretAuditEvents, groupBySecret, summarize, exposureAt } from "./audit-secrets.js";
 import type { AuditEvent } from "./audit.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { cmdSecrets } from "./commands/secrets.js";
+import {
+  governanceClient,
+  governanceFixture,
+  projectConfig,
+} from "./governance-outcome.test-support.js";
 
 function makeRepo(events: object[]): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-audit-"));
@@ -252,5 +258,39 @@ describe("kit audit secrets --target (compiled CLI)", () => {
       ["DB_URL"],
     );
     assert.deepEqual(x.declaredOnly, ["SESSION_SECRET"]);
+  });
+});
+
+describe("secrets.generate is attributed to the keys it read", () => {
+  const values = ["fixture-not-a-secret-0001", "4821"];
+  const config = `${projectConfig}[secrets]\nstore = "env"\n[secrets.keys.DEMO_DB_PASSWORD]\nsource = "config"\nvalue = "${values[0]}"\n[secrets.keys.DEMO_PIN]\nsource = "config"\nvalue = "${values[1]}"\n`;
+
+  async function assertAttributed(target: string): Promise<void> {
+    const log = readFileSync(join(target, ".kit-audit.jsonl"), "utf-8");
+    for (const value of values) assert.ok(!log.includes(`"${value}"`), log);
+    const { reports, unattributed } = groupBySecret(await readSecretAuditEvents(target));
+    assert.deepEqual(unattributed, [], log);
+    assert.deepEqual(reports.map((r) => r.key).sort(), ["DEMO_DB_PASSWORD", "DEMO_PIN"]);
+    assert.ok(reports.every((r) => r.events.some((e) => e.operation === "secrets.generate")));
+  }
+
+  it("for `kit secrets` (CLI)", async (t) => {
+    const { target } = governanceFixture(t);
+    writeFileSync(join(target, ".kit.toml"), config);
+    process.chdir(target);
+    const argv = process.argv;
+    t.after(() => (process.argv = argv));
+    process.argv = [process.execPath, "kit", "secrets"];
+    assert.equal(await cmdSecrets(), true);
+    await assertAttributed(target);
+  });
+
+  it("for the MCP kit_secrets tool", async (t) => {
+    const { target } = governanceFixture(t);
+    writeFileSync(join(target, ".kit.toml"), config);
+    const client = await governanceClient(t);
+    const result = await client.callTool({ name: "kit_secrets", arguments: { cwd: target } });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    await assertAttributed(target);
   });
 });

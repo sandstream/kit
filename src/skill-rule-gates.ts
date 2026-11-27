@@ -22,11 +22,12 @@ export const SKILL_DIRS = [".claude/skills", ".agents/skills", ".codex/skills"];
 
 const RULE_WORD_EN = /\b(never|must not|mustn't|do not|don't|always|forbid(?:den)?|avoid)\b/i;
 /** Skills are often written in the team's language; this reads Swedish rule words, it does not speak them. */
-const RULE_WORD_SV = /\b(aldrig|förbjud\w*|undvik)\b/i;
-const isRuleLine = (text: string): boolean => RULE_WORD_EN.test(text) || RULE_WORD_SV.test(text);
-const CODE_TOKEN = /`([^`\n]{2,80})`/g;
+export const RULE_WORD_SV = /\b(aldrig|förbjud\w*|undvik)\b/i;
+export const isRuleLine = (text: string): boolean =>
+  RULE_WORD_EN.test(text) || RULE_WORD_SV.test(text);
+export const CODE_TOKEN = /`([^`\n]{2,80})`/g;
 /** A token that names code rather than an ordinary word: punctuation, a call or camelCase. */
-const CODE_SHAPE = /[.()*_:<>[\]/]|[a-z][A-Z]/;
+export const CODE_SHAPE = /[.()*_:<>[\]/]|[a-z][A-Z]/;
 
 export interface UngatedSkillRule {
   file: string;

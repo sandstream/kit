@@ -234,6 +234,16 @@ Those are a separate supply chain worth understanding:
   Nothing is installed, so no install gate sees it. `kit agent-audit` names
   each one it finds in its environment and in Claude Code's `settings.json`
   `env` blocks; it cannot see shell rc files it is not run from.
+- **Project MCP servers** start with every agent session once approved. When
+  a committed `.mcp.json` (or `.codex/config.toml`, `.cursor/mcp.json`, …)
+  runs the checkout's own code (`go run ./…`, `cargo run`, `node ./…`,
+  `python -m <a package in the checkout>`, `npm run`, `uv run`), whatever a
+  commit or branch puts there runs before anyone reads it. A package runner
+  without a version (`npx -y <pkg>`, `uvx <pkg>`) runs whatever was published
+  last. `kit agent-audit` warns (low) on both, and calls the runner unpinned
+  as `kit triage skill` does. Neither fails: building your own server, or
+  running a well-known one through `npx`, is common, and a failure on every
+  such config would be noise.
 
 How to harden host CLIs (kit cannot do this for you):
 
@@ -398,6 +408,15 @@ It also warns when declared permissions let a unit write without confirmation.
 This separate row covers file edits, broad shell access, and common file commands.
 It checks `allow` rules, `acceptEdits`, and `bypassPermissions`.
 Bare `ask` and `deny` rules take precedence for this row.
+
+The trifecta row reads Claude Code's grants only, and its pass text says so.
+The same command lists every saved rule it can read in a ledger: Claude Code (user, project, local
+and managed), Codex `prefix_rule` (user and project), Cursor CLI and Gemini CLI. Each rule gets a
+class from the same tables, so a Codex `prefix_rule(pattern=["bash"])` reads "all three legs" and is
+reported. `~/.kit/agent-rules.json` holds the accepted rules: a new allow rule, and a deny or ask rule
+that is gone, are reported until a person runs `kit agent-audit --accept-rules`, which the gates
+refuse from an agent. This is the trace a permission reply that rewrites the rule files leaves.
+A rule file kit cannot parse is reported, not counted as narrow.
 
 The audit cannot see approvals or mode changes made during a session.
 It does not classify every shell command or write-capable MCP tool.
