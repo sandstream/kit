@@ -4,6 +4,7 @@ import { devNull } from "node:os";
 import type { SecretsConfig } from "./config.js";
 import { generateSecrets } from "./secrets.js";
 import { exec } from "./utils/exec.js";
+import { execPinned } from "./vendor-cli-pin.js";
 import { secureFile } from "./utils/secure-perms.js";
 import { safeErrorMessage } from "./secrets-migrate.js";
 import { recordSecretWrite, SECRET_WRITE_OPS } from "./secrets-write-record.js";
@@ -278,7 +279,7 @@ async function syncToGitHubViaCli(
 ): Promise<SyncResult> {
   // Fall back to `gh secret set` CLI if libsodium is unavailable
   try {
-    await exec("gh", ["--version"], { timeout: 5_000 });
+    await execPinned("gh", ["--version"], { timeout: 5_000 });
   } catch {
     return {
       target: "github",
@@ -292,9 +293,13 @@ async function syncToGitHubViaCli(
 
   for (const [name, value] of Object.entries(secrets)) {
     try {
-      await exec("gh", ["secret", "set", name, "--repo", `${owner}/${repo}`, "--body", value], {
-        timeout: 15_000,
-      });
+      await execPinned(
+        "gh",
+        ["secret", "set", name, "--repo", `${owner}/${repo}`, "--body", value],
+        {
+          timeout: 15_000,
+        },
+      );
       synced.push(name);
     } catch (err) {
       // execFile errors embed the full argv (including `--body <value>`) in the
