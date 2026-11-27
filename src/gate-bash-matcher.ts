@@ -17,7 +17,7 @@ import type { PreToolUseGroup } from "./gate-settings.js";
 export const GATE_BASH_MATCHER = "Bash|PowerShell";
 
 /** The Claude Code tools that run shell commands. */
-export const SHELL_TOOLS = ["Bash", "PowerShell"] as const;
+const SHELL_TOOLS = ["Bash", "PowerShell"] as const;
 
 /**
  * Does a Claude Code matcher select `tool`? The documented rules ("Matcher patterns"): `*`, `""` or

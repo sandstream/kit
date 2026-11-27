@@ -922,6 +922,29 @@ export function gateLiveness(
 }
 
 /**
+ * The install-gate is already in `settings`: widen a `Bash`-only matcher (it misses PowerShell)
+ * and write the file when that or the command refresh changed anything.
+ */
+async function refreshInstallGate(
+  file: string,
+  path: string,
+  settings: { hooks?: Record<string, SettingsHookGroup[]> },
+  commandUpdated: boolean,
+): Promise<HookInstallResult> {
+  const widened = widenGateBashMatchers(settings.hooks?.PreToolUse ?? []);
+  if (!commandUpdated && !widened) {
+    return { file, action: "unchanged", detail: "install-gate already wired" };
+  }
+  try {
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    const what = widened ? "matcher widened to PowerShell" : "command refreshed";
+    return { file, action: "updated", detail: `install-gate hook ${what}` };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Install the PreToolUse install-gate hook into `.claude/settings.json` so an
  * un-triaged package install is BLOCKED before it runs — the *enforce* layer for
  * agent auto-mode (the rules-file block only *advises*; an agent can otherwise run
@@ -956,17 +979,7 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
   const existing = refreshSettingsGateCommand(pre, "gate-bash", desired);
   if (existing.found) {
     markGatesInstalled(cwd); // gate present → record it for liveness (idempotent)
-    const widened = widenGateBashMatchers(pre); // a `Bash`-only matcher misses PowerShell
-    if (existing.updated || widened) {
-      try {
-        await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-        const what = widened ? "matcher widened to PowerShell" : "command refreshed";
-        return { file, action: "updated", detail: `install-gate hook ${what}` };
-      } catch (err) {
-        return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-      }
-    }
-    return { file, action: "unchanged", detail: "install-gate already wired" };
+    return await refreshInstallGate(file, path, settings, existing.updated);
   }
 
   pre.push({ matcher: GATE_BASH_MATCHER, hooks: [gateHook(desired)] });
