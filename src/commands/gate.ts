@@ -52,7 +52,7 @@ export async function cmdGateBash(): Promise<boolean> {
   // Agent-agnostic command extraction (Claude/Codex/Amazon Q/Gemini tool_input.command,
   // Cursor top-level command, Cline run_commands `commands`) — shared pure helper. Cline sends
   // several commands in one call, and each one must pass.
-  const { decideBashGate, extractCommandsFromHookPayload } = await import("../install-gate.js");
+  const { extractCommandsFromHookPayload } = await import("../install-gate.js");
   const { clineShellCallUnreadable } = await import("../install-gate-payload.js");
   if (clineShellCallUnreadable(payload)) {
     const reason =
@@ -66,38 +66,9 @@ export async function cmdGateBash(): Promise<boolean> {
   if (commands.length === 0) {
     return stdoutAllow(); // no shell command in this tool call → allow
   }
-  const { trailCommandRefusal } = await import("../trail-guard.js");
-  const { homedir } = await import("node:os");
-  const { gateSettingsCommandRefusal } = await import("../gate-self-edit.js");
-  const notes: string[] = [];
-  const checked: Awaited<ReturnType<typeof decideBashGate>>["checked"] = [];
-  // Each command alone, then the list as one script: a `cd` or an `export` in one command
-  // changes what the next one does, and only the script form keeps that context.
-  const script = commands.length > 1 ? [commands.join("\n")] : [];
-  for (const [i, command] of [...commands, ...script].entries()) {
-    if (await refuseTrail("gate-bash", trailCommandRefusal(command, homedir()), payload)) {
-      return true;
-    }
-    const selfEdit = gateSettingsCommandRefusal(command, process.cwd(), homedir());
-    if (await refuseTrail("gate-bash", selfEdit, payload)) return true;
-    const verdict = await decideBashGate(command, undefined, process.cwd());
-    if (verdict.block) {
-      await auditGateDeny("gate-bash", verdict.reason, sessionIdOf(payload));
-      // Cline reads a stdout JSON verdict and exits 0. Antigravity and Gemini CLI get a stdout
-      // decision too, and then the exit-2 PreToolUse deny that every other agent uses.
-      if (stdoutDeny(`kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`)) {
-        return true;
-      }
-      writeSync(
-        2,
-        `kit install-gate: BLOCKED: ${verdict.reason}${triageAdvice(verdict.reason, "\n")}\n`,
-      );
-      process.exit(2); // PreToolUse deny
-    }
-    if (i >= commands.length) break; // the script repeats the notes of its commands
-    checked.push(...verdict.checked);
-    notes.push(...(verdict.notes ?? []));
-  }
+  const passed = await gateEachCommand(commands, payload, triageAdvice);
+  if (passed === true) return true;
+  const { checked, notes } = passed;
   const { writePassWarnings } = await import("../triage-warnings.js");
   await writePassWarnings("kit install-gate", checked);
   return stdoutAllow(notes);
@@ -518,4 +489,51 @@ function gateFormat(): string {
   if (eq) return eq.slice("--format=".length);
   const i = argv.indexOf("--format");
   return i !== -1 && i + 1 < argv.length ? argv[i + 1] : "";
+}
+
+/**
+ * Gate each command of a tool call, then the list as one script (see cmdGateBash). Returns true
+ * when a refusal was written on stdout; exits 2 on any other refusal; else what passed.
+ */
+async function gateEachCommand(
+  commands: string[],
+  payload: unknown,
+  triageAdvice: (reason: string, lead?: string) => string,
+): Promise<
+  true | { checked: import("../install-gate.js").BashGateVerdict["checked"]; notes: string[] }
+> {
+  const { decideBashGate } = await import("../install-gate.js");
+  const { trailCommandRefusal } = await import("../trail-guard.js");
+  const { homedir } = await import("node:os");
+  const { gateSettingsCommandRefusal } = await import("../gate-self-edit.js");
+  const notes: string[] = [];
+  const checked: Awaited<ReturnType<typeof decideBashGate>>["checked"] = [];
+  // Each command alone, then the list as one script: a `cd` or an `export` in one command
+  // changes what the next one does, and only the script form keeps that context.
+  const script = commands.length > 1 ? [commands.join("\n")] : [];
+  for (const [i, command] of [...commands, ...script].entries()) {
+    if (await refuseTrail("gate-bash", trailCommandRefusal(command, homedir()), payload)) {
+      return true;
+    }
+    const selfEdit = gateSettingsCommandRefusal(command, process.cwd(), homedir());
+    if (await refuseTrail("gate-bash", selfEdit, payload)) return true;
+    const verdict = await decideBashGate(command, undefined, process.cwd());
+    if (verdict.block) {
+      await auditGateDeny("gate-bash", verdict.reason, sessionIdOf(payload));
+      // Cline reads a stdout JSON verdict and exits 0. Antigravity and Gemini CLI get a stdout
+      // decision too, and then the exit-2 PreToolUse deny that every other agent uses.
+      if (stdoutDeny(`kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`)) {
+        return true;
+      }
+      writeSync(
+        2,
+        `kit install-gate: BLOCKED: ${verdict.reason}${triageAdvice(verdict.reason, "\n")}\n`,
+      );
+      process.exit(2); // PreToolUse deny
+    }
+    if (i >= commands.length) break; // the script repeats the notes of its commands
+    checked.push(...verdict.checked);
+    notes.push(...(verdict.notes ?? []));
+  }
+  return { checked, notes };
 }

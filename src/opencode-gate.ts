@@ -24,6 +24,9 @@
  * So 1.4 and later get the "both" form: `export default { id, setup, server }`.
  */
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 export type OpenCodePluginApi = "v1" | "both";
 
@@ -34,19 +37,85 @@ export function openCodePluginApi(version: string | undefined): OpenCodePluginAp
   return Number(m[1]) === 1 && Number(m[2]) < 4 ? "v1" : "both";
 }
 
-/** The installed OpenCode's `--version` output, or undefined when it does not run. */
-export function detectOpenCodeVersion(): string | undefined {
+/**
+ * The version of the OpenCode on PATH, read without running anything from the project. Only
+ * absolute PATH directories outside `projectRoot` count, so a repository cannot plant an
+ * `opencode` that kit runs. The version comes from the package.json of the npm install the
+ * binary belongs to; on macOS and Linux, when there is none, kit runs that absolute binary with
+ * `--version`, without a shell and from the home directory. Undefined when there is no safe answer.
+ */
+export function detectOpenCodeVersion(
+  projectRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const bin = trustedOpenCodeBinary(projectRoot, env);
+  if (!bin) return undefined;
+  const fromPackage = installedPackageVersion(bin);
+  if (fromPackage || process.platform === "win32") return fromPackage;
   try {
-    // The command line is fixed; on Windows the npm shim is a .cmd file that needs the shell.
-    return execFileSync("opencode", ["--version"], {
+    return execFileSync(bin, ["--version"], {
+      cwd: homedir(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 10_000,
-      shell: process.platform === "win32",
+      shell: false,
     });
   } catch {
     return undefined;
   }
+}
+
+/** True when `child` is `root` or inside it, compared as real paths. */
+function inside(child: string, root: string): boolean {
+  const rel = relative(realOr(root), realOr(child));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+function realOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/** The first `opencode` on PATH in an absolute directory outside the project. */
+function trustedOpenCodeBinary(projectRoot: string, env: NodeJS.ProcessEnv): string | undefined {
+  const names = process.platform === "win32" ? ["opencode.cmd", "opencode.exe"] : ["opencode"];
+  const path = env.PATH ?? env.Path ?? "";
+  for (const dir of path.split(delimiter)) {
+    if (!dir || !isAbsolute(dir) || inside(dir, projectRoot)) continue;
+    for (const name of names) {
+      const file = join(dir, name);
+      if (existsSync(file) && statSync(file).isFile()) return file;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The version in the package.json of the npm package that holds `bin`: the folder of the
+ * resolved binary and its parents (macOS and Linux symlink into the package), or the
+ * `node_modules/opencode-ai` next to a Windows npm shim.
+ */
+function installedPackageVersion(bin: string): string | undefined {
+  const candidates = [join(dirname(bin), "node_modules", "opencode-ai", "package.json")];
+  let dir = dirname(realOr(bin));
+  for (let i = 0; i < 4; i++, dir = dirname(dir)) candidates.push(join(dir, "package.json"));
+  for (const file of candidates) {
+    try {
+      const pkg = JSON.parse(readFileSync(file, "utf8")) as { name?: unknown; version?: unknown };
+      if (
+        typeof pkg.name === "string" &&
+        /opencode/.test(pkg.name) &&
+        typeof pkg.version === "string"
+      ) {
+        return pkg.version;
+      }
+    } catch {
+      /* not this one */
+    }
+  }
+  return undefined;
 }
 
 /** True for a gate plugin with no default export: the form only OpenCode 1.x loads. */

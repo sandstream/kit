@@ -116,28 +116,31 @@ async function writeOpenCodePlugin(path: string, content: string, replace: boole
  */
 export async function installInstallGateOpenCode(
   cwd: string = process.cwd(),
-  version: () => string | undefined = detectOpenCodeVersion,
+  version: (projectRoot: string) => string | undefined = detectOpenCodeVersion,
 ): Promise<HookInstallResult> {
   const file = ".opencode/plugin/kit-install-gate.js";
   const path = resolve(cwd, file);
   const { isReadOnlyMode } = await import("./read-only-mode.js");
   if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
-  const detected =
-    existsSync(resolve(cwd, ".opencode")) ||
-    existsSync(resolve(cwd, "opencode.json")) ||
-    existsSync(resolve(cwd, "opencode.jsonc"));
-  if (!detected) return { file, action: "skipped", detail: "no OpenCode project detected" };
-
-  const api = openCodePluginApi(version());
+  const markers = [".opencode", "opencode.json", "opencode.jsonc"];
+  if (!markers.some((m) => existsSync(resolve(cwd, m)))) {
+    return { file, action: "skipped", detail: "no OpenCode project detected" };
+  }
   const current = await readExistingOpenCodePlugin(path, file);
   if (typeof current !== "string" && current !== undefined) return current;
+  return writeOpenCodeGate(path, file, current, openCodePluginApi(version(cwd)));
+}
+
+/** Write the plugin form for `api`; an unknown version keeps a 1.x plugin kit wrote before. */
+async function writeOpenCodeGate(
+  path: string,
+  file: string,
+  current: string | undefined,
+  api: ReturnType<typeof openCodePluginApi>,
+): Promise<HookInstallResult> {
   if (api === undefined && current !== undefined && isV1OnlyPlugin(current)) {
-    return {
-      file,
-      action: "unchanged",
-      detail: "kept the OpenCode 1.x plugin",
-      notice: OPENCODE_UNKNOWN_KEEP,
-    };
+    const detail = "kept the OpenCode 1.x plugin";
+    return { file, action: "unchanged", detail, notice: OPENCODE_UNKNOWN_KEEP };
   }
   const plugin = renderOpenCodeInstallGate(api ?? "both");
   const notice = api === undefined ? OPENCODE_UNKNOWN_NEW : undefined;
@@ -154,9 +157,9 @@ export async function installInstallGateOpenCode(
 }
 
 const OPENCODE_UNKNOWN_KEEP =
-  "kit could not read the OpenCode version (`opencode --version`), so it kept the OpenCode 1.x gate plugin. OpenCode 2.x does not load that plugin: put `opencode` on PATH and run kit agent-config again.";
+  "kit could not read the OpenCode version, so it kept the OpenCode 1.x gate plugin. OpenCode 2.x does not load that plugin: put `opencode` on PATH and run kit agent-config again.";
 const OPENCODE_UNKNOWN_NEW =
-  "kit could not read the OpenCode version (`opencode --version`). The gate plugin loads in OpenCode 1.4 and later; OpenCode 1.0 to 1.3 do not load it.";
+  "kit could not read the OpenCode version. The gate plugin loads in OpenCode 1.4 and later; OpenCode 1.0 to 1.3 do not load it.";
 
 /**
  * The kit-managed plugin text at `path`; undefined when there is none. A result object when kit

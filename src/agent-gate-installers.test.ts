@@ -15,9 +15,16 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ANTIGRAVITY_HOOK_NAME,
@@ -28,6 +35,7 @@ import {
   installInstallGateOpenCode,
 } from "./agent-config.js";
 import { generateKitCmdWrapper } from "./kit-wrapper.js";
+import { detectOpenCodeVersion } from "./opencode-gate.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const cli = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
@@ -315,41 +323,42 @@ describe("Antigravity: hooks.json is keyed by hook name", () => {
   });
 });
 
-describe("OpenCode: the plugin form follows the installed version", () => {
-  type Hooks = Record<string, (i: unknown, o: unknown) => Promise<void>>;
-  type Mod = Record<string, unknown> & { default?: Record<string, unknown> };
-  const load = async (dir: string, tag: string): Promise<Mod> =>
-    import(`${pathToFileURL(join(dir, ".opencode", "plugin", "kit-install-gate.js")).href}?${tag}`);
-  /** 1.0-1.3 call every export as a function (index.ts:41-44 at v1.0.0). */
-  const v1Hooks = async (mod: Mod): Promise<Hooks> => {
-    const fns = [...new Set(Object.values(mod))];
-    assert.ok(
-      fns.every((fn) => typeof fn === "function"),
-      "OpenCode 1.0-1.3 call every export",
-    );
-    return (await (fns[0] as () => Promise<Hooks>)()) as Hooks;
-  };
-  /** 1.4+: a default object with id and server (shared.ts:272-303 at v1.19.6). */
-  const v14Hooks = async (mod: Mod): Promise<Hooks> => {
-    assert.equal(typeof mod.default?.id, "string");
-    return (await (mod.default?.server as () => Promise<Hooks>)()) as Hooks;
-  };
-  /** 2.x: a default object with a string id and setup (module.ts:81-93); one event per call. */
-  const v2Shell = async (mod: Mod) => {
-    assert.ok(mod.default && typeof mod.default === "object" && typeof mod.default.id === "string");
-    let hook: ((e: unknown) => Promise<void>) | undefined;
-    const register = async (_n: string, cb: (e: unknown) => Promise<void>) => void (hook = cb);
-    await (mod.default.setup as (c: unknown) => Promise<void>)({ tool: { hook: register } });
-    return (cmd: string) =>
-      hook!({ tool: "shell", sessionID: "s", id: "c", input: { command: cmd } });
-  };
-  const blocksV1 = async (hooks: Hooks) => {
-    const call = (command: string) =>
-      hooks["tool.execute.before"]({ tool: "bash" }, { args: { command } });
-    await assert.rejects(call(INSTALL), /kit install-gate blocked/);
-    await assert.doesNotReject(call(SAFE));
-  };
+// OpenCode loader shapes, cited in opencode-gate.ts.
+type Hooks = Record<string, (i: unknown, o: unknown) => Promise<void>>;
+type Mod = Record<string, unknown> & { default?: Record<string, unknown> };
+const load = async (dir: string, tag: string): Promise<Mod> =>
+  import(`${pathToFileURL(join(dir, ".opencode", "plugin", "kit-install-gate.js")).href}?${tag}`);
+/** 1.0-1.3 call every export as a function (index.ts:41-44 at v1.0.0). */
+const v1Hooks = async (mod: Mod): Promise<Hooks> => {
+  const fns = [...new Set(Object.values(mod))];
+  assert.ok(
+    fns.every((fn) => typeof fn === "function"),
+    "OpenCode 1.0-1.3 call every export",
+  );
+  return (await (fns[0] as () => Promise<Hooks>)()) as Hooks;
+};
+/** 1.4+: a default object with id and server (shared.ts:272-303 at v1.19.6). */
+const v14Hooks = async (mod: Mod): Promise<Hooks> => {
+  assert.equal(typeof mod.default?.id, "string");
+  return (await (mod.default?.server as () => Promise<Hooks>)()) as Hooks;
+};
+/** 2.x: a default object with a string id and setup (module.ts:81-93); one event per call. */
+const v2Shell = async (mod: Mod) => {
+  assert.ok(mod.default && typeof mod.default === "object" && typeof mod.default.id === "string");
+  let hook: ((e: unknown) => Promise<void>) | undefined;
+  const register = async (_n: string, cb: (e: unknown) => Promise<void>) => void (hook = cb);
+  await (mod.default.setup as (c: unknown) => Promise<void>)({ tool: { hook: register } });
+  return (cmd: string) =>
+    hook!({ tool: "shell", sessionID: "s", id: "c", input: { command: cmd } });
+};
+const blocksV1 = async (hooks: Hooks) => {
+  const call = (command: string) =>
+    hooks["tool.execute.before"]({ tool: "bash" }, { args: { command } });
+  await assert.rejects(call(INSTALL), /kit install-gate blocked/);
+  await assert.doesNotReject(call(SAFE));
+};
 
+describe("OpenCode: the plugin form follows the installed version", () => {
   it("2.4.1 and 1.19.6 get the default-object plugin, and both loaders block", async (t) => {
     for (const version of ["2.4.1", "opencode 1.19.6\n"]) {
       const dir = project(t, ".opencode");
@@ -381,5 +390,34 @@ describe("OpenCode: the plugin form follows the installed version", () => {
     const n = await installInstallGateOpenCode(project(t, ".opencode"), () => undefined);
     assert.equal(n.action, "created");
     assert.match(n.notice ?? "", /1\.4 and later/);
+  });
+});
+
+describe("OpenCode version detection", () => {
+  it("reads the version from install metadata and never runs an opencode from the project", (t) => {
+    const dir = project(t, ".opencode");
+    const trusted = mkdtempSync(join(tmpdir(), "kit-opencode-bin-"));
+    t.after(() => rmTemp(trusted));
+    const marker = join(dir, "ran");
+    const plant = (folder: string) => {
+      const name = POSIX ? "opencode" : "opencode.cmd";
+      const body = POSIX
+        ? `#!/bin/sh\ntouch "${marker}"\necho 9.9.9\n`
+        : `@echo off\r\necho x> "${marker}"\r\n`;
+      writeFileSync(join(folder, name), body);
+      if (POSIX) chmodSync(join(folder, name), 0o755);
+    };
+    plant(dir);
+    const PATH = [dir, ".", ""].join(delimiter);
+    assert.equal(detectOpenCodeVersion(dir, { PATH }), undefined);
+    plant(trusted);
+    const pkg = join(trusted, "node_modules", "opencode-ai");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), '{"name":"opencode-ai","version":"1.3.0"}');
+    assert.equal(
+      detectOpenCodeVersion(dir, { PATH: [dir, ".", trusted].join(delimiter) }),
+      "1.3.0",
+    );
+    assert.equal(existsSync(marker), false, "no opencode was run");
   });
 });
