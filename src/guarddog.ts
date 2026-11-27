@@ -189,22 +189,40 @@ function hasRuleFinding(value: unknown): boolean {
   return reportText(value) || (Array.isArray(value) && value.some(sourceFinding));
 }
 
+// GuardDog 3 `capability-*` rules list what code can do (spawn, network, file
+// reads). Its risk engine forms a risk only from a threat, so these hits are
+// inventory and are not counted as malware indicators. GuardDog's `issues`
+// includes them.
+function indicatorCount(results: Record<string, unknown>): number {
+  let count = 0;
+  for (const [rule, value] of Object.entries(results)) {
+    if (rule.startsWith("capability-")) continue;
+    if (reportText(value)) count += 1;
+    else if (Array.isArray(value)) count += value.length;
+  }
+  return count;
+}
+
 function countIndicators(result: Record<string, unknown>): ScannerReport {
   const { issues, errors, results } = result;
   const issueCount =
     typeof issues === "number" && Number.isSafeInteger(issues) && issues >= 0 ? issues : undefined;
   const messages = scannerRecord(errors) ? Object.values(errors) : undefined;
   const ruleResults = scannerRecord(results) ? Object.values(results) : undefined;
-  const hasFinding = ruleResults?.some(hasRuleFinding);
-  const count = Math.max(issueCount ?? 0, hasFinding ? 1 : 0);
+  const readable =
+    issueCount !== undefined &&
+    scannerRecord(results) &&
+    validRuleResults(ruleResults, issueCount > 0);
+  // Results kit cannot read keep GuardDog's own count.
+  const count = readable
+    ? indicatorCount(results)
+    : Math.max(issueCount ?? 0, ruleResults?.some(hasRuleFinding) ? 1 : 0);
   if (issueCount === undefined || !messages || !messages.every(reportText)) {
     return { count, gap: "malformed" };
   }
   // A download failure has issues: 0 and an errors map, and can omit results.
   if (messages.length > 0) return { count, gap: "partial" };
-  if (!validRuleResults(ruleResults, issueCount > 0)) {
-    return { count, gap: "malformed" };
-  }
+  if (!readable) return { count, gap: "malformed" };
   return { count };
 }
 
