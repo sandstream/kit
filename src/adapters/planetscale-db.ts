@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
-import { ADAPTER_FETCH_TIMEOUT_MS } from "./fetch-timeout.js";
+import { adapterFetch } from "./fetch-timeout.js";
 
 interface PlanetScaleDatabase {
   id: string;
@@ -81,14 +81,13 @@ export const planetscaleDbAdapter: ServiceAdapter = {
       Accept: "application/json",
     };
 
-    // Create database
+    const databasesUrl = `https://api.planetscale.com/v1/organizations/${org}/databases`;
     let db: PlanetScaleDatabase;
     try {
-      const resp = await fetch(`https://api.planetscale.com/v1/organizations/${org}/databases`, {
+      const resp = await adapterFetch(databasesUrl, {
         method: "POST",
         headers,
         body: JSON.stringify({ name: dbName }),
-        signal: AbortSignal.timeout(ADAPTER_FETCH_TIMEOUT_MS),
       });
 
       if (!resp.ok) {
@@ -112,13 +111,12 @@ export const planetscaleDbAdapter: ServiceAdapter = {
     // Create a connection password for the main branch
     let password: PlanetScalePassword;
     try {
-      const resp = await fetch(
+      const resp = await adapterFetch(
         `https://api.planetscale.com/v1/organizations/${org}/databases/${db.name}/branches/main/passwords`,
         {
           method: "POST",
           headers,
           body: JSON.stringify({ name: `${dbName}-kit`, role: "readwriter" }),
-          signal: AbortSignal.timeout(ADAPTER_FETCH_TIMEOUT_MS),
         },
       );
 

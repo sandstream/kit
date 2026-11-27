@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
-import { ADAPTER_FETCH_TIMEOUT_MS } from "./fetch-timeout.js";
+import { adapterFetch } from "./fetch-timeout.js";
 
 interface NeonProject {
   id: string;
@@ -74,7 +74,7 @@ export const neonDbAdapter: ServiceAdapter = {
 
     let project: NeonProjectResponse;
     try {
-      const resp = await fetch("https://api.neon.tech/v2/projects", {
+      const resp = await adapterFetch("https://api.neon.tech/v2/projects", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -82,7 +82,6 @@ export const neonDbAdapter: ServiceAdapter = {
           Accept: "application/json",
         },
         body: JSON.stringify({ project: { name: projectName } }),
-        signal: AbortSignal.timeout(ADAPTER_FETCH_TIMEOUT_MS),
       });
 
       if (!resp.ok) {

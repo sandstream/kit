@@ -1,5 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
-import { ADAPTER_FETCH_TIMEOUT_MS } from "./fetch-timeout.js";
+import { adapterFetch } from "./fetch-timeout.js";
 import { exec } from "../utils/exec.js";
 
 /**
@@ -94,7 +94,7 @@ export const cloudflareR2Adapter: ServiceAdapter = {
     if (cfApiToken) {
       // Try to create R2 API token via Cloudflare API
       try {
-        const resp = await fetch(
+        const resp = await adapterFetch(
           `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/tokens`,
           {
             method: "POST",
@@ -107,7 +107,6 @@ export const cloudflareR2Adapter: ServiceAdapter = {
               permissions: ["admin:read", "admin:write"],
               buckets: [bucketName],
             }),
-            signal: AbortSignal.timeout(ADAPTER_FETCH_TIMEOUT_MS),
           },
         );
 
