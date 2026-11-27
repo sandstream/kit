@@ -5,6 +5,7 @@ import {
   openSync,
   opendirSync,
   readSync,
+  statSync,
   type Dir,
   type Dirent,
 } from "node:fs";
@@ -51,6 +52,8 @@ interface DiscoveryState {
   seen: number;
   stopped: boolean;
   match: (relPath: string) => boolean;
+  /** Repo-relative `commands/` and `agents/` dirs of plugin roots, each ending in `/`. */
+  pluginMdDirs: string[];
 }
 
 /** INSTRUCTION_NAMES lower-cased: macOS and Windows open `agents.md` when an agent asks for `AGENTS.md`. */
@@ -72,6 +75,33 @@ export function isInstructionFile(relPath: string): boolean {
   return name.endsWith(".md") && claude !== -1 && CLAUDE_MD_DIRS.has(parts[claude + 1] ?? "");
 }
 
+/**
+ * A plugin root loads `commands/*.md` as slash commands and `agents/*.md` as subagents, without a
+ * `.claude/` above them (code.claude.com/docs/en/plugins-reference). A directory is a plugin root
+ * when it holds Claude Code's `.claude-plugin/plugin.json` or Codex's `.codex-plugin/plugin.json`.
+ */
+const PLUGIN_MD_DIRS = new Set(["commands", "agents"]);
+const PLUGIN_MANIFESTS = [
+  join(".claude-plugin", "plugin.json"),
+  join(".codex-plugin", "plugin.json"),
+];
+
+function isPluginRoot(abs: string): boolean {
+  return PLUGIN_MANIFESTS.some((manifest) => {
+    try {
+      return statSync(join(abs, manifest)).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** A `.md` file under a plugin root's `commands/` or `agents/`, at any depth. */
+function inPluginMdDir(state: DiscoveryState, rel: string, entry: Dirent): boolean {
+  if (entry.isDirectory() || !rel.toLowerCase().endsWith(".md")) return false;
+  return state.pluginMdDirs.some((dir) => rel.startsWith(dir));
+}
+
 function relativePath(root: string, path: string): string {
   return relative(root, path).split(sep).join("/") || ".";
 }
@@ -89,7 +119,10 @@ function visit(
 ): void {
   const path = join(abs, entry.name);
   const rel = relativePath(root, path);
-  if (state.match(rel)) {
+  if (entry.isDirectory() && PLUGIN_MD_DIRS.has(entry.name) && isPluginRoot(abs)) {
+    state.pluginMdDirs.push(`${rel}/`);
+  }
+  if (state.match(rel) || inPluginMdDir(state, rel, entry)) {
     if (state.files.length < MAX_FILES) state.files.push(rel);
     else {
       state.coverageGaps.push({ path: rel, reason: "file-limit" });
@@ -136,7 +169,14 @@ export function discoverInstructionFiles(
   files: string[];
   coverageGaps: InstructionCoverageGap[];
 } {
-  const state: DiscoveryState = { files: [], coverageGaps: [], seen: 0, stopped: false, match };
+  const state: DiscoveryState = {
+    files: [],
+    coverageGaps: [],
+    seen: 0,
+    stopped: false,
+    match,
+    pluginMdDirs: [],
+  };
   walk(root, root, 0, state);
   return { files: state.files.sort(), coverageGaps: state.coverageGaps };
 }
