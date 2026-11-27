@@ -20,20 +20,60 @@ export function toolArgsCommand(payload: unknown): unknown {
 const CLINE_SHELL_TOOLS = new Set(["run_commands", "execute_command"]);
 
 /**
- * One `run_commands` entry: a command string, or `{command, args}` that Cline runs without a
- * shell (`StructuredCommandInputSchema`, `sdk/packages/core/src/extensions/tools/schemas.ts:133-142`).
+ * POSIX single-quoting: the gate re-parses the joined line as shell, and it must see the same
+ * argv that Cline runs. A word of only safe characters stays bare.
  */
-function clineEntry(entry: unknown): string[] {
-  if (typeof entry === "string") return entry.trim() ? [entry] : [];
-  if (Array.isArray(entry)) return entry.flatMap(clineEntry);
-  if (!entry || typeof entry !== "object") return [];
-  const { command, args, commands, cmd } = entry as Record<string, unknown>;
-  if (commands !== undefined) return clineEntry(commands);
-  if (typeof command === "string" && command.trim()) {
-    const argv = Array.isArray(args) ? args.filter((a): a is string => typeof a === "string") : [];
-    return [[command, ...argv].join(" ")];
+function shQuote(word: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * A `{command, args}` entry, which Cline runs without a shell (`StructuredCommandInputSchema`,
+ * `sdk/packages/core/src/extensions/tools/schemas.ts:133-142`). Each word is quoted, so an
+ * argument with spaces, quotes, `;` or `&&` stays one argument. Undefined when the argv cannot be
+ * written as shell words: `args` is not a list of strings, or a word holds a NUL byte.
+ */
+function structuredCommand(command: string, args: unknown): string | undefined {
+  // Without args, `{command}` is also the legacy shell-string form (`schemas.ts:166-176`); the
+  // gate reads it as shell, which sees at least what an executable name would run.
+  if (args === undefined) return command;
+  if (!Array.isArray(args)) return undefined;
+  const argv = args as unknown[];
+  if (!argv.every((a): a is string => typeof a === "string")) return undefined;
+  const words = [command, ...argv];
+  if (words.some((w) => w.includes("\0"))) return undefined;
+  return words.map(shQuote).join(" ");
+}
+
+/** The commands of one `run_commands` input, and whether some entry could not be read. */
+interface ClineRead {
+  commands: string[];
+  unreadable: boolean;
+}
+
+/** One `run_commands` entry or input: a command string, a list, or an object holding them. */
+function clineEntry(entry: unknown, out: ClineRead): ClineRead {
+  if (typeof entry === "string") {
+    if (entry.trim()) out.commands.push(entry);
+  } else if (Array.isArray(entry)) {
+    for (const item of entry) clineEntry(item, out);
+  } else if (entry && typeof entry === "object") {
+    clineObject(entry as Record<string, unknown>, out);
   }
-  return typeof cmd === "string" && cmd.trim() ? [cmd] : [];
+  return out;
+}
+
+function clineObject(entry: Record<string, unknown>, out: ClineRead): void {
+  const { command, args, commands, cmd } = entry;
+  if (commands !== undefined) {
+    clineEntry(commands, out);
+  } else if (typeof command === "string" && command.trim()) {
+    const line = structuredCommand(command, args);
+    if (line === undefined) out.unreadable = true;
+    else out.commands.push(line);
+  } else if (typeof cmd === "string" && cmd.trim()) {
+    out.commands.push(cmd);
+  }
 }
 
 /**
@@ -54,13 +94,8 @@ function clineParam(value: unknown): unknown {
   }
 }
 
-/**
- * Every shell command of a Cline PreToolUse payload, in order. Cline runs `run_commands` with
- * `{commands: string[]}` (`schemas.ts:149-176` accepts more shapes), and each one must pass the
- * gate. The CLI payload also carries the raw input in `tool_call.input` (`hook-file-hooks.ts:858-866`),
- * which is read first. Returns undefined for a payload that is not Cline's.
- */
-export function clineCommands(payload: unknown): string[] | undefined {
+/** Read a Cline PreToolUse payload: undefined when it is not Cline's. */
+function readCline(payload: unknown): ClineRead | undefined {
   const p = (payload ?? {}) as {
     tool_call?: { input?: unknown };
     preToolUse?: { toolName?: unknown; parameters?: unknown };
@@ -71,25 +106,38 @@ export function clineCommands(payload: unknown): string[] | undefined {
   // string, and that is patch text.
   const shell = CLINE_SHELL_TOOLS.has(String(p.preToolUse.toolName));
   if (input !== undefined && (shell || (typeof input === "object" && !Array.isArray(input)))) {
-    const raw = clineEntry(input);
-    if (raw.length > 0) return raw;
+    const raw = clineEntry(input, { commands: [], unreadable: false });
+    if (raw.commands.length > 0 || raw.unreadable) return raw;
   }
   const params = p.preToolUse.parameters;
-  if (!params || typeof params !== "object") return [];
   const decoded: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
-    decoded[key] = clineParam(value);
+  if (params && typeof params === "object") {
+    for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
+      decoded[key] = clineParam(value);
+    }
   }
-  return clineEntry(decoded);
+  return clineEntry(decoded, { commands: [], unreadable: false });
 }
 
 /**
- * True when Cline asks to run its shell tool but kit can read no command from the payload, for
- * example a bare string input, which the VS Code adapter turns into `{}`. The gate cannot tell
- * what would run, so it blocks.
+ * Every shell command of a Cline PreToolUse payload, in order. Cline runs `run_commands` with
+ * `{commands: string[]}` (`schemas.ts:149-176` accepts more shapes), and each one must pass the
+ * gate. The CLI payload also carries the raw input in `tool_call.input` (`hook-file-hooks.ts:858-866`),
+ * which is read first. Returns undefined for a payload that is not Cline's.
+ */
+export function clineCommands(payload: unknown): string[] | undefined {
+  return readCline(payload)?.commands;
+}
+
+/**
+ * True when Cline asks to run its shell tool and kit cannot read every command from the payload:
+ * no command at all (a bare string input, which the VS Code adapter turns into `{}`), or a
+ * `{command, args}` entry whose argv cannot be written as shell words. The gate cannot tell what
+ * would run, so it blocks.
  */
 export function clineShellCallUnreadable(payload: unknown): boolean {
   const tool = (payload as { preToolUse?: { toolName?: unknown } } | null)?.preToolUse?.toolName;
   if (typeof tool !== "string" || !CLINE_SHELL_TOOLS.has(tool)) return false;
-  return (clineCommands(payload) ?? []).length === 0;
+  const read = readCline(payload);
+  return !read || read.unreadable || read.commands.length === 0;
 }

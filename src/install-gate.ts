@@ -1296,28 +1296,36 @@ async function gateVerdict(
  * the tool call carries no shell command (→ the gate allows it). Pure.
  */
 export function extractCommandsFromHookPayload(payload: unknown): string[] {
+  const p = (payload ?? {}) as { tool_input?: { command?: unknown } };
+  if (p.tool_input?.command === undefined) {
+    const cline = clineCommands(payload);
+    if (cline !== undefined) return cline;
+  }
+  const raw = rawHookCommand(payload);
+  const line =
+    typeof raw === "string"
+      ? raw
+      : Array.isArray(raw)
+        ? raw.filter((x): x is string => typeof x === "string").join(" ")
+        : "";
+  return line ? [line] : [];
+}
+
+/** The one command field of a non-Cline hook payload, in the order the list above gives. */
+function rawHookCommand(payload: unknown): unknown {
   const p = (payload ?? {}) as {
     tool_input?: { command?: unknown };
     command?: unknown;
     toolCall?: { args?: { CommandLine?: unknown } };
     arguments?: { command?: unknown };
   };
-  if (p.tool_input?.command === undefined) {
-    const cline = clineCommands(payload);
-    if (cline !== undefined) return cline;
-  }
-  const raw =
+  return (
     p.tool_input?.command ??
     p.toolCall?.args?.CommandLine ??
     p.arguments?.command ??
     p.command ??
-    toolArgsCommand(payload);
-  if (typeof raw === "string") return raw ? [raw] : [];
-  if (Array.isArray(raw)) {
-    const joined = raw.filter((x): x is string => typeof x === "string").join(" ");
-    return joined ? [joined] : [];
-  }
-  return [];
+    toolArgsCommand(payload)
+  );
 }
 
 /**

@@ -56,7 +56,7 @@ export async function cmdGateBash(): Promise<boolean> {
   const { clineShellCallUnreadable } = await import("../install-gate-payload.js");
   if (clineShellCallUnreadable(payload)) {
     const reason =
-      "kit install-gate: cannot read the commands of this Cline run_commands call, so it is blocked. Send the commands as a list of strings.";
+      "kit install-gate: cannot read every command of this Cline run_commands call, so it is blocked. Send the commands as a list of strings, or as {command, args} with string args.";
     await auditGateDeny("gate-bash", reason, sessionIdOf(payload));
     if (stdoutDeny(reason)) return true;
     writeSync(2, `${reason}\n`);
@@ -71,7 +71,10 @@ export async function cmdGateBash(): Promise<boolean> {
   const { gateSettingsCommandRefusal } = await import("../gate-self-edit.js");
   const notes: string[] = [];
   const checked: Awaited<ReturnType<typeof decideBashGate>>["checked"] = [];
-  for (const command of commands) {
+  // Each command alone, then the list as one script: a `cd` or an `export` in one command
+  // changes what the next one does, and only the script form keeps that context.
+  const script = commands.length > 1 ? [commands.join("\n")] : [];
+  for (const [i, command] of [...commands, ...script].entries()) {
     if (await refuseTrail("gate-bash", trailCommandRefusal(command, homedir()), payload)) {
       return true;
     }
@@ -91,6 +94,7 @@ export async function cmdGateBash(): Promise<boolean> {
       );
       process.exit(2); // PreToolUse deny
     }
+    if (i >= commands.length) break; // the script repeats the notes of its commands
     checked.push(...verdict.checked);
     notes.push(...(verdict.notes ?? []));
   }

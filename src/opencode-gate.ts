@@ -1,27 +1,80 @@
 /**
- * Generated OpenCode install gate plugin. One file serves both plugin APIs:
+ * Generated OpenCode install gate plugin. No single file loads in every OpenCode release, because
+ * the loaders want different module shapes (repository sst/opencode):
  *
- * - OpenCode 2.x loads `export default { id, setup }` and nothing else ("V1 plugin implementations
- *   do not run in V2": sst/opencode `services/site/src/docs/content/build/plugins/migrate-v1.mdx:10-12`;
- *   decoder `packages/core/src/plugin/module.ts:81-93`, commit 697db192, v2.4.1). `setup` registers
+ * - 1.0 to 1.3 call every export as a plugin function: `for (const [_name, fn] of
+ *   Object.entries(mod)) await fn(input)` (`packages/opencode/src/plugin/index.ts:41-44` at v1.0.0,
+ *   commit b9a39b81; `:86-92` at v1.2.0, ffc000de; `:119-124` at v1.3.0, eb3bfffa). A default
+ *   export that is an object makes that call throw, so these releases get the "v1" form: function
+ *   exports only.
+ * - 1.4 and later 1.x read `default.server` when the default export is an object with an `id`
+ *   (`readV1Plugin`, `packages/opencode/src/plugin/shared.ts:272-303`, called from `index.ts:90` at
+ *   v1.4.0, 98325dcd, and from `index.ts:114-125` at v1.19.6, f4e363c8).
+ * - 2.x decodes `export default { id, setup }` or `{ id, effect }` and nothing else
+ *   (`packages/core/src/plugin/module.ts:81-93` at 697db192, v2.4.1; "V1 plugin implementations do
+ *   not run in V2", `services/site/src/docs/content/build/plugins/migrate-v1.mdx:10-12`). The
+ *   decoder refuses a default export that is not an object (effect 4.1.0
+ *   `packages/effect/src/SchemaAST.ts:3144`, commit 9a91b192), so a function with properties does
+ *   not load there. It ignores the extra `server` key. `setup` registers
  *   `ctx.tool.hook("execute.before")`; the event is `{tool, input, ...}`
  *   (`packages/plugin/src/promise/tool.ts:51-61`), the shell tool is `shell` with `input.command`
  *   (`packages/core/src/tool/plugin/shell.ts:29,64-65`), and a rejection fails that call alone
- *   (`packages/plugin/src/promise/adapter.ts:265-282`). The decoder ignores the extra `server` key.
- * - OpenCode 1.4 to 1.19 read `default.server` when the default export is an object with an `id`
- *   (`readV1Plugin`, `packages/opencode/src/plugin/shared.ts:272-303` and `index.ts:114-125` at tag
- *   v1.19.6). `server` returns the `tool.execute.before` hook, which gets `(input, output)` with the
- *   command in `output.args.command`.
+ *   (`packages/plugin/src/promise/adapter.ts:265-282`).
  *
- * OpenCode 1.0 to 1.3 called every export as a plugin function, and the default object breaks that
- * loader, so those releases are not supported. The named `kitInstallGate` export is the same V1
- * function, kept for callers that import it by name.
+ * So 1.4 and later get the "both" form: `export default { id, setup, server }`.
  */
-export function renderOpenCodeInstallGate(): string {
+import { execFileSync } from "node:child_process";
+
+export type OpenCodePluginApi = "v1" | "both";
+
+/** The plugin form for an `opencode --version` output; undefined when it names no version. */
+export function openCodePluginApi(version: string | undefined): OpenCodePluginApi | undefined {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(version ?? "");
+  if (!m) return undefined;
+  return Number(m[1]) === 1 && Number(m[2]) < 4 ? "v1" : "both";
+}
+
+/** The installed OpenCode's `--version` output, or undefined when it does not run. */
+export function detectOpenCodeVersion(): string | undefined {
+  try {
+    // The command line is fixed; on Windows the npm shim is a .cmd file that needs the shell.
+    return execFileSync("opencode", ["--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+      shell: process.platform === "win32",
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+/** True for a gate plugin with no default export: the form only OpenCode 1.x loads. */
+export function isV1OnlyPlugin(text: string): boolean {
+  return text.includes("tool.execute.before") && !/^export default\b/m.test(text);
+}
+
+const BOTH_HEADER =
+  "// Loads in OpenCode 2.x (default export { id, setup }) and OpenCode 1.4+ (default export { id, server }).\n";
+const V1_HEADER = "// For OpenCode 1.0 to 1.3, which call every export as a plugin function.\n";
+const DEFAULT_EXPORT = `
+export default {
+  id: "kit-install-gate",
+  // OpenCode 2.x: register the hook on the tool domain; one mutable event per call.
+  async setup(ctx) {
+    await ctx.tool.hook("execute.before", async (event) => gate(event?.tool, event?.input?.command));
+  },
+  // OpenCode 1.4+: the same V1 plugin function.
+  server: kitInstallGate,
+};
+`;
+
+/** The plugin text: "both" for OpenCode 1.4 and later, "v1" for OpenCode 1.0 to 1.3. */
+export function renderOpenCodeInstallGate(api: OpenCodePluginApi = "both"): string {
+  const both = api === "both";
   return `// kit install-gate — blocks un-triaged package installs before they run.
 // Generated by \`kit agent-config --install-gate\`. Delete this file to disable.
-// Loads in OpenCode 2.x (default export { id, setup }) and OpenCode 1.4+ (default export { id, server }).
-import { execFileSync } from "node:child_process";
+${both ? BOTH_HEADER : V1_HEADER}import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -66,15 +119,5 @@ function gate(tool, command) {
 export const kitInstallGate = async () => ({
   "tool.execute.before": async (input, output) => gate(input?.tool, output?.args?.command),
 });
-
-export default {
-  id: "kit-install-gate",
-  // OpenCode 2.x: register the hook on the tool domain; one mutable event per call.
-  async setup(ctx) {
-    await ctx.tool.hook("execute.before", async (event) => gate(event?.tool, event?.input?.command));
-  },
-  // OpenCode 1.4+: the same V1 plugin function.
-  server: kitInstallGate,
-};
-`;
+${both ? DEFAULT_EXPORT : ""}`;
 }
