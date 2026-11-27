@@ -14,7 +14,11 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
 import { gateSettingsFile, preToolUseGroups } from "./gate-settings.js";
-import { GATE_BASH_MATCHER, widenGateBashMatchers } from "./gate-bash-matcher.js";
+import {
+  GATE_BASH_MATCHER,
+  widenGateBashMatchers,
+  widenGateEgressMatchers,
+} from "./gate-bash-matcher.js";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
 import { portableGateCommand, portableGatesMode } from "./portable-gate.js";
@@ -1069,7 +1073,7 @@ export async function installLimitsGate(cwd: string = process.cwd()): Promise<Ho
 
 /**
  * Install the exec-broker PreToolUse gates (Pillar 3) into `.claude/settings.json`:
- * `kit gate-egress` (matcher `Bash`) blocks network targets outside the signed [scope].egress,
+ * `kit gate-egress` (matcher `Bash|PowerShell`) blocks network targets outside the signed [scope].egress,
  * and `kit gate-fs` (matcher `Write|Edit|NotebookEdit`) blocks writes outside [scope].fs.
  *
  * Unlike the install/env gates this is OPT-IN (`kit agent-config --broker-gate`), NOT default:
@@ -1103,7 +1107,12 @@ export async function installBrokerGates(cwd: string = process.cwd()): Promise<H
   const pre = (hooks.PreToolUse ??= []);
   const desiredEgress = settingsGateInvocation("gate-egress", cwd);
   const desiredFs = settingsGateInvocation("gate-fs", cwd);
-  const egress = refreshSettingsGateCommand(pre, "gate-egress", desiredEgress);
+  const egress = refreshSettingsGateCommand(
+    pre,
+    "gate-egress",
+    desiredEgress,
+    widenGateEgressMatchers,
+  );
   const fs = refreshSettingsGateCommand(pre, "gate-fs", desiredFs);
   if (egress.found && fs.found) {
     if (egress.updated || fs.updated) {
@@ -1116,12 +1125,7 @@ export async function installBrokerGates(cwd: string = process.cwd()): Promise<H
     }
     return { file, action: "unchanged", detail: "broker gates already wired" };
   }
-  if (!egress.found) {
-    pre.push({
-      matcher: "Bash",
-      hooks: [gateHook(desiredEgress)],
-    });
-  }
+  if (!egress.found) pre.push({ matcher: GATE_BASH_MATCHER, hooks: [gateHook(desiredEgress)] });
   if (!fs.found) {
     pre.push({
       matcher: "Write|Edit|NotebookEdit",
