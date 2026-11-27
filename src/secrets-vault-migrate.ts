@@ -32,7 +32,7 @@ import type { SecretsConfig, SecretKeyConfig } from "./config.js";
 import { writeSecretToBackend, isValidKeyName, escapeRegex } from "./secrets-migrate.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 import { appendAuditEventDirect } from "./audit.js";
-import { exec } from "./utils/exec.js";
+import { execPinned } from "./vendor-cli-pin.js";
 
 type BackendSource = SecretKeyConfig["source"];
 
@@ -92,7 +92,7 @@ export async function readSecretFromBackend(
               "1Password CLI present but no account configured — run 'op account add', enable desktop-app CLI integration, or set OP_SERVICE_ACCOUNT_TOKEN",
           };
         }
-        const { stdout } = await exec("op", ["read", config.ref, "--no-newline"], {
+        const { stdout } = await execPinned("op", ["read", config.ref, "--no-newline"], {
           timeout: 15_000,
         });
         return { ok: true, value: stdout, detail: "read from 1Password" };
@@ -103,18 +103,18 @@ export async function readSecretFromBackend(
         const args = ["secrets", "get", name, "--plain"];
         if (topLevel.infisical?.project_id) args.push("--projectId", topLevel.infisical.project_id);
         if (topLevel.infisical?.environment) args.push("--env", topLevel.infisical.environment);
-        const { stdout } = await exec("infisical", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("infisical", args, { timeout: 15_000 });
         return { ok: true, value: stdout.trim(), detail: "read from Infisical" };
       }
       case "bitwarden": {
         const field = config.name || config.ref;
         if (!field) return { ok: false, detail: "no Bitwarden field" };
-        const { stdout } = await exec("bw", ["get", field], { timeout: 15_000 });
+        const { stdout } = await execPinned("bw", ["get", field], { timeout: 15_000 });
         return { ok: true, value: stdout.trim(), detail: "read from Bitwarden" };
       }
       case "doppler": {
         if (!config.name) return { ok: false, detail: "no Doppler name" };
-        const { stdout } = await exec("doppler", ["secrets", "get", config.name, "--plain"], {
+        const { stdout } = await execPinned("doppler", ["secrets", "get", config.name, "--plain"], {
           timeout: 15_000,
         });
         return { ok: true, value: stdout.trim(), detail: "read from Doppler" };
@@ -122,7 +122,7 @@ export async function readSecretFromBackend(
       case "vault": {
         const path = config.vault_path || "secret/data/kit";
         const field = config.name || "value";
-        const { stdout } = await exec("vault", ["kv", "get", "-field", field, path], {
+        const { stdout } = await execPinned("vault", ["kv", "get", "-field", field, path], {
           timeout: 15_000,
         });
         return { ok: true, value: stdout.trim(), detail: `read from Vault ${path}` };
@@ -131,19 +131,19 @@ export async function readSecretFromBackend(
         const args = ["secretsmanager", "get-secret-value", "--secret-id", config.name || ""];
         if (config.aws_region) args.push("--region", config.aws_region);
         args.push("--query", "SecretString", "--output", "text");
-        const { stdout } = await exec("aws", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("aws", args, { timeout: 15_000 });
         return { ok: true, value: stdout.trim(), detail: "read from AWS Secrets Manager" };
       }
       case "gcp-sm": {
         const args = ["secrets", "versions", "access", "latest", "--secret", config.name || ""];
         if (config.gcp_project) args.push("--project", config.gcp_project);
-        const { stdout } = await exec("gcloud", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("gcloud", args, { timeout: 15_000 });
         return { ok: true, value: stdout.trim(), detail: "read from GCP Secret Manager" };
       }
       case "azure-kv": {
         const vault = config.azure_vault;
         if (!vault) return { ok: false, detail: "no Azure vault" };
-        const { stdout } = await exec(
+        const { stdout } = await execPinned(
           "az",
           [
             "keyvault",

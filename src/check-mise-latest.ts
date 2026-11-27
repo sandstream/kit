@@ -20,6 +20,8 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { parse } from "smol-toml";
 import type { SecurityCheckResult } from "./check-security.js";
+import type { HitlBlock } from "./hitl.js";
+import { c } from "./utils/colors.js";
 import { identityOf, sameIdentity } from "./utils/same-file.js";
 
 /** Where the check looks. Injected so tests use a temp folder and never the real machine. */
@@ -274,6 +276,31 @@ export async function pinMiseLatest(
       out.push({ file, tool, to: version });
     }
     if (changed) writeFileSync(file, text);
+  }
+  return out;
+}
+
+/** What `kit fix` prints and records for the fork loop: nothing unless the row warns. */
+export async function migrateMiseLatest(
+  cwd: string,
+  e: MiseLatestEnv = defaultEnv(),
+): Promise<{ lines: string[]; fixed: number; manual: Omit<HitlBlock, "owner">[] }> {
+  const out = { lines: [] as string[], fixed: 0, manual: [] as Omit<HitlBlock, "owner">[] };
+  if (checkMiseLatest(cwd, e)[0]?.status !== "warn") return out;
+  for (const o of await pinMiseLatest(cwd, e)) {
+    if ("to" in o) {
+      out.fixed++;
+      out.lines.push(`  ${c.green}✓${c.reset} ${o.tool}  pinned  latest → ${o.to} in ${o.file}`);
+      continue;
+    }
+    out.lines.push(`  ${c.red}✗${c.reset} ${o.tool}  ${o.reason}`);
+    out.manual.push({
+      blocker: `${o.tool} is pinned to latest in a mise config while mise's npm shim is on PATH`,
+      reason: "mise resolves npm: latest by running npm view through its own shim, which loops",
+      steps: [o.reason, "Run `kit check --category security`."],
+      respondWith: `${o.tool} pinned to an exact version`,
+      agentContinuesWith: "kit check --category security",
+    });
   }
   return out;
 }

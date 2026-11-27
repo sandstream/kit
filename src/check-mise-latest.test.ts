@@ -105,7 +105,9 @@ describe("mise config with npm: tools at latest (fork-loop risk)", () => {
       }
     },
   );
+});
 
+describe("the mise npm: latest row", () => {
   it(
     "warns when a config has npm: at latest and npm on PATH is a mise shim",
     posixOnly,

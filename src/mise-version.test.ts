@@ -86,7 +86,9 @@ describe("resolveMiseVersion", () => {
       assert.match(urls[0], /pypi\.org\/pypi\/semgrep\/json$/);
     });
   });
+});
 
+describe("resolveMiseVersion refusals and passthrough", () => {
   it("refuses (fail closed) when the registry cannot be read, and never returns latest", async () => {
     await withProject(async (dir) => {
       const { d } = deps({});
