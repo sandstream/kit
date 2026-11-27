@@ -2606,7 +2606,7 @@
       "commands": {
         "incident": {
           "kind": "command",
-          "summary": "Vendor incident: rotation plan per key + keyed-hash snapshot; --verify reports changed/unchanged/unresolvable",
+          "summary": "Vendor incident: rotation plan per key + evidence plan (the store's own access-record query per key, printed only; --since <ISO>) + keyed-hash snapshot; --verify reports changed/unchanged/unresolvable",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -2747,6 +2747,7 @@
         "--read-only",
         "--readonly",
         "--secrets-only",
+        "--since",
         "--stdin",
         "--store",
         "--supabase-project",

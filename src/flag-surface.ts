@@ -510,6 +510,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--railway-service",
     "--random",
     "--secrets-only",
+    "--since",
     "--stdin",
     "--store",
     "--supabase-project",
