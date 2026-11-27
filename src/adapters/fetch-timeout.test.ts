@@ -11,10 +11,10 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { upstashRedisAdapter } from "./adapters/upstash-redis.js";
-import { neonDbAdapter } from "./adapters/neon-db.js";
-import { planetscaleDbAdapter } from "./adapters/planetscale-db.js";
-import type { ServiceAdapter, ProvisionResult } from "./adapters/types.js";
+import { upstashRedisAdapter } from "./upstash-redis.js";
+import { neonDbAdapter } from "./neon-db.js";
+import { planetscaleDbAdapter } from "./planetscale-db.js";
+import type { ServiceAdapter, ProvisionResult } from "./types.js";
 
 const HUNG = Symbol("hung");
 const GUARD_MS = 5_000;
