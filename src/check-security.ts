@@ -2399,6 +2399,7 @@ async function appendHostSecurityChecks(
   results.push(await checkMemoryInjection(), await checkMemoryHooksLiveness());
   results.push(await checkTranscriptSecrets(undefined, root));
   results.push(await checkGateLiveness(root), await checkGitHookFloor(root));
+  results.push(await (await import("./check-deny-rules.js")).checkKitDenyRules(root));
   results.push(await checkDeviceIdOverride());
   results.push(await (await import("./check-docker-ioc.js")).checkDockerIocs());
 }
