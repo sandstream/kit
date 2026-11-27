@@ -1,0 +1,3 @@
+### Fixed
+
+- **`kit secrets` and the MCP `kit_secrets` tool now record which keys they read, so `kit audit secrets` can attribute each read to a key.** The `secrets.generate` event carried only the store (CLI) or nothing at all (MCP), so every read landed in `unattributed` and `kit audit secrets --key X` could not show who read X or when, though its help promises "who/what touched each key + when". The event now carries the declared key NAMES under `name`/`names`, the shape kit already records for writes; values are never logged. Whether these events are written when `[governance]` is off is unchanged. Found by kit-research note kms-decrypt-evidence-vs-kit.
