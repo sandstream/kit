@@ -37,6 +37,7 @@ const EXACT: Record<string, string> = {
   ".devcontainer.json": "dev container (runs commands on create)",
   ".devcontainer/devcontainer.json": "dev container (runs commands on create)",
   ".envrc": "direnv (runs on cd)",
+  "t3.json": "T3 Code project scripts (run on worktree create and settle)",
 };
 
 /** Directory prefixes and what their files are. */
