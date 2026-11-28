@@ -112,3 +112,37 @@ it("GuardDog skips an absent target and verifies an empty PyPI target", windows,
     assert.equal(existsSync(cache), false);
   });
 });
+
+it("GuardDog applies a reviewed exception only to the hashed file it names", windows, async () => {
+  await withFixture(async (root) => {
+    const source = "const port = process.env.EXAMPLE_PORT;\n";
+    writeFileSync(join(root, "package.json"), '{"devDependencies":{"fixture":"1.0.0"}}');
+    mkdirSync(join(root, "node_modules", "fixture", "lib"), { recursive: true });
+    writeFileSync(join(root, "node_modules", "fixture", "package.json"), '{"version":"1.0.0"}');
+    writeFileSync(join(root, "node_modules", "fixture", "lib", "a.js"), source);
+    const hit = { location: "package/lib/a.js:1", code: source, message: "env read" };
+    const results = { "threat-runtime-environment-read": [hit] };
+    const result = { issues: 1, errors: {}, results };
+    writeFileSync(
+      join(root, "report.json"),
+      JSON.stringify([{ dependency: "fixture", version: "1.0.0", result }]),
+    );
+    assert.equal((await checkGuardDog(root)).status, "fail");
+    const entry = {
+      package: "fixture",
+      version: "1.0.0",
+      rule: "threat-runtime-environment-read",
+      file: "lib/a.js",
+      sha256: createHash("sha256").update(source).digest("hex"),
+      reason: "example reads its own port setting",
+      expires: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
+    };
+    writeFileSync(join(root, "guarddog-exceptions.json"), JSON.stringify([entry]));
+    const r = await checkGuardDog(root);
+    assert.equal(r.status, "pass");
+    assert.equal(gateStatus(r), "pass");
+    assert.match(r.detail, /1 reviewed GuardDog exception\(s\) from guarddog-exceptions\.json/);
+    writeFileSync(join(root, "node_modules", "fixture", "lib", "a.js"), source + "// changed\n");
+    assert.equal((await checkGuardDog(root)).status, "fail");
+  });
+});

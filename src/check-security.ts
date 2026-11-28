@@ -1,5 +1,6 @@
 import { advisoryOptionsFor, checkDependencySurface } from "./check-dependency-surface.js";
 import { auditDecision } from "./audit-exceptions.js";
+import { guardDogWaiver } from "./guarddog-exceptions.js";
 import { skipsBasicScan } from "./basic-scan-skip.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -1761,7 +1762,8 @@ export async function checkGuardDog(root: string): Promise<SecurityCheckResult> 
   } catch {
     // An unreadable target cannot confirm the original scan scope.
   }
-  return classifyGuardDog(result, scope, manifestChanged);
+  // Reviewed exceptions in guarddog-exceptions.json cover only exact, hashed findings.
+  return classifyGuardDog(result, scope, manifestChanged, await guardDogWaiver(root));
 }
 
 /**

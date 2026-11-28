@@ -235,6 +235,28 @@ Threat and metadata rule findings count. A report kit cannot read keeps GuardDog
 The check runs GuardDog each time. The report has no artifact digest or ruleset identity for reuse.
 Kit ignores legacy GuardDog verdict files.
 
+`guarddog-exceptions.json` at the repository root holds reviewed GuardDog false positives, as a JSON list.
+Each entry names `package`, an exact `version`, one `rule`, one `file` inside the package and that file's `sha256`, with a `reason` and an `expires` date at most 90 days ahead:
+
+```json
+[
+  {
+    "package": "prettier",
+    "version": "3.10.1",
+    "rule": "threat-runtime-obfuscation",
+    "file": "index.mjs",
+    "sha256": "efa4ff19afa80e7e5531273138ffe61dd0749d36c14a5299dfc742d5e2363171",
+    "reason": "Line 12306 is the bundled json5 Unicode ID_Start table, used only in a test() call",
+    "expires": "2027-02-25"
+  }
+]
+```
+
+An entry covers a source finding only when the package is installed at that version under `node_modules` and the installed file has that SHA-256.
+Another version, rule or file, changed bytes, a missing install or a past expiry date cover nothing, and the check detail names each entry that did not apply.
+A rule that fails to run and a metadata finding cannot be excepted.
+Read the flagged file in the registry tarball before you add an entry, and write what you saw in `reason`.
+
 ## Exploit intelligence in scan results
 
 The JSON result shows separate coverage for CISA KEV and FIRST EPSS.
