@@ -147,6 +147,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   const { runAgentEndpoint } = await import("../agent-endpoint.js");
   const { runUserAgentAudit } = await import("../agent-audit-user.js");
   const { runAgentSkillPosture } = await import("../agent-skill-posture.js");
+  const { runCodexApprovals } = await import("../agent-codex-approvals.js");
   const { runClaudeDesktopAudit } = await import("../agent-audit-claude-desktop.js");
   const results = [
     ...runAgentAudit(process.cwd()),
@@ -154,6 +155,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
     ...runClaudeDesktopAudit(homedir(), process.env),
     ...drift.userSurfaceDriftRows(homedir(), process.env, !isReadOnlyMode()),
     ...runAgentTrifecta(process.cwd(), homedir()),
+    ...runCodexApprovals(process.cwd(), homedir(), process.env),
     ...runAgentPreload(process.cwd(), homedir(), process.env),
     ...runAgentEndpoint(process.cwd(), homedir(), process.env),
     ...runAgentSkillPosture(process.cwd(), homedir(), process.env),
