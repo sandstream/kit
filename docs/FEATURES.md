@@ -268,7 +268,7 @@ Context pointers are non-secret and live in config; the credentials they authent
 
 ### Quality gates (baseline-aware)
 
-- `kit check --enforce-tests`: Fail when net-new source files lack a sibling `.test.ts`
+- `kit check --enforce-tests`: Fail when net-new source files lack a sibling `.test.ts`. The `unit-test coverage` row counts `.ts`/`.js` files under `src/` (or each workspace's), minus `index`, `types`, test, spec and `.d.ts` files; when it counts none it is a skip that says what it found, never a pass
 - `kit design`: Static a11y scan (img-alt, button-empty, anchor-no-href, input-no-label) + design-token consistency (raw `#hex` / `px` bypass). `--enforce` to gate, `--json` for machine output
 - `kit monkey-test`: Role-based release gate for money-handling apps: stack/env/seed detection, Playwright desktop+mobile crawl, sandbox money flow, and security pack. See [docs/MONKEY_TEST.md](MONKEY_TEST.md)
 - `kit review`: Meta-runner: `check` + `design` + `standards` + `adr` in one command. Use as a single PR-gate entry point for AI agents

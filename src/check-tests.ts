@@ -74,6 +74,39 @@ function siblingTestPath(srcPath: string): string {
   return srcPath.replace(/\.(ts|js)$/, ".test.$1");
 }
 
+/** What a walk of the source dirs found: the files counted as source, and those without a test. */
+interface SourceInventory {
+  /** Source files counted, after the exclusions above. */
+  counted: number;
+  /** .ts/.js files the exclusions dropped (index, types, tests, specs, declarations). */
+  excluded: string[];
+  /** Counted files with no sibling test, relative to cwd and sorted. */
+  untested: string[];
+}
+
+async function inventorySources(cwd: string, srcDirs: string[]): Promise<SourceInventory> {
+  const inv: SourceInventory = { counted: 0, excluded: [], untested: [] };
+  for (const dir of srcDirs) {
+    const root = resolve(cwd, dir);
+    if (!(await pathExists(root))) continue;
+    const files = collectSourceFiles(root);
+    inv.counted += files.length;
+    const all = walkSourceFiles(root, {
+      exts: [".ts", ".js"],
+      includeTests: true,
+      skipDirs: ["node_modules"],
+    });
+    const kept = new Set(files);
+    inv.excluded.push(...all.filter((f) => !kept.has(f)).map((f) => relative(cwd, f)));
+    for (const file of files) {
+      if (!(await pathExists(siblingTestPath(file)))) inv.untested.push(relative(cwd, file));
+    }
+  }
+  inv.untested.sort();
+  inv.excluded.sort();
+  return inv;
+}
+
 /**
  * Find source files without a sibling test file.
  * Returns relative paths so the result is stable across machines.
@@ -82,18 +115,7 @@ export async function findUntestedSources(
   cwd = process.cwd(),
   srcDirs: string[] = DEFAULT_SRC_DIRS,
 ): Promise<string[]> {
-  const untested: string[] = [];
-  for (const dir of srcDirs) {
-    const root = resolve(cwd, dir);
-    if (!(await pathExists(root))) continue;
-    const files = collectSourceFiles(root);
-    for (const file of files) {
-      if (!(await pathExists(siblingTestPath(file)))) {
-        untested.push(relative(cwd, file));
-      }
-    }
-  }
-  return untested.sort();
+  return (await inventorySources(cwd, srcDirs)).untested;
 }
 
 /** Look for at least one Playwright spec tagged `@smoke`. */
@@ -115,6 +137,57 @@ async function hasSmokeTests(
     }
   }
   return false;
+}
+
+const ROW = { category: "tests", name: "unit-test coverage" } as const;
+
+/**
+ * The coverage row. Zero files counted is not "every source file has a test": that sentence would
+ * be vacuously true of an empty walk (measured: a `src/` holding only `index.js`, which is excluded
+ * by default, passed). It is an honest skip that says what the walk found.
+ */
+function coverageRow(
+  inv: SourceInventory,
+  srcDirs: string[],
+  baselineList: string[] | undefined,
+  enforce: boolean,
+): TestCheckResult {
+  if (inv.counted === 0) {
+    const where = srcDirs.join(", ");
+    const found = inv.excluded.length
+      ? `${inv.excluded.length} .ts/.js file(s) in ${where}, all excluded by name or suffix (${inv.excluded.slice(0, 3).join(", ")}${inv.excluded.length > 3 ? ", …" : ""})`
+      : `no .ts/.js files in ${where}`;
+    return {
+      ...ROW,
+      status: "skip",
+      detail: `no source files counted: ${found}`,
+    };
+  }
+  const { untested } = inv;
+  const baseline = new Set(baselineList ?? []);
+  const netNew = untested.filter((f) => !baseline.has(f));
+  if (untested.length === 0) {
+    return {
+      ...ROW,
+      status: "pass",
+      detail: `every source file has a sibling .test file (${inv.counted} counted)`,
+    };
+  }
+  if (netNew.length === 0) {
+    return {
+      ...ROW,
+      status: "warn",
+      detail: `${untested.length} pre-existing untested file(s) (baseline-frozen)`,
+      severity: "low",
+    };
+  }
+  return {
+    ...ROW,
+    status: enforce ? "fail" : "warn",
+    detail: `${netNew.length} new untested file(s) (${untested.length} total)`,
+    severity: enforce ? "high" : "medium",
+    files: netNew.slice(0, 10),
+  };
 }
 
 /**
@@ -163,35 +236,7 @@ export async function checkTests(
     return results;
   }
 
-  const untested = await findUntestedSources(cwd, srcDirs);
-  const baseline = new Set(opts.baseline ?? []);
-  const netNew = untested.filter((f) => !baseline.has(f));
-
-  if (untested.length === 0) {
-    results.push({
-      category: "tests",
-      name: "unit-test coverage",
-      status: "pass",
-      detail: "every source file has a sibling .test file",
-    });
-  } else if (netNew.length === 0) {
-    results.push({
-      category: "tests",
-      name: "unit-test coverage",
-      status: "warn",
-      detail: `${untested.length} pre-existing untested file(s) (baseline-frozen)`,
-      severity: "low",
-    });
-  } else {
-    results.push({
-      category: "tests",
-      name: "unit-test coverage",
-      status: enforce ? "fail" : "warn",
-      detail: `${netNew.length} new untested file(s) (${untested.length} total)`,
-      severity: enforce ? "high" : "medium",
-      files: netNew.slice(0, 10),
-    });
-  }
+  results.push(coverageRow(await inventorySources(cwd, srcDirs), srcDirs, opts.baseline, enforce));
 
   if (opts.requireSmoke) {
     const hasSmoke = await hasSmokeTests(cwd);
