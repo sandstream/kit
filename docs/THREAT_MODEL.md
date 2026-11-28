@@ -415,6 +415,12 @@ It also warns when declared permissions let a unit write without confirmation.
 This separate row covers file edits, broad shell access, and common file commands.
 It checks `allow` rules, `acceptEdits`, and `bypassPermissions`.
 Bare `ask` and `deny` rules take precedence for this row.
+Cline keeps its approvals in `~/.cline/data/globalState.json` (or `$CLINE_DATA_DIR`, or
+`$CLINE_DIR/data`), not in a rule file. When its auto-approve runs shell commands without asking
+(`autoApprovalSettings.actions.executeSafeCommands` or `executeAllCommands`, or the removed
+`yoloModeToggled` / `autoApproveAllToggled` toggles that older builds still read), `kit agent-audit`
+and `kit check` warn (`cline auto-approve`), as for `bypassPermissions`. Not read: the VS Code state
+database of Cline builds from before that file, and the Cline CLI's command-line flags.
 
 The trifecta row reads Claude Code's grants only, and its pass text says so.
 The same command lists every saved rule it can read in a ledger: Claude Code (user, project, local
