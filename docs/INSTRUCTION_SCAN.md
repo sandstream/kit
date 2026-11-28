@@ -35,6 +35,11 @@ Named pipes and other special files are refused. Actual reads have a byte limit,
 Each finding includes a file, line, rule, and sanitized excerpt.
 Injection rules also inspect the whole file, so a line break cannot split a recognized phrase past the check.
 Custom secret-transfer and download rules retain their documented single-line scope.
+The injection rule that pairs a sending verb with a secret noun (`exfil-imperative`) skips a pair
+the text forbids: a verb right after `never`, `do not`, `must not` and the like ("Never send the
+token"), unless a carve-out follows ("… except to …"), and a noun that sits in a later sentence
+starting with such a word ("what to send back. Never ask for a secret"). A period alone does not
+split a pair.
 
 `complete` describes coverage within the selected scope. It does not describe whether findings exist.
 `unread` lists selected files that were not read.

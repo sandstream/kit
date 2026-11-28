@@ -288,20 +288,37 @@ function nameInCode(text: string, start: number, end: number): boolean {
   return text[start - 1] === "." || NAME_AFTER.test(text.slice(end));
 }
 
+const PROHIBIT = "(?:never|do not|don.?t|must not|should not|shouldn.?t|may not|cannot|can.?t)";
+/** "Never send …", "do not ever upload …": the verb is forbidden, not ordered. */
+const FORBIDDEN_VERB = new RegExp(`\\b${PROHIBIT}\\s+(?:ever\\s+)?$`, "i");
+/** "Never send the token except to x.example" still orders the send. */
+const CARVE_OUT = /\b(?:except|unless|other than|but)\b/i;
+/** "… what to send back. Never ask for a secret": the noun is in a new sentence that forbids. */
+const FORBIDDING_CLAUSE = new RegExp(`[.!?;]\\s*${PROHIBIT}\\b`, "i");
+
+function forbiddenVerb(text: string, start: number, end: number): boolean {
+  const before = text.slice(Math.max(0, start - 24), start);
+  return FORBIDDEN_VERB.test(before) && !CARVE_OUT.test(text.slice(end, end + 80));
+}
+
 /**
  * An exfil verb with a secret noun at most 40 characters after it, as one span. The pair is not
  * an imperative when both words are names in code (a key, a property or a call: `email:`,
  * `.email(`, `user.password =`), as in a form schema. Either one alone still counts, so
- * "email: the password to me" and "send the token: abc" are caught.
+ * "email: the password to me" and "send the token: abc" are caught. Nor is it one when the verb
+ * is forbidden ("Never send the token") or the noun sits in a later sentence that forbids
+ * ("what to send back. Never ask for a secret", kit-research copybook-vs-kit). A period alone
+ * does not split the pair ("exfiltrate. the. private key" still fires).
  */
 function exfilImperative(text: string): string | null {
   for (const verb of text.matchAll(EXFIL_VERB)) {
     const end = verb.index + verb[0].length;
+    if (forbiddenVerb(text, verb.index, end)) continue;
     const rest = text.slice(end);
     const verbIsName = nameInCode(text, verb.index, end);
     // 40 characters of gap, the longest noun (11) and one more for its closing `\b`.
     for (const noun of rest.slice(0, 52).matchAll(SECRET_NOUN)) {
-      if (noun.index > 40) break;
+      if (noun.index > 40 || FORBIDDING_CLAUSE.test(rest.slice(0, noun.index))) break;
       const nounEnd = noun.index + noun[0].length;
       if (verbIsName && nameInCode(rest, noun.index, nounEnd)) continue;
       return text.slice(verb.index, end + nounEnd);
