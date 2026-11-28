@@ -1,6 +1,6 @@
 /**
  * Repository references that installers fetch: the shared reduction to `owner/repo`, and the
- * Claude Code plugin commands that add third-party code to the agent itself.
+ * Claude Code and Codex plugin commands that add third-party code to the agent itself.
  */
 import type { InstallProbe } from "./install-gate.js";
 import { unwrapCommandWrappers } from "./install-gate-wrappers.js";
@@ -237,43 +237,73 @@ export function repoSourceArg(source: string): { ref: string } | { unverifiable:
 }
 
 /**
- * `claude plugin marketplace add <source>` and `claude plugin install <plugin> --marketplace
- * <source>` add a marketplace: a repo whose plugins run INSIDE the agent. A plugin's hooks module
- * can drop a prompt, submit text as the user and send billed model requests, more authority than
- * most npm packages, and `claude plugin install` passed this gate silently while `npx skills add`
- * did not. Adding the marketplace is the trust decision, so that is what is triaged:
+ * `claude plugin marketplace add <source>`, `codex plugin marketplace add <source>` and `claude
+ * plugin install <plugin> --marketplace <source>` add a marketplace: a repo whose plugins run
+ * INSIDE the agent. A plugin's hooks module can drop a prompt, submit text as the user and send
+ * billed model requests, more authority than most npm packages, and `claude plugin install` passed
+ * this gate silently while `npx skills add` did not. Adding the marketplace is the trust decision,
+ * so that is what is triaged, for both agents alike (kit-research copybook-vs-kit: the Codex form
+ * passed while the Claude form was triaged):
  *
  *   - a GitHub repo (`owner/repo`, `https://github.com/owner/repo`, `git@github.com:…`) → `github:` ref;
  *   - a local path → the user's own code, nothing to triage;
  *   - anything else (another host, a URL to a marketplace.json) → unverifiable, fail-closed.
  *
  * `claude plugin install <plugin>@<marketplace>` names a marketplace added earlier, which was
- * triaged when it was added, so it is not an add. `/plugin install` typed inside Claude Code is a
- * slash command and never reaches a Bash hook; this covers the shell form only.
+ * triaged when it was added, so it is not an add; nor are `update` / `marketplace upgrade`.
+ * `/plugin install` typed inside the agent is a slash command and never reaches a Bash hook; this
+ * covers the shell form only.
  */
-export function claudePluginInstall(tokens: readonly string[], probe: InstallProbe): boolean {
-  if (tokens[0] !== "claude" || !PLUGIN_BINS.has(tokens[1] ?? "")) return false;
+export function agentPluginInstall(tokens: readonly string[], probe: InstallProbe): boolean {
+  const agent = tokens[0];
+  if ((agent !== "claude" && agent !== "codex") || !PLUGIN_BINS.has(tokens[1] ?? "")) return false;
   const rest = tokens.slice(2);
   let source: string | undefined;
   if (rest[0] === "marketplace" && rest[1] === "add") {
-    source = rest.slice(2).find((t) => !t.startsWith("-"));
+    source = marketplaceSource(rest.slice(2));
     if (source === undefined) {
       probe.isInstall = true;
-      probe.unverifiable.push("claude-plugin-marketplace:<none>");
+      probe.unverifiable.push(`${agent}-plugin-marketplace:<none>`);
       return true;
     }
-  } else if (rest[0] === "install" || rest[0] === "i") {
+  } else if (agent === "claude" && (rest[0] === "install" || rest[0] === "i")) {
     source = marketplaceFlag(rest);
     if (source === undefined) return true; // a marketplace added (and triaged) earlier
   } else {
-    return true; // list, remove, update, validate: nothing new is fetched from a new source
+    return true; // list, remove, update, upgrade, validate: nothing new from a new source
   }
   if (localRepoSource(source)) return true; // the user's own marketplace on disk
   probe.isInstall = true;
   const repo = githubOnly(source);
   if (repo) probe.refs.push(`github:${repo}`);
-  else probe.unverifiable.push(`claude-plugin-marketplace:${rejectedSourceDisplay(source)}`);
+  else probe.unverifiable.push(`${agent}-plugin-marketplace:${rejectedSourceDisplay(source)}`);
   return true;
+}
+
+/** Codex's `--ref <ref>` and `--sparse <path>` take a value that is not the source. */
+const MARKETPLACE_VALUE_FLAGS = new Set(["--ref", "--sparse"]);
+
+function marketplaceSource(args: readonly string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    if (MARKETPLACE_VALUE_FLAGS.has(args[i])) i++;
+    else if (!args[i].startsWith("-")) return args[i];
+  }
+  return undefined;
+}
+
+/** The npm packages that ship the agent CLIs: `npx @openai/codex plugin …` is `codex plugin …`. */
+const AGENT_PACKAGES: Record<string, string> = {
+  "@anthropic-ai/claude-code": "claude",
+  "@openai/codex": "codex",
+  claude: "claude",
+  codex: "codex",
+};
+
+/** Read an npm runner's command (`npx -y @openai/codex@1 plugin …`) as the agent CLI it runs. */
+export function runnerPluginInstall(argv: readonly string[], probe: InstallProbe): void {
+  const name = /^(@[^/@]+\/[^@]+|[^@]+)/.exec(argv[0] ?? "")?.[1] ?? "";
+  const agent = AGENT_PACKAGES[name];
+  if (agent) agentPluginInstall([agent, ...argv.slice(1)], probe);
 }
 
 function marketplaceFlag(args: readonly string[]): string | undefined {
