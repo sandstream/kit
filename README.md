@@ -144,7 +144,7 @@ The 7.x line starts with one breaking change to the skill fingerprint.
   check and counts commits that skipped the hook, `runtime installs: node` that judges every Node install
   and the one PATH runs, and `anonymous database access` that lists the tables anon can read. `kit triage
   npm` warns about a release younger than 14 days and waives a security patch that OSV lists as the first
-  fix. A new worktree gets the PreToolUse gates from a `post-checkout` hook. `kit watch` ranks open
+  fix. A new worktree gets the gates and deny rules from a `post-checkout` hook. `kit watch` ranks open
   security pull requests, `[deploy.health]` tags findings `deployed` or `branch only`, `kit services`
   keeps leases for the local services agents start, and `[[scan.allow]]` records reviewed exceptions. The
   Semgrep gate fails closed. No breaking change. Windows is not verified for the new hook. Full list in
@@ -349,7 +349,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `.kit/standards.d/*.toml`: Declarative house-rule plugins match one line at a time, print an optional `because` with each failure, and support `mode = "forbid"` and `mode = "require"`; agent-skill lines that state a rule about code no plugin checks are listed as a warning; directory excludes like `scripts/` mean `scripts/**`, with zero-match warnings
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit`: Check install risks, dependencies, and GitHub Actions.
-- `kit agent-audit`: Check agent, MCP, and hook configuration. It warns about the lethal trifecta, writes without confirmation, and environment variables that load code into every process.
+- `kit agent-audit`: Check agent, MCP (Claude Desktop included), and hook configuration. It warns about the lethal trifecta, writes without confirmation (including Codex with approvals or its sandbox off), and environment variables that load code into every process.
 - `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
 - `kit coverage [--standard=<key>|all]`: Evidence maps against 8 pinned standards — OWASP **ASVS L2** · **LLM Top 10** · **Agentic Top 10** · **MCP Top 10** · NIST **SSDF 800-218A** · **NIST 800-53 Rev. 5** (control-family level) · **AIUC-1** · **GCP WAF Security** — showing which controls kit's deterministic checks auto-verify vs gap/manual/n-a (evidence maps, **not** compliance attestations; `--list-standards` to enumerate, `--json` for GRC tools)
 - `kit sentinel {run,install,status}`: Autonomous redline watcher (propose/apply guarded fixes)

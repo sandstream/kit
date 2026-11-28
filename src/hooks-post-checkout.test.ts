@@ -1,8 +1,10 @@
 /**
  * The post-checkout hook that installs the gates in a new worktree. git runs it after every
  * checkout, so it must leave at once, print nothing and not start kit unless the checkout is a new
- * worktree (its previous HEAD is all zeros). These tests install the hook into a real repository and
- * let git run it, with a stub `kit` on PATH that records where and how it was called.
+ * worktree (its previous HEAD is all zeros, or it is a linked worktree kit has not gated yet). These tests install the hook into a real repository and
+ * let git run it, with a stub `kit` on PATH that records where and how it was called. A worktree
+ * that git creates without running the hook (`--no-checkout`, `--orphan`) is gated at its first
+ * checkout instead, while it has no kit gate marker.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -118,6 +120,7 @@ describe("the post-checkout hook", { skip: SKIP_WINDOWS }, () => {
       execFileSync("git", ["-C", s.main, "checkout", "-q", "-"], { env: s.env });
       assert.deepEqual(calls(s), []);
       const run = spawnSync("sh", [s.hook, "abc123", "def456", "1"], {
+        cwd: s.main,
         env: s.env,
         encoding: "utf8",
       });
@@ -132,9 +135,9 @@ describe("the post-checkout hook", { skip: SKIP_WINDOWS }, () => {
     const s = await setup();
     try {
       for (const zeros of [ZEROS40, ZEROS64]) {
-        spawnSync("sh", [s.hook, zeros, "def456", "1"], { env: s.env });
+        spawnSync("sh", [s.hook, zeros, "def456", "1"], { cwd: s.main, env: s.env });
       }
-      spawnSync("sh", [s.hook], { env: s.env });
+      spawnSync("sh", [s.hook], { cwd: s.main, env: s.env });
       assert.equal(calls(s).length, 2);
     } finally {
       rmTemp(s.root);
@@ -155,27 +158,98 @@ describe("the post-checkout hook", { skip: SKIP_WINDOWS }, () => {
   });
 });
 
+const gitIn = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]): void => {
+  execFileSync("git", ["-C", cwd, ...args], { env, input: "a.txt\n" });
+};
+
+describe(
+  "the post-checkout hook: worktrees git creates without running it",
+  { skip: SKIP_WINDOWS },
+  () => {
+    // `git worktree add --no-checkout` and `--orphan` run no post-checkout hook. The first checkout
+    // in such a worktree passes its real HEAD as the previous one, so the all-zero test left it
+    // ungated. T3 Code creates every sparse worktree this way (add --no-checkout, sparse-checkout
+    // set, checkout). The hook now also acts in a linked worktree without kit's gate marker.
+    it("runs kit at the first checkout of a --no-checkout worktree (T3 Code's sparse sequence)", async () => {
+      const s = await setup();
+      try {
+        const wt = join(s.root, "wt");
+        gitIn(s.main, s.env, "worktree", "add", "-q", "--no-checkout", wt);
+        assert.deepEqual(calls(s), [], "git ran no hook for the add itself");
+        gitIn(wt, s.env, "sparse-checkout", "set", "--no-cone", "--stdin");
+        gitIn(wt, s.env, "checkout", "-q");
+        assert.deepEqual(calls(s), [`${wt} worktree-gates`]);
+      } finally {
+        rmTemp(s.root);
+      }
+    });
+
+    it("runs kit at a checkout after the first commit of an --orphan worktree", async () => {
+      // From the unborn branch git passes an all-zero previous HEAD, which the old test caught; once
+      // the orphan branch has a commit, it passes that commit and the old test let it through.
+      const s = await setup();
+      try {
+        const wt = join(s.root, "wt");
+        const head = execFileSync("git", ["-C", s.main, "rev-parse", "HEAD"], { encoding: "utf8" });
+        gitIn(s.main, s.env, "worktree", "add", "-q", "--orphan", "-b", "o", wt);
+        writeFileSync(join(wt, "b.txt"), "b\n");
+        gitIn(wt, s.env, "add", "b.txt");
+        gitIn(
+          wt,
+          s.env,
+          "-c",
+          "user.email=t@example.invalid",
+          "-c",
+          "user.name=t",
+          "commit",
+          "-qm",
+          "b",
+        );
+        gitIn(wt, s.env, "checkout", "-q", "--detach", head.trim());
+        assert.deepEqual(calls(s), [`${wt} worktree-gates`]);
+      } finally {
+        rmTemp(s.root);
+      }
+    });
+
+    it("leaves at once in a worktree that kit has already gated", async () => {
+      const s = await setup();
+      try {
+        const wt = join(s.root, "wt");
+        gitIn(s.main, s.env, "worktree", "add", "-q", "--no-checkout", wt);
+        mkdirSync(join(wt, ".claude"));
+        writeFileSync(join(wt, ".claude", ".kit-gates-installed"), "x\n");
+        gitIn(wt, s.env, "checkout", "-q");
+        gitIn(wt, s.env, "checkout", "-q", "-b", "other");
+        assert.deepEqual(calls(s), []);
+      } finally {
+        rmTemp(s.root);
+      }
+    });
+  },
+);
+
+const COMMITTED = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  ".githooks",
+  "post-checkout",
+);
+
+function sandbox(): { root: string; env: NodeJS.ProcessEnv; log: string } {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-committed-hook-")));
+  const stubs = join(root, "stubs");
+  const home = join(root, "home");
+  mkdirSync(stubs);
+  mkdirSync(home);
+  const log = join(root, "kit-calls.log");
+  writeFileSync(join(stubs, "kit"), `#!/bin/sh\necho "$*" >> "${log}"\n`);
+  chmodSync(join(stubs, "kit"), 0o755);
+  const env = { ...process.env, HOME: home, PATH: `${stubs}:/usr/bin:/bin` };
+  return { root, env, log };
+}
+
 describe("the committed .githooks/post-checkout of this repository", { skip: SKIP_WINDOWS }, () => {
-  const COMMITTED = resolve(
-    dirname(fileURLToPath(import.meta.url)),
-    "..",
-    ".githooks",
-    "post-checkout",
-  );
-
-  function sandbox(): { root: string; env: NodeJS.ProcessEnv; log: string } {
-    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-committed-hook-")));
-    const stubs = join(root, "stubs");
-    const home = join(root, "home");
-    mkdirSync(stubs);
-    mkdirSync(home);
-    const log = join(root, "kit-calls.log");
-    writeFileSync(join(stubs, "kit"), `#!/bin/sh\necho "$*" >> "${log}"\n`);
-    chmodSync(join(stubs, "kit"), 0o755);
-    const env = { ...process.env, HOME: home, PATH: `${stubs}:/usr/bin:/bin` };
-    return { root, env, log };
-  }
-
   it("is an executable file that names the command", () => {
     const text = readFileSync(COMMITTED, "utf8");
     assert.match(text, /^#!\/bin\/sh/);
@@ -187,10 +261,11 @@ describe("the committed .githooks/post-checkout of this repository", { skip: SKI
   it("runs kit for a new worktree, and for no other checkout", () => {
     const s = sandbox();
     try {
-      spawnSync("sh", [COMMITTED, ZEROS40, "def456", "1"], { env: s.env });
-      spawnSync("sh", [COMMITTED, ZEROS64, "def456", "1"], { env: s.env });
-      spawnSync("sh", [COMMITTED, "abc123", "def456", "1"], { env: s.env });
-      spawnSync("sh", [COMMITTED], { env: s.env });
+      const opts = { cwd: s.root, env: s.env };
+      spawnSync("sh", [COMMITTED, ZEROS40, "def456", "1"], opts);
+      spawnSync("sh", [COMMITTED, ZEROS64, "def456", "1"], opts);
+      spawnSync("sh", [COMMITTED, "abc123", "def456", "1"], opts);
+      spawnSync("sh", [COMMITTED], opts);
       assert.deepEqual(readFileSync(s.log, "utf8").trim().split("\n"), [
         "worktree-gates",
         "worktree-gates",
@@ -228,3 +303,25 @@ describe("the committed .githooks/post-checkout of this repository", { skip: SKI
     }
   });
 });
+
+describe(
+  "the committed .githooks/post-checkout in a linked worktree",
+  { skip: SKIP_WINDOWS },
+  () => {
+    it("runs kit in a linked worktree without kit's gate marker, whatever the previous HEAD", () => {
+      const s = sandbox();
+      try {
+        const wt = join(s.root, "wt");
+        mkdirSync(wt);
+        writeFileSync(join(wt, ".git"), "gitdir: /elsewhere\n");
+        spawnSync("sh", [COMMITTED, "abc123", "abc123", "1"], { cwd: wt, env: s.env });
+        mkdirSync(join(wt, ".claude"));
+        writeFileSync(join(wt, ".claude", ".kit-gates-installed"), "x\n");
+        spawnSync("sh", [COMMITTED, "abc123", "abc123", "1"], { cwd: wt, env: s.env });
+        assert.deepEqual(readFileSync(s.log, "utf8").trim().split("\n"), ["worktree-gates"]);
+      } finally {
+        rmTemp(s.root);
+      }
+    });
+  },
+);

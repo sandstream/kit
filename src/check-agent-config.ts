@@ -43,6 +43,7 @@ export async function checkAgentConfig(
   const { runRuleLedger } = await import("./agent-rule-ledger.js");
   const { checkCodexHookTrust } = await import("./codex-hook-trust.js");
   const { checkAiderCommitVerify } = await import("./check-aider-commit-verify.js");
+  const { checkClineAutoApprove } = await import("./check-cline-auto-approve.js");
   return [
     ...runAgentAudit(root),
     ...checkInstructionSecrets(root),
@@ -61,5 +62,7 @@ export async function checkAgentConfig(
     ...checkCodexHookTrust(root, home, env),
     // Aider commits with --no-verify by default, past kit's git hooks.
     ...checkAiderCommitVerify(root, home, env),
+    // Cline's auto-approve runs every command without asking, as Claude Code's bypassPermissions.
+    ...checkClineAutoApprove(home, env),
   ];
 }
