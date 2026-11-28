@@ -224,6 +224,11 @@ GuardDog writes an array of dependency results to stdout.
 A successful empty array verifies an empty manifest within the selected scope.
 A missing target or report, malformed output, package omissions and scanner errors leave coverage unverified.
 Kit retains reported malware indicators and the strict security gate fails when coverage is unverified.
+GuardDog 3.2 reads an npm archive's `package.json` from `package/` or from a folder named after the package.
+When an archive uses another root folder, such as `node v22.20/` in `@types/node` 22.x, its `metadata_mismatch` rule fails to run.
+Kit then reruns that one rule. It fetches the exact version's registry document and tarball from registry.npmjs.org and checks the tarball's integrity.
+It writes the archive's `package.json` under `package/` in a temporary folder and runs `guarddog npm scan` on it with the registry document as `--metadata`.
+If any step fails, for example where GuardDog's kernel sandbox is unavailable, the package stays unverified.
 GuardDog 3 `capability-*` rules list what package code can do, such as spawning processes or opening connections.
 Kit does not count them as malware indicators, because GuardDog forms a risk only from a threat rule.
 Threat and metadata rule findings count. A report kit cannot read keeps GuardDog's own `issues` count.

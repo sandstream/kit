@@ -21,6 +21,7 @@ export { checkEnvGitignored } from "./check-env-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog, guardDogScope, GUARDDOG_CHECK } from "./guarddog.js";
+import { rescanArchiveRoots } from "./guarddog-archive-root.js";
 import {
   buildSemgrepArgs,
   semgrepConfig,
@@ -1746,12 +1747,13 @@ export async function checkGuardDog(root: string): Promise<SecurityCheckResult> 
   // A verify report gives registry versions but no artifact or ruleset identity.
   // A fresh scan is required even if a previous verdict covered these selectors.
   const timeoutMs = Number(process.env.KIT_GUARDDOG_TIMEOUT_MS ?? "") || 300_000;
-  const result = await execFileNoThrow(bin, [ecosystem, "verify", file, "--output-format=json"], {
+  const verify = await execFileNoThrow(bin, [ecosystem, "verify", file, "--output-format=json"], {
     timeout: timeoutMs,
     cwd: root,
     // Older GuardDog includes devDependencies by default. Newer versions use this setting.
     env: { ...process.env, GUARDDOG_NPM_INCLUDE_DEV_DEPENDENCIES: "true" },
   });
+  const result = await rescanArchiveRoots(ecosystem, verify, bin, timeoutMs);
   let manifestChanged = true;
   try {
     const currentManifest = readRegularFileBytesIfPresent(resolve(root, file));
