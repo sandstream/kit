@@ -513,13 +513,13 @@ function register_kit_run(server: StdioMcpServer): void {
     "kit_run",
     {
       description:
-        "Execute a command with project environment variables loaded from .env.local, or with inject: true, with the declared [secrets.keys] resolved into the command's environment only (no .env.local read or written). Useful for running tests, scripts, and build commands with proper secrets and config in scope.",
+        "Run a command with env from .env.local, or with inject: true, [secrets.keys] in its env only.",
       inputSchema: {
         command: z
           .string()
           .describe("Command to execute (with arguments, e.g., 'pnpm test --watch')"),
         cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
-        inject: z.boolean().optional().describe("Pass [secrets.keys] in the env only; fail closed"),
+        inject: z.boolean().optional().describe("Fail-closed, no file"),
       },
     },
     async ({ command, cwd, inject }) => {
