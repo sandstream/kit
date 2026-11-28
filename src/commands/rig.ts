@@ -16,6 +16,7 @@ import { c } from "../utils/colors.js";
 import { flagValue, GLOBAL_FLAGS, hasFlag, rejectUnknownFlags } from "../utils/flags.js";
 import { adjudicate } from "../rig/adjudicate.js";
 import { FindingsRefused, ingestFindings, type IngestResult } from "../rig/findings.js";
+import { instrumentsOf, instrumentWarnings } from "../rig/instruments.js";
 import { loadManifest, RigManifestError, type RigManifest } from "../rig/manifest.js";
 import { renderPlan, renderReport } from "../rig/render.js";
 import { cmdRigPlant } from "./rig-plant.js";
@@ -204,6 +205,7 @@ async function cmdAdjudicate(cwd: string): Promise<boolean> {
   }
   const { outcomes, unknownTargets } = adjudicate(loaded.manifest, merged);
   const stats = aggregate(loaded.manifest, outcomes);
+  const instruments = instrumentsOf(merged.runs);
   const shas = files.map((f) => f.sha);
   const result: RigResult = {
     inputId: loaded.inputId,
@@ -211,7 +213,8 @@ async function cmdAdjudicate(cwd: string): Promise<boolean> {
     outcomes,
     unknownTargets,
     stats,
-    warnings: splitWarnings(stats),
+    warnings: [...splitWarnings(stats), ...instrumentWarnings(instruments)],
+    instruments,
     receipt: await sign(cwd, loaded.inputId, shas, summarise(stats)),
   };
   const path = await writeResult(cwd, result);
