@@ -50,15 +50,18 @@ Deterministic, fail-closed, zero-LLM:
   `--approval-mode yolo`; Cursor's `agent --force` / `--yolo`; `copilot --allow-all-tools`,
   `--allow-all`, `--yolo` or `COPILOT_ALLOW_ALL`; `kiro-cli --trust-all-tools`; and `droid
   --skip-permissions-unsafe`. It reads through `sh -c`, `env`, `sudo`, `xargs`, `npx` / `npm exec`
-  / `pnpm dlx`, `$(…)`, `cmd /c` and PowerShell `-Command` / `-EncodedCommand`. The refusal names
-  the flag and how to run the same agent with approvals on. T3 Code's `t3 thread start`, `t3 thread
+  / `pnpm dlx`, `$(…)`, `cmd /c` and PowerShell `-Command` / `-EncodedCommand`, and through the
+  herdr launcher: `herdr … --kind <agent> -- <argv>` is read as `<agent> <argv>`, and `herdr … --
+  <cmd …>` as `<cmd …>`; herdr commands without `--` start nothing and pass. The refusal names the
+  flag and how to run the same agent with approvals on. T3 Code's `t3 thread start`, `t3 thread
   send`, `t3 workflow start` and `t3 workflow resume` are refused whatever their flags: they start
   or steer an agent at the project's default permission mode, which is Full access unless changed,
   and no flag on the command sets it. `t3 thread show`, `list` and the other read-only subcommands
   pass. Not covered: flags no vendor documents
   (Codex `--full-auto`, Amp's `--dangerously-allow-all`, OpenCode, Augment's `auggie`), Cline's
-  CLI, which approves everything by default when given a prompt, and approval settings in a
-  config file or `-c` override rather than on the command line.
+  CLI, which approves everything by default when given a prompt, approval settings in a config
+  file or `-c` override rather than on the command line, and launchers that set the mode in their
+  own settings (Orca, Paseo, T3 Code).
 
   It refuses the GitHub actions a scoped token reaches, as it refuses a push to the default branch
   (`src/gh-token-actions.ts`): every `gh pr merge` (plain, `--auto` and `--admin` all land or queue
