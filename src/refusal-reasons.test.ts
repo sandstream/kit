@@ -37,6 +37,27 @@ describe("reasonShape", () => {
   });
 });
 
+describe("reasonShape: a version is not a host", () => {
+  // kit-research audit-year-evidence-vs-kit: `kit usage` printed npm's "version 1.3.0 is
+  // DEPRECATED" refusal as "version <host> is DEPRECATED".
+  it("shapes dotted version numbers as <version>", () => {
+    assert.equal(
+      reasonShape("left-pad: version 1.3.0 is DEPRECATED"),
+      "left-pad: version <version> is DEPRECATED",
+    );
+    assert.equal(reasonShape("needs v2.1 or 1.0.0-beta.1"), "needs <version> or <version>");
+    assert.equal(reasonShape("cooling: 16.0.0 was published"), "cooling: <version> was published");
+  });
+
+  it("still shapes IPv4 addresses and host names as <host>", () => {
+    assert.equal(reasonShape("connect to 10.0.0.1:8080 refused"), "connect to <host>:<n> refused");
+    assert.equal(reasonShape("egress to 192.168.1.255 denied"), "egress to <host> denied");
+    assert.equal(reasonShape("egress to 10.0.0.1.nip.io denied"), "egress to <host> denied");
+    assert.equal(reasonShape("egress to evil.example denied"), "egress to <host> denied");
+    assert.equal(reasonShape("egress to api.v1.example.com denied"), "egress to <host> denied");
+  });
+});
+
 describe("groupRefusals", () => {
   it("puts refusals that differ only in a path into one wall, most frequent first", () => {
     const fs = (path: string) => ({

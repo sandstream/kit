@@ -8,7 +8,7 @@
  * one admin approval) asks for that view: read where agents fail before writing more rules.
  *
  * A reason is reduced to its shape by deterministic substitutions, so refusals that differ only in
- * a path, host, package, quoted value or number fall into one group. No model reads the text.
+ * a path, host, package, version, quoted value or number fall into one group. No model reads the text.
  */
 
 const FILE_EXTENSIONS = new Set([
@@ -27,6 +27,21 @@ const FILE_EXTENSIONS = new Set([
   "py",
 ]);
 
+/**
+ * A dotted number is a version (`1.3.0`, `v2.1`, `1.0.0-beta.1`), not a host, unless it is exactly
+ * four octets of 0-255 with no prefix or suffix: that is an IPv4 address and stays `<host>`. A
+ * dotted number followed by more labels (`10.0.0.1.nip.io`) is not matched here at all, so the
+ * host rule below takes the whole name.
+ */
+const DOTTED_NUMBER =
+  /\bv?\d+(?:\.\d+){1,3}(?:-[0-9a-z]+(?:\.[0-9a-z]+)*)?(?:\+[0-9a-z.]+)?(?![.\w-])/gi;
+
+function versionOrIpv4(m: string): string {
+  const octets = m.split(".");
+  const ipv4 = octets.length === 4 && octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255);
+  return ipv4 ? "<host>" : "<version>";
+}
+
 const RULES: Array<[RegExp, string | ((m: string) => string)]> = [
   [/`[^`]*`/g, "<…>"],
   [/"[^"]*"|'[^']*'/g, "<…>"],
@@ -35,6 +50,7 @@ const RULES: Array<[RegExp, string | ((m: string) => string)]> = [
   [/(^|[\s(=])(?:\[REDACTED\]|~|\.{1,2})?(?:\/[^\s,;:()]+)+/g, "$1<path>"],
   [/\b[A-Za-z]:\\[^\s,;()]+/g, "<path>"],
   [/\b[a-z][a-z0-9-]*:[^\s,;()]+/gi, "<target>"],
+  [DOTTED_NUMBER, versionOrIpv4],
   [
     /\b[a-z0-9-]+(?:\.[a-z0-9-]+)+\b/gi,
     (m) => (FILE_EXTENSIONS.has(m.split(".").pop()?.toLowerCase() ?? "") ? m : "<host>"),
