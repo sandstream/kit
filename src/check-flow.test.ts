@@ -6,12 +6,13 @@
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { runCli, type CliResult } from "./cli-run.test-support.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { coverageFromRuns } from "./usage-report.js";
 
 const ANSI = /\x1b\[[0-9;]*m/g;
 const plain = (s: string): string => s.replace(ANSI, "");
@@ -211,5 +212,37 @@ describe("kit check: attestation and update notice", () => {
     writeFileSync(join(r.root, ".kit.toml"), "");
     const res = await check(r, ["--category", "tests"]);
     assert.doesNotMatch(plain(res.stdout), /99\.0\.0/);
+  });
+});
+
+describe("kit check: run history", () => {
+  // `kit usage` reads the last saved run from .kit/runs and, with none, says "run `kit check`
+  // once". Only the MCP tool used to save runs, so that advice never worked from the CLI.
+  let r: Repo;
+  before(() => {
+    r = makeRepo("");
+  });
+  after(() => dropRepo(r));
+
+  const saved = (): string[] => {
+    const dir = join(r.root, ".kit", "runs");
+    return existsSync(dir) ? readdirSync(dir).filter((f) => /^check-\d+\.json$/.test(f)) : [];
+  };
+
+  it("a CLI run, text or --json, is saved where kit usage reads it", async () => {
+    assert.equal(coverageFromRuns(r.root).at, null);
+    await check(r, ["--category", "tests"]);
+    assert.equal(saved().length, 1, "text mode saves the run");
+    await check(r, ["--category", "tests", "--json"]);
+    assert.equal(saved().length, 2, "--json saves the run too");
+    const cov = coverageFromRuns(r.root);
+    assert.notEqual(cov.at, null, "kit usage now finds a saved run");
+    assert.ok(cov.enumerated > 0, "and counts its rows");
+  });
+
+  it("read-only mode saves nothing", async () => {
+    const before = saved().length;
+    await check(r, ["--category", "tests"], { KIT_READ_ONLY: "1" });
+    assert.equal(saved().length, before);
   });
 });

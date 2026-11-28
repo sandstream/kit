@@ -33,6 +33,8 @@ import {
   parseCategoryFlag,
 } from "../check-run.js";
 import { printUpstreamTable } from "../check-upstream.js";
+import { fullCheckPayload } from "../check-mcp-summary.js";
+import { writeCheckDetail } from "../check-detail-store.js";
 import { syncSecurityFindings } from "../findings-track.js";
 import { collectHints } from "../hints.js";
 import {
@@ -224,6 +226,10 @@ async function runCheckAction(
     step,
   });
   await trackFindings(config, run, jsonMode);
+  // Save the run to .kit/runs the way the MCP kit_check tool does, so `kit usage` reads a CLI
+  // run too. Fail-soft: a write that cannot happen (read-only mode or
+  // checkout) leaves no file and never changes the verdict.
+  writeCheckDetail(process.cwd(), fullCheckPayload(run), Date.now());
   if (jsonMode) return printJsonRun(run);
 
   printTables(run);
