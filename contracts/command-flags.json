@@ -57,14 +57,15 @@
       "bareFlags": []
     },
     "run": {
-      "flags": [],
-      "reason": "Run uses global Kit options. Arguments after the separator belong to the child command.",
+      "flags": ["--inject"],
+      "reason": "Run uses global Kit options, and --inject passes declared secrets only in the child's environment. Arguments after the separator belong to the child command.",
       "tests": [
         "src/command-owned-flags.test.ts",
         "src/cli-run-environment-policy.test.ts",
-        "src/cli-flag-values-contract.test.ts"
+        "src/cli-flag-values-contract.test.ts",
+        "src/cli-run-inject.test.ts"
       ],
-      "bareFlags": []
+      "bareFlags": ["--inject"]
     },
     "whoami": {
       "flags": ["--json"],

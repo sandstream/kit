@@ -36,7 +36,7 @@ const cases = [
     args: ["create-plugin", "contract-probe", "--skip-install"],
     wrong: "--no-setup",
   },
-  { verb: "run", own: [], args: ["run", "--", ...child], wrong: "--minimal" },
+  { verb: "run", own: ["--inject"], args: ["run", "--", ...child], wrong: "--minimal" },
   { verb: "open", own: [], args: ["open"], wrong: "--json" },
 ];
 
