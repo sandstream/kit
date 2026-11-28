@@ -59,4 +59,4 @@ Enabled audit layers record that failure. A permission refusal does not start th
 
 Child output stays inside the tool result. Child standard input cannot consume MCP requests.
 Explicit URL checks cannot infer arbitrary child file writes, environment access, or hidden network requests.
-See [child command execution](COMMANDS.md#child-command-execution) for environment and audit limits.
+See [child command execution](CLI_RUNTIME.md#child-command-execution) for environment and audit limits.
