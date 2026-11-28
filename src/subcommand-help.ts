@@ -215,7 +215,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "triage brew":
     "Homebrew formula or cask: resolves the upstream repository, then scores it as kit triage repo does",
   "triage mcp":
-    "MCP tool metadata: reads the tool definitions for poisoning and pins them against drift. kit triage mcp <server> --tools <file>",
+    "MCP tool metadata: reads the tool definitions and the server instructions for poisoning and pins them against drift. kit triage mcp <server> --tools <file> [--init <initialize.json>]",
   "triage model":
     "An untrusted AI artifact (model weights or a dataset) before you load it; --scan-bytes adds a byte-level malware scan through a local ClamAV",
   "triage plugin":

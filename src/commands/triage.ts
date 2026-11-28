@@ -1,10 +1,10 @@
 // `kit triage` commands — extracted from cli.ts (incremental split).
 import { c } from "../utils/colors.js";
-import { hasFlag, flagValue } from "../utils/flags.js";
+import { hasFlag } from "../utils/flags.js";
 import { runTriage, listTriageTools, type TriageType } from "../triage.js";
 import { recordNpxBins } from "../triage-npm-bins.js";
 import { SKIPPED_COMMITS_LOG } from "../hooks.js";
-import { triageMcpTools, extractToolDefs } from "../mcp-triage.js";
+import { cmdTriageMcp } from "./triage-mcp.js";
 import { discoverPlugins } from "../agent-sbom.js";
 import { scanPluginManifest, manifestHasHighRisk } from "../plugin-triage.js";
 import { triageVaultConfig } from "../vault-triage.js";
@@ -96,7 +96,7 @@ const HELP_ROWS = [
   "  kit triage model <path> --scan-bytes + byte-level malware scan via a local ClamAV delegate (clean/malicious/gap; never a silent pass)",
   "  kit triage skill <path|name>         Evaluate Claude Code / agent skill",
   "  kit triage skill <path|name> --deep  Require a complete SkillSpector static scan",
-  "  kit triage mcp <server> --tools <f>  Evaluate MCP tool metadata (poisoning) + pin against drift",
+  "  kit triage mcp <server> --tools <f>  MCP tool metadata (poisoning) + pin against drift; --init <f> adds the server instructions",
   "  kit triage plugin [name]             Triage kitPlugins (npm supply-chain + manifest-poisoning scan); all declared if no name",
   "  kit triage vault-config              Triage the secret-backend selection (.kit.toml secrets.store + per-key source); never reads secret values",
   "  kit triage all <target>              Auto-detect and run all checks",
@@ -422,114 +422,6 @@ async function cmdTriagePlugin(args: string[]): Promise<boolean> {
     console.log(`\n${c.yellow}⚠️  Review warnings above before trusting these plugins.${c.reset}`);
   }
   return allPassed;
-}
-
-const MCP_PIN_FILE = ".kit-mcp-pins.json";
-
-interface McpPin {
-  hash: string;
-  toolCount: number;
-  pinnedAt: string;
-}
-
-/**
- * `kit triage mcp <server> --tools <manifest.json> [--pin]` — static MCP
- * tool-metadata triage (G3). Reads a tools/list manifest, runs kit's injection
- * detector over every tool description + parameter doc (tool poisoning), and
- * compares a stable content hash against a pinned one (rug-pull / drift). Exits
- * non-zero on high-confidence poisoning or a silent tool-definition change.
- * `--pin` records/updates the pin. Deterministic, zero-LLM.
- */
-async function cmdTriageMcp(args: string[]): Promise<boolean> {
-  const { readFile, writeFile } = await import("node:fs/promises");
-  const { resolve } = await import("node:path");
-
-  const server = args.find((a) => !a.startsWith("--"));
-  const toolsPath = flagValue(process.argv, "--tools");
-  const doPin = hasFlag(args, "--pin");
-  if (!server || !toolsPath) {
-    console.error(
-      `${c.red}usage: kit triage mcp <server> --tools <manifest.json> [--pin]${c.reset}`,
-    );
-    console.error(
-      `${c.dim}manifest = a tools/list response (or a JSON array of tool defs) for the server${c.reset}`,
-    );
-    return false;
-  }
-
-  let tools;
-  try {
-    const raw = await readFile(resolve(process.cwd(), toolsPath), "utf-8");
-    tools = extractToolDefs(JSON.parse(raw));
-  } catch (err) {
-    console.error(
-      `${c.red}could not read tool manifest ${toolsPath}: ${err instanceof Error ? err.message : err}${c.reset}`,
-    );
-    return false;
-  }
-  if (tools.length === 0) {
-    console.error(`${c.red}no tool definitions found in ${toolsPath}${c.reset}`);
-    return false;
-  }
-
-  const pinPath = resolve(process.cwd(), MCP_PIN_FILE);
-  const pins = await readMcpPins(pinPath, readFile);
-  const result = triageMcpTools(server, tools, pins[server]?.hash);
-
-  console.log(`${c.bold}MCP triage: ${server}${c.reset} (${result.toolCount} tools)`);
-  if (result.findings.length === 0) {
-    console.log(`  ${c.green}✓ no tool-poisoning patterns${c.reset}`);
-  } else {
-    for (const f of result.findings) {
-      const tag =
-        f.confidence === "high" ? `${c.red}[HIGH]${c.reset}` : `${c.yellow}[heur]${c.reset}`;
-      console.log(`  ${tag} ${f.tool} · ${f.field}: ${f.label}`);
-    }
-  }
-  const driftMsg: Record<string, string> = {
-    new: `${c.dim}new server — no prior pin${c.reset}`,
-    unchanged: `${c.green}✓ tool set unchanged since pin${c.reset}`,
-    changed: `${c.red}✗ RUG-PULL: tool set changed since pin${c.reset}`,
-    "legacy-pin": `${c.yellow}! pin predates title, annotation and output-schema coverage — review them, then re-pin with --pin${c.reset}`,
-    unknown: `${c.dim}drift unknown${c.reset}`,
-  };
-  console.log(`  ${driftMsg[result.drift]}`);
-  console.log(`  ${c.dim}hash ${result.toolsetHash.slice(0, 16)}…${c.reset}`);
-
-  if (doPin) {
-    pins[server] = {
-      hash: result.toolsetHash,
-      toolCount: result.toolCount,
-      pinnedAt: new Date().toISOString(),
-    };
-    try {
-      await writeFile(pinPath, JSON.stringify(pins, null, 2) + "\n", "utf-8");
-      console.log(`  ${c.green}✓ pinned${c.reset}`);
-    } catch (err) {
-      console.error(
-        `${c.red}could not write pin: ${err instanceof Error ? err.message : err}${c.reset}`,
-      );
-      return false;
-    }
-    // Pinning accepts the current state as trusted, so drift can't fail this run.
-    return !result.findings.some((f) => f.confidence === "high");
-  }
-
-  if (!result.passed) {
-    console.error(`${c.red}✗ MCP triage failed (poisoning or rug-pull) — review above${c.reset}`);
-  }
-  return result.passed;
-}
-
-async function readMcpPins(
-  pinPath: string,
-  readFile: (p: string, enc: "utf-8") => Promise<string>,
-): Promise<Record<string, McpPin>> {
-  try {
-    return JSON.parse(await readFile(pinPath, "utf-8")) as Record<string, McpPin>;
-  } catch {
-    return {};
-  }
 }
 
 export { TRIAGE_MAX_AGE_DAYS } from "../triage-receipt.js";
