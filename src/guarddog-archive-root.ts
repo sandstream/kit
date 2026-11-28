@@ -36,6 +36,9 @@ const MAX_FETCH_MS = 20_000;
 const MAX_TAR_BYTES = 64 * 1024 * 1024;
 /** A bound on the extra downloads and scans one check can start. */
 const MAX_RESCANS = 8;
+// The name and version go into a registry URL, so only plain npm spellings are accepted.
+const NPM_NAME = /^(?:@[a-z\d_~][a-z\d._~-]*\/)?[a-z\d_~][a-z\d._~-]*$/i;
+const NPM_VERSION = /^\d+\.\d+\.\d+(?:-[\da-z.-]+)?(?:\+[\da-z.-]+)?$/i;
 
 /** Network and process access, replaceable in tests. */
 export interface ArchiveRootTools {
@@ -64,7 +67,9 @@ function rootErrorRow(entry: unknown): entry is RootErrorRow {
   const { errors, issues, results } = result;
   return (
     typeof dependency === "string" &&
+    NPM_NAME.test(dependency) &&
     typeof version === "string" &&
+    NPM_VERSION.test(version) &&
     Number.isSafeInteger(issues) &&
     (results === undefined || scannerRecord(results)) &&
     scannerRecord(errors) &&
@@ -91,7 +96,7 @@ function policy(rescan: Rescan, maxBytes?: number): NpmArtifactFetchPolicy {
 
 /** The registry document of one exact version, as GuardDog reads it from the full packument. */
 async function registryDocument(row: RootErrorRow, rescan: Rescan) {
-  const url = `${REGISTRY}/${row.dependency.replace("/", "%2F")}/${row.version}`;
+  const url = `${REGISTRY}/${row.dependency.replaceAll("/", "%2F")}/${row.version}`;
   const fetched = await rescan.tools.fetch(url, policy(rescan, MAX_DOCUMENT_BYTES));
   if (fetched.status !== "retrieved") return undefined;
   const parsed = parseJsonObject(fetched.bytes, MAX_DOCUMENT_BYTES);

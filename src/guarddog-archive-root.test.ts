@@ -177,6 +177,8 @@ describe("rescanArchiveRoots fails closed", () => {
     assert.equal(await rescan(input, missing), input);
     const other = verify({ metadata_mismatch: "failed to run rule metadata_mismatch: boom" });
     assert.equal(await rescan(other, t), other);
+    const odd = { ...input, stdout: input.stdout.replace('"@scope/fixture"', '"../x/y"') };
+    assert.equal(await rescan(odd, t), odd);
     assert.equal(await rescanArchiveRoots("pypi", input, "guarddog", 10_000, t), input);
     assert.deepEqual(calls, []);
   });
