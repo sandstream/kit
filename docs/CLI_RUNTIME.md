@@ -28,7 +28,7 @@ are read-only and work in any mode.
 
 ## Child command execution
 
-Use `kit run [--env <name>] -- <command> [args...]`.
+Use `kit run [--env <name>] [--inject] -- <command> [args...]`.
 Kit passes arguments after `--` to the child without interpreting them as Kit flags.
 The CLI preserves the child exit code. A missing executable returns 127.
 
@@ -39,7 +39,9 @@ Kit validates supported sections in every declared overlay, then validates the e
 Supported overlay sections are `tools`, `services`, `secrets`, `skills`, and `governance`.
 Other overlay sections remain stored but do not apply.
 The child receives the parent environment plus values from `.env.local`, when that file exists; their key names are first recorded as a `secrets.read` event ([data flow](DATA_FLOW.md#secret-reads-secretsread)).
-This command does not fetch vault values or generate environment files.
+Without `--inject`, this command does not fetch vault values or generate environment files.
+
+With `--inject` (MCP `kit_run`: `inject: true`), kit resolves every key `.kit.toml` declares in `[secrets.keys]` and passes the values only in the child's environment, over the inherited one. It neither reads nor writes `.env.local`. The read is recorded as `secrets.read` with `via: "kit run"` before any value is fetched, and the values are redacted from the child's output like every declared value. The child does not start when there is no `[secrets.keys]`, a key is prod-scoped outside the prod env (the rule `kit secrets` applies), the read cannot be recorded, or any key does not resolve. On Windows, names are folded case-insensitively, so an inherited `Path` never sits beside an injected `PATH`. Next.js and Vite take an existing `process.env` value ahead of `.env.local`, so `kit run --inject -- next dev` or `kit run --inject -- vite` needs no file. A tool that only reads the file still needs `kit secrets`.
 
 Enabled governance checks permissions, revocation, budget, and configured secret expiration before execution.
 Active resource rules inspect the parsed arguments for explicit URL hosts and scheme-less curl/wget targets.
