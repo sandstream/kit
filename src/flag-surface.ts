@@ -480,7 +480,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--split",
     "--strict",
   ],
-  run: [],
+  run: ["--inject"],
   sbom: ["--agent", "--format"],
   scan: ["--json", "--list-delegates", "--sarif", "--strict", "--update-baseline"],
   secrets: [
@@ -523,6 +523,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--vercel-team",
     "--verify",
     "--via",
+    "--write-env-file",
     "--yes",
   ],
   security: [
@@ -688,7 +689,7 @@ export const COMMAND_BARE_FLAGS: Record<string, readonly string[]> = {
   "guard-observe": [],
   ingest: ["--json"],
   open: [],
-  run: [],
+  run: ["--inject"],
   whoami: ["--json"],
 };
 
