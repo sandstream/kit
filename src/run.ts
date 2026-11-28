@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { parse as parseToml } from "smol-toml";
 import { parseEnvFile } from "./env-inspect.js";
+import { mergeInjected, resolveInjectedSecrets } from "./run-inject.js";
 import { recordSecretRead } from "./secrets-read-record.js";
 import {
   createRedactingLineWriter,
@@ -30,6 +31,11 @@ export interface RunOptions {
   maxOutputBytes?: number;
   /** `[governance.agent]`, stamped on the record of the `.env.local` names handed to the child. */
   agent?: { id?: string; name?: string };
+  /**
+   * Resolve `[secrets.keys]` and pass them only in the child's environment (`kit run --inject`).
+   * `.env.local` is then neither read nor written; an unresolved key stops the run.
+   */
+  inject?: boolean;
 }
 
 export interface RunResult {
@@ -163,23 +169,31 @@ async function declaredSecretValues(cwd: string, env: Record<string, string>): P
   return values.filter((value): value is string => typeof value === "string" && value !== "");
 }
 
+/** The `.env.local` names not overridden, merged into `env`. A missing file adds none. */
+async function mergeEnvLocal(
+  cwd: string,
+  env: Record<string, string>,
+  overrides: Record<string, string>,
+): Promise<string[]> {
+  try {
+    const parsed = parseEnvFile(await readFile(resolve(cwd, ".env.local"), "utf-8"));
+    Object.assign(env, parsed);
+    return Object.keys(parsed).filter((name) => !Object.hasOwn(overrides, name));
+  } catch {
+    return []; // .env.local is optional.
+  }
+}
+
+/** With `injected` (`kit run --inject`), those values replace `.env.local`, which is not read. */
 async function loadCommandEnvironment(
   cwd: string,
   inheritEnv: boolean,
   overrides: Record<string, string>,
+  injected?: ReadonlyMap<string, string>,
 ): Promise<{ env: Record<string, string>; knownSecrets: KnownSecrets; fromEnvLocal: string[] }> {
-  const env: Record<string, string> = inheritEnv
-    ? { ...(process.env as Record<string, string>) }
-    : {};
-  let fromEnvLocal: string[] = [];
-  try {
-    const content = await readFile(resolve(cwd, ".env.local"), "utf-8");
-    const parsed = parseEnvFile(content);
-    fromEnvLocal = Object.keys(parsed).filter((name) => !Object.hasOwn(overrides, name));
-    Object.assign(env, parsed);
-  } catch {
-    // .env.local is optional.
-  }
+  const inherited = inheritEnv ? { ...(process.env as Record<string, string>) } : {};
+  const env = injected ? mergeInjected(inherited, injected) : inherited;
+  const fromEnvLocal = injected ? [] : await mergeEnvLocal(cwd, env, overrides);
   Object.assign(env, overrides);
   const knownSecrets = {
     known: secretValuesFromEnv(env),
@@ -442,7 +456,7 @@ class CommandProcess {
   }
 }
 
-/** Execute a command with parent environment, optional .env.local, and explicit overrides. */
+/** Execute a command with parent environment, optional .env.local or injected secrets, and overrides. */
 export async function executeCommand(opts: RunOptions): Promise<RunResult> {
   const {
     commandArgs,
@@ -455,10 +469,13 @@ export async function executeCommand(opts: RunOptions): Promise<RunResult> {
     maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
   } = opts;
   if (commandArgs.length === 0) throw new Error("No command provided");
+  // Resolved and recorded as `secrets.read` via "kit run" before the child exists; throws if not.
+  const injected = opts.inject ? await resolveInjectedSecrets(cwd) : undefined;
   const { env, knownSecrets, fromEnvLocal } = await loadCommandEnvironment(
     cwd,
     inheritEnv,
     envOverrides,
+    injected,
   );
   if (parentSignal) throw new Error(`Cannot start a command during ${parentSignal} cleanup`);
   // The names kit hands the child from .env.local, recorded before the spawn; unrecordable → throw.

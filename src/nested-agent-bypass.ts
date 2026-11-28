@@ -15,13 +15,11 @@
  * starts a T3 Code agent at the project's runtime mode, which is Full access unless changed, and no
  * flag on that command can set it (kit-research#241). Such a launch is refused whatever its flags.
  *
- * Only flags the vendor documents are listed, each with its source. Read without execution, like
- * `install-gate-hooks`. Quoted text is data unless a shell runs it (`sh -c '…'`, `$(…)`,
- * `powershell -EncodedCommand`), which is read again, to a bounded depth.
+ * Only flags the vendor documents are listed, each with its source. Read without execution, through
+ * the carriers in `gate-bash-carriers` (`sh -c '…'`, `$(…)`, `powershell -EncodedCommand`, …).
  */
-import { bin, MAX_DEPTH, SHELLS, WRAPPERS } from "./install-gate-hooks.js";
-import { windowsShellBodies } from "./install-gate-shells.js";
-import { shellSegments, shellWords, shellWordValue } from "./install-gate-words.js";
+import { readThroughCarriers, type CommandReader } from "./gate-bash-carriers.js";
+import { bin } from "./install-gate-hooks.js";
 
 /** What was caught. */
 export interface NestedAgentBypass {
@@ -180,11 +178,6 @@ const CLIS = new Map<string, string>([
   ["droid", "droid"],
   ["t3", "t3"],
 ]);
-const RUNNERS = new Set(["npx", "bunx", "pnpx"]);
-const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun"]);
-const RUNNER_SUBCOMMANDS = new Set(["exec", "dlx", "x"]);
-const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
-const KEYWORDS = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{", "("]);
 
 /**
  * The agent a command word starts, or null: `claude`, `/usr/local/bin/codex`, `gemini.cmd`,
@@ -239,85 +232,16 @@ function harnessHit(h: Harness, args: readonly string[], env: string[]): string 
   return all.length > 0 && all.every(Boolean) ? all.join(" ") : null;
 }
 
-function knownHead(word: string): boolean {
-  const head = bin(word);
-  return (
-    nestedAgentCli(word) !== null ||
-    SHELLS.has(head) ||
-    WRAPPERS.has(head) ||
-    RUNNERS.has(head) ||
-    PACKAGE_MANAGERS.has(head)
-  );
-}
-
-/** `env X=1 claude …`, `npx -y @openai/codex …`, `sudo -u x gemini …`: read from the command on. */
-function wrapped(args: string[], depth: number): NestedAgentBypass | null {
-  const k = args.findIndex(knownHead);
-  if (k < 0) return null;
-  const env = args.slice(0, k).filter((a) => ASSIGNMENT.test(a));
-  return wordsFound([...env, ...args.slice(k)], depth + 1);
-}
-
-/** A shell's command string is run: read each multi-word argument as a command. */
-function shellString(args: string[], depth: number): NestedAgentBypass | null {
-  for (const arg of args) {
-    const found = /\s/.test(arg) ? commandFound(arg, depth + 1) : null;
-    if (found) return found;
-  }
-  return wrapped(args, depth);
-}
-
-/** A wrapper, runner, package-manager runner or shell around another command. */
-function viaCarrier(head: string, args: string[], depth: number): NestedAgentBypass | null {
-  if (depth >= MAX_DEPTH) return null;
-  if (WRAPPERS.has(head) || RUNNERS.has(head)) return wrapped(args, depth);
-  if (PACKAGE_MANAGERS.has(head) && RUNNER_SUBCOMMANDS.has(args[0] ?? ""))
-    return wrapped(args.slice(1), depth);
-  return SHELLS.has(head) || head === "eval" ? shellString(args, depth) : null;
-}
-
-function wordsFound(words: readonly string[], depth: number): NestedAgentBypass | null {
-  let i = 0;
-  const env: string[] = [];
-  for (; i < words.length && (ASSIGNMENT.test(words[i]!) || KEYWORDS.has(words[i]!)); i++)
-    if (ASSIGNMENT.test(words[i]!)) env.push(words[i]!);
-  const head = words[i] ?? "";
-  const args = words.slice(i + 1);
-  const harness = BY_AGENT.get(nestedAgentCli(head) ?? "");
-  if (!harness) return viaCarrier(bin(head), args, depth);
-  const flag = harnessHit(harness, args, env);
-  if (!flag) return null;
-  const found = { agent: harness.agent, flag, approvalsOn: harness.approvalsOn };
-  return harness.mode ? { ...found, mode: harness.mode } : found;
-}
-
-/** Grouping characters glued to a word (`(claude`, `-y)`) are syntax, not part of it. */
-function segmentWords(segment: string): string[] {
-  return shellWords(segment)
-    .map((w) => shellWordValue(w).replace(/^[({]+|[)}]+$/g, ""))
-    .filter(Boolean);
-}
-
-/** Text a shell runs inside this command: `$(…)`, backticks, `cmd /c`, `powershell -c|-e`. */
-function innerCommands(command: string): string[] {
-  const out = [...command.matchAll(/\$\(([^()]{1,2000})\)|`([^`]{1,2000})`/g)].map(
-    (m) => m[1] ?? m[2]!,
-  );
-  return [...out, ...windowsShellBodies(command)];
-}
-
-function commandFound(command: string, depth: number): NestedAgentBypass | null {
-  for (const segment of shellSegments(command)) {
-    const found = wordsFound(segmentWords(segment), depth);
-    if (found) return found;
-  }
-  if (depth >= MAX_DEPTH) return null;
-  for (const inner of innerCommands(command)) {
-    const found = commandFound(inner, depth + 1);
-    if (found) return found;
-  }
-  return null;
-}
+const READER: CommandReader<NestedAgentBypass> = {
+  isTarget: (word) => nestedAgentCli(word) !== null,
+  read(head, args, env) {
+    const harness = BY_AGENT.get(nestedAgentCli(head)!)!;
+    const flag = harnessHit(harness, args, env);
+    if (!flag) return null;
+    const found = { agent: harness.agent, flag, approvalsOn: harness.approvalsOn };
+    return harness.mode ? { ...found, mode: harness.mode } : found;
+  },
+};
 
 /**
  * The nested agent with approvals off in `command`, or null. `command` is a shell command string,
@@ -325,9 +249,7 @@ function commandFound(command: string, depth: number): NestedAgentBypass | null 
  * `agent-audit`.
  */
 export function nestedAgentBypass(command: string | readonly string[]): NestedAgentBypass | null {
-  if (typeof command !== "string") return wordsFound(command, 0);
-  if (!command || command.length > 100_000) return null;
-  return commandFound(command, 0);
+  return readThroughCarriers(command, READER);
 }
 
 /** The refusal: the agent, the flag, how to run it with approvals on, and who decides. */

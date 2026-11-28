@@ -60,6 +60,26 @@ Deterministic, fail-closed, zero-LLM:
   CLI, which approves everything by default when given a prompt, and approval settings in a
   config file or `-c` override rather than on the command line.
 
+  It refuses the GitHub actions a scoped token reaches, as it refuses a push to the default branch
+  (`src/gh-token-actions.ts`): every `gh pr merge` (plain, `--auto` and `--admin` all land or queue
+  a change on the base branch), `gh secret set|delete`, `gh variable set|delete`,
+  `gh workflow run|enable|disable`, `gh auth token|refresh|login|switch` and
+  `gh auth status --show-token`, a `gh alias set` that expands to one of these, and the same writes
+  through `gh api`: a non-GET request (any method spelling: `-X PUT`, `-XPUT`, `--method=put`, or a
+  body that makes it a POST) to a pull request's `/merge` or `ccr/auto_merge`, to `/merges`, to a
+  `secrets` or `variables` path, to a workflow's `dispatches|enable|disable` or to a repository's
+  `dispatches`, and the GraphQL merge mutations. That the token allows an action does not make it
+  the agent's decision: the refusal names the action and asks the agent to hand it to the person.
+  Reads stay allowed (`gh api` GETs, `gh pr view|list|checks`, `gh run view`, `gh secret list`), and
+  so does `gh pr create`. It reads through the same carriers as the nested-agent check
+  (`src/gate-bash-carriers.ts`), so `command gh`, `exec gh`, an absolute path, `gh.exe`, a quoted
+  `"gh"`, an env prefix, `sh -c`, `$(…)` and PowerShell `-Command` are refused too. It is part of
+  `gate-bash`, so every harness whose shell tool kit routes through `gate-bash` is covered (the
+  end-to-end test drives the Claude Code and Codex payloads); an agent kit writes only a rules file
+  for (Copilot) is not. Not covered: the same request sent with `curl` and a token, a GitHub MCP
+  server's merge tool (not a shell command), and a GraphQL query read from a file
+  (`-F query=@file`).
+
   It refuses a system-wide change to the trusted root certificates (`src/ca-trust-store.ts`):
   `update-ca-certificates`, `update-ca-trust`, `trust anchor`, `security add-trusted-cert`,
   `certutil -addstore Root` (or `AuthRoot`), `Import-Certificate` / `Import-PfxCertificate` into
