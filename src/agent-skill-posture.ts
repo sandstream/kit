@@ -9,6 +9,11 @@
  * tool, and one without `disable-model-invocation` may be invoked by the model on its own; both are
  * the defaults, so a skill that says nothing is the one with the widest posture. Each row says which
  * values were declared and which are defaults. Read-only; nothing is run.
+ *
+ * Other harnesses keep project skills in folders this row does not read (`.cursor/skills`,
+ * `.opencode/skills`, `.gemini/skills`, `.github/skills`). A skill installed there was absent with
+ * no word said (kit-research unslop-anything-vs-kit), so a folder that exists is named as unread.
+ * Reading them is a separate decision: each vendor's layout has to be checked first.
  */
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -136,6 +141,30 @@ export function invocationPhrase(m: SkillManifest): string {
   return `${model}, ${user}`;
 }
 
+/** Project skill folders other harnesses load and this posture does not read, with their harness. */
+const UNREAD_PROJECT_SKILL_DIRS: [rel: string, harness: string][] = [
+  [".cursor/skills", "Cursor"],
+  [".opencode/skills", "OpenCode"],
+  [".gemini/skills", "Gemini CLI"],
+  [".github/skills", "GitHub Copilot"],
+];
+
+function isDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The unread skill folders present in `cwd`, as shown: `.cursor/skills (Cursor, 2 skill(s))`. */
+function unreadSkillFolders(cwd: string): string[] {
+  return UNREAD_PROJECT_SKILL_DIRS.filter(([rel]) => isDir(join(cwd, ...rel.split("/")))).map(
+    ([rel, harness]) =>
+      `${rel} (${harness}, ${skillDirs(join(cwd, ...rel.split("/"))).length} skill(s))`,
+  );
+}
+
 function row(status: "pass" | "warn", name: string, detail: string): SecurityCheckResult {
   return { category: "exposure", name, status, detail };
 }
@@ -160,6 +189,16 @@ export function runAgentSkillPosture(
   env: Record<string, unknown> = {},
 ): SecurityCheckResult[] {
   const postures = readSkillPostures(cwd, home, env);
+  const unread = unreadSkillFolders(cwd);
+  const unreadRows = unread.length
+    ? [
+        row(
+          "warn",
+          "skill posture: folders not read",
+          `${unread.join(", ")}: present, but neither this posture nor the agent-audit script scan reads them`,
+        ),
+      ]
+    : [];
   if (postures.length === 0) {
     return [
       row(
@@ -167,6 +206,7 @@ export function runAgentSkillPosture(
         "skill posture",
         "no skills in .claude/skills, .agents/skills or .codex/skills here or at user level",
       ),
+      ...unreadRows,
     ];
   }
   const project = postures.filter((p) => p.scope === "project").length;
@@ -175,5 +215,5 @@ export function runAgentSkillPosture(
     "skill posture",
     `${postures.length} skill(s): ${project} in this checkout, ${postures.length - project} at user level`,
   );
-  return [summary, ...postures.map(postureRow)];
+  return [summary, ...unreadRows, ...postures.map(postureRow)];
 }

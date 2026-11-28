@@ -1,0 +1,3 @@
+### Fixed
+
+- **`kit agent-audit` now names project skill folders it does not read.** Its skill posture and script scan read `.claude/skills`, `.agents/skills` and `.codex/skills`; a skill under `.cursor/skills`, `.opencode/skills`, `.gemini/skills` or `.github/skills` was absent from the output with nothing said. When one of those folders exists, a `skill posture: folders not read` warning now names it, with the harness that loads it and how many skills it holds. The folders are still not read; that is a separate decision. The exit code does not change. Found by kit-research `unslop-anything-vs-kit`.
