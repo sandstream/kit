@@ -15,6 +15,7 @@ import {
   scannedHead,
   staleCatalogDetail,
   staleCatalogStatus,
+  withRepositoryScope,
 } from "./bumblebee-age.js";
 import { checkEnvGitignored } from "./check-env-gitignore.js";
 export { checkEnvGitignored } from "./check-env-gitignore.js";
@@ -165,6 +166,11 @@ export interface SecurityCheckResult extends Partial<{ hasFindings: true; scanIn
    * instead of the human-facing result name. Only set on self-audit results.
    */
   ruleId?: string;
+  /**
+   * True when the scan behind this row did not look at this repository (bumblebee's `baseline`
+   * profile reads the machine's package roots). Its pass is no evidence for a repository control.
+   */
+  outsideRepository?: true;
   /** Other advisory ids (CVE/GHSA) the scanner reported for the same vulnerability. */
   aliases?: string[];
 }
@@ -2326,9 +2332,9 @@ async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
     } satisfies SecurityCheckResult);
   if (!findings && !outcome.gap) {
     const advisory = await bumblebeeCatalogAdvisory(outcome, profile);
-    if (advisory) return advisory;
+    if (advisory) return withRepositoryScope(advisory, profile);
   }
-  return scannerEvidence(row, outcome.findings.length, outcome.gap);
+  return withRepositoryScope(scannerEvidence(row, outcome.findings.length, outcome.gap), profile);
 }
 
 /** Short, human-readable summary of the catalogs matched by findings. */

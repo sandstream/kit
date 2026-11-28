@@ -311,3 +311,40 @@ describe("coverage --verify: an incomplete backing row does not verify a control
     assert.equal(pt.evidence, "unrun");
   });
 });
+
+describe("coverage --verify: a pass that did not look at this repository verifies nothing", () => {
+  // Measured: NIST 800-53 SA and SR read "verified" when their only backing row present was
+  // `bumblebee (supply-chain)` passing on the baseline profile, whose detail says it read the
+  // machine's package roots, "not this repository's dependencies", while `npm audit` failed.
+  const bumblebee: SecurityCheckResult = {
+    category: "supply-chain",
+    name: "bumblebee (supply-chain)",
+    status: "pass",
+    detail: "no known exposures in 86 packages on this machine (baseline profile: …)",
+    outsideRepository: true,
+  };
+  const npmAudit: SecurityCheckResult = {
+    category: "dependency",
+    name: "npm audit",
+    status: "fail",
+    detail: "0 critical, 3 high vulnerabilities",
+  };
+  const family = (id: string, results: SecurityCheckResult[]) =>
+    buildStandardReport(NIST_800_53, results)
+      .sections.flatMap((s) => s.entries)
+      .find((e) => e.requirement.id === id)?.evidence;
+
+  it("leaves SA and SR unrun, not verified", () => {
+    assert.equal(family("SR", [bumblebee, npmAudit]), "unrun");
+    assert.equal(family("SA", [bumblebee, npmAudit]), "unrun");
+  });
+
+  it("a repository-scoped pass of the same scan still verifies SR", () => {
+    const projectScan = { ...bumblebee, outsideRepository: undefined };
+    assert.equal(family("SR", [projectScan, npmAudit]), "verified");
+  });
+
+  it("a machine-scope fail still fails the control", () => {
+    assert.equal(family("SR", [{ ...bumblebee, status: "fail" }]), "failing");
+  });
+});

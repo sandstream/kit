@@ -37,8 +37,9 @@ export type Bucket = "auto" | "gap" | "manual" | "na";
  *   verified - a backing check actually ran and passed, and none failed, did not run, or
  *              stopped with findings
  *   failing  - a backing check ran and FAILED (the control is NOT covered this run)
- *   unrun    - no backing check produced a pass this run (skipped / absent), or one of them did
- *              not run or did not finish and reported findings
+ *   unrun    - no backing check produced a pass this run (skipped / absent, or a pass from a
+ *              scan that did not look at this repository), or one of them did not run or did
+ *              not finish and reported findings
  * Without results the field is undefined and AUTO means only "a check is mapped".
  */
 export type EvidenceState = "verified" | "failing" | "unrun";
@@ -74,9 +75,14 @@ export function evidenceFor(checks: string[], byKey: Map<string, EvidenceStatus>
   return sawPass && !sawIncomplete ? "verified" : "unrun";
 }
 
-/** A fail stays a fail; a row that did not run or did not finish with findings is incomplete. */
+/**
+ * A fail stays a fail; a row that did not run or did not finish with findings is incomplete. A pass
+ * from a scan that did not look at this repository (`outsideRepository`) counts as a skip: it is
+ * no evidence for a repository control, so it cannot verify one on its own.
+ */
 function evidenceStatus(r: SecurityCheckResult): EvidenceStatus {
   if (r.status === "fail") return "fail";
+  if (r.outsideRepository && r.status === "pass") return "skip";
   return r.didNotRun || r.hasFindings ? "incomplete" : r.status;
 }
 
