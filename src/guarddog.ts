@@ -12,6 +12,17 @@ import { parseJsonObject } from "./utils/json-object.js";
 export const GUARDDOG_CHECK = { category: "supply-chain", name: "guarddog (malware)" } as const;
 export type GuardDogEcosystem = "npm" | "pypi";
 
+/** Reviewed exceptions for one scan (see guarddog-exceptions.ts). */
+export interface GuardDogWaiver {
+  /** True when a reviewed exception covers this source finding. */
+  finding(dependency: string, version: string, rule: string, location: string): boolean;
+  /** Text for the check detail: what was excepted, and entries that no longer apply. */
+  summary(): string;
+}
+
+/** A waiver bound to one package row of the report: rule and finding location. */
+type RowWaiver = (rule: string, location: string) => boolean;
+
 interface GuardDogScope {
   ecosystem: GuardDogEcosystem;
   selectors: Map<string, Set<string>>;
@@ -193,12 +204,16 @@ function hasRuleFinding(value: unknown): boolean {
 // reads). Its risk engine forms a risk only from a threat, so these hits are
 // inventory and are not counted as malware indicators. GuardDog's `issues`
 // includes them.
-function indicatorCount(results: Record<string, unknown>): number {
+// A reviewed exception covers only a source finding: a metadata text finding names no file.
+// Rule errors are never excepted, so a rule that did not run leaves coverage unverified.
+function indicatorCount(results: Record<string, unknown>, waiver?: RowWaiver): number {
   let count = 0;
   for (const [rule, value] of Object.entries(results)) {
     if (rule.startsWith("capability-")) continue;
     if (reportText(value)) count += 1;
-    else if (Array.isArray(value)) count += value.length;
+    else if (Array.isArray(value)) {
+      count += value.filter((hit) => !waiver?.(rule, String(hit.location))).length;
+    }
   }
   return count;
 }
@@ -210,21 +225,21 @@ function issueTotal(issues: unknown): number | undefined {
 }
 
 /** The indicator count, and whether kit could read the per-rule results. */
-function ruleCount(issueCount: number | undefined, results: unknown) {
+function ruleCount(issueCount: number | undefined, results: unknown, waiver?: RowWaiver) {
   const ruleResults = scannerRecord(results) ? Object.values(results) : undefined;
   if (issueCount !== undefined && validRuleResults(ruleResults, issueCount > 0)) {
-    return { count: indicatorCount(results as Record<string, unknown>), readable: true };
+    return { count: indicatorCount(results as Record<string, unknown>, waiver), readable: true };
   }
   // Results kit cannot read keep GuardDog's own count.
   const hasFinding = ruleResults?.some(hasRuleFinding) ?? false;
   return { count: Math.max(issueCount ?? 0, hasFinding ? 1 : 0), readable: false };
 }
 
-function countIndicators(result: Record<string, unknown>): ScannerReport {
+function countIndicators(result: Record<string, unknown>, waiver?: RowWaiver): ScannerReport {
   const { errors, results } = result;
   const issueCount = issueTotal(result.issues);
   const messages = scannerRecord(errors) ? Object.values(errors) : undefined;
-  const { count, readable } = ruleCount(issueCount, results);
+  const { count, readable } = ruleCount(issueCount, results, waiver);
   if (issueCount === undefined || !messages || !messages.every(reportText)) {
     return { count, gap: "malformed" };
   }
@@ -246,7 +261,16 @@ function packageEnvelope(entry: unknown, namePattern: RegExp) {
   return { dependency: entry.dependency, version: entry.version, result: entry.result };
 }
 
-function packageRows(entries: unknown[], ecosystem: GuardDogEcosystem) {
+function rowWaiver(
+  waiver: GuardDogWaiver | undefined,
+  dependency: string,
+  version: string,
+): RowWaiver | undefined {
+  if (!waiver) return undefined;
+  return (rule, location) => waiver.finding(dependency, version, rule, location);
+}
+
+function packageRows(entries: unknown[], ecosystem: GuardDogEcosystem, waiver?: GuardDogWaiver) {
   const namePattern = ecosystem === "npm" ? NPM_NAME : PYPI_NAME;
   const versionPattern = ecosystem === "npm" ? NPM_VERSION : PYPI_VERSION;
   const versions = new Map<string, Set<string>>();
@@ -262,7 +286,10 @@ function packageRows(entries: unknown[], ecosystem: GuardDogEcosystem) {
     }
     const name = normalizeName(ecosystem, entry.dependency);
     const version = ecosystem === "pypi" ? pypiVersionKey(entry.version) : entry.version;
-    const outcome = countIndicators(entry.result);
+    const outcome = countIndicators(
+      entry.result,
+      rowWaiver(waiver, entry.dependency, entry.version),
+    );
     const identity = JSON.stringify([name, version]);
     findings.set(identity, Math.max(findings.get(identity) ?? 0, outcome.count));
     if (outcome.gap === "malformed") {
@@ -295,12 +322,13 @@ function rowGap(malformed: boolean, hasUsableEvidence: boolean, partial: boolean
 function readGuardDogReport(
   result: Pick<ExecResult, "stdout" | "stderr">,
   scope: GuardDogScope,
+  waiver?: GuardDogWaiver,
 ): ScannerReport {
   const { stdout, stderr } = result;
   if (!stdout.trim()) return { count: 0, gap: "missing" };
   const entries = parseVerifyEntries(stdout);
   if (!entries) return { count: 0, gap: "malformed" };
-  const { count, versions, gap } = packageRows(entries, scope.ecosystem);
+  const { count, versions, gap } = packageRows(entries, scope.ecosystem, waiver);
   if (gap === "malformed") return { count, gap };
   if (scope.gap) {
     return {
@@ -357,8 +385,9 @@ export function classifyGuardDog(
   result: ExecResult,
   scope: GuardDogScope,
   manifestChanged = false,
+  waiver?: GuardDogWaiver,
 ): SecurityCheckResult {
-  const report = readGuardDogReport(result, scope);
+  const report = readGuardDogReport(result, scope, waiver);
   const { count } = report;
   const row: SecurityCheckResult =
     count > 0
@@ -388,7 +417,7 @@ export function classifyGuardDog(
       result.stderr,
     );
   const gap = scannerGap(report, result, missingTarget ? { noTarget: 1 } : {});
-  return scannerEvidence(
+  const evidence = scannerEvidence(
     row,
     count,
     gap ??
@@ -396,4 +425,7 @@ export function classifyGuardDog(
         ? { status: "partial", reason: "GuardDog manifest changed during the scan" }
         : undefined),
   );
+  // Name the exceptions that applied or no longer apply, whatever the coverage.
+  const excepted = waiver?.summary();
+  return excepted ? { ...evidence, detail: evidence.detail + ". " + excepted } : evidence;
 }
