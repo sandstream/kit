@@ -9,11 +9,11 @@ const GATE_MARKER = ".claude/.kit-gates-installed";
  *
  * A new worktree is recognised two ways, both measured with git 2.43:
  *
- * - `git worktree add` (plain, `-b`, `--detach`, and with sparse checkout) runs the hook in the new
+ * - `git worktree add` (plain, -b, --detach, and with sparse checkout) runs the hook in the new
  *   worktree with an all-zero previous HEAD (any hash length).
- * - `git worktree add --no-checkout` and `--orphan` do not run the hook at all. A later checkout in
+ * - `git worktree add --no-checkout` and --orphan do not run the hook at all. A later checkout in
  *   such a worktree passes its real HEAD as the previous one (the first checkout after
- *   `--no-checkout`, which is how T3 Code makes a sparse worktree; any checkout after the first
+ *   --no-checkout, which is how T3 Code makes a sparse worktree; any checkout after the first
  *   commit on an orphan branch), so the all-zero test let it through ungated. The hook therefore
  *   also acts when it runs in a linked worktree (`.git` is a file, not a directory) that has no kit
  *   gate marker yet. Once kit has gated it, the marker is there and later checkouts leave at once.
