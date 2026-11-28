@@ -1,8 +1,11 @@
 import { check1PasswordStatus } from "./onepassword.js";
 import { exec } from "./utils/exec.js";
+import { execPinned } from "./vendor-cli-pin.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import type { SecretKeyConfig, InfisicalConfig } from "./config.js";
-import type { SecretResolveResult } from "./secrets.js";
+import type { SecretBackend, SecretResolveResult, WriteOpts, WriteResult } from "./secrets.js";
+
+export type { SecretBackend, WriteOpts, WriteResult } from "./secrets.js";
 
 /**
  * Run a vault CLI, resolving its binary mise-first.
@@ -18,62 +21,15 @@ async function execCli(
   args: string[],
   opts?: Parameters<typeof exec>[2],
 ): Promise<{ stdout: string; stderr: string }> {
-  const bin = (await resolveToolBin(tool)) ?? tool;
-  return exec(bin, args, opts) as Promise<{ stdout: string; stderr: string }>;
+  // Behind the vendor-CLI pin, mise-first through the resolver the pin measures with: every call
+  // to one tool starts the same file, and a mismatched pin is refused (never a fallback).
+  return execPinned(tool, args, opts);
 }
 
 /** Is a vault CLI installed (mise or PATH)? Used to tell "not installed" apart
  *  from "installed but not logged in" in user-facing hints. */
 export async function vaultCliInstalled(tool: string): Promise<boolean> {
   return (await resolveToolBin(tool)) !== null;
-}
-
-/**
- * Single source of truth for every secret backend kit speaks to.
- *
- * Each backend declares how to `resolve` (read) a value and, optionally, how
- * to `write` one. A backend with no `write` is read-only — migration to it is
- * unsupported, surfaced uniformly by {@link writeViaBackend}. Keeping read and
- * write side-by-side in one object is the whole point: the previous design had
- * two independent `switch (source)` statements (one in secrets.ts, one in
- * secrets-migrate.ts), so adding a backend to one and forgetting the other
- * failed silently. Here the omission is visible in a single place — and the
- * read/write capability matrix is asserted in secret-backends.test.ts.
- */
-
-export interface WriteOpts {
-  vault?: string;
-  project?: string;
-  region?: string;
-  vaultPath?: string;
-}
-
-export interface WriteResult {
-  ok: boolean;
-  ref?: string;
-  detail: string;
-}
-
-export interface SecretBackend {
-  /** Read a secret value for `name` using its `config`. Never throws — failures
-   *  come back as `{ resolved: false, detail }`. */
-  resolve(
-    name: string,
-    config: SecretKeyConfig,
-    infisicalConfig?: InfisicalConfig,
-    cwd?: string,
-  ): Promise<SecretResolveResult>;
-  /** Write a secret. Absent ⇒ the backend is read-only (migration unsupported).
-   *  May throw; callers wrap it so the error is redacted before surfacing.
-   *
-   *  Value handling: where the CLI supports it, the value is fed via stdin so it
-   *  never lands in argv / the process table (vault `kv put -`, aws/gcp
-   *  `file:///dev/stdin` / `--data-file=-`). The 1Password, Infisical, Doppler and
-   *  Azure CLIs only accept the value as a `key=value` / `--value` argv token for
-   *  these operations, so it is briefly visible in `ps` there — an inherent CLI
-   *  limitation. The error path is covered regardless: writeSecretToBackend redacts
-   *  the held plaintext by exact substring before any failure message is surfaced. */
-  write?(key: string, value: string, opts: WriteOpts): Promise<WriteResult>;
 }
 
 // ─── Infisical bulk-fetch cache (avoids repeated CLI calls per generate) ──────
@@ -133,6 +89,18 @@ async function fetchInfisicalSecrets(
 
 // ─── Backend registry ─────────────────────────────────────────────────────────
 
+/**
+ * Single source of truth for every secret backend kit speaks to.
+ *
+ * Each backend declares how to `resolve` (read) a value and, optionally, how
+ * to `write` one. A backend with no `write` is read-only — migration to it is
+ * unsupported, surfaced uniformly by {@link writeViaBackend}. Keeping read and
+ * write side-by-side in one object is the whole point: the previous design had
+ * two independent `switch (source)` statements (one in secrets.ts, one in
+ * secrets-migrate.ts), so adding a backend to one and forgetting the other
+ * failed silently. Here the omission is visible in a single place — and the
+ * read/write capability matrix is asserted in secret-backends.test.ts.
+ */
 export const BACKENDS: Record<string, SecretBackend> = {
   env: {
     async resolve(name) {
@@ -239,7 +207,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
   eas: {
     async resolve(name, config) {
       try {
-        const { stdout } = await exec("eas", ["secret:list", "--json"], { timeout: 10_000 });
+        const { stdout } = await execCli("eas", ["secret:list", "--json"], { timeout: 10_000 });
         const secrets = JSON.parse(stdout);
         const found =
           Array.isArray(secrets) &&
@@ -358,7 +326,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
     async write(key, value) {
       // `dotenvx set <KEY> <value>` encrypts the value into .env (ECIES). The
       // value is an argv token — see the SecretBackend.write note on exposure.
-      await exec("dotenvx", ["set", key, value], { timeout: 15_000 });
+      await execCli("dotenvx", ["set", key, value], { timeout: 15_000 });
       return { ok: true, detail: "encrypted into .env via dotenvx" };
     },
   },
@@ -422,7 +390,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
       ];
       if (config.aws_region) args.push("--region", config.aws_region);
       try {
-        const { stdout } = await exec("aws", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("aws", args, { timeout: 15_000 });
         const val = stdout.trim();
         if (!val || val === "None") {
           return { name, resolved: false, value: null, detail: "AWS: secret empty or not found" };
@@ -450,7 +418,9 @@ export const BACKENDS: Record<string, SecretBackend> = {
       ];
       if (opts.region) args.push("--region", opts.region);
       try {
-        await exec("aws", args, { timeout: 15_000, input: value } as Parameters<typeof exec>[2]);
+        await execPinned("aws", args, { timeout: 15_000, input: value } as Parameters<
+          typeof exec
+        >[2]);
       } catch {
         const update = [
           "secretsmanager",
@@ -461,7 +431,9 @@ export const BACKENDS: Record<string, SecretBackend> = {
           "file:///dev/stdin",
         ];
         if (opts.region) update.push("--region", opts.region);
-        await exec("aws", update, { timeout: 15_000, input: value } as Parameters<typeof exec>[2]);
+        await execPinned("aws", update, { timeout: 15_000, input: value } as Parameters<
+          typeof exec
+        >[2]);
       }
       return { ok: true, detail: "wrote to AWS Secrets Manager" };
     },
@@ -476,7 +448,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
         config.gcp_project || process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
       if (project) args.push("--project", project);
       try {
-        const { stdout } = await exec("gcloud", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("gcloud", args, { timeout: 15_000 });
         const val = stdout.trim();
         return {
           name,
@@ -504,14 +476,14 @@ export const BACKENDS: Record<string, SecretBackend> = {
       ];
       if (opts.project) createArgs.push("--project", opts.project);
       try {
-        await exec("gcloud", createArgs, {
+        await execPinned("gcloud", createArgs, {
           timeout: 15_000,
           input: value,
         } as Parameters<typeof exec>[2]);
       } catch {
         const addArgs = ["secrets", "versions", "add", key, "--data-file=-"];
         if (opts.project) addArgs.push("--project", opts.project);
-        await exec("gcloud", addArgs, {
+        await execPinned("gcloud", addArgs, {
           timeout: 15_000,
           input: value,
         } as Parameters<typeof exec>[2]);
@@ -546,7 +518,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
         "tsv",
       ];
       try {
-        const { stdout } = await exec("az", args, { timeout: 15_000 });
+        const { stdout } = await execPinned("az", args, { timeout: 15_000 });
         const val = stdout.trim();
         return {
           name,
@@ -570,7 +542,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
           detail: "Azure: --vault required (azure_vault or AZURE_KEYVAULT_NAME)",
         };
       }
-      await exec(
+      await execPinned(
         "az",
         ["keyvault", "secret", "set", "--vault-name", opts.vault, "--name", key, "--value", value],
         { timeout: 15_000 },

@@ -45,6 +45,12 @@ export interface CliIdentity {
   version: string;
   size: number;
   pinnedAt: string;
+  /**
+   * Win32 only: the CLI is an npm-style `.cmd` shim, and `path`/`sha256` above are the program it
+   * starts (the JS entry or `.exe`). The shim is pinned too, so a shim edited to point elsewhere
+   * is caught even when the old entry is untouched.
+   */
+  shim?: { path: string; sha256: string };
 }
 
 export interface CliLockEntry {

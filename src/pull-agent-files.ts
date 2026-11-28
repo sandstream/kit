@@ -49,6 +49,7 @@ const PREFIXES: [string, string][] = [
   [".claude/plugins/", "agent plugin"],
   [".codex/skills/", "agent skill"],
   [".opencode/plugin/", "agent plugin"],
+  [".amazonq/cli-agents/", "agent config (hooks)"],
   [".clinerules/hooks/", "agent hook script"],
   [".clinerules/", "agent rules"],
   [".agents/", "agent skill"],

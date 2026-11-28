@@ -1,4 +1,5 @@
 import { installTools } from "./install.js";
+import { migrateMiseLatest } from "./check-mise-latest.js";
 import {
   readkitMeta,
   readSkillsLock,
@@ -13,7 +14,7 @@ import { withGovernance } from "./governance-middleware.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { buildVercelDeployTargets, checkDeploy } from "./check-deploy.js";
-import { resolveViaBackend } from "./secret-backends.js";
+import { readBy, resolveRecorded } from "./secrets-read-record.js";
 import { propagate } from "./secrets-propagate.js";
 import { installHooks } from "./hooks.js";
 import { patchGitignore } from "./check-gitignore.js";
@@ -124,7 +125,7 @@ async function fixDeploy(
         continue;
       }
 
-      const resolved = await resolveViaBackend(key, keyConfig, config.secrets?.infisical);
+      const resolved = await resolveRecorded(key, keyConfig, readBy("kit fix", config, cwd));
       if (!resolved.resolved || !resolved.value || resolved.managed) {
         manualActions.push(
           deployManualBlock({
@@ -538,6 +539,10 @@ async function runFixPipeline(config: kitConfig, cwd: string): Promise<boolean> 
   }
 
   const state: FixState = { fixed: 0, manual: [] };
+  const mise = await migrateMiseLatest(cwd); // the mise fork loop, check-mise-latest.ts
+  mise.lines.forEach((line) => console.log(line));
+  state.fixed += mise.fixed;
+  state.manual.push(...mise.manual.map(developerBlock));
   await fixTools(config, state);
   await fixLockFiles(config, cwd, state);
   await fixServices(config, state);

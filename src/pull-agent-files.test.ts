@@ -100,7 +100,10 @@ function agentAuditPaths(): { files: string[]; dirs: string[] } {
 
 /** Files kit's own `install*Gate*` functions write a gate into, and the settings files Claude's go to. */
 function gateFiles(): string[] {
-  const chunks = source("agent-config.ts").split(/\n(?=export (?:async )?function )/);
+  const text = ["agent-config.ts", "agent-gate-installers.ts", "agent-gate-contracts.ts"]
+    .map(source)
+    .join("\n");
+  const chunks = text.split(/\n(?=export (?:async )?function )/);
   const gates = chunks.filter((c) => /^export (?:async )?function install\w*Gate/.test(c));
   return [
     ...gates.flatMap((c) => quoted(c, /\bfile(?: =|:) "([^"]+)"/g)),
@@ -119,7 +122,9 @@ describe("agentFileKind covers what kit reads and writes elsewhere", () => {
   it("names every file kit's agent config writes a gate into", () => {
     const files = gateFiles();
     assert.ok(files.length >= 8, "extraction found too few gate files");
-    for (const f of files) assert.notEqual(agentFileKind(f), null, f);
+    // Some installers name a directory of agent files (`.amazonq/cli-agents`): a file in it counts.
+    for (const f of files)
+      assert.notEqual(agentFileKind(f) ?? agentFileKind(`${f}/x.json`), null, f);
   });
 
   it("names the Codex, Cursor and Droid hook files as hooks", () => {

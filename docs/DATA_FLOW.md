@@ -158,6 +158,17 @@ appendAuditEventDirect({event}) ──▶ appendFile(.kit-audit.jsonl)
 `[governance.audit].company_id` in `.kit.toml` (one-time opt-in surfaces a loud
 stderr notice on first send; a missing company id surfaces a configuration warning).
 
+### Secret reads (`secrets.read`)
+
+Whenever kit resolves or hands on a secret, it first appends a `secrets.read` event to `.kit-audit.jsonl`, with `[governance]` on or off. That covers `kit secrets`
+(with `sync`, `validate` and `onecli register`), MCP `kit_secrets`, `kit run` and MCP `kit_run` (the
+`.env.local` names given to the child), the exec-broker (the env names it hands over), the vault
+probes in `kit check`, `kit fix` and the branch-protection audit. The event names the keys, the store,
+the kit surface (`via`), the agent harness kit detected (Claude Code or Codex) and
+`[governance.agent]` when the caller has the config. It never holds a value or a digest of one. If
+the event cannot be written, kit does not read the secret. `kit audit secrets` lists the reads per
+key. These are reads through kit only: a process that opens `.env.local` itself leaves no record.
+
 ## Network destinations
 
 These are built-in defaults, not a complete host allow-list. A configured API base

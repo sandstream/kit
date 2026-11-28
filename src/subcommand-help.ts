@@ -117,7 +117,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "security prescan-diff":
     "Diff two prescan reports — surface new regressions + fixed findings since baseline",
   "audit secrets":
-    "Forensics: who/what touched each key + when (reads audit log); --target <platform> lists the keys kit pushed there",
+    "Forensics: who/what touched each key + when (reads audit log); --target <platform> lists the keys kit pushed there; --key <NAME> --since <ISO> answers whether NAME was read or written through kit since then, from a verified chain (exit 1 when it does not verify)",
   "audit verify":
     "Verify the audit chain and HMAC seal. --all --strict requires at least one verified log. --require-external also requires authenticated receipt and current checkpoint verification, including with --all.",
   "audit anchor":
@@ -163,7 +163,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "secrets list":
     "List key names by backend with expiry/rotation metadata; never values (--backend, --json)",
   "secrets incident":
-    "Vendor incident: rotation plan per key + keyed-hash snapshot; --verify reports changed/unchanged/unresolvable",
+    "Vendor incident: rotation plan per key + evidence plan (the store's own access-record query per key, printed only; --since <ISO>) + keyed-hash snapshot; --verify reports changed/unchanged/unresolvable",
   "secrets validate":
     "Verify every declared key resolves in vault. --auto pulls from .env.template",
   "env list": "List configured environments ([env.<name>])",
@@ -259,7 +259,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "tools list":
     "Inventory the CLIs on this machine: resolved path, the installer that owns it (measured from the path, never assumed), installed version, and — with --latest — how far behind each one is",
   "tools pin":
-    "Pin the vault/cloud CLIs (op, infisical, bw, doppler, vault, aws, gcloud, az, gh) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
+    "Pin the vault, cloud and deploy CLIs kit hands secrets or credentials through (op, infisical, bw, doppler, vault, aws, gcloud, az, gh, eas, dotenvx, vercel, supabase, fly, flyctl, railway, wrangler, stripe) by realpath, sha256 and version in .kit/cli-lock.json; kit then refuses to run one that changed. --accept <tool> re-trusts a change (audited)",
   "memory keygen":
     "X25519 recipient keypair: ephemeral sessions push encrypted with NO secret; only holders of the private key decrypt",
   "memory push":

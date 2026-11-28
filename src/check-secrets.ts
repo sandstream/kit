@@ -4,7 +4,8 @@ import type { SecretsConfig, SecretKeyConfig, InfisicalConfig } from "./config.j
 import { check1PasswordStatus } from "./onepassword.js";
 import { checkInfisicalStatus } from "./infisical-status.js";
 import { resolveViaBackend } from "./secret-backends.js";
-import { exec } from "./utils/exec.js";
+import { recordSecretRead } from "./secrets-read-record.js";
+import { execPinned } from "./vendor-cli-pin.js";
 
 export interface SecretStatus {
   name: string;
@@ -94,7 +95,7 @@ async function check1PasswordSecret(
   }
 
   try {
-    const { stdout } = await exec("op", ["read", ref, "--no-newline"], {
+    const { stdout } = await execPinned("op", ["read", ref, "--no-newline"], {
       timeout: 10_000,
     });
     return { available: !!stdout, detail: stdout ? "Found in 1Password" : "Empty in 1Password" };
@@ -137,7 +138,7 @@ async function checkInfisicalSecret(
         args.push("--path", infisicalConfig.path);
       }
 
-      const { stdout } = await exec("infisical", args, {
+      const { stdout } = await execPinned("infisical", args, {
         timeout: 15_000,
         env: { ...process.env },
       });
@@ -170,7 +171,7 @@ async function checkInfisicalSecret(
 
 async function checkEasSecret(name: string): Promise<{ available: boolean; detail: string }> {
   try {
-    const { stdout } = await exec("eas", ["secret:list", "--json"], {
+    const { stdout } = await execPinned("eas", ["secret:list", "--json"], {
       timeout: 10_000,
     });
     const secrets = JSON.parse(stdout);
@@ -188,7 +189,7 @@ async function checkBitwardenSecret(
   fieldName: string,
 ): Promise<{ available: boolean; detail: string }> {
   try {
-    const { stdout } = await exec("bw", ["get", fieldName], {
+    const { stdout } = await execPinned("bw", ["get", fieldName], {
       timeout: 10_000,
     });
     const found = !!stdout;
@@ -205,7 +206,7 @@ async function checkDopplerSecret(
   secretName: string,
 ): Promise<{ available: boolean; detail: string }> {
   try {
-    const { stdout } = await exec("doppler", ["secrets", "get", secretName, "--plain"], {
+    const { stdout } = await execPinned("doppler", ["secrets", "get", secretName, "--plain"], {
       timeout: 10_000,
     });
     const found = !!stdout;
@@ -230,7 +231,7 @@ async function checkVaultSecret(
     };
   }
   try {
-    const { stdout } = await exec("vault", ["kv", "get", "-field", field, path], {
+    const { stdout } = await execPinned("vault", ["kv", "get", "-field", field, path], {
       timeout: 10_000,
     });
     return {
@@ -268,7 +269,7 @@ async function checkAwsSecret(
     args.push("--region", config.aws_region);
   }
   try {
-    const { stdout } = await exec("aws", args, { timeout: 15_000 });
+    const { stdout } = await execPinned("aws", args, { timeout: 15_000 });
     return {
       available: !!stdout.trim() && stdout.trim() !== "None",
       detail:
@@ -306,7 +307,7 @@ async function checkGcpSecret(
     args.push("--project", project);
   }
   try {
-    const { stdout } = await exec("gcloud", args, { timeout: 15_000 });
+    const { stdout } = await execPinned("gcloud", args, { timeout: 15_000 });
     return {
       available: !!stdout.trim(),
       detail: stdout.trim() ? "Found in GCP Secret Manager" : "Empty in GCP Secret Manager",
@@ -352,7 +353,7 @@ async function checkAzureSecret(
     "tsv",
   ];
   try {
-    const { stdout } = await exec("az", args, { timeout: 15_000 });
+    const { stdout } = await execPinned("az", args, { timeout: 15_000 });
     return {
       available: !!stdout.trim(),
       detail: stdout.trim() ? "Found in Azure Key Vault" : "Empty in Azure Key Vault",
@@ -381,6 +382,22 @@ async function templateIsPresent(cwd: string, template: string): Promise<boolean
   }
 }
 
+/**
+ * The availability probes below fetch each vault-backed value (`op read`, `get-secret-value`, …)
+ * to see that it resolves, so they are reads: record the names first. `env` and `config` keys are
+ * looked up in this process, not fetched from a store.
+ */
+async function recordVaultProbes(
+  keys: Record<string, SecretKeyConfig>,
+  cwd: string,
+): Promise<void> {
+  const fetched = Object.keys(keys).filter((n) => !["env", "config"].includes(keys[n]!.source));
+  await recordSecretRead(
+    { keys: fetched, storeOf: (name) => keys[name]!.source, via: "kit check" },
+    { cwd },
+  );
+}
+
 export async function checkSecrets(
   secrets: SecretsConfig,
   cwd = process.cwd(),
@@ -392,6 +409,7 @@ export async function checkSecrets(
   const opCache: OnePasswordCache = { status: null };
 
   if (secrets.keys) {
+    await recordVaultProbes(secrets.keys, cwd);
     for (const [name, config] of Object.entries(secrets.keys)) {
       let result: Omit<SecretStatus, "name" | "source">;
 

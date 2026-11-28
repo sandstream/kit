@@ -72,6 +72,7 @@ describe("passing verdicts carry their warnings", () => {
         return [status];
       },
       miseInstall: async () => ({ ok: true, detail: "" }),
+      resolveVersion: async (_tool, version) => ({ kind: "pinned", version }),
       gateInstall: async (tool) => ({
         tool,
         decision: "pass",

@@ -5,7 +5,11 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { toolArgsCommand } from "./install-gate-payload.js";
+import {
+  clineCommands,
+  clineShellCallUnreadable,
+  toolArgsCommand,
+} from "./install-gate-payload.js";
 import { extractCommandFromHookPayload } from "./install-gate.js";
 import { installInstallGateAntigravity } from "./agent-config.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
@@ -40,12 +44,13 @@ describe("Copilot CLI's camelCase toolArgs", () => {
 });
 
 describe("--format antigravity: the required stdout decision", () => {
-  it("denies on stdout with exit 0, and allows on stdout", () => {
+  it("denies on stdout and with exit 2, and allows on stdout", () => {
     const toolCall = (command: string) => ({
       toolCall: { name: "run_command", args: { CommandLine: command } },
     });
     const denied = gate(toolCall(BLOCKED), ["--format", "antigravity"]);
-    assert.equal(denied.status, 0, denied.stderr);
+    // Antigravity documents no exit-code meaning, so the deny is on stdout and in the exit code.
+    assert.equal(denied.status, 2, denied.stderr);
     const verdict = JSON.parse(denied.stdout.trim().split("\n").pop() ?? "{}");
     assert.equal(verdict.decision, "deny");
     assert.match(verdict.reason, /kit install-gate/);
@@ -72,10 +77,38 @@ describe("--format antigravity: the required stdout decision", () => {
     };
     writeFileSync(join(dir, ".agents", "hooks.json"), JSON.stringify(old));
     assert.equal((await installInstallGateAntigravity(dir)).action, "updated");
-    const groups = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8")).hooks
-      .PreToolUse;
+    const written = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8"));
+    assert.equal(written.hooks, undefined, "kit's old entry is gone");
+    const groups = written["kit-install-gate"].PreToolUse;
     assert.equal(groups.length, 1);
     assert.ok(groups[0].hooks[0].command.endsWith("gate-bash --format antigravity"));
     assert.equal((await installInstallGateAntigravity(dir)).action, "unchanged");
+  });
+});
+
+// Cline run_commands shapes: github.com/cline/cline at cbc7d141, `schemas.ts:133-176` (input),
+// `apps/vscode/src/sdk/hooks-adapter.ts:28-38,168-174` (VS Code parameters as JSON text).
+describe("Cline run_commands: every command, each argv word quoted", () => {
+  const vs = (parameters: Record<string, string>, toolName = "run_commands") => ({
+    preToolUse: { toolName, parameters },
+  });
+  it("reads every shape, and quotes structured argv as shell words", () => {
+    const cases: [unknown, string[] | undefined][] = [
+      [vs({ commands: JSON.stringify(["ls", "npm i a"]) }), ["ls", "npm i a"]],
+      [vs({ commands: "[ -f x ] && npm i f" }), ["[ -f x ] && npm i f"]],
+      [vs({ command: "npm i c" }, "execute_command"), ["npm i c"]],
+      [vs({ cmd: "npm i d" }), ["npm i d"]],
+      [
+        vs({ command: "echo", args: JSON.stringify(["a b", "it's", "; x"]) }),
+        ["echo 'a b' 'it'\\''s' '; x'"],
+      ],
+      [vs({ path: "a.ts", new_text: "x" }, "editor"), []],
+      [{ tool_input: { command: "x" } }, undefined],
+    ];
+    for (const [payload, want] of cases) assert.deepEqual(clineCommands(payload), want);
+    assert.equal(extractCommandFromHookPayload(cases[0][0]), "ls\nnpm i a");
+    assert.equal(clineShellCallUnreadable(vs({ commands: "[]" })), true);
+    assert.equal(clineShellCallUnreadable(vs({ command: "npm", args: "i x" })), true);
+    assert.equal(clineShellCallUnreadable(vs({ commands: JSON.stringify(["ls"]) })), false);
   });
 });

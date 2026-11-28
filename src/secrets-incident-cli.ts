@@ -19,6 +19,7 @@ import { resolveToolBin } from "./utils/resolveTool.js";
 import { resolve } from "node:path";
 import { loadConfig, type kitConfig, type SecretKeyConfig } from "./config.js";
 import { appendAuditEventDirect } from "./audit.js";
+import { EVIDENCE_LIMIT, evidencePlan, type EvidenceStep } from "./secrets-evidence-plan.js";
 import { resetInfisicalCache, resolveViaBackend } from "./secret-backends.js";
 import {
   buildInventory,
@@ -211,6 +212,47 @@ function printPlan(backend: string, entries: InventoryEntry[], deps: IncidentDep
   for (const e of entries) {
     deps.out(`  ${c.bold}${e.name}${c.reset}  ${c.dim}(${e.rotation.kind})${c.reset}`);
     deps.out(`    ${e.rotation.command}`);
+  }
+  deps.out("");
+}
+
+function printStep(step: EvidenceStep, deps: IncidentDeps): void {
+  const tag = step.verified ? "" : ` ${c.yellow}(not verified)${c.reset}`;
+  deps.out(`    ${step.service}${tag}`);
+  if (step.command) deps.out(`      ${step.command}`);
+  for (const caveat of step.caveats) deps.out(`      ${c.dim}${caveat}${c.reset}`);
+  if (step.source) deps.out(`      ${c.dim}${step.source}${c.reset}`);
+}
+
+/** A full ISO 8601 date or date-time, else a placeholder the person fills in. */
+function evidenceSince(args: string[]): string | null {
+  const raw = flagValue(args, "--since");
+  if (raw === undefined) return "<incident-start-ISO-8601>";
+  const iso = /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:\d{2})?)?$/;
+  return iso.test(raw) && !Number.isNaN(Date.parse(raw)) ? raw : null;
+}
+
+/**
+ * Per key, the command that fetches the store's own access record, then kit's own record
+ * (`src/secrets-evidence-plan.ts`). Printed only: kit runs none of them.
+ */
+function printEvidencePlan(
+  entries: InventoryEntry[],
+  config: kitConfig,
+  deps: IncidentDeps,
+  since: string,
+): void {
+  deps.out(
+    `${c.bold}Evidence plan${c.reset}  ${c.dim}(printed only; kit runs none of these)${c.reset}`,
+  );
+  deps.out(`${c.dim}Where each store records reads of the key since ${since}.${c.reset}`);
+  deps.out(`${c.dim}${EVIDENCE_LIMIT}${c.reset}\n`);
+  const keys = config.secrets?.keys ?? {};
+  for (const e of entries) {
+    const cfg = keys[e.name];
+    if (!cfg) continue;
+    deps.out(`  ${c.bold}${e.name}${c.reset}`);
+    for (const step of evidencePlan(e.name, cfg, since)) printStep(step, deps);
   }
   deps.out("");
 }
@@ -441,7 +483,7 @@ export async function runSecretsIncident(
 ): Promise<boolean> {
   const backend = args[0];
   if (!backend || backend.startsWith("-") || !isKnownBackend(backend)) {
-    deps.err(`Usage: kit secrets incident <backend> [--verify] [--new-snapshot]`);
+    deps.err(`Usage: kit secrets incident <backend> [--since <ISO>] [--verify] [--new-snapshot]`);
     deps.err(`Backends: ${knownBackends().join(", ")}`);
     return false;
   }
@@ -450,7 +492,13 @@ export async function runSecretsIncident(
     deps.out(`${c.dim}No keys declared with source "${backend}"; nothing to do.${c.reset}`);
     return true;
   }
+  const since = evidenceSince(args);
+  if (since === null) {
+    deps.err(`--since takes an ISO 8601 date or date-time, for example 2026-11-20T00:00:00Z.`);
+    return false;
+  }
   printPlan(backend, entries, deps);
+  printEvidencePlan(entries, config, deps, since);
   if (hasFlag(args, "--verify")) return runVerify(backend, entries, config, deps);
   if (hasFlag(args, "--new-snapshot")) return takeSnapshot(backend, entries, config, deps, true);
   return snapshotOnce(backend, entries, config, deps);

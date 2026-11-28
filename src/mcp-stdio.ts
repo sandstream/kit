@@ -16,6 +16,7 @@
  */
 import type { Readable, Writable } from "node:stream";
 import { z } from "zod";
+import { runInCallScope } from "./utils/call-scope.js";
 
 /** Newest first. Same list as the SDK at the version kit pins. */
 const SUPPORTED_PROTOCOL_VERSIONS = [
@@ -230,6 +231,22 @@ export class StdioMcpServer {
     const tool = this.tools.get(name);
     // Like the SDK, a failure the model can act on is a tool result with isError, not a protocol error.
     if (!tool) return toolError(protocolText(INVALID_PARAMS, `Tool ${name} not found`));
+    // Each call is its own scope: a failure that would set the CLI's exit code (a vendor-CLI pin
+    // refusal) becomes this call's error instead, and never the server process's exit code.
+    const { value, failures } = await runInCallScope(() => this.dispatch(tool, name, params));
+    if (failures.length === 0) return value;
+    return {
+      ...value,
+      content: [...value.content, ...failures.map((text) => ({ type: "text", text }))],
+      isError: true,
+    };
+  }
+
+  private async dispatch(
+    tool: Tool,
+    name: string,
+    params: Record<string, unknown>,
+  ): Promise<ToolResult> {
     try {
       const extra = { signal: new AbortController().signal };
       if (!tool.schema) return await (tool.handler as (e: typeof extra) => ToolResult)(extra);

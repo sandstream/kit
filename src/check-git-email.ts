@@ -12,7 +12,8 @@
 import type { SecurityCheckResult } from "./check-security.js";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 
-const NAME = "git user.email is a no-reply address";
+/** Neutral on purpose: the row prints as `<name>: <status>`, so a claim here reads as the finding. */
+const NAME = "git user.email no-reply";
 
 /** Hosted no-reply domains: GitHub, GitLab, Codeberg, Bitbucket. */
 const NOREPLY_DOMAIN =
@@ -61,7 +62,7 @@ export async function checkGitEmail(
       ...row,
       status: "warn",
       severity: "low",
-      detail: `${masked}: every commit publishes it, and agents read git log, so it lands in model context`,
+      detail: `not a no-reply address (${masked}): every commit publishes it, and agents read git log, so it lands in model context`,
       suggestion:
         "use your GitHub no-reply address (Settings > Emails): git config user.email <id>+<login>@users.noreply.github.com",
     },

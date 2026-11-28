@@ -1,10 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   installTools,
   ensureScannersInstalled,
   miseErrorDetail,
+  miseInstall,
+  miseUseTarget,
   type InstallDeps,
+  type MiseExecDeps,
 } from "./install.js";
 
 function makeDeps(overrides: Partial<InstallDeps> = {}): InstallDeps {
@@ -12,6 +18,7 @@ function makeDeps(overrides: Partial<InstallDeps> = {}): InstallDeps {
     checkTools: async () => [],
     miseInstall: async () => ({ ok: true, detail: "" }),
     gateInstall: async (tool) => ({ tool, decision: "pass", reason: "stub" }),
+    resolveVersion: async (_tool, version) => ({ kind: "passthrough", version }),
     ...overrides,
   };
 }
@@ -299,6 +306,142 @@ describe("installTools read-only mode", () => {
       assert.equal(touched, false); // no check / no install ran
     } finally {
       delete process.env.KIT_READ_ONLY;
+    }
+  });
+});
+
+describe("installTools never hands latest to mise for npm/pipx (fork-loop fix)", () => {
+  const missing = async (tools: Record<string, string>) =>
+    Object.keys(tools).map((name) => ({ name, required: "latest", installed: null, ok: false }));
+
+  it("installs the resolved cooled version and triages that exact version", async () => {
+    const installs: string[][] = [];
+    const gated: string[] = [];
+    const deps = makeDeps({
+      checkTools: missing,
+      resolveVersion: async () => ({ kind: "resolved", version: "1.1305.1", detail: "cooled" }),
+      gateInstall: async (tool) => {
+        gated.push(tool);
+        return { tool, decision: "pass", reason: "ok" };
+      },
+      miseInstall: async (tool, version) => {
+        installs.push([tool, version]);
+        return { ok: true, detail: "" };
+      },
+    });
+    await installTools({ "npm:snyk": "latest" }, deps);
+    assert.deepEqual(installs, [["npm:snyk", "1.1305.1"]]);
+    assert.deepEqual(gated, ["npm:snyk@1.1305.1"]);
+  });
+
+  it("refuses (fail closed) when latest cannot be resolved: no gate, no mise", async () => {
+    let touched = false;
+    const deps = makeDeps({
+      checkTools: missing,
+      resolveVersion: async () => ({ kind: "refused", reason: "registry could not be read" }),
+      gateInstall: async (tool) => {
+        touched = true;
+        return { tool, decision: "pass", reason: "ok" };
+      },
+      miseInstall: async () => {
+        touched = true;
+        return { ok: true, detail: "" };
+      },
+    });
+    const [r] = await installTools({ "npm:@socketsecurity/cli": "latest" }, deps);
+    assert.equal(r.action, "failed");
+    assert.match(r.detail, /registry could not be read/);
+    assert.equal(touched, false);
+  });
+});
+
+/** A fake exec that records every call. No test here spawns mise. */
+function fakeMise(dir: string, home: string, fail = false) {
+  const calls: string[][] = [];
+  const deps: MiseExecDeps = {
+    exec: async (file, args) => {
+      calls.push([file, ...args]);
+      if (fail) throw Object.assign(new Error("Command failed"), { stderr: "mise ERROR boom" });
+      return { stdout: "", stderr: "" };
+    },
+    cwd: () => dir,
+    home: () => home,
+  };
+  return { calls, deps };
+}
+
+describe("miseInstall writes only to the project's mise config", () => {
+  function tmp(): string {
+    return mkdtempSync(join(tmpdir(), "kit-mise-install-"));
+  }
+
+  it("passes --path <project>/mise.toml to mise use, with the exact version", async () => {
+    const dir = tmp();
+    const home = tmp();
+    try {
+      const { calls, deps } = fakeMise(dir, home);
+      const r = await miseInstall("npm:snyk", "1.1305.1", deps);
+      assert.equal(r.ok, true);
+      assert.deepEqual(calls, [
+        ["mise", "install", "npm:snyk@1.1305.1"],
+        ["mise", "use", "--path", join(dir, "mise.toml"), "npm:snyk@1.1305.1"],
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("uses an existing .mise.toml rather than creating a second file", () => {
+    const dir = tmp();
+    try {
+      writeFileSync(join(dir, ".mise.toml"), "[tools]\n");
+      assert.equal(miseUseTarget(dir, join(dir, "elsewhere")), join(dir, ".mise.toml"));
+      writeFileSync(join(dir, "mise.toml"), "[tools]\n");
+      assert.equal(miseUseTarget(dir, join(dir, "elsewhere")), join(dir, "mise.toml"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses in the home directory, where mise use would write the global config", async () => {
+    const home = tmp();
+    try {
+      mkdirSync(join(home, ".config"), { recursive: true });
+      const { calls, deps } = fakeMise(home, home);
+      const r = await miseInstall("npm:snyk", "1.1305.1", deps);
+      assert.equal(r.ok, false);
+      assert.match(r.detail, /global mise config/);
+      assert.equal(calls.length, 0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses latest for an npm: or pipx: tool even when a caller passes it directly", async () => {
+    const dir = tmp();
+    try {
+      const { calls, deps } = fakeMise(dir, join(dir, "home"));
+      for (const tool of ["npm:snyk", "pipx:semgrep"]) {
+        const r = await miseInstall(tool, "latest", deps);
+        assert.equal(r.ok, false);
+        assert.match(r.detail, /never hands "latest" to mise/);
+      }
+      assert.equal(calls.length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("turns a mise failure into its ERROR line", async () => {
+    const dir = tmp();
+    try {
+      const { deps } = fakeMise(dir, join(dir, "home"), true);
+      const r = await miseInstall("aqua:x/y", "1.0.0", deps);
+      assert.equal(r.ok, false);
+      assert.equal(r.detail, "boom");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

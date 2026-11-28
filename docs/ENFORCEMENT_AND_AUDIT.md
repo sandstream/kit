@@ -18,6 +18,9 @@ Deterministic, fail-closed, zero-LLM:
   In Claude Code, `gate-bash` is matched to `Bash|PowerShell`: both tools run shell commands, and
   on Windows without Git Bash only `PowerShell` exists. A `Bash`-only matcher, which kit wrote before
   2026-11-27, fails `enforcement gate liveness` in `kit check`; `kit agent-config` widens it in place.
+  The opt-in `gate-egress` reads shell commands too (PowerShell's `Invoke-WebRequest` among them)
+  and gets the same matcher. Where it is wired, a `Bash`-only entry fails the same row, and
+  `kit agent-config --broker-gate` widens it.
 
   `gate-bash` reads the pending command as a shell would, which means it follows installs into
   `$(…)`, backticks, `sh -c '…'`, the Windows shells (`cmd /c …`, `powershell`/`pwsh -Command …`
@@ -52,6 +55,18 @@ Deterministic, fail-closed, zero-LLM:
   (Codex `--full-auto`, Amp's `--dangerously-allow-all`, OpenCode, Augment's `auggie`), Cline's
   CLI, which approves everything by default when given a prompt, and approval settings in a
   config file or `-c` override rather than on the command line.
+
+  It refuses a system-wide change to the trusted root certificates (`src/ca-trust-store.ts`):
+  `update-ca-certificates`, `update-ca-trust`, `trust anchor`, `security add-trusted-cert`,
+  `certutil -addstore Root` (or `AuthRoot`), `Import-Certificate` / `Import-PfxCertificate` into
+  `Cert:\LocalMachine\Root` or `Cert:\CurrentUser\Root`, and copying, `tee`-ing or redirecting a
+  file into an anchor directory (`/usr/local/share/ca-certificates`,
+  `/etc/pki/ca-trust/source/anchors` and their Arch and SUSE equivalents). A trusted root lets
+  whoever holds its key intercept TLS for every program on the machine. There is no agent-side
+  allow, as for a command that cannot be undone: the refusal asks the person to run it. Reading
+  the store (`trust list`, `certutil -dump`) is allowed. Out of scope: per-process variables such
+  as `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE`, and NSS databases
+  (`certutil -A -d …` on Linux).
 
   This is a correction, not a design note. Every line of a here-document used to be scanned as its
   own command, and the gate blocked kit's own PR description because the prose contained
