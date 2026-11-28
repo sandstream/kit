@@ -37,7 +37,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 const isHigh = (severity: unknown): boolean => severity === "high" || severity === "critical";
 
 /** End of the given UTC day, or NaN when the text is not a calendar date. */
-function endOfDay(date: string): number {
+export function endOfDay(date: string): number {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NaN;
   const start = Date.parse(`${date}T00:00:00Z`);
   return Number.isNaN(start) ? NaN : start + DAY_MS - 1;
