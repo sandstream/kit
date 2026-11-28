@@ -18,6 +18,9 @@
  * instructions (AGENTS.md, CLAUDE.md, .cursorrules, GEMINI.md, Copilot's), read for keys. The
  * instruction-constraint rows read the same files for rule lines that name missing code or that
  * the working tree dropped since HEAD.
+ *
+ * T3 Code's rows (src/agent-audit-t3.ts) are here too: it starts agents in Full access by default,
+ * and a repository's `t3.json` scripts run on worktree creation and settle (kit-research#241).
  */
 import { homedir } from "node:os";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -43,6 +46,7 @@ export async function checkAgentConfig(
   const { runRuleLedger } = await import("./agent-rule-ledger.js");
   const { checkCodexHookTrust } = await import("./codex-hook-trust.js");
   const { checkAiderCommitVerify } = await import("./check-aider-commit-verify.js");
+  const { runT3Audit } = await import("./agent-audit-t3.js");
   return [
     ...runAgentAudit(root),
     ...checkInstructionSecrets(root),
@@ -61,5 +65,7 @@ export async function checkAgentConfig(
     ...checkCodexHookTrust(root, home, env),
     // Aider commits with --no-verify by default, past kit's git hooks.
     ...checkAiderCommitVerify(root, home, env),
+    // T3 Code starts agents in Full access by default; a repo's t3.json scripts run on their own.
+    ...runT3Audit(root, home, env),
   ];
 }
