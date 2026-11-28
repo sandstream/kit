@@ -2552,11 +2552,12 @@
     "run": {
       "kind": "command",
       "summary": "Execute a command with project env vars loaded",
-      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
+      "x-kit-accepted-flags": ["--env","--help","--inject","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-flags-without-values": [
         "--help",
+        "--inject",
         "--non-interactive",
         "--version"
       ],
@@ -2762,6 +2763,7 @@
         "--verify",
         "--version",
         "--via",
+        "--write-env-file",
         "--yes"
       ],
       "x-kit-args-modeled": true,
