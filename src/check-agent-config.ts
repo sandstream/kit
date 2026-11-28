@@ -47,6 +47,7 @@ export async function checkAgentConfig(
   const { checkCodexHookTrust } = await import("./codex-hook-trust.js");
   const { checkAiderCommitVerify } = await import("./check-aider-commit-verify.js");
   const { runT3Audit } = await import("./agent-audit-t3.js");
+  const { checkClineAutoApprove } = await import("./check-cline-auto-approve.js");
   return [
     ...runAgentAudit(root),
     ...checkInstructionSecrets(root),
@@ -67,5 +68,7 @@ export async function checkAgentConfig(
     ...checkAiderCommitVerify(root, home, env),
     // T3 Code starts agents in Full access by default; a repo's t3.json scripts run on their own.
     ...runT3Audit(root, home, env),
+    // Cline's auto-approve runs every command without asking, as Claude Code's bypassPermissions.
+    ...checkClineAutoApprove(home, env),
   ];
 }

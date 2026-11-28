@@ -149,6 +149,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   const { runAgentSkillPosture } = await import("../agent-skill-posture.js");
   const { runCodexApprovals } = await import("../agent-codex-approvals.js");
   const { runT3Audit } = await import("../agent-audit-t3.js");
+  const { checkClineAutoApprove } = await import("../check-cline-auto-approve.js");
   const results = [
     ...runAgentAudit(process.cwd()),
     ...runUserAgentAudit(process.cwd(), homedir(), process.env),
@@ -159,6 +160,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
     ...runAgentEndpoint(process.cwd(), homedir(), process.env),
     ...runAgentSkillPosture(process.cwd(), homedir(), process.env),
     ...runT3Audit(process.cwd(), homedir(), process.env),
+    ...checkClineAutoApprove(homedir(), process.env),
   ];
   const ledger = ledgerMod.runRuleLedger(process.cwd(), homedir(), process.env, {
     record: !isReadOnlyMode(),
