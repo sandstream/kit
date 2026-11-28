@@ -1,5 +1,6 @@
 import { advisoryOptionsFor, checkDependencySurface } from "./check-dependency-surface.js";
 import { auditDecision } from "./audit-exceptions.js";
+import { guardDogWaiver } from "./guarddog-exceptions.js";
 import { skipsBasicScan } from "./basic-scan-skip.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -21,6 +22,7 @@ export { checkEnvGitignored } from "./check-env-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog, guardDogScope, GUARDDOG_CHECK } from "./guarddog.js";
+import { rescanArchiveRoots } from "./guarddog-archive-root.js";
 import {
   buildSemgrepArgs,
   semgrepConfig,
@@ -1746,12 +1748,13 @@ export async function checkGuardDog(root: string): Promise<SecurityCheckResult> 
   // A verify report gives registry versions but no artifact or ruleset identity.
   // A fresh scan is required even if a previous verdict covered these selectors.
   const timeoutMs = Number(process.env.KIT_GUARDDOG_TIMEOUT_MS ?? "") || 300_000;
-  const result = await execFileNoThrow(bin, [ecosystem, "verify", file, "--output-format=json"], {
+  const verify = await execFileNoThrow(bin, [ecosystem, "verify", file, "--output-format=json"], {
     timeout: timeoutMs,
     cwd: root,
     // Older GuardDog includes devDependencies by default. Newer versions use this setting.
     env: { ...process.env, GUARDDOG_NPM_INCLUDE_DEV_DEPENDENCIES: "true" },
   });
+  const result = await rescanArchiveRoots(ecosystem, verify, bin, timeoutMs);
   let manifestChanged = true;
   try {
     const currentManifest = readRegularFileBytesIfPresent(resolve(root, file));
@@ -1759,7 +1762,8 @@ export async function checkGuardDog(root: string): Promise<SecurityCheckResult> 
   } catch {
     // An unreadable target cannot confirm the original scan scope.
   }
-  return classifyGuardDog(result, scope, manifestChanged);
+  // Reviewed exceptions in guarddog-exceptions.json cover only exact, hashed findings.
+  return classifyGuardDog(result, scope, manifestChanged, await guardDogWaiver(root));
 }
 
 /**
@@ -2392,6 +2396,8 @@ async function appendHostSecurityChecks(
   results.push(await checkTranscriptSecrets(undefined, root));
   results.push(await checkGateLiveness(root), await checkGitHookFloor(root));
   results.push(await (await import("./check-deny-rules.js")).checkKitDenyRules(root));
+  const { claudeSandboxNetworkRow } = await import("./claude-sandbox-network.js");
+  results.push(claudeSandboxNetworkRow(root));
   results.push(await checkDeviceIdOverride());
   results.push(await (await import("./check-docker-ioc.js")).checkDockerIocs());
 }

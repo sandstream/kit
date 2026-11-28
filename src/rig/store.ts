@@ -15,6 +15,7 @@ import { join } from "node:path";
 import type { RunOutcome } from "./adjudicate.js";
 import type { ConfigStats } from "./report.js";
 import type { RunMark } from "./findings.js";
+import type { Instrument } from "./instruments.js";
 
 const RIG_DIR = join(".kit", "rig");
 
@@ -37,6 +38,11 @@ export interface RigResult {
   unknownTargets: RunMark[];
   stats: ConfigStats[];
   warnings: string[];
+  /**
+   * The model, version and declared `model_digest` behind the runs, per config. Bound by the
+   * receipt through the findings file hashes it signs. Absent in a result.json written before it.
+   */
+  instruments?: Instrument[];
   receipt: RigReceipt;
 }
 

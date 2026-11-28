@@ -11,6 +11,10 @@
  * --dangerously-skip-permissions:*)`) with the same table. `nestedAgentBypass` takes a shell
  * command string or one argv; `nestedAgentCli` names the agent behind a command word.
  *
+ * An orchestrator that starts the agent itself is matched by subcommand instead: `t3 thread start`
+ * starts a T3 Code agent at the project's runtime mode, which is Full access unless changed, and no
+ * flag on that command can set it (kit-research#241). Such a launch is refused whatever its flags.
+ *
  * Only flags the vendor documents are listed, each with its source. Read without execution, through
  * the carriers in `gate-bash-carriers` (`sh -c '…'`, `$(…)`, `powershell -EncodedCommand`, …).
  */
@@ -25,6 +29,8 @@ export interface NestedAgentBypass {
   flag: string;
   /** How to run the same agent with its approvals on. */
   approvalsOn: string;
+  /** Set when the command cannot say what mode the agent runs in: what kit knows of it instead. */
+  mode?: string;
 }
 
 /** An option and the value that turns approvals off. */
@@ -40,6 +46,10 @@ interface Harness {
   together: OptionValue[];
   /** An environment assignment before the command that turns approvals off. */
   env?: RegExp;
+  /** Subcommands that start or steer an agent whose mode no flag sets: refused on their own. */
+  launches?: string[][];
+  /** For `launches`: the mode the started agent runs in, as far as kit knows. */
+  mode?: string;
   approvalsOn: string;
 }
 
@@ -126,6 +136,27 @@ const HARNESSES: Harness[] = [
     together: [],
     approvalsOn: "Use `--auto low` or `--auto medium`, which keep Droid's permission checks.",
   },
+  {
+    // pingdotgg/t3code 0.1.13 (read as data): `t3 thread start` calls the server's
+    // `t3_thread_launch`, `t3 thread send` its `t3_thread_send` (apps/server/src/cli/thread.ts);
+    // `t3 workflow start|resume` runs durable workflows (cli/workflow.ts). None takes a permission
+    // mode. A new thread starts at `defaultRuntimeMode`, `DEFAULT_RUNTIME_MODE = "full-access"`
+    // (packages/contracts/src/providerPolicy.ts), which is Claude `bypassPermissions` and Codex
+    // `danger-full-access` (docs/user/permission-modes.md).
+    agent: "t3",
+    flags: [],
+    options: [],
+    together: [],
+    launches: [
+      ["thread", "start"],
+      ["thread", "send"],
+      ["workflow", "start"],
+      ["workflow", "resume"],
+    ],
+    mode: "T3 Code runs it at the project's default permission mode, which is Full access (approvals off) unless changed, and no flag on this command sets it",
+    approvalsOn:
+      "Ask the person to start it from T3 Code, after setting Settings → Threads → New threads → Permissions below Full access.",
+  },
 ];
 
 const BY_AGENT = new Map(HARNESSES.map((h) => [h.agent, h]));
@@ -145,6 +176,7 @@ const CLIS = new Map<string, string>([
   ["@github/copilot", "copilot"],
   ["kiro-cli", "kiro-cli"],
   ["droid", "droid"],
+  ["t3", "t3"],
 ]);
 
 /**
@@ -180,8 +212,17 @@ function flagHit(args: string[], flags: string[]): string | null {
   return args.find((a) => flags.includes(a) || flags.some((f) => a === `${f}=true`)) ?? null;
 }
 
+/** A launch subcommand pair, next to each other among the options: `thread start`. */
+function launchHit(opts: string[], launches: string[][]): string | null {
+  for (const pair of launches) {
+    if (opts.some((a, i) => pair.every((w, k) => opts[i + k] === w))) return pair.join(" ");
+  }
+  return null;
+}
+
 function harnessHit(h: Harness, args: readonly string[], env: string[]): string | null {
   const opts = options(args);
+  if (h.launches) return launchHit(opts, h.launches);
   const found =
     env.find((e) => h.env?.test(e)) ??
     flagHit(opts, h.flags) ??
@@ -196,7 +237,9 @@ const READER: CommandReader<NestedAgentBypass> = {
   read(head, args, env) {
     const harness = BY_AGENT.get(nestedAgentCli(head)!)!;
     const flag = harnessHit(harness, args, env);
-    return flag ? { agent: harness.agent, flag, approvalsOn: harness.approvalsOn } : null;
+    if (!flag) return null;
+    const found = { agent: harness.agent, flag, approvalsOn: harness.approvalsOn };
+    return harness.mode ? { ...found, mode: harness.mode } : found;
   },
 };
 
@@ -211,6 +254,13 @@ export function nestedAgentBypass(command: string | readonly string[]): NestedAg
 
 /** The refusal: the agent, the flag, how to run it with approvals on, and who decides. */
 export function nestedAgentBypassReason(found: NestedAgentBypass): string {
+  if (found.mode) {
+    return (
+      `starts or steers a nested agent (${found.agent} ${found.flag}): ${found.mode}, so it would ` +
+      "run commands nobody approves, outside this session's permission prompts. " +
+      `${found.approvalsOn} Running an agent unattended is the person's decision, not the agent's (fail-closed)`
+    );
+  }
   return (
     `starts a nested agent with its approvals off (${found.agent} ${found.flag}): it would run ` +
     `commands nobody approves, outside this session's permission prompts. ${found.approvalsOn} ` +

@@ -224,11 +224,38 @@ GuardDog writes an array of dependency results to stdout.
 A successful empty array verifies an empty manifest within the selected scope.
 A missing target or report, malformed output, package omissions and scanner errors leave coverage unverified.
 Kit retains reported malware indicators and the strict security gate fails when coverage is unverified.
+GuardDog 3.2 reads an npm archive's `package.json` from `package/` or from a folder named after the package.
+When an archive uses another root folder, such as `node v22.20/` in `@types/node` 22.x, its `metadata_mismatch` rule fails to run.
+Kit then reruns that one rule. It fetches the exact version's registry document and tarball from registry.npmjs.org and checks the tarball's integrity.
+It writes the archive's `package.json` under `package/` in a temporary folder and runs `guarddog npm scan` on it with the registry document as `--metadata`.
+If any step fails, for example where GuardDog's kernel sandbox is unavailable, the package stays unverified.
 GuardDog 3 `capability-*` rules list what package code can do, such as spawning processes or opening connections.
 Kit does not count them as malware indicators, because GuardDog forms a risk only from a threat rule.
 Threat and metadata rule findings count. A report kit cannot read keeps GuardDog's own `issues` count.
 The check runs GuardDog each time. The report has no artifact digest or ruleset identity for reuse.
 Kit ignores legacy GuardDog verdict files.
+
+`guarddog-exceptions.json` at the repository root holds reviewed GuardDog false positives, as a JSON list.
+Each entry names `package`, an exact `version`, one `rule`, one `file` inside the package and that file's `sha256`, with a `reason` and an `expires` date at most 90 days ahead:
+
+```json
+[
+  {
+    "package": "prettier",
+    "version": "3.10.1",
+    "rule": "threat-runtime-obfuscation",
+    "file": "index.mjs",
+    "sha256": "efa4ff19afa80e7e5531273138ffe61dd0749d36c14a5299dfc742d5e2363171",
+    "reason": "Line 12306 is the bundled json5 Unicode ID_Start table, used only in a test() call",
+    "expires": "2027-02-25"
+  }
+]
+```
+
+An entry covers a source finding only when the package is installed at that version under `node_modules` and the installed file has that SHA-256.
+Another version, rule or file, changed bytes, a missing install or a past expiry date cover nothing, and the check detail names each entry that did not apply.
+A rule that fails to run and a metadata finding cannot be excepted.
+Read the flagged file in the registry tarball before you add an entry, and write what you saw in `reason`.
 
 ## Exploit intelligence in scan results
 

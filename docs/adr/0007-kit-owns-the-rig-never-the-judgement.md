@@ -118,7 +118,8 @@ As of 2026-10-31, the rig is a shipped, experimental command surface: `kit rig p
   required `tune`/`holdout` split, and clean controls. Its input id is a SHA-256 over the canonical
   manifest plus the prompt and every patch, line endings normalised.
 - **Ingest schema**: JSONL rows `{run, config, target, file, line, claim, severity, model,
-model_version, date}`, plus a `"none": true` row for a run that found nothing. The claim text is
+model_version, date}`, plus a `"none": true` row for a run that found nothing, and an
+  optional `model_digest` (see the amendment below). The claim text is
   carried and never interpreted.
 - **Deterministic adjudication**: file and line against the planted range within a tolerance; a
   control's findings are false positives. Nothing model-generated decides a verdict.
@@ -132,6 +133,39 @@ Every report prints the three limits above. kit still runs no reviewer: the mode
 outside kit and hands its findings in. Planting defects from historical fixes and the first
 workload (kit's own agent rules) are tracked in `docs/plans/2026-10-29-kit-rig-v1.md`.
 
+## Amendment (2026-11-28): the rig records the instrument's provenance, never judges it
+
+A row's `model` and `model_version` are free text, so two runs labelled `model_version: "latest"`
+against different weights were counted as one instrument. An ingest row may now carry an optional
+**`model_digest`**: the caller's statement of which weights produced the run, as
+`<scheme>:<value>` (a content hash such as `sha256:<64 hex>`, or a provider snapshot id such as
+`snapshot:<id>`). The owner approved this on 2026-11-28.
+
+What kit does with it, and only this:
+
+- **Validates its shape.** No whitespace, a bounded length, and for `sha256`, `sha384` and
+  `sha512` the exact hex length. One run of one target declared with two digests is malformed.
+- **Records it.** It stays in the stored findings file, which the receipt names by hash, so the
+  signature binds it. `result.json` lists the instruments per config (model, version, digest, run
+  count).
+- **Shows it.** `kit rig report` prints the instruments and warns when one config's model and
+  version label covers two digests, or digested and undigested runs.
+
+What kit does not do with it:
+
+- **It is never required.** A row without it is accepted exactly as before.
+- **kit never computes or verifies it.** kit runs no model and reads no weights. The digest is an
+  attestation by the caller, not proof, and every report that shows one prints a fourth line:
+  _"model_digest is self-declared: kit did not run the model and cannot prove the findings came
+  from those weights."_
+- **It never adjudicates.** No digest changes whether a finding caught a defect, any recall or
+  false-positive number, or a comparison verdict. A test holds that a run's numbers are the same
+  with and without a digest.
+
+This keeps the line above: recording provenance is receipts (the rig's), deciding what the
+provenance means is judgement (outside kit). Source: kit-research note
+`calculus-of-association-vs-kit.md`.
+
 ## Status of enforcement
 
 This ADR carries **no `kit-enforce` block**, and that is deliberate rather than an
@@ -140,3 +174,11 @@ duplicating it here would give two rules that can drift apart. What this ADR add
 boundary that a human applies in review — which is why it is listed as _documented, not
 enforced_, and why building the rig before this file existed would have been the erosion
 it guards against.
+
+The 2026-11-28 amendment is narrower and is held by tests, not by review alone:
+`src/rig/model-digest.test.ts` (optional, shape-checked, one digest per run of a target, shown with
+the self-declared line), `src/rig/instruments.test.ts` (one instrument per declared digest, and the
+warning when one label covers two) and `src/commands/rig.test.ts` (carried into `result.json` and
+the report, and a run's numbers are identical with and without a digest). They are not listed in
+`enforced_by:`, because that field would make `kit adr list` present the whole ADR as enforced,
+and its core boundary is still applied in review.
