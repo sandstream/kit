@@ -14,6 +14,7 @@
  *     `id-token: write` (src/gha-install-scripts.ts).
  *   - a long-lived AWS, GCP or Azure key where the provider accepts OIDC (src/gha-static-cloud-keys.ts).
  *   - `copilot-requests: write` or `models: read` granted at workflow level (src/gha-model-spend.ts).
+ *   - a `run:` step that sends a secret to a host outside GitHub (src/gha-secret-egress.ts).
  *   - `pull_request_target`, which GitHub blocks in public repositories from 2026-12-02 unless
  *     an Actions event policy allows it.
  *
@@ -29,6 +30,7 @@ import { auditModelSpend } from "./gha-model-spend.js";
 import { auditStaticCloudKeys } from "./gha-static-cloud-keys.js";
 import { auditWriteAll } from "./gha-write-all.js";
 import { auditSecretsDump } from "./gha-secrets-dump.js";
+import { auditSecretEgress } from "./gha-secret-egress.js";
 import { PRT_DEFAULT_BLOCK_DATE, pwnRequest, workflowTriggers } from "./gha-pwn.js";
 
 const UNPINNED_RULE = {
@@ -105,6 +107,7 @@ export function auditWorkflow(content: string, file: string): SecurityCheckResul
   out.push(...auditStaticCloudKeys(content, file));
   out.push(...auditModelSpend(content, file));
   out.push(...auditSecretsDump(content, file));
+  out.push(...auditSecretEgress(content, file));
   return out;
 }
 
@@ -191,7 +194,7 @@ export function runGhaAudit(cwd: string): SecurityCheckResult[] {
       category: "supply-chain",
       name: "gha-audit",
       status: "pass",
-      detail: `${files.length} workflow(s): all actions pinned, no pwn-request, no skippable gate, no write-all, no wide id-token or model-spend permission, no scripted install with credentials, no static cloud key`,
+      detail: `${files.length} workflow(s): all actions pinned, no pwn-request, no skippable gate, no write-all, no wide id-token or model-spend permission, no scripted install with credentials, no static cloud key, no secret sent to an outside host`,
     });
   }
   return out;
