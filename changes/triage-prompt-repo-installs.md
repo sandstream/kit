@@ -1,0 +1,3 @@
+### Fixed
+
+- **`kit triage prompt` now lists the repository behind `owner/repo` agent installers.** For `git clone https://github.com/…` it named the repo and the `kit triage repo` step, but for `claude plugin marketplace add`, `codex plugin marketplace add` and `npx skills add` with an `owner/repo` (or GitHub URL) source it named nothing. These sources are now read with the install gate's own source parser and listed as `repo <owner/repo> (<installer>)` with a `kit triage repo` next step; a source on another host is named as one `kit triage repo` cannot score, and a local path is skipped. Found by kit-research `copybook-vs-kit`.
