@@ -551,14 +551,14 @@ describe("installInstallGate", () => {
       assert.equal(r1.action, "created");
       const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
       const groups = s.hooks.PreToolUse;
-      assert.ok(Array.isArray(groups) && groups.length === 1);
+      assert.ok(Array.isArray(groups) && groups.length === 2);
       assert.equal(groups[0].matcher, "Bash|PowerShell");
       assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
 
       const r2 = await installInstallGate(dir);
       assert.equal(r2.action, "unchanged");
       const s2 = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
-      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+      assert.equal(s2.hooks.PreToolUse.length, 2, "no duplicate group on re-run");
     } finally {
       rmTemp(dir);
     }
@@ -639,7 +639,7 @@ describe("installInstallGate", () => {
         const r = await installInstallGate(dir);
         assert.equal(r.action, "updated");
         const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
-        assert.equal(s.hooks.PreToolUse.length, 1);
+        assert.equal(s.hooks.PreToolUse.length, 2);
         assert.equal(s.hooks.PreToolUse[0].hooks[0].command, kitGateInvocation());
       } finally {
         rmTemp(dir);

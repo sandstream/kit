@@ -5,11 +5,13 @@ import { resolve, dirname, join, isAbsolute } from "node:path";
 import { gateSettingsFile, preToolUseGroups } from "./gate-settings.js";
 import {
   GATE_BASH_MATCHER,
+  addOrchestrationGateGroup,
   widenGateBashMatchers,
   widenGateEgressMatchers,
 } from "./gate-bash-matcher.js";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
+import { ORCHESTRATION_MCP_MATCHER } from "./orchestration-mcp-tools.js";
 import { portableGateCommand, portableGatesMode } from "./portable-gate.js";
 import {
   GATE_SUBCOMMANDS,
@@ -914,6 +916,31 @@ export function gateLiveness(
 }
 
 /**
+ * The install gate is already wired: add its group for the MCP tools that start or steer another
+ * agent (gate-bash refuses them too) when it is missing, and write the file when anything changed.
+ */
+async function rewriteWiredInstallGate(
+  file: string,
+  path: string,
+  settings: { hooks?: Record<string, SettingsHookGroup[]> },
+  refreshed: boolean,
+  desired: string,
+): Promise<HookInstallResult> {
+  const mcp = addOrchestrationGateGroup(settings.hooks?.PreToolUse ?? [], gateHook(desired));
+  if (!refreshed && !mcp)
+    return { file, action: "unchanged", detail: "install-gate already wired" };
+  const detail = mcp
+    ? "install-gate now also runs for MCP tools that start or steer an agent"
+    : "install-gate hook command refreshed";
+  try {
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return { file, action: "updated", detail };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Install the PreToolUse install-gate hook into `.claude/settings.json` so an
  * un-triaged package install is BLOCKED before it runs — the *enforce* layer for
  * agent auto-mode (the rules-file block only *advises*; an agent can otherwise run
@@ -947,18 +974,11 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
   const existing = refreshSettingsGateCommand(pre, "gate-bash", desired, widenGateBashMatchers);
   if (existing.found) {
     markGatesInstalled(cwd); // gate present → record it for liveness (idempotent)
-    if (existing.updated) {
-      try {
-        await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-        return { file, action: "updated", detail: "install-gate hook command refreshed" };
-      } catch (err) {
-        return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-      }
-    }
-    return { file, action: "unchanged", detail: "install-gate already wired" };
+    return rewriteWiredInstallGate(file, path, settings, existing.updated, desired);
   }
 
   pre.push({ matcher: GATE_BASH_MATCHER, hooks: [gateHook(desired)] });
+  addOrchestrationGateGroup(pre, gateHook(desired));
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
@@ -1162,6 +1182,41 @@ export async function installInstallGateCodex(
   return next.length > 0 ? { ...result, next } : result;
 }
 
+/**
+ * kit's Codex gate is already wired: refresh its command and, when missing, append the block for the
+ * MCP tools that start or steer an agent. That block is separate, so the trusted `^Bash$` hook keeps
+ * its hash; Codex asks the user to trust the new one.
+ */
+async function rewriteWiredCodexGate(w: {
+  file: string;
+  path: string;
+  existing: string;
+  refreshed: string;
+  mcp: boolean;
+  desired: string;
+  flag: string;
+}): Promise<HookInstallResult> {
+  const { file, flag } = w;
+  const next = w.mcp ? w.refreshed + codexOrchestrationBlock(w.desired) : w.refreshed;
+  if (next === w.existing) {
+    return { file, action: "unchanged", detail: `install-gate already wired${flag}` };
+  }
+  const what = w.mcp
+    ? "install-gate now also runs for MCP tools that start an agent"
+    : "install-gate hook command refreshed";
+  try {
+    await writeFile(w.path, next, "utf-8");
+    return { file, action: "updated", detail: `${what}${flag}` };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** kit's gate-bash for the orchestration MCP tools, as a Codex PreToolUse block (TOML literals). */
+function codexOrchestrationBlock(desired: string): string {
+  return `\n[[hooks.PreToolUse]]\nmatcher = '${ORCHESTRATION_MCP_MATCHER}'\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${desired}'\n`;
+}
+
 async function writeInstallGateCodex(cwd: string): Promise<HookInstallResult> {
   const file = ".codex/config.toml";
   const path = resolve(cwd, file);
@@ -1186,23 +1241,17 @@ async function writeInstallGateCodex(cwd: string): Promise<HookInstallResult> {
     lookalikes > 0
       ? `; left ${lookalikes} gate-bash look-alike hook(s) untouched: not kit's, do not trust them`
       : "";
-  if (codexGateHooks(replaceTomlGateCommand(existing, "gate-bash", desired)).length > 0) {
-    const next = replaceTomlGateCommand(existing, "gate-bash", desired);
-    if (next !== existing) {
-      try {
-        await writeFile(path, next, "utf-8");
-        return { file, action: "updated", detail: `install-gate hook command refreshed${flag}` };
-      } catch (err) {
-        return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
-      }
-    }
-    return { file, action: "unchanged", detail: `install-gate already wired${flag}` };
+  const refreshed = replaceTomlGateCommand(existing, "gate-bash", desired);
+  const kitHooks = codexGateHooks(refreshed);
+  if (kitHooks.length > 0) {
+    const mcp = !kitHooks.some((h) => h.matcher === ORCHESTRATION_MCP_MATCHER);
+    return rewriteWiredCodexGate({ file, path, existing, refreshed, mcp, desired, flag });
   }
   // Single-quoted TOML literal — the invocation has double quotes, but no single quotes.
   const block = `\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${desired}'\n`;
   try {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, existing + block, "utf-8");
+    await writeFile(path, existing + block + codexOrchestrationBlock(desired), "utf-8");
     return {
       file,
       action: existed ? "updated" : "created",

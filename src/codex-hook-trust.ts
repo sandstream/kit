@@ -38,6 +38,10 @@ import { codexHome } from "./agent-audit-user.js";
 import { codexTrusts, pathKey, rootKeys } from "./check-pretrusted.js";
 import { commandIncludesSubcommand } from "./agent-config-hook-liveness.js";
 import { isKitGateCommand } from "./kit-gate-command.js";
+import { ORCHESTRATION_MCP_MATCHER } from "./orchestration-mcp-tools.js";
+
+/** kit's gate for the MCP tools that start an agent, as opposed to its shell gate. Pure. */
+const isMcpGate = (h: { matcher?: string }): boolean => h.matcher === ORCHESTRATION_MCP_MATCHER;
 
 /** Codex's default command-hook timeout in seconds (`discovery.rs:1040`). */
 const DEFAULT_TIMEOUT_SEC = 600;
@@ -116,6 +120,8 @@ export interface CodexGateHook {
   hash: string;
   /** The exact command Codex will show in /hooks, and the user is asked to trust. */
   command: string;
+  /** The group's matcher: `^Bash$`, or the orchestration MCP tools (src/orchestration-mcp-tools.ts). */
+  matcher?: string;
 }
 
 /** PreToolUse command handlers in a Codex config's text, with their indexes. Pure. */
@@ -164,6 +170,7 @@ export function codexGateHooks(
       handlerIndex,
       hash: codexCommandHookHash("pre_tool_use", matcher, handler, platform),
       command: effectiveCommand(handler, platform),
+      ...(matcher === undefined ? {} : { matcher }),
     }));
 }
 
@@ -292,9 +299,10 @@ export function codexActivationSteps(root: string, status: CodexGateStatus): str
       : pending.some((h) => h.trust === "disabled")
         ? "the hook is turned off in Codex"
         : "Codex runs a new hook only after you trust it";
-    const commands = pending.map((h) => `\`${h.command}\``).join(" or ");
+    const commands = [...new Set(pending.map((h) => `\`${h.command}\``))].join(" or ");
+    const matchers = pending.map((h) => `\`${h.matcher ?? ""}\``).join(" and ");
     steps.push(
-      `In Codex, open /hooks (or answer the startup hook review) and trust the PreToolUse hook in .codex/config.toml whose command is exactly ${commands}: ${why}. Trust no other hook as kit's gate.`,
+      `In Codex, open /hooks (or answer the startup hook review) and trust the PreToolUse hook(s) in .codex/config.toml whose command is exactly ${commands} (matcher ${matchers}): ${why}. Trust no other hook as kit's gate.`,
     );
   }
   if (status.lookalikes > 0) {
@@ -350,7 +358,9 @@ export function checkCodexHookTrust(
   env: Record<string, unknown> = process.env,
 ): SecurityCheckResult[] {
   const status = codexGateStatus(root, home, env);
-  if (!status?.hooks.length && existsSync(codexGateMarkerPath(root))) {
+  // The shell gate is the one liveness keys off; the MCP-tool gate alone does not gate installs.
+  const shell = status?.hooks.filter((h) => !isMcpGate(h)) ?? [];
+  if (!shell.length && existsSync(codexGateMarkerPath(root))) {
     return [codexGateMissingRow(status)];
   }
   if (!status) return [];
@@ -368,7 +378,10 @@ export function checkCodexHookTrust(
   const states = status.hooks.map((h) => h.trust).join(", ") || "not kit's";
   const lookalikes =
     status.lookalikes > 0 ? `; ${status.lookalikes} gate-bash look-alike hook(s), not kit's` : "";
-  const runs = status.hooks.length > 0 && status.hooks.every((h) => h.trust === "trusted");
+  const runs = shell.length > 0 && shell.every((h) => h.trust === "trusted");
+  const mcp = status.hooks.filter((h) => isMcpGate(h) && h.trust !== "trusted");
+  const mcpNote =
+    mcp.length > 0 ? "; MCP tools that start an agent run ungated until their hook is trusted" : "";
   return [
     {
       category: "exposure",
@@ -377,7 +390,7 @@ export function checkCodexHookTrust(
       severity: "medium",
       detail: `kit's gate-bash hook in .codex/config.toml: project ${
         status.projectTrusted ? "trusted" : "not trusted"
-      }, hook ${states}${lookalikes}. ${runs && status.projectTrusted ? "kit's gate runs" : "Codex installs run ungated"}`,
+      }, hook ${states}${lookalikes}. ${runs && status.projectTrusted ? "kit's gate runs" : "Codex installs run ungated"}${mcpNote}`,
       suggestion: steps.join(" "),
     },
   ];

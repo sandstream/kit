@@ -53,6 +53,17 @@ export async function cmdGateBash(): Promise<boolean> {
   // Agent-agnostic command extraction (Claude/Codex/Amazon Q/Gemini tool_input.command,
   // Cursor top-level command, Cline run_commands `commands`) — shared pure helper. Cline sends
   // several commands in one call, and each one must pass.
+  // An MCP tool that starts or steers another agent (T3 Code's `delegate_task`, …): no shell
+  // command, but the same nested-agent refusal (src/orchestration-mcp-tools.ts).
+  const { orchestrationRefusal } = await import("../orchestration-mcp-tools.js");
+  const orchestration = orchestrationRefusal(payload);
+  if (orchestration) {
+    const reason = `kit install-gate: BLOCKED: ${orchestration}`;
+    await auditGateDeny("gate-bash", orchestration, sessionIdOf(payload));
+    if (stdoutDeny(reason)) return true;
+    writeSync(2, `${reason}\n`);
+    process.exit(2); // PreToolUse deny
+  }
   const { extractCommandsFromHookPayload } = await import("../install-gate.js");
   const { clineShellCallUnreadable } = await import("../install-gate-payload.js");
   if (clineShellCallUnreadable(payload)) {

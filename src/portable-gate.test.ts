@@ -167,12 +167,14 @@ describe(
       assert.match(first.stdout, /portable gates: \.claude\/settings\.json holds gate lines/);
       assert.deepEqual(gates(), [
         portableGateCommand("gate-bash"),
+        portableGateCommand("gate-bash"),
         portableGateCommand("gate-env"),
       ]);
       assert.equal(existsSync(join(dir, ".claude", "settings.local.json")), false);
 
       run();
       assert.deepEqual(gates(), [
+        portableGateCommand("gate-bash"),
         portableGateCommand("gate-bash"),
         portableGateCommand("gate-env"),
       ]);

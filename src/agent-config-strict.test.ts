@@ -120,7 +120,11 @@ describe("gate hooks fail closed", () => {
     const hooks = settingsOf(dir).hooks.PreToolUse.flatMap(
       (g: { hooks: { onFailure?: string }[] }) => g.hooks,
     );
-    assert.equal(hooks.length, 2);
+    assert.equal(
+      hooks.length,
+      3,
+      "gate-bash (shell tools and agent-launching MCP tools), gate-env",
+    );
     for (const h of hooks) assert.equal(h.onFailure, "block");
   });
 
@@ -135,7 +139,8 @@ describe("gate hooks fail closed", () => {
     assert.equal(r.action, "updated");
     const after = settingsOf(dir).hooks.PreToolUse;
     assert.equal(after[0].hooks[0].onFailure, "block");
-    assert.deepEqual(after[1].hooks[0], { type: "command", command: "echo me" });
+    const mine = after.find((g: { matcher: string }) => g.matcher === "Bash");
+    assert.deepEqual(mine?.hooks[0], { type: "command", command: "echo me" });
     assert.equal((await installInstallGate(dir)).action, "unchanged");
   });
 });
