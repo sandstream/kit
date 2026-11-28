@@ -34,6 +34,18 @@ function scannedScope(packagesScanned: number, profile: string): string {
   return `${packagesScanned} packages, profile=${profile}`;
 }
 
+/**
+ * Mark a row from the `baseline` profile as evidence about the machine, not the repository. A
+ * control-coverage map (`kit coverage --verify`) must not read that pass as a repository control
+ * verified: NIST 800-53 SR read "verified" on this row alone. Other profiles are left as they are.
+ */
+export function withRepositoryScope<T extends object>(
+  row: T,
+  profile: string,
+): T & { outsideRepository?: true } {
+  return profile === "baseline" ? { ...row, outsideRepository: true as const } : row;
+}
+
 export function scannedHead(packagesScanned: number, profile: string): string {
   const scope = scannedScope(packagesScanned, profile);
   return profile === "baseline"

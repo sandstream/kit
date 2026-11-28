@@ -6,6 +6,7 @@ import {
   scannedHead,
   staleCatalogDetail,
   staleCatalogStatus,
+  withRepositoryScope,
 } from "./bumblebee-age.js";
 
 const newer = { latest: "0.2.0", pinned: "0.1.2" };
@@ -87,5 +88,17 @@ describe("LOCAL_COVER", () => {
     assert.match(LOCAL_COVER, /osv-scanner/);
     assert.match(LOCAL_COVER, /not live threat data/);
     assert.doesNotMatch(LOCAL_COVER, /—/);
+  });
+});
+
+describe("withRepositoryScope: a baseline row is not evidence about the repository", () => {
+  const row = { name: "bumblebee (supply-chain)", status: "pass" };
+
+  it("marks a baseline-profile row as outside the repository", () => {
+    assert.equal(withRepositoryScope(row, "baseline").outsideRepository, true);
+  });
+
+  it("leaves a project-profile row unmarked", () => {
+    assert.equal(withRepositoryScope(row, "project").outsideRepository, undefined);
   });
 });
