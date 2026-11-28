@@ -3534,7 +3534,7 @@
         },
         "mcp": {
           "kind": "command",
-          "summary": "MCP tool metadata: reads the tool definitions for poisoning and pins them against drift. kit triage mcp <server> --tools <file>",
+          "summary": "MCP tool metadata: reads the tool definitions and the server instructions for poisoning and pins them against drift. kit triage mcp <server> --tools <file> [--init <initialize.json>]",
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-flags-inherited": true,
@@ -3650,6 +3650,7 @@
         "--deep",
         "--env",
         "--help",
+        "--init",
         "--json",
         "--minisign-key",
         "--non-interactive",

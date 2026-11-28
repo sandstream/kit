@@ -661,6 +661,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--checksum",
     "--cosign-key",
     "--deep",
+    "--init",
     "--json",
     "--minisign-key",
     "--pin",
