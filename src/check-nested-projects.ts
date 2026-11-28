@@ -36,6 +36,13 @@ const MANIFESTS = [
   "composer.json",
 ];
 
+/**
+ * Manifests that mean "there is a project here", for an ecosystem no kit scanner reads. Finding one
+ * must not read as "no manifest here": the project is real, its dependencies are simply not
+ * covered. Each entry names the ecosystem so the row can say which one.
+ */
+const UNREAD_MANIFESTS: readonly [string, string][] = [["build.zig.zon", "Zig"]];
+
 /** Directories that never represent a project of the operator's own. */
 const IGNORED = new Set([
   "node_modules",
@@ -72,6 +79,19 @@ async function manifestsIn(dir: string): Promise<string[]> {
 
 async function hasManifest(dir: string): Promise<boolean> {
   return (await manifestsIn(dir)).length > 0;
+}
+
+/** The unread-ecosystem manifests present in a directory, as `file (Ecosystem)` labels. */
+async function unreadManifestsIn(dir: string): Promise<string[]> {
+  const present = await Promise.all(
+    UNREAD_MANIFESTS.map(([m]) =>
+      access(join(dir, m)).then(
+        () => true,
+        () => false,
+      ),
+    ),
+  );
+  return UNREAD_MANIFESTS.filter((_, i) => present[i]).map(([m, eco]) => `${m} (${eco})`);
 }
 
 /**
@@ -181,19 +201,23 @@ export interface ScanScope {
   cargoMembers?: string[];
   /** The manifests each nested project holds. Absent means unknown: every project counts. */
   manifests?: Record<string, string[]>;
+  /** Root manifests of ecosystems no kit scanner reads, as `file (Ecosystem)` labels. */
+  unreadRoot?: string[];
 }
 
 /** The facts, gathered once: the row below and the skip escalation both read them. */
 export async function scanScopeFacts(root: string): Promise<ScanScope> {
-  const [rootManifest, manifests] = await Promise.all([
+  const [rootManifest, manifests, unreadRoot] = await Promise.all([
     hasManifest(root),
     findNestedManifests(root),
+    unreadManifestsIn(root),
   ]);
   const nested = Object.keys(manifests).sort();
   return {
     rootManifest,
     nested,
     manifests,
+    unreadRoot,
     workspaces: rootManifest ? await declaresWorkspaces(root) : false,
     cargoMembers: rootManifest ? await cargoWorkspaceMembers(root, nested) : [],
   };
@@ -272,9 +296,30 @@ function say(
 }
 
 /**
+ * The row for a root whose only manifest is one kit does not read. It is a project, so "no manifest
+ * here" would be false; and none of its dependencies were scanned, so it is not a pass either.
+ */
+function unreadRootRow(unread: string[], nested: string[], list: string): SecurityCheckResult {
+  const below = nested.length ? `, nor of ${nested.length} project(s) below: ${list}` : "";
+  return say(
+    "warn",
+    `manifest found here but not read: ${unread.join(", ")} — kit does not cover this ecosystem, so this verdict covers none of its dependencies${below}`,
+    {
+      severity: nested.length ? "high" : "medium",
+      suggestion:
+        "Review these dependencies by hand; for a git-pinned dependency, run kit triage repo <url>",
+    },
+  );
+}
+
+/**
  * Report what this run's directory does and does not cover.
  *
- * The four cases are distinct, and only one of them is a problem:
+ * A root whose only manifest belongs to an ecosystem kit does not read (`build.zig.zon`) is a
+ * project, not an empty directory: it warns that the manifest was found and not read, and still
+ * names any projects below.
+ *
+ * Otherwise the four cases are distinct, and only one of them is a problem:
  *   - nothing nested: the scope is this project, say so;
  *   - a root manifest declaring workspaces: the children are covered by the root scan (a Cargo
  *     workspace covers only its locked members, so any other child still falls to the next case);
@@ -290,7 +335,14 @@ export async function checkScanScope(
     nested,
     workspaces,
     cargoMembers = [],
+    unreadRoot = [],
   } = facts ?? (await scanScopeFacts(root));
+
+  const show = (paths: string[]): string =>
+    paths.slice(0, 4).join(", ") + (paths.length > 4 ? `, +${paths.length - 4}` : "");
+  const list = show(nested);
+
+  if (!rootManifest && unreadRoot.length) return unreadRootRow(unreadRoot, nested, list);
 
   if (nested.length === 0) {
     return say(
@@ -298,10 +350,6 @@ export async function checkScanScope(
       rootManifest ? "this project, scanned in place" : "no project manifests here or below",
     );
   }
-
-  const show = (paths: string[]): string =>
-    paths.slice(0, 4).join(", ") + (paths.length > 4 ? `, +${paths.length - 4}` : "");
-  const list = show(nested);
 
   if (rootManifest && workspaces) {
     return say("pass", `${nested.length} nested package(s) covered via workspaces: ${list}`);
