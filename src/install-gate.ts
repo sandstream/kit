@@ -25,10 +25,11 @@ import { checkBareInstall, type BareSegment } from "./install-gate-bare.js";
 import * as requirements from "./install-gate-requirements.js";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
 import {
-  claudePluginInstall,
+  agentPluginInstall,
   npmRunnerInvocation,
   ownerRepoArg,
   repoSourceArg,
+  runnerPluginInstall,
 } from "./install-gate-repos.js";
 import {
   binBase,
@@ -986,6 +987,7 @@ function shellChildRefusal(packages: readonly string[], argv: readonly string[])
  * Keep unsupported sources as refusals, alongside the wrapper package and supported repositories.
  */
 function repoFetcherSources(command: string, throughArgs: string[], probe: InstallProbe): void {
+  runnerPluginInstall([command, ...throughArgs], probe); // `npx @openai/codex plugin marketplace add`
   const bare = npmName(binBase(command));
   if (!bare || !REPO_FETCHER_PACKAGES.has(bare)) return;
   for (const tok of throughArgs) {
@@ -1175,7 +1177,7 @@ function scanSegment(segment: string, probe: InstallProbe): void {
   const start = raw.length - tokens.length;
   const cmdRaw = raw.filter((t, i) => i >= start || !t.startsWith("-"));
 
-  if (indirectInstall(tokens, probe) || claudePluginInstall(tokens, probe)) return;
+  if (indirectInstall(tokens, probe) || agentPluginInstall(tokens, probe)) return;
   if (gemInstall(tokens, probe)) return;
   const lead = raw.slice(0, start); // env assignments can move a registry: the parsers read them
   if (REGISTRY_INSTALLS.some((record) => record(tokens, probe, lead))) return;

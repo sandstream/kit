@@ -30,6 +30,23 @@ For example, `uv run -- python app.py --config-file=settings.toml` does not sele
 A previous package triage does not verify a source selected by an unread configuration file.
 Remove the source configuration to use the default registry. Kit cannot verify installs with these options.
 
+## Agent plugin marketplaces
+
+Adding a plugin marketplace is the trust decision for every plugin installed from it, so the gate
+triages the marketplace repository when it is added. It treats Claude Code and Codex alike:
+
+- `claude plugin marketplace add <source>`, `claude plugin install <plugin> --marketplace <source>`
+  and `codex plugin marketplace add <source>` (also after Codex's `--ref <ref>` and `--sparse <path>`)
+  run `kit triage repo` on a GitHub source (`owner/repo`, an `https://github.com/…` or `git@github.com:…` URL);
+- a local path is the user's own code and passes;
+- any other source (another host, a URL to a `marketplace.json`) or no source is refused.
+
+The same reading applies when the agent CLI is run through its npm package
+(`npx @anthropic-ai/claude-code plugin …`, `npx @openai/codex plugin …`), a shell string, `env`,
+`cd … &&` or an absolute path. `claude plugin install <plugin>@<marketplace>`, `claude plugin update`
+and `codex plugin marketplace upgrade` fetch from a marketplace that was triaged when it was added
+and pass. Other harnesses that install plugins only from their own UI are not covered.
+
 ## Bare installs
 
 A bare `npm install`, `npm ci`, `npm update`, `pnpm install`, `yarn` or `bun install` names no package.
