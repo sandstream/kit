@@ -23,6 +23,12 @@
  * One run of one target is either failed or reviewed: a row that contradicts an earlier one for
  * the same (config, run, target) is reported as malformed.
  *
+ * Any row may carry an optional `"model_digest"`: what the caller says identifies the reviewer's
+ * weights, as `<scheme>:<value>` (a content hash such as `sha256:<64 hex>`, or a provider snapshot
+ * id such as `snapshot:<id>`). kit checks its shape and records it; it never computes, verifies or
+ * adjudicates on it (ADR-0007). It lets a report tell "same label, different weights" apart. One
+ * run of one target declared with two digests is reported as malformed.
+ *
  * kit never judges the claim text. It only needs the location to adjudicate (phase 2) and the
  * attribution to keep runs apart. A malformed row is reported with its line number and never
  * skipped silently; in strict mode one bad row refuses the whole file.
@@ -42,6 +48,8 @@ export interface RunMark {
   date: string;
   /** Why the run did not complete, from a `"failed"` row. Absent for a completed review. */
   failed?: string;
+  /** The caller's declared identity of the model's weights. Recorded, never verified. */
+  model_digest?: string;
 }
 
 export interface Finding extends RunMark {
@@ -63,7 +71,7 @@ export interface IngestResult {
   errors: RowError[];
 }
 
-const MARK_KEYS = ["run", "config", "target", "model", "model_version", "date"];
+const MARK_KEYS = ["run", "config", "target", "model", "model_version", "date", "model_digest"];
 const FINDING_KEYS = [...MARK_KEYS, "file", "line", "claim", "severity"];
 const NONE_KEYS = [...MARK_KEYS, "none"];
 const FAILED_KEYS = [...MARK_KEYS, "failed"];
@@ -74,12 +82,28 @@ function unknownKeys(r: Record<string, unknown>, allowed: string[]): string | nu
   return extra.length > 0 ? `unknown key(s) ${extra.sort().join(", ")}` : null;
 }
 
+/** `<scheme>:<value>`, no whitespace, bounded. A hash scheme also fixes the hex length. */
+const DIGEST_SHAPE = /^[a-z0-9][a-z0-9.-]{0,31}:[A-Za-z0-9._:/@+=-]{1,200}$/;
+const HASH_HEX: Record<string, number> = { sha256: 64, sha384: 96, sha512: 128 };
+
+/** The problem with an optional `model_digest`, or null. Shape only: kit cannot verify it. */
+function digestProblem(d: unknown): string | null {
+  if (d === undefined) return null;
+  const why = `"model_digest" must be "<scheme>:<value>" (e.g. sha256:<64 hex> or snapshot:<id>)`;
+  if (typeof d !== "string" || !DIGEST_SHAPE.test(d)) return why;
+  const [scheme, value] = [d.slice(0, d.indexOf(":")), d.slice(d.indexOf(":") + 1)];
+  const hex = HASH_HEX[scheme];
+  return hex === undefined || new RegExp(`^[0-9a-f]{${hex}}$`).test(value) ? null : why;
+}
+
 /** The first problem with the attribution fields every row carries, or null. */
 function markProblem(r: Record<string, unknown>): string | null {
   const blank = MARK_STRINGS.find(
     (k) => typeof r[k] !== "string" || (r[k] as string).trim() === "",
   );
   if (blank) return `"${blank}" must be a non-empty string`;
+  const digest = digestProblem(r.model_digest);
+  if (digest) return digest;
   const date = r.date;
   if (
     typeof date !== "string" ||
@@ -124,6 +148,7 @@ function markOf(r: Record<string, unknown>): RunMark {
     date: r.date as string,
   };
   if (typeof r.failed === "string") mark.failed = r.failed;
+  if (typeof r.model_digest === "string") mark.model_digest = r.model_digest;
   return mark;
 }
 
@@ -170,6 +195,11 @@ export function runKey(m: Pick<RunMark, "config" | "run" | "target">): string {
 
 /** Why a row contradicts the earlier row for the same run of the same target, or null. */
 function contradiction(seen: RunMark | undefined, row: RunMark): string | null {
+  if (seen && seen.model_digest !== row.model_digest) {
+    return `run ${row.run} of config ${row.config} on ${row.target} is already recorded with model_digest ${
+      seen.model_digest ?? "(none)"
+    }; one run of a target is one instrument`;
+  }
   if (!seen || (seen.failed === undefined) === (row.failed === undefined)) return null;
   return `run ${row.run} of config ${row.config} on ${row.target} is already recorded as ${
     seen.failed === undefined ? "reviewed" : "failed"

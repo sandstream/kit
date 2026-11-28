@@ -4,6 +4,7 @@
  */
 import type { RigManifest } from "./manifest.js";
 import { compareConfigs, LIMITS, type Comparison, type Shortfall, type Spread } from "./report.js";
+import { DIGEST_LIMIT } from "./instruments.js";
 import type { RigResult } from "./store.js";
 
 const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
@@ -30,6 +31,7 @@ export function renderPlan(m: RigManifest, inputId: string, findingsPath: string
   lines.push(
     "",
     `Row: {"run","config","target","file","line","claim","severity","model","model_version","date"}`,
+    `     optional "model_digest": "<scheme>:<value>" (sha256:<hex>, snapshot:<id>), recorded, never verified`,
     `Then: kit rig ingest ${findingsPath}; kit rig adjudicate; kit rig report`,
   );
   return lines;
@@ -83,6 +85,21 @@ function shortfallLines(what: string, shortfall: Shortfall[] | undefined): strin
   });
 }
 
+/** The declared instruments, and the self-declared limit whenever a digest is shown. */
+function instrumentLines(result: RigResult): string[] {
+  const list = result.instruments ?? [];
+  if (!list.some((i) => i.model_digest !== undefined)) return [];
+  return [
+    "Instruments (declared by the caller):",
+    ...list.map(
+      (i) =>
+        `  ${i.config.padEnd(6)} ${i.model} ${i.model_version}  ${i.model_digest ?? "(no digest)"}  ${i.runs} run(s)`,
+    ),
+    `  ${DIGEST_LIMIT}`,
+    "",
+  ];
+}
+
 /** The full report for one adjudicated input. */
 export function renderReport(result: RigResult, otherInputs: string[]): string[] {
   const lines = [
@@ -111,7 +128,7 @@ export function renderReport(result: RigResult, otherInputs: string[]): string[]
     }
     lines.push("");
   }
-  lines.push(...renderComparisons(result));
+  lines.push(...renderComparisons(result), ...instrumentLines(result));
   for (const w of result.warnings) lines.push(`warning: ${w}`);
   for (const u of result.unknownTargets) {
     lines.push(
