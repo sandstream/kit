@@ -2,8 +2,8 @@
  * The carriers `gate-bash` reads through to reach the command a shell would really run.
  *
  * `sh -c '…'`, `env X=1 …`, `sudo -u x …`, `xargs …`, `npx -y <pkg> …`, `npm exec` / `pnpm dlx`,
- * `$(…)`, backticks, `cmd /c` and PowerShell `-Command` / `-EncodedCommand` all run another
- * command. A classifier names the commands it cares about (`isTarget`) and reads one of them
+ * `$(…)`, backticks, `cmd /c`, PowerShell `-Command` / `-EncodedCommand` and an agent launcher
+ * (`herdr pane new --kind claude -- <argv>`) all run another command. A classifier names the commands it cares about (`isTarget`) and reads one of them
  * (`read`); this walk finds them behind any carrier, to a bounded depth.
  *
  * Shared by the nested-agent classifier (`nested-agent-bypass`) and the GitHub token actions
@@ -27,6 +27,20 @@ const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun"]);
 const RUNNER_SUBCOMMANDS = new Set(["exec", "dlx", "x"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const KEYWORDS = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{", "("]);
+/** Terminal and agent managers that start a command given after `--` (kit-research copybook-vs-kit). */
+const LAUNCHERS = new Set(["herdr"]);
+
+/**
+ * The command a launcher starts: `herdr … --kind <agent> -- <argv>` starts `<agent> <argv>`, and
+ * `herdr … -- <cmd …>` starts `<cmd …>`. Without `--` it starts nothing (`herdr pane list`).
+ */
+function launchedCommand(args: readonly string[]): string[] | null {
+  const end = args.indexOf("--");
+  if (end < 0) return null;
+  const at = args.slice(0, end).findIndex((a) => a === "--kind" || a.startsWith("--kind="));
+  const kind = at < 0 ? "" : args[at]!.startsWith("--kind=") ? args[at]!.slice(7) : args[at + 1];
+  return kind ? [kind, ...args.slice(end + 1)] : args.slice(end + 1);
+}
 
 class Walk<T> {
   constructor(private readonly reader: CommandReader<T>) {}
@@ -38,7 +52,8 @@ class Walk<T> {
       SHELLS.has(head) ||
       WRAPPERS.has(head) ||
       RUNNERS.has(head) ||
-      PACKAGE_MANAGERS.has(head)
+      PACKAGE_MANAGERS.has(head) ||
+      LAUNCHERS.has(head)
     );
   }
 
@@ -63,6 +78,10 @@ class Walk<T> {
   private viaCarrier(head: string, args: string[], depth: number): T | null {
     if (depth >= MAX_DEPTH) return null;
     if (WRAPPERS.has(head) || RUNNERS.has(head)) return this.wrapped(args, depth);
+    if (LAUNCHERS.has(head)) {
+      const launched = launchedCommand(args);
+      return launched ? this.words(launched, depth + 1) : null;
+    }
     if (PACKAGE_MANAGERS.has(head) && RUNNER_SUBCOMMANDS.has(args[0] ?? ""))
       return this.wrapped(args.slice(1), depth);
     return SHELLS.has(head) || head === "eval" ? this.shellString(args, depth) : null;
