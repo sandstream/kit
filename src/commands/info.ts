@@ -148,6 +148,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   const { runUserAgentAudit } = await import("../agent-audit-user.js");
   const { runAgentSkillPosture } = await import("../agent-skill-posture.js");
   const { runCodexApprovals } = await import("../agent-codex-approvals.js");
+  const { claudeSandboxNetworkRow } = await import("../claude-sandbox-network.js");
   const { runClaudeDesktopAudit } = await import("../agent-audit-claude-desktop.js");
   const { checkClineAutoApprove } = await import("../check-cline-auto-approve.js");
   const results = [
@@ -160,6 +161,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
     ...runAgentPreload(process.cwd(), homedir(), process.env),
     ...runAgentEndpoint(process.cwd(), homedir(), process.env),
     ...runAgentSkillPosture(process.cwd(), homedir(), process.env),
+    ...[claudeSandboxNetworkRow(process.cwd())].filter((r) => r.status !== "skip"),
     ...checkClineAutoApprove(homedir(), process.env),
   ];
   const ledger = ledgerMod.runRuleLedger(process.cwd(), homedir(), process.env, {

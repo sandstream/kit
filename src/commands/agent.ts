@@ -99,6 +99,8 @@ async function installPermissionsAndStrict(): ReturnType<typeof installKitPermis
   const strict = await installStrictSettings();
   console.log(`\n  ${c.bold}Deny rules + sandbox${c.reset} ${c.dim}(Claude Code)${c.reset}`);
   for (const line of describeStrictResult(strict)) console.log(`    ${line}`);
+  const net = (await import("../claude-sandbox-network.js")).agentConfigSandboxLine(strict.sandbox);
+  if (net) console.log(`    ${net}`);
   if (strict.action === "failed") process.exitCode = 1;
   return installKitPermissions();
 }
