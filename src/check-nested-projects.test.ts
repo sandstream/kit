@@ -166,6 +166,38 @@ describe("checkScanScope: sibling projects", () => {
   });
 });
 
+describe("checkScanScope: a manifest kit does not read", () => {
+  // Measured on connect-zig: the root holds build.zig.zon with four pinned dependencies, and the
+  // row said "no manifest here". The manifest is there; kit does not read it. Saying so is the
+  // honest row, and it must not turn into a pass.
+  const zon = '.{ .name = .x, .version = "0.1.0", .dependencies = .{} }\n';
+
+  it("names build.zig.zon as found but not read, never as no manifest here", async () => {
+    const dir = tree({ "build.zig.zon": zon, "src/root.zig": "pub fn main() void {}\n" });
+    try {
+      const r = await checkScanScope(dir);
+      assert.equal(r.status, "warn", r.detail);
+      assert.doesNotMatch(r.detail, /no manifest here|no project manifests/);
+      assert.match(r.detail, /found here but not read: build\.zig\.zon \(Zig\)/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("still names the projects below, at high severity", async () => {
+    const dir = tree({ "build.zig.zon": zon, "bench/go/go.mod": "module b\n" });
+    try {
+      const r = await checkScanScope(dir);
+      assert.equal(r.status, "warn", r.detail);
+      assert.equal(r.severity, "high");
+      assert.doesNotMatch(r.detail, /no manifest here/);
+      assert.match(r.detail, /build\.zig\.zon \(Zig\).*1 project\(s\) below: bench\/go/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
 describe("findNestedProjects", () => {
   it("ignores dependency and build directories, which are not the operator's projects", async () => {
     const dir = tree({
