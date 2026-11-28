@@ -1,7 +1,7 @@
 # `kit secrets` injects at exec time instead of writing `.env.local`
 
-Status: DRAFT. Blocked on an owner decision, because the default change conflicts with the CLI
-stability promise for 7.x (see "Conflict").
+Status: DECIDED, option (a). Step 1 and the notice ship in 7.x; the default flips only in 8.0 (see
+"Decision and what shipped"). The conflict below is why the flip waits for a MAJOR.
 
 **Why:** kit-research `kms-decrypt-evidence-vs-kit` (2026-11-27). `kit secrets` takes a value from a
 store whose reads are logged (for `aws-sm`, every `GetSecretValue` is a CloudTrail event) and
@@ -78,3 +78,50 @@ major line"*. Its core behaviour, as documented, is writing the file:
 Flipping the default inside 7.x breaks that promise. No ADR covers `.env.local` (`docs/adr` checked),
 so this is a contract conflict, not an ADR one. Step 1 and the notice are additive and allowed in a
 minor release. The flip needs the owner to schedule it for 8.0, or to amend `CLI_STABILITY.md`.
+
+## Decision and what shipped
+
+The owner chose (a): ship the opt-in pieces and the notice in 7.x, flip the default in 8.0.
+`docs/CLI_STABILITY.md` ("Behaviour changes scheduled for the next MAJOR") records the flip, so the
+7.x promise holds: every change below is additive.
+
+Shipped in 7.x:
+
+- `kit run --inject -- <cmd>` and MCP `kit_run` `inject: true` (`src/run-inject.ts`). They resolve
+  `[secrets.keys]` through `resolveSecretsInMemory` (`src/secrets.ts`, the same resolver
+  `generateSecrets` uses), record `secrets.read` with `via: "kit run"` first (#1126), and put the
+  values in the child's environment, where #1113's declared-value redaction covers them.
+  `.env.local` is neither read nor written. Fail closed: no `[secrets.keys]`, a prod-scoped key
+  outside prod (the rule `kit secrets` applies), an unrecordable read, or any unresolved key stops the
+  run before the child exists. Names fold case-insensitively on `win32` (`mergeInjected`).
+- `kit secrets --write-env-file`: today's behaviour, spelled out.
+- The notice: when `kit secrets` writes `.env.local` without `--write-env-file`, one stderr line
+  points at `kit run --inject`. It fires on every write, not only when an existing kit header is
+  found, because that is when the 8.0 change would affect the caller.
+
+Not shipped, deliberately (each is open for 8.0 or a later minor):
+
+- `[secrets] inject = true` in `.kit.toml` (a config-schema addition); `--inject` covers it.
+- `--no-write-env-file`; in 8.0 it becomes the default and needs no flag.
+- MCP `kit_secrets` is unchanged: it still writes and returns `written`. 8.0 adds `injected`.
+- `kit run` without `--inject` still reads an existing `.env.local` and prints no notice, and the
+  `.env.local` merge there still does not fold names on Windows.
+- `kit setup`, `kit doctor`, `kit statusline`, `env switch` and the other consumers in the table
+  keep their 7.x behaviour until the flip.
+
+Scheduled for 8.0: `kit secrets` writes only with `--write-env-file`; `kit run` injects by default;
+MCP `kit_secrets` follows the CLI and adds `injected`; the changelog carries a `BREAKING` entry and
+`contracts/public-surface.json` is reviewed.
+
+Consumers re-verified from their official docs (2026-11-28):
+
+- Next.js, "Environment Variable Load Order": "1. `process.env` 2. `.env.$(NODE_ENV).local`
+  3. `.env.local` (Not checked when `NODE_ENV` is `test`.)" —
+  https://nextjs.org/docs/app/guides/environment-variables#environment-variable-load-order
+- Vite, ".env Files": "environment variables that already exist when Vite is executed have the
+  highest priority and will not be overwritten by `.env` files" — https://vite.dev/guide/env-and-mode
+- dotenv: "By default, we will never modify any environment variables that have already been set." —
+  https://github.com/motdotla/dotenv (`@next/env` `loadEnvConfig` is the Next.js loader above.)
+
+`src/cli-run-inject.test.ts` quotes the first two, and drives the real CLI with a child that reads
+only `process.env`, as `next dev` and `vite` do.

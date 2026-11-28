@@ -11,6 +11,7 @@ import { hasFlag, flagValue } from "../utils/flags.js";
 import { createPlugin } from "../create-plugin.js";
 import { cloneRepository } from "../clone.js";
 import { executeGovernedCommand } from "../run-governance.js";
+import { injectRequested } from "../run-inject.js";
 import { listServices, openService } from "../open.js";
 import { cmdSetup } from "./setup.js";
 
@@ -147,10 +148,14 @@ export async function cmdRun(): Promise<boolean> {
     console.error(
       `${c.dim}  --env <name>    Environment to use (dev, staging, production, etc.)${c.reset}`,
     );
+    console.error(
+      `${c.dim}  --inject        Pass [secrets.keys] only in the command's environment; no .env.local${c.reset}`,
+    );
     console.error();
     console.error(`${c.dim}Example:${c.reset}`);
     console.error(`${c.dim}  kit run -- pnpm test${c.reset}`);
     console.error(`${c.dim}  kit run --env staging -- node scripts/migrate.js${c.reset}`);
+    console.error(`${c.dim}  kit run --inject -- next dev${c.reset}`);
     return false;
   }
 
@@ -161,6 +166,7 @@ export async function cmdRun(): Promise<boolean> {
     cwd: process.cwd(),
     inheritEnv: true,
     interactiveApproval: true,
+    inject: injectRequested(args.slice(0, doubleDashIndex)),
   });
   if (!outcome.result) {
     console.error(`${c.red}${outcome.reason ?? "Command denied"}${c.reset}`);

@@ -140,6 +140,20 @@ const SECRETS_SUBCOMMANDS: Record<string, () => Promise<boolean>> = {
   "revoke-old": () => cmdSecretsRevokeOld(),
 };
 
+/**
+ * One stderr line when `kit secrets` wrote `.env.local` by default (7.x keeps writing it; 8.0 will
+ * not without `--write-env-file`, docs/plans/2026-11-27-secrets-exec-inject.md). Never on stdout.
+ */
+// A named constant keeps the flag off the scanned surface of the commands that import this module.
+const WRITE_ENV_FILE_FLAG = "--write-env-file";
+
+function envFileNotice(): void {
+  if (process.argv.includes(WRITE_ENV_FILE_FLAG)) return;
+  console.error(
+    "kit: kit 8 will stop writing .env.local by default; run `kit run --inject -- <cmd>` to pass secrets to one process, or pass `--write-env-file` to keep the file.",
+  );
+}
+
 export async function cmdSecrets(): Promise<boolean> {
   const sub = process.argv[3];
   if (sub !== undefined && Object.hasOwn(SECRETS_SUBCOMMANDS, sub)) {
@@ -230,6 +244,7 @@ export async function cmdSecrets(): Promise<boolean> {
       if (written) {
         const source = fromTemplate ? `from ${secretsConfig.template}` : "from keys";
         console.log(`\n  ${c.green}✓${c.reset} Wrote .env.local ${c.dim}(${source})${c.reset}`);
+        envFileNotice();
       } else if (skipped === "nothing-resolved") {
         console.log(
           `\n  ${c.yellow}!${c.reset} Skipped .env.local ${c.dim}— no secrets resolved (vault empty/unauthed); existing file left intact${c.reset}`,
