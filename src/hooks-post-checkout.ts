@@ -1,8 +1,25 @@
+/** kit's gate marker, relative to the checkout (src/agent-config.ts gateMarkerPath). */
+const GATE_MARKER = ".claude/.kit-gates-installed";
+
 /**
- * git runs post-checkout after every checkout. This one acts only for a new worktree, which has an
- * all-zero previous HEAD (any hash length), so an ordinary checkout leaves at once: kit is not
- * started and nothing is printed. A failing command never fails the checkout, which git ignores
- * here anyway. The commands are written out verbatim so the up-to-date check still finds them.
+ * git runs post-checkout after every checkout. This one acts for a new worktree and leaves at once
+ * otherwise: kit is not started and nothing is printed. A failing command never fails the checkout,
+ * which git ignores here anyway. The commands are written out verbatim so the up-to-date check still
+ * finds them.
+ *
+ * A new worktree is recognised two ways, both measured with git 2.43:
+ *
+ * - `git worktree add` (plain, `-b`, `--detach`, and with sparse checkout) runs the hook in the new
+ *   worktree with an all-zero previous HEAD (any hash length).
+ * - `git worktree add --no-checkout` and `--orphan` do not run the hook at all. A later checkout in
+ *   such a worktree passes its real HEAD as the previous one (the first checkout after
+ *   `--no-checkout`, which is how T3 Code makes a sparse worktree; any checkout after the first
+ *   commit on an orphan branch), so the all-zero test let it through ungated. The hook therefore
+ *   also acts when it runs in a linked worktree (`.git` is a file, not a directory) that has no kit
+ *   gate marker yet. Once kit has gated it, the marker is there and later checkouts leave at once.
+ *
+ * Only `case` and `test` are used, so the hook stays POSIX sh and runs under Git for Windows' sh.
+ * An empty first argument (git never sends one) still leaves.
  */
 export function postCheckoutScript(commands: string[]): string {
   const run = commands.map((cmd) => `${cmd} || true`).join("\n");
@@ -12,7 +29,8 @@ export function postCheckoutScript(commands: string[]): string {
 # Commands: ${commands.length}
 
 case "$1" in
-  ""|*[!0]*) exit 0 ;;
+  "") exit 0 ;;
+  *[!0]*) [ -f .git ] && [ ! -e ${GATE_MARKER} ] || exit 0 ;;
 esac
 
 ${run}
