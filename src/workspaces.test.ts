@@ -75,7 +75,10 @@ describe("checkTests + checkDesign in a monorepo (#249)", () => {
     const results = await checkTests({ cwd: dir });
     const cov = results.find((r) => r.name === "unit-test coverage")!;
     assert.equal(cov.status, "skip");
-    assert.match(cov.detail, /workspace resolution may have missed/);
+    assert.match(
+      cov.detail,
+      /if this is a monorepo, declare the packages in package\.json `workspaces`/,
+    );
     rmTemp(dir);
   });
 });
