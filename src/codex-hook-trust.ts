@@ -22,9 +22,15 @@
  *
  * kit reads this and reports it. It never writes `trusted_hash`: trusting a hook is the user's
  * decision, made in Codex (`/hooks`, or the startup hook review).
+ *
+ * Liveness (kit-research `agent-vm-yolo-herdr-paseo-vs-kit`): `kit agent-config` records that it
+ * wired the gate in a machine-local marker, `.codex/.kit-gate-installed`, as it does for Claude
+ * Code's gates. Where the marker is present and kit's gate is gone from `.codex/config.toml`, the
+ * row fails and names `kit agent-config`; before, the row disappeared and `kit check` went quieter.
+ * No marker and no gate: kit never wired it here, and there is no row.
  */
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -304,13 +310,49 @@ export function codexActivationSteps(root: string, status: CodexGateStatus): str
   return steps;
 }
 
-/** `kit check` row: warn while kit's Codex gate is present but not one Codex will run. */
+/** Machine-local marker that `kit agent-config` wired kit's Codex gate here (beside the config). */
+function codexGateMarkerPath(root: string): string {
+  return join(root, ".codex", ".kit-gate-installed");
+}
+
+/** Record that kit's Codex gate is wired here (best-effort; never throws). */
+export function markCodexGateInstalled(root: string): void {
+  try {
+    writeFileSync(codexGateMarkerPath(root), new Date().toISOString() + "\n");
+  } catch {
+    /* advisory: a failed marker never fails the install */
+  }
+}
+
+/** The fail row for a Codex gate kit wired here that is gone now. */
+function codexGateMissingRow(status: CodexGateStatus | null): SecurityCheckResult {
+  const lookalikes = status?.lookalikes
+    ? `; ${status.lookalikes} gate-bash look-alike hook(s) there are not kit's`
+    : "";
+  return {
+    category: "exposure",
+    name: "codex install-gate liveness",
+    status: "fail",
+    severity: "high",
+    detail: `kit wired its gate-bash hook into .codex/config.toml on this machine (.codex/.kit-gate-installed), and it is gone${lookalikes}. Codex runs installs ungated`,
+    suggestion:
+      "Run: kit agent-config (it writes kit's gate-bash hook back into .codex/config.toml); then trust it in Codex and re-run kit check --category security",
+  };
+}
+
+/**
+ * `kit check` rows: fail when kit wired its Codex gate here and it is gone; warn while it is present
+ * but not one Codex will run.
+ */
 export function checkCodexHookTrust(
   root: string,
   home: string,
   env: Record<string, unknown> = process.env,
 ): SecurityCheckResult[] {
   const status = codexGateStatus(root, home, env);
+  if (!status?.hooks.length && existsSync(codexGateMarkerPath(root))) {
+    return [codexGateMissingRow(status)];
+  }
   if (!status) return [];
   const steps = codexActivationSteps(root, status);
   if (steps.length === 0) {

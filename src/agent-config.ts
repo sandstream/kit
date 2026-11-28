@@ -1143,6 +1143,7 @@ export async function installBrokerGates(cwd: string = process.cwd()): Promise<H
  * Writing the hook does not make Codex run it: Codex runs a project hook only in a trusted project
  * and only after the user trusts that hook (src/codex-hook-trust.ts cites the code). The result's
  * `next` names those steps until both hold. kit never writes the trust: that is the user's decision.
+ * Once wired, it marks `.codex/.kit-gate-installed`, so `kit check` fails if the gate is later removed.
  *
  * The matcher stays `^Bash$`. Codex's `apply_patch` also fires PreToolUse, but sends the raw patch
  * text in `tool_input.command` (codex-rs/core/src/tools/handlers/apply_patch.rs:370-375), which
@@ -1153,7 +1154,9 @@ export async function installInstallGateCodex(
 ): Promise<HookInstallResult> {
   const result = await writeInstallGateCodex(cwd);
   if (result.action === "skipped" || result.action === "failed") return result;
-  const { codexGateStatus, codexActivationSteps } = await import("./codex-hook-trust.js");
+  const { codexGateStatus, codexActivationSteps, markCodexGateInstalled } =
+    await import("./codex-hook-trust.js");
+  markCodexGateInstalled(cwd); // the gate is wired: `codex install-gate liveness` keys off this
   const status = codexGateStatus(cwd, homedir(), process.env);
   const next = status ? codexActivationSteps(resolve(cwd), status) : [];
   return next.length > 0 ? { ...result, next } : result;
