@@ -162,6 +162,53 @@ describe("kit rig pipeline", () => {
   });
 });
 
+describe("kit rig pipeline: a declared model_digest (ADR-0007)", () => {
+  it("carries a declared model_digest into result.json and the report, and splits one label", () => {
+    const dir = fixture();
+    try {
+      const digest = (ch: string): string => `sha256:${ch.repeat(64)}`;
+      const tag = (text: string, d: (i: number) => string): string =>
+        text
+          .trim()
+          .split("\n")
+          .map((l, i) => JSON.stringify({ ...JSON.parse(l), model_digest: d(i) }))
+          .join("\n") + "\n";
+      // config A: runs r1 and r2 on one digest, r3 on another; same model and version label.
+      const a = readFileSync(join(dir, "a.jsonl"), "utf8");
+      writeFileSync(
+        join(dir, "a.jsonl"),
+        tag(a, (i) => digest(i < 6 ? "a" : "b")),
+      );
+      const { result } = pipeline(dir);
+      const full = result as unknown as { instruments: { model_digest?: string; runs: number }[] };
+      assert.deepEqual(
+        full.instruments.map((i) => [i.model_digest, i.runs]),
+        [
+          [digest("a"), 2],
+          [digest("b"), 1],
+          [undefined, 3],
+        ],
+      );
+      const report = kit(dir, ["report"]).stdout;
+      assert.match(report, /Instruments \(declared by the caller\):/);
+      assert.match(report, /warning: config A: m 1 was declared with 2 different model_digest/);
+      assert.match(report, /model_digest is self-declared/);
+      const plain = fixture();
+      try {
+        assert.deepEqual(
+          result.stats,
+          pipeline(plain).result.stats,
+          "a digest never changes a number",
+        );
+      } finally {
+        rmTemp(plain);
+      }
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
 describe("kit rig refusals", () => {
   it("treats a changed prompt as a new input and refuses to report the old one's numbers", () => {
     const dir = fixture();

@@ -149,10 +149,12 @@ export async function cmdAgentAudit(): Promise<boolean> {
   const { runAgentSkillPosture } = await import("../agent-skill-posture.js");
   const { runCodexApprovals } = await import("../agent-codex-approvals.js");
   const { claudeSandboxNetworkRow } = await import("../claude-sandbox-network.js");
+  const { runClaudeDesktopAudit } = await import("../agent-audit-claude-desktop.js");
   const { checkClineAutoApprove } = await import("../check-cline-auto-approve.js");
   const results = [
     ...runAgentAudit(process.cwd()),
     ...runUserAgentAudit(process.cwd(), homedir(), process.env),
+    ...runClaudeDesktopAudit(homedir(), process.env),
     ...drift.userSurfaceDriftRows(homedir(), process.env, !isReadOnlyMode()),
     ...runAgentTrifecta(process.cwd(), homedir()),
     ...runCodexApprovals(process.cwd(), homedir(), process.env),
