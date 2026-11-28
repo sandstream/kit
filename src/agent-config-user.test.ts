@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { describeUserGates, installUserGates } from "./agent-config-user.js";
 import { userGateCommands, userSettingsPath } from "./gate-liveness-user.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { ORCHESTRATION_MCP_MATCHER } from "./orchestration-mcp-tools.js";
 
 type Settings = {
   hooks?: { PreToolUse?: { matcher?: string; hooks: { command: string; onFailure?: string }[] }[] };
@@ -40,10 +41,10 @@ describe("installUserGates", () => {
       const pre = read(home).hooks?.PreToolUse ?? [];
       assert.deepEqual(
         pre.map((g) => g.matcher),
-        ["Bash|PowerShell", "Write|Edit|NotebookEdit"],
+        ["Bash|PowerShell", ORCHESTRATION_MCP_MATCHER, "Write|Edit|NotebookEdit"],
       );
       for (const g of pre) assert.equal(g.hooks[0].onFailure, "block");
-      assert.equal(userGateCommands(home).length, 2);
+      assert.equal(userGateCommands(home).length, 3);
     }),
   );
 
@@ -73,7 +74,7 @@ describe("installUserGates", () => {
         g.hooks.map((h) => h.command),
       );
       assert.ok(commands.includes("/opt/mine.sh"), "the user's own PreToolUse hook stays");
-      assert.equal(userGateCommands(home).length, 2);
+      assert.equal(userGateCommands(home).length, 3);
       assert.equal(r.backup, `${userSettingsPath(home)}.bak`);
       assert.equal(readFileSync(r.backup, "utf-8"), text);
     }),
@@ -87,7 +88,7 @@ describe("installUserGates", () => {
       const r = await installUserGates(home);
       assert.equal(r.action, "unchanged", r.detail);
       assert.equal(readFileSync(userSettingsPath(home), "utf-8"), first);
-      assert.equal(userGateCommands(home).length, 2, "no duplicate gate entries");
+      assert.equal(userGateCommands(home).length, 3, "no duplicate gate entries");
     }),
   );
 });

@@ -51,7 +51,15 @@ Deterministic, fail-closed, zero-LLM:
   `--allow-all`, `--yolo` or `COPILOT_ALLOW_ALL`; `kiro-cli --trust-all-tools`; and `droid
   --skip-permissions-unsafe`. It reads through `sh -c`, `env`, `sudo`, `xargs`, `npx` / `npm exec`
   / `pnpm dlx`, `$(…)`, `cmd /c` and PowerShell `-Command` / `-EncodedCommand`. The refusal names
-  the flag and how to run the same agent with approvals on. Not covered: flags no vendor documents
+  the flag and how to run the same agent with approvals on. The same refusal covers MCP tools that
+  start or steer another agent, which go through no shell: `kit agent-config` also wires `gate-bash`
+  to `mcp__<server>__<tool>` for `delegate_task`, `t3_thread_launch`, `t3_thread_send`,
+  `t3_thread_send_attachments`, `create_threads`, `schedule_task`, `run_scheduled_task_now`, and
+  `t3_workflow` when its action starts, resumes or signals a run (T3 Code's tools; any server's tool
+  of that name). In Claude Code that is a PreToolUse group of its own; in Codex a second
+  `[[hooks.PreToolUse]]` block, so the trusted `^Bash$` hook keeps its hash, and Codex runs the new
+  one only after you trust it in `/hooks` (the `codex install-gate trust` row says so until then).
+  Not covered: flags no vendor documents
   (Codex `--full-auto`, Amp's `--dangerously-allow-all`, OpenCode, Augment's `auggie`), Cline's
   CLI, which approves everything by default when given a prompt, and approval settings in a
   config file or `-c` override rather than on the command line.

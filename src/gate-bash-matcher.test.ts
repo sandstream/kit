@@ -10,6 +10,7 @@ import {
   staleGateBashMatchers,
   widenGateBashMatchers,
 } from "./gate-bash-matcher.js";
+import { ORCHESTRATION_MCP_MATCHER } from "./orchestration-mcp-tools.js";
 
 interface Group {
   matcher?: string;
@@ -43,7 +44,10 @@ function preToolUse(dir: string): Group[] {
   return s.hooks.PreToolUse as Group[];
 }
 
-const holdsGateBash = (g: Group) => (g.hooks ?? []).some((h) => h.command.endsWith("gate-bash"));
+/** A shell group running gate-bash; the group for agent-launching MCP tools is not one. */
+const holdsGateBash = (g: Group) =>
+  g.matcher !== ORCHESTRATION_MCP_MATCHER &&
+  (g.hooks ?? []).some((h) => h.command.endsWith("gate-bash"));
 const gate = (command = "/x/kit gate-bash") => ({ type: "command", command });
 
 // https://code.claude.com/docs/en/hooks, "PowerShell" tool input: "Match `Bash|PowerShell` in

@@ -13,11 +13,16 @@
  * The opt-in `kit gate-egress` reads shell commands too (PowerShell's `Invoke-WebRequest` among
  * them) and was also installed with `Bash` alone, so the same reading and repair cover it, keyed on
  * its own subcommand; `kit agent-config --broker-gate` widens it.
+ *
+ * `gate-bash` also runs in a group of its own whose matcher selects the MCP tools that start or
+ * steer another agent (`ORCHESTRATION_MCP_MATCHER`, src/orchestration-mcp-tools.ts). That group is
+ * not a shell group: it is never reported stale for missing a shell tool, and never widened.
  */
 import { resolve } from "node:path";
 import { commandIncludesSubcommand } from "./agent-config-hook-liveness.js";
 import { groupsIn, preToolUseGroups, type PreToolUseGroup } from "./gate-settings.js";
 import { userSettingsPath } from "./gate-liveness-user.js";
+import { ORCHESTRATION_MCP_MATCHER } from "./orchestration-mcp-tools.js";
 
 /** The matcher kit writes for `gate-bash`: an exact-name list, not a regular expression. */
 export const GATE_BASH_MATCHER = "Bash|PowerShell";
@@ -49,7 +54,8 @@ const isGate =
   (sub: ShellGate) =>
   (hook: { command?: unknown }): boolean =>
     typeof hook.command === "string" && commandIncludesSubcommand(hook.command, sub);
-const holdsGate = (sub: ShellGate) => (g: PreToolUseGroup) => (g.hooks ?? []).some(isGate(sub));
+const holdsGate = (sub: ShellGate) => (g: PreToolUseGroup) =>
+  g.matcher !== ORCHESTRATION_MCP_MATCHER && (g.hooks ?? []).some(isGate(sub));
 const coversShells = (g: PreToolUseGroup): boolean =>
   SHELL_TOOLS.every((tool) => matcherSelects(g.matcher, tool));
 
@@ -147,3 +153,19 @@ export function widenGateBashMatchers(
 /** `widenGateBashMatchers` for the opt-in egress gate. */
 export const widenGateEgressMatchers = (groups: PreToolUseGroup[]): boolean =>
   widenGateBashMatchers(groups, "gate-egress");
+
+/**
+ * Add `hook` (kit's gate-bash) in a group of its own for the orchestration MCP tools, unless such a
+ * group already runs gate-bash. Returns whether it added one.
+ */
+export function addOrchestrationGateGroup(
+  groups: PreToolUseGroup[],
+  hook: NonNullable<PreToolUseGroup["hooks"]>[number],
+): boolean {
+  const has = groups.some(
+    (g) => g.matcher === ORCHESTRATION_MCP_MATCHER && (g.hooks ?? []).some(isGate("gate-bash")),
+  );
+  if (has) return false;
+  groups.push({ matcher: ORCHESTRATION_MCP_MATCHER, hooks: [hook] });
+  return true;
+}
