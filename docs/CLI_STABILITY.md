@@ -83,6 +83,24 @@ From that point:
 No command is currently deprecated. The mechanism is in place so that when the
 first one is, the warning fires automatically.
 
+### Behaviour changes scheduled for the next MAJOR
+
+A default can change only in a MAJOR release. Until then the current behaviour
+stays, an explicit flag spells it out so scripts can opt in before the flip, and
+kit prints one notice line to **stderr** (never stdout).
+
+| Change in 8.0 | 7.x today | Opt in now |
+| --- | --- | --- |
+| `kit secrets` stops writing `.env.local` unless given `--write-env-file`; `kit run` injects `[secrets.keys]` by default | `kit secrets` writes `.env.local`, and without `--write-env-file` prints `` kit: kit 8 will stop writing .env.local by default; run `kit run --inject -- <cmd>` to pass secrets to one process, or pass `--write-env-file` to keep the file. `` | `kit run --inject -- <cmd>` (MCP `kit_run` `inject: true`), or `kit secrets --write-env-file` to keep the file after 8.0 |
+
+Migration: run your dev server through kit so it gets the values in its
+environment, `kit run --inject -- next dev`, `kit run --inject -- vite`,
+`kit run --inject -- npm test`. Next.js and Vite take `process.env` ahead of
+`.env.local`, so nothing else changes. A tool that reads only the file keeps
+working when `kit secrets` is given `--write-env-file`. Then delete the old
+`.env.local`: every read of it was invisible to kit and to your vault's audit
+log. Design and consumer list: `docs/plans/2026-11-27-secrets-exec-inject.md`.
+
 ## How the freeze is enforced
 
 `scripts/gen-public-surface.mjs` emits a deterministic JSON snapshot of the

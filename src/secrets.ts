@@ -87,6 +87,39 @@ async function beginRead(
   resetInfisicalCache();
 }
 
+/** Resolve every declared key through its backend, after `beginRead` recorded the read. */
+async function resolveKeys(
+  secrets: SecretsConfig & { keys: Record<string, SecretKeyConfig> },
+): Promise<{ results: SecretResolveResult[]; resolved: Map<string, string> }> {
+  const results: SecretResolveResult[] = [];
+  for (const [name, config] of Object.entries(secrets.keys)) {
+    results.push(await resolveViaBackend(name, config, secrets.infisical));
+  }
+  const resolved = new Map<string, string>();
+  for (const r of results) {
+    // Skip backend-managed values (e.g. EAS) — their `value` is a display
+    // placeholder, not a real secret to write into .env.local or a child's env.
+    if (r.resolved && r.value !== null && !r.managed) {
+      resolved.set(r.name, r.value);
+    }
+  }
+  return { results, resolved };
+}
+
+/**
+ * Resolve the declared keys into memory and write nothing: the path `kit run --inject` uses to hand
+ * them to one child. The read is recorded in `read.cwd`'s chain first, as for `generateSecrets`, and
+ * an unrecordable read throws before any value is fetched.
+ */
+export async function resolveSecretsInMemory(
+  secrets: SecretsConfig,
+  read: Partial<SecretReader> & { cwd: string },
+): Promise<{ results: SecretResolveResult[]; resolved: Map<string, string> }> {
+  if (!secrets.keys) return { results: [], resolved: new Map() };
+  await beginRead(secrets.keys, devNull, read);
+  return resolveKeys({ ...secrets, keys: secrets.keys });
+}
+
 export async function generateSecrets(
   secrets: SecretsConfig,
   outputPath: string = ".env.local",
@@ -97,27 +130,13 @@ export async function generateSecrets(
   fromTemplate: boolean;
   skipped?: "nothing-resolved";
 }> {
-  const results: SecretResolveResult[] = [];
   if (!secrets.keys) {
-    return { results, written: false, fromTemplate: false };
+    return { results: [], written: false, fromTemplate: false };
   }
 
   // Record the read (or throw), then reset the Infisical bulk-fetch cache for this call.
   await beginRead(secrets.keys, outputPath, read);
-
-  for (const [name, config] of Object.entries(secrets.keys)) {
-    results.push(await resolveViaBackend(name, config, secrets.infisical));
-  }
-
-  // Build a lookup of resolved values
-  const resolved = new Map<string, string>();
-  for (const r of results) {
-    // Skip backend-managed values (e.g. EAS) — their `value` is a display
-    // placeholder, not a real secret to write into .env.local.
-    if (r.resolved && r.value !== null && !r.managed) {
-      resolved.set(r.name, r.value);
-    }
-  }
+  const { results, resolved } = await resolveKeys({ ...secrets, keys: secrets.keys });
 
   let content: string;
   let fromTemplate = false;
