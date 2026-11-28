@@ -7,7 +7,14 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +25,7 @@ import {
   installInstallGate,
   markGatesInstalled,
 } from "./agent-config.js";
+import { CREDENTIAL_DIRS, KIT_DENY_RULES, installStrictSettings } from "./agent-config-strict.js";
 import { ensureWorktreeGates } from "./worktree-gates.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 import { ensureKitWrapper } from "./kit-wrapper.js";
@@ -190,6 +198,77 @@ describe("ensureWorktreeGates: when it does nothing or fails", () => {
       const got = await ensureWorktreeGates(r.wt, async () => {});
       assert.equal(got.outcome, "failed");
       assert.match(got.detail, /not wired/);
+    } finally {
+      rmTemp(r.root);
+    }
+  });
+});
+
+interface Settings {
+  permissions?: { deny?: string[] };
+  sandbox?: { enabled?: boolean; filesystem?: { denyRead?: string[] } };
+}
+
+const settingsOf = (cwd: string): Settings => {
+  const path = join(cwd, ".claude", "settings.json");
+  return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Settings) : {};
+};
+
+describe("ensureWorktreeGates: the deny floor", () => {
+  it("writes kit's deny rules and sandbox block in a worktree of a checkout that has them", async () => {
+    // Was: only the hooks were mirrored. The deny rules live in the same ignored `.claude/`, so the
+    // new worktree allowed `Read(~/.ssh/**)`, `.env*` and force push that the main checkout refused.
+    const r = repo(true);
+    try {
+      await installGates(r.main);
+      assert.equal((await installStrictSettings(r.main)).action, "updated");
+      assert.equal(settingsOf(r.wt).permissions?.deny, undefined, "precondition: no deny rule");
+      const got = await ensureWorktreeGates(r.wt, installGates);
+      assert.equal(got.outcome, "installed", got.detail);
+      assert.deepEqual(settingsOf(r.wt).permissions?.deny, KIT_DENY_RULES);
+      if (process.platform !== "win32") {
+        assert.equal(settingsOf(r.wt).sandbox?.enabled, true);
+        assert.deepEqual(settingsOf(r.wt).sandbox?.filesystem?.denyRead, CREDENTIAL_DIRS);
+      }
+      assert.equal(git(r.wt, "status", "--short").trim(), "", "no tracked file changes");
+    } finally {
+      rmTemp(r.root);
+    }
+  });
+
+  it("adds the floor to a worktree that already has the hooks", async () => {
+    const r = repo(true);
+    try {
+      await installGates(r.main);
+      await installStrictSettings(r.main);
+      await installGates(r.wt);
+      const got = await ensureWorktreeGates(r.wt, installGates);
+      assert.equal(got.outcome, "installed", got.detail);
+      assert.deepEqual(settingsOf(r.wt).permissions?.deny, KIT_DENY_RULES);
+    } finally {
+      rmTemp(r.root);
+    }
+  });
+
+  it("writes no deny rule when the main checkout has none", async () => {
+    const r = repo(true);
+    try {
+      await installGates(r.main);
+      await ensureWorktreeGates(r.wt, installGates);
+      assert.equal(settingsOf(r.wt).permissions?.deny, undefined);
+    } finally {
+      rmTemp(r.root);
+    }
+  });
+
+  it("reports failed when the floor could not be written", async () => {
+    const r = repo(true);
+    try {
+      await installGates(r.main);
+      await installStrictSettings(r.main);
+      const got = await ensureWorktreeGates(r.wt, installGates, async () => {});
+      assert.equal(got.outcome, "failed");
+      assert.match(got.detail, /deny rules are not all/);
     } finally {
       rmTemp(r.root);
     }

@@ -1,0 +1,38 @@
+[
+  {
+    "package": "@modelcontextprotocol/sdk",
+    "version": "1.32.2",
+    "rule": "threat-runtime-environment-read",
+    "file": "dist/cjs/examples/client/simpleClientCredentials.js",
+    "sha256": "84e9f9708f398427f4454401ca61b869f365794822b789f9a39371195f94a08e",
+    "reason": "Reviewed 2026-11-28 from the registry tarball (integrity checked). A documented example client: it reads its own MCP_SERVER_URL, MCP_CLIENT_ID, MCP_EXPECTED_ISSUER, MCP_CLIENT_PRIVATE_KEY_PEM, MCP_CLIENT_ALGORITHM and MCP_CLIENT_SECRET settings and passes them to the SDK's auth provider. No other environment read, no eval, no outbound address but the configured server (default localhost).",
+    "expires": "2027-02-25"
+  },
+  {
+    "package": "@modelcontextprotocol/sdk",
+    "version": "1.32.2",
+    "rule": "threat-runtime-environment-read",
+    "file": "dist/cjs/examples/server/elicitationUrlExample.js",
+    "sha256": "c8ada4f9941f220f230dc0309f1f9480a02065a8c343259cd377396c2a738cb7",
+    "reason": "Reviewed 2026-11-28 from the registry tarball (integrity checked). An example server: the flagged line reads MCP_PORT and MCP_AUTH_PORT to pick its listen ports (defaults 3000 and 3001). Its one fetch posts a token to the introspection endpoint of its own demo auth server on localhost. Other URLs are localhost or example.com placeholders.",
+    "expires": "2027-02-25"
+  },
+  {
+    "package": "@modelcontextprotocol/sdk",
+    "version": "1.32.2",
+    "rule": "threat-runtime-environment-read",
+    "file": "dist/cjs/examples/server/simpleStreamableHttp.js",
+    "sha256": "e6c445455b1fbd7e819526cfc546748f8e4422762469f95163aad5d3133f8854",
+    "reason": "Reviewed 2026-11-28 from the registry tarball (integrity checked). An example server: the flagged line reads MCP_PORT and MCP_AUTH_PORT to pick its listen ports (defaults 3000 and 3001). Its one fetch posts a token to the introspection endpoint of its own demo auth server on localhost. Other URLs are example.com placeholders and the SDK's GitHub repository.",
+    "expires": "2027-02-25"
+  },
+  {
+    "package": "prettier",
+    "version": "3.10.1",
+    "rule": "threat-runtime-obfuscation",
+    "file": "index.mjs",
+    "sha256": "efa4ff19afa80e7e5531273138ffe61dd0749d36c14a5299dfc742d5e2363171",
+    "reason": "Reviewed 2026-11-28 from the registry tarball (integrity checked). Line 12306 is `var ID_Start = /[...]/;`, a 7,109-character regex character class made only of \\x and \\u escapes, ranges and surrogate-pair alternatives: the Unicode ID_Start table of the bundled @bybrave/json5 lib/unicode.js (prettier's own package.json declares @bybrave/json5 3.1.0). It is used only as ID_Start.test(c). index.mjs has no eval or new Function.",
+    "expires": "2027-02-25"
+  }
+]

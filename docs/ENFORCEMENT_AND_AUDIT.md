@@ -51,10 +51,34 @@ Deterministic, fail-closed, zero-LLM:
   `--allow-all`, `--yolo` or `COPILOT_ALLOW_ALL`; `kiro-cli --trust-all-tools`; and `droid
   --skip-permissions-unsafe`. It reads through `sh -c`, `env`, `sudo`, `xargs`, `npx` / `npm exec`
   / `pnpm dlx`, `$(…)`, `cmd /c` and PowerShell `-Command` / `-EncodedCommand`. The refusal names
-  the flag and how to run the same agent with approvals on. Not covered: flags no vendor documents
+  the flag and how to run the same agent with approvals on. T3 Code's `t3 thread start`, `t3 thread
+  send`, `t3 workflow start` and `t3 workflow resume` are refused whatever their flags: they start
+  or steer an agent at the project's default permission mode, which is Full access unless changed,
+  and no flag on the command sets it. `t3 thread show`, `list` and the other read-only subcommands
+  pass. Not covered: flags no vendor documents
   (Codex `--full-auto`, Amp's `--dangerously-allow-all`, OpenCode, Augment's `auggie`), Cline's
   CLI, which approves everything by default when given a prompt, and approval settings in a
   config file or `-c` override rather than on the command line.
+
+  It refuses the GitHub actions a scoped token reaches, as it refuses a push to the default branch
+  (`src/gh-token-actions.ts`): every `gh pr merge` (plain, `--auto` and `--admin` all land or queue
+  a change on the base branch), `gh secret set|delete`, `gh variable set|delete`,
+  `gh workflow run|enable|disable`, `gh auth token|refresh|login|switch` and
+  `gh auth status --show-token`, a `gh alias set` that expands to one of these, and the same writes
+  through `gh api`: a non-GET request (any method spelling: `-X PUT`, `-XPUT`, `--method=put`, or a
+  body that makes it a POST) to a pull request's `/merge` or `ccr/auto_merge`, to `/merges`, to a
+  `secrets` or `variables` path, to a workflow's `dispatches|enable|disable` or to a repository's
+  `dispatches`, and the GraphQL merge mutations. That the token allows an action does not make it
+  the agent's decision: the refusal names the action and asks the agent to hand it to the person.
+  Reads stay allowed (`gh api` GETs, `gh pr view|list|checks`, `gh run view`, `gh secret list`), and
+  so does `gh pr create`. It reads through the same carriers as the nested-agent check
+  (`src/gate-bash-carriers.ts`), so `command gh`, `exec gh`, an absolute path, `gh.exe`, a quoted
+  `"gh"`, an env prefix, `sh -c`, `$(…)` and PowerShell `-Command` are refused too. It is part of
+  `gate-bash`, so every harness whose shell tool kit routes through `gate-bash` is covered (the
+  end-to-end test drives the Claude Code and Codex payloads); an agent kit writes only a rules file
+  for (Copilot) is not. Not covered: the same request sent with `curl` and a token, a GitHub MCP
+  server's merge tool (not a shell command), and a GraphQL query read from a file
+  (`-F query=@file`).
 
   It refuses a system-wide change to the trusted root certificates (`src/ca-trust-store.ts`):
   `update-ca-certificates`, `update-ca-trust`, `trust anchor`, `security add-trusted-cert`,
@@ -179,6 +203,29 @@ The `deny rule liveness` row of `kit check` reads them back:
 `~/.ssh/id_ed25519`): an allow of the same tool that would let that call through matches. The row
 does not read user-scope or managed settings, and it does not cover Codex, Cursor, Gemini or other
 harnesses' rule files, where kit writes no deny rule.
+
+## Claude Code's sandbox network
+
+`kit agent-config` turns on Claude Code's sandbox (`sandbox.enabled`) in the project
+`.claude/settings.json`. That alone does not close the network. Claude Code decides a host outside
+`sandbox.network.allowedDomains` by permission mode: it asks by default, and in `bypassPermissions`
+mode it allows the host without a prompt. Only `sandbox.network.strictAllowlist: true` (user or
+managed settings, Claude Code v2.1.219 or later) or the managed `allowManagedDomainsOnly` makes it
+refuse every such host. A repository file cannot set `strictAllowlist`, so kit does not write it.
+
+The `Claude Code sandbox network` row reports this in `kit check` and `kit agent-audit`, and
+`kit agent-config` prints the same line after it turns the sandbox on:
+
+- It warns when the sandbox is on and neither key is set where Claude Code honors it. The warning is
+  medium when a settings file sets `permissions.defaultMode: "bypassPermissions"`, and low
+  otherwise.
+- It passes when the user (`~/.claude/settings.json` or `$CLAUDE_CONFIG_DIR`) or managed settings
+  (`managed-settings.json` and `managed-settings.d/`) make the allowlist strict.
+- It skips when the sandbox is off and on native Windows, where the sandbox does not run.
+
+It does not read server-managed or MDM settings or `--settings`, and it does not judge a custom proxy
+(`httpProxyPort`, `socksProxyPort`), which takes over the filtering. It covers Claude Code only. Codex
+network access is not covered.
 
 ## Verify a Vercel token
 
