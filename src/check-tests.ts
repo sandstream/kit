@@ -2,14 +2,10 @@
  * Test-coverage enforcement.
  *
  * Walks src/ and reports source files without a sibling `.test.ts` (or
- * `.test.js`). Configurable per project via `.kit.toml`:
- *
- *   [tests]
- *   enforce = true                  # default false; turn on to gate
- *   src_globs = ["src/**\/*.ts"]    # what counts as source
- *   exclude  = ["src/**\/*.test.ts", "src/**\/index.ts"]
- *   require_smoke = true            # at least one @smoke-tagged e2e/*.spec.ts
- *   smoke_dirs = ["e2e", "tests/e2e"]
+ * `.test.js`). When the root has no src/, it walks each workspace's src/,
+ * app/ and components/ dirs (package.json `workspaces` / pnpm-workspace.yaml).
+ * No `.kit.toml` key configures this check: `kit check` / `kit review` read no
+ * `[tests]` section. `--enforce-tests` turns warnings into failures.
  *
  * Net-new vs baseline: existing untested files can be frozen via
  * `.kit-baseline.json` (see baseline.ts) — only new gaps then fail.
@@ -158,7 +154,7 @@ export async function checkTests(
       name: "unit-test coverage",
       status: "skip",
       detail:
-        "no source directories matched (src/ or workspace src dirs) — if this is a monorepo, workspace resolution may have missed them; set [tests] src_globs",
+        "no source directories matched (src/ or workspace src dirs) — if this is a monorepo, declare the packages in package.json `workspaces` or pnpm-workspace.yaml; the source dirs are not configurable",
     });
     return results;
   }
