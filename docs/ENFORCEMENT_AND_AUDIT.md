@@ -180,6 +180,29 @@ The `deny rule liveness` row of `kit check` reads them back:
 does not read user-scope or managed settings, and it does not cover Codex, Cursor, Gemini or other
 harnesses' rule files, where kit writes no deny rule.
 
+## Claude Code's sandbox network
+
+`kit agent-config` turns on Claude Code's sandbox (`sandbox.enabled`) in the project
+`.claude/settings.json`. That alone does not close the network. Claude Code decides a host outside
+`sandbox.network.allowedDomains` by permission mode: it asks by default, and in `bypassPermissions`
+mode it allows the host without a prompt. Only `sandbox.network.strictAllowlist: true` (user or
+managed settings, Claude Code v2.1.219 or later) or the managed `allowManagedDomainsOnly` makes it
+refuse every such host. A repository file cannot set `strictAllowlist`, so kit does not write it.
+
+The `Claude Code sandbox network` row reports this in `kit check` and `kit agent-audit`, and
+`kit agent-config` prints the same line after it turns the sandbox on:
+
+- It warns when the sandbox is on and neither key is set where Claude Code honors it. The warning is
+  medium when a settings file sets `permissions.defaultMode: "bypassPermissions"`, and low
+  otherwise.
+- It passes when the user (`~/.claude/settings.json` or `$CLAUDE_CONFIG_DIR`) or managed settings
+  (`managed-settings.json` and `managed-settings.d/`) make the allowlist strict.
+- It skips when the sandbox is off and on native Windows, where the sandbox does not run.
+
+It does not read server-managed or MDM settings or `--settings`, and it does not judge a custom proxy
+(`httpProxyPort`, `socksProxyPort`), which takes over the filtering. It covers Claude Code only. Codex
+network access is not covered.
+
 ## Verify a Vercel token
 
 Run `kit check verify-vercel-token` when `VERCEL_TOKEN` is declared
