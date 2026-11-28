@@ -1,18 +1,26 @@
 /**
  * The whole path, with nothing stubbed: `kit agent-config` in a main checkout installs the gates and
  * the post-checkout hook, then `git worktree add` runs that hook, which runs the built kit, which
- * gates the new worktree before any session starts in it. HOME is a temporary folder, so the
+ * gates the new worktree, hooks and deny rules, before any session starts in it. HOME is a temporary folder, so the
  * self-healing wrapper the hook embeds is not written into the real one.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { gateLiveness } from "./agent-config.js";
+import { KIT_DENY_RULES } from "./agent-config-strict.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const SKIP_WINDOWS =
@@ -65,6 +73,10 @@ describe("kit agent-config, then git worktree add", { skip: SKIP_WINDOWS }, () =
       const live = gateLiveness(wt);
       assert.equal(live.installGate, true, "the new worktree has the install gate");
       assert.equal(live.envGate, true, "the new worktree has the env-write gate");
+      const settings = join(wt, ".claude", "settings.json");
+      assert.equal(existsSync(settings), true, "the new worktree has .claude/settings.json");
+      const deny = JSON.parse(readFileSync(settings, "utf8")).permissions?.deny;
+      assert.deepEqual(deny, KIT_DENY_RULES, "the new worktree has kit's deny rules");
     } finally {
       rmTemp(root);
     }
